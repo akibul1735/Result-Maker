@@ -96,6 +96,7 @@ export const DPE_LOGO_OPTIONS: DpeLogoOption[] = [
 
 export interface Settings {
   school: string;
+  schoolAddress?: string;
   year: string;
   pdfFont?: PdfFontId;
   dpeLogo?: DpeLogoStyle;
@@ -316,6 +317,7 @@ export function toJson(list: Student[], st: Settings): string {
     {
       version: 1,
       school: st.school,
+      schoolAddress: st.schoolAddress ?? "",
       year: st.year,
       pdfFont: st.pdfFont || "noto_serif",
       dpeLogo: st.dpeLogo || "simple",
@@ -351,6 +353,7 @@ export function fromJson(txt: string): { students: Student[]; settings: Settings
   const dpeLogo: DpeLogoStyle = o.dpeLogo === "color" ? "color" : "simple";
   const settings: Settings = {
     school: typeof o.school === "string" ? o.school : "",
+    schoolAddress: typeof o.schoolAddress === "string" ? o.schoolAddress : "",
     year: typeof o.year === "string" ? o.year : "২০২৬",
     pdfFont,
     dpeLogo,
@@ -503,6 +506,7 @@ export function importCsv(txt: string, existing: Student[]): Student[] {
 
 export const DEFAULT_SETTINGS: Settings = {
   school: "কামারখালী সরকারি প্রাথমিক বিদ্যালয়",
+  schoolAddress: "কামারখালী, মধুখালী, ফরিদপুর",
   year: "২০২৬",
   pdfFont: "noto_serif",
   dpeLogo: "simple",

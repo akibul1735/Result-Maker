@@ -282,32 +282,6 @@ object PdfGen {
         center(ctx, c, "প্রাথমিক শিক্ষা অধিদপ্তর", cx, cy + r + 12f, 8.5f, true, 160f, fontId)
     }
 
-    private fun drawNctbEmblem(ctx: Context?, c: Canvas, cx: Float, cy: Float, r: Float, fontId: String) {
-        val sealStroke = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = 0xFF0F172A.toInt()
-            style = Paint.Style.STROKE
-            strokeWidth = 1.4f
-        }
-        c.drawCircle(cx, cy, r, sealStroke)
-        sealStroke.strokeWidth = 0.7f
-        c.drawCircle(cx, cy, r - 3.5f, sealStroke)
-
-        sealStroke.strokeWidth = 1.1f
-        c.drawLine(cx, cy - 10f, cx, cy + 8f, sealStroke)
-
-        val wings = Path().apply {
-            moveTo(cx - 8f, cy + 4f)
-            quadTo(cx - 4f, cy + 1f, cx, cy + 4f)
-            quadTo(cx + 4f, cy + 1f, cx + 8f, cy + 4f)
-        }
-        c.drawPath(wings, sealStroke)
-        c.drawCircle(cx, cy - 6f, 3.2f, sealStroke)
-
-        val p = tp(ctx, 6.5f, true, fontId)
-        p.textAlign = Paint.Align.CENTER
-        c.drawText("NCTB", cx, cy + 12.5f, p)
-    }
-
     fun renderCoverBitmap(
         ctx: Context,
         s: Student,
@@ -412,9 +386,16 @@ object PdfGen {
         dottedField(ctx, c, "মোবাইল নম্বর:", bn(tm), 246f, 438f, 395f, 9.5f, f)
 
         val backCx = 18f + 391f / 2f
-        drawNctbEmblem(ctx, c, backCx, 488f, 19f, f)
-        center(ctx, c, "জাতীয় শিক্ষাক্রম ও পাঠ্যপুস্তক বোর্ড, বাংলাদেশ", backCx, 532f, 10.5f, true, 355f, f)
-        center(ctx, c, "প্রাথমিক শিক্ষা স্তর (১ম–৫ম শ্রেণি)", backCx, 549f, 8f, false, 355f, f, 0xFF475569.toInt())
+        c.drawLine(48f, 468f, 379f, 468f, stroke)
+
+        val schoolName = st.school.ifBlank { "বিদ্যালয়ের নাম" }
+        val fallbackAddr = listOf(s.upazila, s.district).filter { it.isNotBlank() }.joinToString(", ")
+        val schoolAddr = st.schoolAddress.ifBlank { fallbackAddr }
+
+        center(ctx, c, schoolName, backCx, 496f, 12.5f, true, 350f, f, 0xFF0F172A.toInt())
+        if (schoolAddr.isNotBlank()) {
+            center(ctx, c, schoolAddr, backCx, 518f, 10f, false, 350f, f, 0xFF0F172A.toInt())
+        }
 
         // ---- ডান অর্ধেক (x: 433..824): ফ্রন্ট কভার ----
         val frontCx = 433f + 391f / 2f // 628.5
@@ -422,8 +403,19 @@ object PdfGen {
         val pillH = 44f
         val pillX = frontCx - pillW / 2f
         val pillY = 46f
-        c.drawRoundRect(RectF(pillX, pillY, pillX + pillW, pillY + pillH), 22f, 22f, darkFill)
-        center(ctx, c, "শিখন অগ্রগতি প্রতিবেদন", frontCx, 75f, 20f, true, 290f, f, Color.WHITE)
+        val pillOuter = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = 0xFF0F172A.toInt()
+            style = Paint.Style.STROKE
+            strokeWidth = 1.6f
+        }
+        val pillInner = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = 0xFF0F172A.toInt()
+            style = Paint.Style.STROKE
+            strokeWidth = 0.6f
+        }
+        c.drawRoundRect(RectF(pillX, pillY, pillX + pillW, pillY + pillH), 22f, 22f, pillOuter)
+        c.drawRoundRect(RectF(pillX + 3f, pillY + 3f, pillX + pillW - 3f, pillY + pillH - 3f), 19f, 19f, pillInner)
+        center(ctx, c, "শিখন অগ্রগতি প্রতিবেদন", frontCx, 75f, 20f, true, 290f, f, 0xFF0F172A.toInt())
 
         drawDpeLogo(ctx, c, frontCx, 102f, 104f, st.dpeLogo, f)
 

@@ -189,6 +189,23 @@ export const SettingsAndCicd: React.FC<SettingsAndCicdProps> = ({
                 className="w-full px-3.5 py-2 text-sm font-mono tabular-nums rounded-lg border border-slate-200 focus:outline-none focus:border-teal-700"
               />
             </div>
+            <div className="sm:col-span-3">
+              <label className="block text-xs font-medium text-slate-600 mb-1">
+                বিদ্যালয়ের ঠিকানা (ব্যাক কভারে প্রদর্শিত হবে)
+              </label>
+              <input
+                type="text"
+                value={settings.schoolAddress ?? ""}
+                placeholder="যেমন: কামারখালী, মধুখালী, ফরিদপুর"
+                onChange={(e) =>
+                  onUpdateSettings({
+                    ...settings,
+                    schoolAddress: e.target.value,
+                  })
+                }
+                className="w-full px-3.5 py-2 text-sm rounded-lg border border-slate-200 focus:outline-none focus:border-teal-700"
+              />
+            </div>
           </div>
 
           <div className="border-t border-slate-200 pt-4 space-y-2.5">

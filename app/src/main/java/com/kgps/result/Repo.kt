@@ -18,6 +18,7 @@ object Repo {
         val o = JSONObject()
         o.put("version", 1)
         o.put("school", st.school)
+        o.put("schoolAddress", st.schoolAddress)
         o.put("year", st.year)
         o.put("teachers", JSONObject().also { j -> st.teachers.forEach { (k, v) -> j.put(k.toString(), v) } })
         o.put("teacherMobiles", JSONObject().also { j -> st.teacherMobiles.forEach { (k, v) -> j.put(k.toString(), v) } })
@@ -44,7 +45,9 @@ object Repo {
         val o = JSONObject(txt)
         val rawLogo = o.optString("dpeLogo", "simple")
         val st = Settings(
-            school = o.optString("school"), year = o.optString("year", "২০২৬"),
+            school = o.optString("school"),
+            schoolAddress = o.optString("schoolAddress"),
+            year = o.optString("year", "২০২৬"),
             teachers = intMap(o.optJSONObject("teachers")), teacherMobiles = intMap(o.optJSONObject("teacherMobiles")),
             pdfFont = o.optString("pdfFont", "noto_serif").ifBlank { "noto_serif" },
             dpeLogo = if (rawLogo == "color") "color" else "simple"

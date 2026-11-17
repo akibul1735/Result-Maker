@@ -18,6 +18,7 @@ data class Student(
 
 data class Settings(
     val school: String = "",
+    val schoolAddress: String = "",
     val year: String = "২০২৬",
     val teachers: Map<Int, String> = emptyMap(),
     val teacherMobiles: Map<Int, String> = emptyMap(),
@@ -105,6 +106,7 @@ fun Student.overallPct(): Double {
 
 val DEFAULT_SETTINGS = Settings(
     school = "কামারখালী সরকারি প্রাথমিক বিদ্যালয়",
+    schoolAddress = "কামারখালী, মধুখালী, ফরিদপুর",
     year = "২০২৬",
     teachers = mapOf(
         1 to "মোসাঃ তাসলিমা খাতুন",

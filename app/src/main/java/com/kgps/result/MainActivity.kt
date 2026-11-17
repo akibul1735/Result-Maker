@@ -883,6 +883,7 @@ fun SettingsScreen(st: AppState, onBack: () -> Unit, makePdf: (List<Student>, St
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Text("বিদ্যালয়, ফন্ট ও ব্যাকআপ সেটিংস", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
         Field("বিদ্যালয়ের নাম", st.settings.school) { st.updateSettings(st.settings.copy(school = it)) }
+        Field("বিদ্যালয়ের ঠিকানা (ব্যাক কভারে প্রদর্শিত হবে)", st.settings.schoolAddress) { st.updateSettings(st.settings.copy(schoolAddress = it)) }
         Field("শিক্ষাবর্ষ", st.settings.year) { st.updateSettings(st.settings.copy(year = it)) }
 
         Text("প্রতিবেদনের বাংলা ফন্ট (প্রাতিষ্ঠানিক)", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(top = 6.dp))

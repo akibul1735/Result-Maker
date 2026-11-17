@@ -293,43 +293,6 @@ function drawDpeLogo(
   ctx.restore();
 }
 
-function drawNctbEmblem(ctx: CanvasRenderingContext2D, cx: number, cy: number, r = 19) {
-  ctx.save();
-  ctx.strokeStyle = "#0F172A";
-  ctx.lineWidth = 1.4;
-  ctx.beginPath();
-  ctx.arc(cx, cy, r, 0, Math.PI * 2);
-  ctx.stroke();
-
-  ctx.lineWidth = 0.7;
-  ctx.beginPath();
-  ctx.arc(cx, cy, r - 3.5, 0, Math.PI * 2);
-  ctx.stroke();
-
-  // Torch & book motif
-  ctx.lineWidth = 1.1;
-  ctx.beginPath();
-  ctx.moveTo(cx, cy - 10);
-  ctx.lineTo(cx, cy + 8);
-  ctx.stroke();
-
-  ctx.beginPath();
-  ctx.moveTo(cx - 8, cy + 4);
-  ctx.quadraticCurveTo(cx - 4, cy + 1, cx, cy + 4);
-  ctx.quadraticCurveTo(cx + 4, cy + 1, cx + 8, cy + 4);
-  ctx.stroke();
-
-  ctx.beginPath();
-  ctx.arc(cx, cy - 6, 3.2, 0, Math.PI * 2);
-  ctx.stroke();
-
-  ctx.font = fontStr(6.5, true);
-  ctx.fillStyle = "#0F172A";
-  ctx.textAlign = "center";
-  ctx.fillText("NCTB", cx, cy + 12.5);
-  ctx.restore();
-}
-
 export function renderCoverPage(
   ctx: CanvasRenderingContext2D,
   s: Student,
@@ -405,46 +368,46 @@ export function renderCoverPage(
   drawDottedField(ctx, "শ্রেণি শিক্ষকের নাম:", tn, 32, 438, 240, 9.5);
   drawDottedField(ctx, "মোবাইল নম্বর:", bn(tm), 246, 438, 395, 9.5);
 
-  // NCTB Emblem & Footer
+  // School Name & Address Footer (monochrome, replaces NCTB text/emblem)
   const backCx = 18 + 391 / 2;
-  drawNctbEmblem(ctx, backCx, 488, 19);
-  drawCenter(
-    ctx,
-    "জাতীয় শিক্ষাক্রম ও পাঠ্যপুস্তক বোর্ড, বাংলাদেশ",
-    backCx,
-    532,
-    10.5,
-    true,
-    355
-  );
-  drawCenter(
-    ctx,
-    "প্রাথমিক শিক্ষা স্তর (১ম–৫ম শ্রেণি)",
-    backCx,
-    549,
-    8,
-    false,
-    355,
-    "#475569"
-  );
+  ctx.strokeStyle = "#0F172A";
+  ctx.lineWidth = 0.7;
+  ctx.beginPath();
+  ctx.moveTo(48, 468);
+  ctx.lineTo(379, 468);
+  ctx.stroke();
+
+  const schoolName = st.school.trim() || "বিদ্যালয়ের নাম";
+  const fallbackAddr = [s.upazila, s.district].filter(Boolean).join(", ");
+  const schoolAddr = (st.schoolAddress ?? "").trim() || fallbackAddr;
+
+  drawCenter(ctx, schoolName, backCx, 496, 12.5, true, 350, "#0F172A");
+  if (schoolAddr) {
+    drawCenter(ctx, schoolAddr, backCx, 518, 10, false, 350, "#0F172A");
+  }
 
   // =========================================================================
   // RIGHT HALF (x: 433..824) = FRONT COVER (Page 1 when folded)
   // =========================================================================
   const frontCx = 433 + 391 / 2; // 628.5
 
-  // Dark rounded pill title banner
+  // Outlined rounded pill title banner (line-shape, no black background fill)
   const pillW = 312;
   const pillH = 44;
   const pillX = frontCx - pillW / 2;
   const pillY = 46;
   ctx.save();
-  ctx.fillStyle = "#0F172A";
+  ctx.strokeStyle = "#0F172A";
+  ctx.lineWidth = 1.6;
   ctx.beginPath();
   ctx.roundRect(pillX, pillY, pillW, pillH, 22);
-  ctx.fill();
+  ctx.stroke();
+  ctx.lineWidth = 0.6;
+  ctx.beginPath();
+  ctx.roundRect(pillX + 3, pillY + 3, pillW - 6, pillH - 6, 19);
+  ctx.stroke();
   ctx.restore();
-  drawCenter(ctx, "শিখন অগ্রগতি প্রতিবেদন", frontCx, 75, 20, true, 290, "#FFFFFF");
+  drawCenter(ctx, "শিখন অগ্রগতি প্রতিবেদন", frontCx, 75, 20, true, 290, "#0F172A");
 
   // Official DPE Logo (Simple B&W or Color per Settings)
   drawDpeLogo(ctx, frontCx, 102, 104, st.dpeLogo || "simple");
