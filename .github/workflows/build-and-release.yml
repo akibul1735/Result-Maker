@@ -1,4 +1,4 @@
-name: Android Release Build & Deploy
+name: Build & Release APK
 
 on:
   push:
@@ -7,6 +7,10 @@ on:
       - master
     tags:
       - 'v*'
+  pull_request:
+    branches:
+      - main
+      - master
   workflow_dispatch:
     inputs:
       version_name:
@@ -17,25 +21,18 @@ on:
         description: 'Numeric Android versionCode'
         required: true
         default: '1'
-      deploy_target:
-        description: 'Deployment target'
-        type: choice
-        options:
-          - github-release
-          - play-internal
-          - play-production
-        default: 'github-release'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: write
 
 jobs:
-  build-release:
-    name: Build Signed Release APK & AAB
+  build-and-release:
+    name: Build Result Maker APK & Publish Release
     runs-on: ubuntu-latest
-    outputs:
-      version_name: ${{ steps.meta.outputs.version_name }}
-      release_tag: ${{ steps.meta.outputs.release_tag }}
 
     steps:
       - name: Checkout repository
@@ -61,6 +58,21 @@ jobs:
           echo "version_code=${CODE}" >> "$GITHUB_OUTPUT"
           echo "release_tag=${TAG}" >> "$GITHUB_OUTPUT"
 
+      - name: Set up Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Verify Web Companion Build
+        run: |
+          if [ -f package-lock.json ]; then
+            npm ci
+          else
+            npm install
+          fi
+          npm run lint
+          npm run build
+
       - name: Set up JDK 17
         uses: actions/setup-java@v4
         with:
@@ -73,7 +85,6 @@ jobs:
           gradle-version: '8.9'
 
       - name: Prepare Release Signing Keystore
-        id: keystore
         env:
           RELEASE_KEYSTORE_BASE64: ${{ secrets.RELEASE_KEYSTORE_BASE64 }}
           RELEASE_KEYSTORE_PASSWORD: ${{ secrets.RELEASE_KEYSTORE_PASSWORD }}
@@ -89,9 +100,8 @@ jobs:
             STORE_PWD="$RELEASE_KEYSTORE_PASSWORD"
             KEY_ALIAS="${RELEASE_KEY_ALIAS:-release}"
             KEY_PWD="${RELEASE_KEY_PASSWORD:-$STORE_PWD}"
-            echo "using_secret_keystore=true" >> "$GITHUB_OUTPUT"
           else
-            echo "::warning::RELEASE_KEYSTORE_BASE64 secret is not configured. Generating temporary signing keystore so release APK remains installable."
+            echo "::warning::RELEASE_KEYSTORE_BASE64 secret not set. Signing with generated temporary release keystore."
             rm -f app/release.keystore
             keytool -genkeypair -v \
               -keystore app/release.keystore \
@@ -105,7 +115,6 @@ jobs:
             STORE_PWD="android"
             KEY_ALIAS="release"
             KEY_PWD="android"
-            echo "using_secret_keystore=false" >> "$GITHUB_OUTPUT"
           fi
           {
             echo "RELEASE_KEYSTORE_PATH=release.keystore"
@@ -114,19 +123,19 @@ jobs:
             echo "RELEASE_KEY_PASSWORD=${KEY_PWD}"
           } >> "$GITHUB_ENV"
 
-      - name: Assemble Signed Release APK & Bundle
+      - name: Build Signed Release APK
         env:
           VERSION_NAME: ${{ steps.meta.outputs.version_name }}
           VERSION_CODE: ${{ steps.meta.outputs.version_code }}
         run: |
           if [ -f ./gradlew ]; then
             chmod +x ./gradlew
-            ./gradlew assembleRelease bundleRelease --no-daemon
+            ./gradlew assembleRelease --no-daemon
           else
-            gradle assembleRelease bundleRelease --no-daemon
+            gradle assembleRelease --no-daemon
           fi
 
-      - name: Stage Named Release Files (result_maker_release.apk)
+      - name: Stage result_maker_release.apk
         run: |
           mkdir -p release-output
           APK_SRC=$(find app/build/outputs/apk/release -name "*.apk" | head -n 1)
@@ -135,81 +144,36 @@ jobs:
             exit 1
           fi
           cp "$APK_SRC" release-output/result_maker_release.apk
+          ls -lh release-output/result_maker_release.apk
 
-          AAB_SRC=$(find app/build/outputs/bundle/release -name "*.aab" | head -n 1 || true)
-          if [ -n "$AAB_SRC" ]; then
-            cp "$AAB_SRC" release-output/result_maker_release.aab
-          fi
-          ls -lh release-output/
-
-      - name: Verify Release APK Signature Fingerprint
+      - name: Verify APK Signature
         run: |
           SDK_DIR="${ANDROID_HOME:-$ANDROID_SDK_ROOT}"
           APKSIGNER=$(find "$SDK_DIR/build-tools" -name "apksigner" 2>/dev/null | sort -V | tail -n 1 || true)
           if [ -n "$APKSIGNER" ]; then
             "$APKSIGNER" verify --print-certs release-output/result_maker_release.apk
-          else
-            echo "::warning::apksigner not found in ANDROID_HOME/build-tools; skipping certificate print."
           fi
 
       - name: Clean up decoded keystore
         if: always()
         run: rm -f app/release.keystore
 
-      - name: Upload Signed Release Artifacts
+      - name: Upload APK Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: result-maker-release-${{ steps.meta.outputs.version_name }}
-          path: release-output/
+          name: result_maker_release
+          path: release-output/result_maker_release.apk
           if-no-files-found: error
           retention-days: 30
 
-  publish-github-release:
-    name: Publish GitHub Release
-    needs: build-release
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Download Signed Artifacts
-        uses: actions/download-artifact@v4
-        with:
-          name: result-maker-release-${{ needs.build-release.outputs.version_name }}
-          path: release-artifacts
-
-      - name: Verify Staged Release Files
-        run: ls -lh release-artifacts/
-
-      - name: Create GitHub Release
+      - name: Publish GitHub Release (APK only)
+        if: github.event_name != 'pull_request'
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ needs.build-release.outputs.release_tag }}
+          tag_name: ${{ steps.meta.outputs.release_tag }}
           target_commitish: ${{ github.sha }}
-          name: Result Maker ${{ needs.build-release.outputs.release_tag }}
+          name: Result Maker ${{ steps.meta.outputs.release_tag }}
           generate_release_notes: true
           make_latest: true
           fail_on_unmatched_files: true
-          files: |
-            release-artifacts/result_maker_release.apk
-            release-artifacts/result_maker_release.aab
-
-  deploy-google-play:
-    name: Deploy to Google Play
-    needs: build-release
-    if: ${{ github.event_name == 'workflow_dispatch' && (inputs.deploy_target == 'play-internal' || inputs.deploy_target == 'play-production') }}
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Download Signed AAB
-        uses: actions/download-artifact@v4
-        with:
-          name: result-maker-release-${{ needs.build-release.outputs.version_name }}
-          path: release-artifacts
-
-      - name: Upload App Bundle to Google Play
-        uses: r0adkll/upload-google-play@v1
-        with:
-          serviceAccountJsonPlainText: ${{ secrets.PLAY_SERVICE_ACCOUNT_JSON }}
-          packageName: com.kgps.result
-          releaseFiles: release-artifacts/result_maker_release.aab
-          track: ${{ inputs.deploy_target == 'play-production' && 'production' || 'internal' }}
-          status: completed
+          files: release-output/result_maker_release.apk

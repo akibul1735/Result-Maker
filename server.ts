@@ -41,9 +41,7 @@ const INSPECTABLE_FILES: Record<string, string> = {
   "MainActivity.kt": "app/src/main/java/com/kgps/result/MainActivity.kt",
   "app/build.gradle.kts": "app/build.gradle.kts",
   "AndroidManifest.xml": "app/src/main/AndroidManifest.xml",
-  "android-ci.yml": ".github/workflows/android-ci.yml",
-  "android-release-deploy.yml": ".github/workflows/android-release-deploy.yml",
-  "web-ci-deploy.yml": ".github/workflows/web-ci-deploy.yml",
+  "build-and-release.yml": ".github/workflows/build-and-release.yml",
 };
 
 async function startServer() {

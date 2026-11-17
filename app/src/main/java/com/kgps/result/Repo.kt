@@ -64,8 +64,8 @@ object Repo {
 
     private fun file(ctx: Context) = File(ctx.filesDir, "data.json")
     fun load(ctx: Context): Pair<List<Student>, Settings> =
-        try { if (file(ctx).exists()) fromJson(file(ctx).readText()) else emptyList<Student>() to Settings() }
-        catch (e: Exception) { emptyList<Student>() to Settings() }
+        try { if (file(ctx).exists()) fromJson(file(ctx).readText()) else SAMPLE_STUDENTS to DEFAULT_SETTINGS }
+        catch (e: Exception) { SAMPLE_STUDENTS to DEFAULT_SETTINGS }
     fun save(ctx: Context, list: List<Student>, st: Settings) { file(ctx).writeText(toJson(list, st)) }
 
     // ---------- CSV ----------
