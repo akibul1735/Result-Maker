@@ -103,6 +103,7 @@ fun SettingsScreen(
     var newFieldLabel by remember { mutableStateOf("") }
     var askReset by remember { mutableStateOf(false) }
     var askClear by remember { mutableStateOf(false) }
+    var pendingRemoveField by remember { mutableStateOf<CustomFieldDef?>(null) }
 
     val csvExportLauncher = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("text/csv")) { uri ->
         if (uri != null) {
@@ -372,7 +373,7 @@ fun SettingsScreen(
                             FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                                 s.customFields.forEach { cf: CustomFieldDef ->
                                     AssistChip(
-                                        onClick = { onRemoveCustomField(cf.key) },
+                                        onClick = { pendingRemoveField = cf },
                                         label = { Text(cf.label, fontSize = 12.sp) },
                                         trailingIcon = {
                                             Icon(
@@ -509,6 +510,27 @@ fun SettingsScreen(
             },
             dismissButton = {
                 TextButton(onClick = { askClear = false }) { Text("বাতিল") }
+            }
+        )
+    }
+
+    pendingRemoveField?.let { field ->
+        AlertDialog(
+            onDismissRequest = { pendingRemoveField = null },
+            title = { Text("কাস্টম ফিল্ড মুছবেন?") },
+            text = { Text("\"${field.label}\" কাস্টম ফিল্ডটি তালিকা থেকে মুছে ফেলা হবে।") },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        onRemoveCustomField(field.key)
+                        pendingRemoveField = null
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = RoseDanger),
+                    modifier = Modifier.testTag("settings_confirm_remove_field_btn")
+                ) { Text("হ্যাঁ, মুছুন") }
+            },
+            dismissButton = {
+                TextButton(onClick = { pendingRemoveField = null }) { Text("বাতিল") }
             }
         )
     }

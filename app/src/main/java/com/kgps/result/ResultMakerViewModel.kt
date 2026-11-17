@@ -13,7 +13,6 @@ import com.kgps.result.ai.AiModelMode
 import com.kgps.result.ai.AiRepository
 import com.kgps.result.ai.ExtractedMarksheet
 import com.kgps.result.ai.PlaceholderAiRepository
-import com.kgps.result.speech.TtsHelper
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -25,7 +24,7 @@ import java.util.UUID
 
 enum class NavSection(val route: String, val labelBn: String) {
     ROSTER("roster", "শিক্ষার্থী তালিকা"),
-    SHEET("sheet", "শিট এন্ট্রি"),
+    SHEET("sheet", "ব্যাচ এন্ট্রি"),
     STUDIO("studio", "রিপোর্ট স্টুডিও"),
     ASSISTANT("assistant", "AI সহায়ক"),
     SETTINGS("settings", "সেটিংস")
@@ -58,7 +57,6 @@ data class AiAssistantState(
 
 class ResultMakerViewModel(application: Application) : AndroidViewModel(application) {
     private val aiRepository: AiRepository = PlaceholderAiRepository()
-    private val ttsHelper = TtsHelper(application)
 
     private val _students = MutableStateFlow<List<Student>>(emptyList())
     val students: StateFlow<List<Student>> = _students.asStateFlow()
@@ -93,7 +91,6 @@ class ResultMakerViewModel(application: Application) : AndroidViewModel(applicat
     private val _draftingRemarkTerm = MutableStateFlow<Int?>(null)
     val draftingRemarkTerm: StateFlow<Int?> = _draftingRemarkTerm.asStateFlow()
 
-    val speakingId: StateFlow<String?> = ttsHelper.speakingId
     val isPlaceholderAi: Boolean get() = aiRepository.isPlaceholderBackend
 
     init {
@@ -179,10 +176,13 @@ class ResultMakerViewModel(application: Application) : AndroidViewModel(applicat
     }
 
     fun deleteStudent(id: String) {
+        val target = _students.value.find { it.id == id }
         val next = _students.value.filter { it.id != id }
         _students.value = next
         if (_studioStudentId.value == id) _studioStudentId.value = null
         persist(nextStudents = next)
+        val label = target?.name?.ifBlank { "রোল ${bn(target.roll.toString())}" } ?: "শিক্ষার্থী"
+        showMessage("$label মুছে ফেলা হয়েছে")
     }
 
     fun updateSettings(newSettings: Settings) {
@@ -205,10 +205,14 @@ class ResultMakerViewModel(application: Application) : AndroidViewModel(applicat
     }
 
     fun removeCustomField(key: String) {
+        val removed = _settings.value.customFields.find { it.key == key }
         val next = _settings.value.copy(
             customFields = _settings.value.customFields.filter { it.key != key }
         )
         updateSettings(next)
+        if (removed != null) {
+            showMessage("\"${removed.label}\" ফিল্ড মুছে ফেলা হয়েছে")
+        }
     }
 
     fun applyCsvImport(summary: Repo.CsvImportSummary) {
@@ -249,41 +253,6 @@ class ResultMakerViewModel(application: Application) : AndroidViewModel(applicat
         _studioStudentId.value = null
         persist(nextStudents = emptyList())
         showMessage("সকল শিক্ষার্থীর তথ্য মুছে ফেলা হয়েছে")
-    }
-
-    // ---------- Text-to-Speech (Native Android TextToSpeech) ----------
-
-    fun speakText(text: String, id: String) {
-        ttsHelper.speak(text, id)
-    }
-
-    fun stopSpeaking() {
-        ttsHelper.stop()
-    }
-
-    fun speakStudentSummary(s: Student) {
-        val id = "student-${s.id}"
-        if (ttsHelper.speakingId.value == id) {
-            ttsHelper.stop()
-            return
-        }
-        val hasEval = (1..3).any { s.hasTerm(it) }
-        val pct = s.overallPct()
-        val grade = gradeOf(pct)
-        val remark = (3 downTo 1).firstNotNullOfOrNull { t -> s.x["REM_$t"]?.takeIf { it.isNotBlank() } }
-        val speech = buildString {
-            append("শিক্ষার্থীর নাম: ${s.name.ifBlank { "অজানা" }}। ")
-            append("${CLSN[s.cls - 1]} শ্রেণি, রোল ${bn(s.roll.toString())}। ")
-            if (hasEval) {
-                append("সমন্বিত গড় নম্বর ${fmt(pct)} শতাংশ, গ্রেড $grade, অর্থাৎ ${gradeLabelBn(grade)}। ")
-            } else {
-                append("এখনো নম্বর এন্ট্রি করা হয়নি। ")
-            }
-            if (!remark.isNullOrBlank()) {
-                append("শ্রেণি শিক্ষকের মতামত: $remark")
-            }
-        }
-        ttsHelper.speak(speech, id)
     }
 
     // ---------- AI Assistant & Drafting ----------
@@ -509,10 +478,5 @@ class ResultMakerViewModel(application: Application) : AndroidViewModel(applicat
         } catch (_: Exception) {
             null
         }
-    }
-
-    override fun onCleared() {
-        super.onCleared()
-        ttsHelper.shutdown()
     }
 }

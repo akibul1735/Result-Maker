@@ -26,12 +26,9 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.ArrowDropDown
 import androidx.compose.material.icons.rounded.ContentPaste
 import androidx.compose.material.icons.rounded.Description
-import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.DropdownMenu
@@ -42,10 +39,8 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -76,7 +71,6 @@ import com.kgps.result.Student
 import com.kgps.result.avg
 import com.kgps.result.bn
 import com.kgps.result.cont
-import com.kgps.result.createEmptyStudent
 import com.kgps.result.fmt
 import com.kgps.result.fmtEn
 import com.kgps.result.fromBn
@@ -140,7 +134,6 @@ fun BulkSheetScreen(
     var termMenuOpen by remember { mutableStateOf(false) }
     var modeMenuOpen by remember { mutableStateOf(false) }
     var subjectMenuOpen by remember { mutableStateOf(false) }
-    var showQuickAddDialog by remember { mutableStateOf(false) }
 
     val subs = remember(cls) { subjectsFor(cls, RELIGIONS.first()) }
     var subKey by remember(cls) { mutableStateOf(subs.first().key) }
@@ -149,7 +142,6 @@ fun BulkSheetScreen(
     val classStudents = remember(students, cls) {
         students.filter { it.cls == cls }.sortedBy { it.roll }
     }
-    val suggestedRoll = (classStudents.maxOfOrNull { it.roll } ?: 0) + 1
 
     val cols: List<SheetColDef> = remember(mode, activeSub, term, subs, settings.customFields) {
         when (mode) {
@@ -376,12 +368,6 @@ fun BulkSheetScreen(
                     Spacer(Modifier.weight(1f))
 
                     IconButton(
-                        onClick = { showQuickAddDialog = true },
-                        modifier = Modifier.size(48.dp).testTag("sheet_open_quick_add_btn")
-                    ) {
-                        Icon(Icons.Rounded.Add, contentDescription = "নতুন শিক্ষার্থী যোগ", tint = TealPrimary)
-                    }
-                    IconButton(
                         onClick = { applyClipboardPaste() },
                         modifier = Modifier.size(48.dp).testTag("sheet_paste_btn")
                     ) {
@@ -499,14 +485,13 @@ fun BulkSheetScreen(
                         fontSize = 14.sp,
                         fontWeight = FontWeight.SemiBold
                     )
-                    Spacer(Modifier.height(10.dp))
-                    Button(
-                        onClick = { showQuickAddDialog = true },
-                        modifier = Modifier.testTag("sheet_empty_add_btn")
-                    ) {
-                        Icon(Icons.Rounded.Add, contentDescription = null, modifier = Modifier.size(16.dp))
-                        Text(" শিক্ষার্থী যোগ করুন")
-                    }
+                    Spacer(Modifier.height(6.dp))
+                    Text(
+                        "শিক্ষার্থী ট্যাব থেকে নতুন শিক্ষার্থী যোগ করুন অথবা CSV ইমপোর্ট করুন",
+                        color = SlateMuted,
+                        fontSize = 12.sp,
+                        textAlign = TextAlign.Center
+                    )
                 }
             } else {
                 Column(Modifier.fillMaxSize()) {
@@ -760,69 +745,6 @@ fun BulkSheetScreen(
                 }
             }
         }
-    }
-
-    if (showQuickAddDialog) {
-        var rollInput by remember { mutableStateOf(suggestedRoll.toString()) }
-        var nameInput by remember { mutableStateOf("") }
-        var religionInput by remember { mutableStateOf(RELIGIONS.first()) }
-
-        AlertDialog(
-            onDismissRequest = { showQuickAddDialog = false },
-            title = { Text("${CLSN[cls - 1]} শ্রেণিতে দ্রুত শিক্ষার্থী যোগ", fontWeight = FontWeight.Bold, fontSize = 16.sp) },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedTextField(
-                        value = rollInput,
-                        onValueChange = { rollInput = it },
-                        label = { Text("রোল নম্বর") },
-                        singleLine = true,
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                        modifier = Modifier.fillMaxWidth().testTag("sheet_dialog_roll_input")
-                    )
-                    OutlinedTextField(
-                        value = nameInput,
-                        onValueChange = { nameInput = it },
-                        label = { Text("শিক্ষার্থীর নাম") },
-                        singleLine = true,
-                        modifier = Modifier.fillMaxWidth().testTag("sheet_dialog_name_input")
-                    )
-                    Text("ধর্ম নির্বাচন করুন", fontSize = 12.sp, color = SlateMuted)
-                    Row(
-                        Modifier.horizontalScroll(rememberScrollState()),
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
-                        RELIGIONS.forEach { r ->
-                            FilterChip(
-                                selected = religionInput == r,
-                                onClick = { religionInput = r },
-                                label = { Text(r, fontSize = 12.sp) }
-                            )
-                        }
-                    }
-                }
-            },
-            confirmButton = {
-                Button(
-                    onClick = {
-                        val trimmed = nameInput.trim()
-                        if (trimmed.isNotEmpty()) {
-                            val rNum = fromBn(rollInput.trim()).toIntOrNull() ?: suggestedRoll
-                            onUpsertStudent(createEmptyStudent(cls, rNum, religionInput).copy(name = trimmed))
-                            onShowMessage("$trimmed (রোল ${bn(rNum.toString())}) যোগ হয়েছে")
-                            showQuickAddDialog = false
-                        }
-                    },
-                    enabled = nameInput.isNotBlank(),
-                    modifier = Modifier.testTag("sheet_dialog_confirm_add")
-                ) {
-                    Text("যোগ করুন")
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { showQuickAddDialog = false }) { Text("বাতিল") }
-            }
-        )
     }
 }
 

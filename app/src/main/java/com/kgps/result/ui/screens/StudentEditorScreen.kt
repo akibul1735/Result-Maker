@@ -32,12 +32,11 @@ import androidx.compose.material.icons.rounded.EventAvailable
 import androidx.compose.material.icons.rounded.FolderOpen
 import androidx.compose.material.icons.rounded.Home
 import androidx.compose.material.icons.rounded.MenuBook
-import androidx.compose.material.icons.rounded.Stop
 import androidx.compose.material.icons.rounded.Tune
 import androidx.compose.material.icons.rounded.Visibility
-import androidx.compose.material.icons.rounded.VolumeUp
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.FilterChip
@@ -96,7 +95,6 @@ import com.kgps.result.ui.theme.TealSoft
 fun StudentEditorScreen(
     initialStudent: Student,
     settings: Settings,
-    speakingId: String?,
     draftingRemarkTerm: Int?,
     isPlaceholderAi: Boolean,
     onAddCustomField: (String) -> Boolean,
@@ -105,7 +103,6 @@ fun StudentEditorScreen(
     onBack: () -> Unit,
     onPreview: (Student) -> Unit,
     onPdf: (Student) -> Unit,
-    onSpeakText: (String, String) -> Unit,
     onDraftRemark: (Student, Int, (String) -> Unit) -> Unit,
     onShowMessage: (String) -> Unit
 ) {
@@ -496,7 +493,7 @@ fun StudentEditorScreen(
                                 modifier = Modifier.fillMaxWidth()
                             ) {
                                 Text(
-                                    "Sample Mode: 'AI খসড়া' নমুনা টেক্সট দেয় (লাইভ AI-এর জন্য Firebase প্রয়োজন)। 'শুনুন' অফলাইনে কাজ করে।",
+                                    "Sample Mode: 'AI খসড়া' নমুনা টেক্সট দেয় (লাইভ AI-এর জন্য Firebase প্রয়োজন)।",
                                     fontSize = 11.5.sp,
                                     color = AmberNotice,
                                     modifier = Modifier.padding(horizontal = 10.dp, vertical = 7.dp)
@@ -507,8 +504,6 @@ fun StudentEditorScreen(
                         (1..3).forEach { t ->
                             val remKey = "REM_$t"
                             val remarkText = s.x[remKey] ?: ""
-                            val speechId = "rem-$t-${s.id}"
-                            val isSpeaking = speakingId == speechId
                             val dVal = s.x["DAYS_$t"]?.let { fromBn(it).toDoubleOrNull() }
                             val pVal = s.x["PRES_$t"]?.let { fromBn(it).toDoubleOrNull() }
                             val attPct = if (dVal != null && pVal != null && dVal > 0) "${fmt((pVal / dVal) * 100.0)}%" else null
@@ -560,35 +555,17 @@ fun StudentEditorScreen(
 
                                         EditorTextField("শ্রেণি শিক্ষকের মতামত", remarkText, lines = 3) { setX(remKey, it) }
 
-                                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-                                            OutlinedButton(
-                                                onClick = {
-                                                    onDraftRemark(s, t) { drafted -> setX(remKey, drafted) }
-                                                },
-                                                enabled = draftingRemarkTerm == null,
-                                                shape = RoundedCornerShape(8.dp),
-                                                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp),
-                                                modifier = Modifier.weight(1f).testTag("editor_ai_draft_$t")
-                                            ) {
-                                                Icon(Icons.Rounded.AutoAwesome, contentDescription = null, modifier = Modifier.size(15.dp))
-                                                Text(if (draftingRemarkTerm == t) " তৈরি হচ্ছে..." else " AI খসড়া", fontSize = 12.sp)
-                                            }
-                                            OutlinedButton(
-                                                onClick = {
-                                                    if (remarkText.isBlank()) onShowMessage("শোনার জন্য প্রথমে মতামত লিখুন")
-                                                    else onSpeakText(remarkText, speechId)
-                                                },
-                                                shape = RoundedCornerShape(8.dp),
-                                                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp),
-                                                modifier = Modifier.weight(1f).testTag("editor_speak_remark_$t")
-                                            ) {
-                                                Icon(
-                                                    imageVector = if (isSpeaking) Icons.Rounded.Stop else Icons.Rounded.VolumeUp,
-                                                    contentDescription = null,
-                                                    modifier = Modifier.size(15.dp)
-                                                )
-                                                Text(if (isSpeaking) " থামান" else " শুনুন", fontSize = 12.sp)
-                                            }
+                                        OutlinedButton(
+                                            onClick = {
+                                                onDraftRemark(s, t) { drafted -> setX(remKey, drafted) }
+                                            },
+                                            enabled = draftingRemarkTerm == null,
+                                            shape = RoundedCornerShape(8.dp),
+                                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp),
+                                            modifier = Modifier.fillMaxWidth().testTag("editor_ai_draft_$t")
+                                        ) {
+                                            Icon(Icons.Rounded.AutoAwesome, contentDescription = null, modifier = Modifier.size(15.dp))
+                                            Text(if (draftingRemarkTerm == t) " তৈরি হচ্ছে..." else " AI খসড়া তৈরি করুন", fontSize = 12.sp)
                                         }
                                     }
                                 }
@@ -613,6 +590,7 @@ fun StudentEditorScreen(
                         askDelete = false
                         onBack()
                     },
+                    colors = ButtonDefaults.buttonColors(containerColor = RoseDanger),
                     modifier = Modifier.testTag("editor_confirm_delete_btn")
                 ) { Text("হ্যাঁ, মুছুন") }
             },

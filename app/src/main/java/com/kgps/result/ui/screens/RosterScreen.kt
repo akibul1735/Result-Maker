@@ -23,10 +23,8 @@ import androidx.compose.material.icons.rounded.GridOn
 import androidx.compose.material.icons.rounded.PersonOutline
 import androidx.compose.material.icons.rounded.School
 import androidx.compose.material.icons.rounded.Search
-import androidx.compose.material.icons.rounded.Stop
 import androidx.compose.material.icons.rounded.UploadFile
 import androidx.compose.material.icons.rounded.Visibility
-import androidx.compose.material.icons.rounded.VolumeUp
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -79,11 +77,9 @@ fun RosterScreen(
     students: List<Student>,
     settings: Settings,
     cls: Int,
-    speakingId: String?,
     onSelectClass: (Int) -> Unit,
     onOpenStudent: (Student) -> Unit,
     onPreviewStudent: (Student) -> Unit,
-    onSpeakStudent: (Student) -> Unit,
     onNewStudentInClass: (Int) -> Unit,
     onOpenSheetInClass: (Int) -> Unit,
     onCsvImport: () -> Unit,
@@ -236,31 +232,31 @@ fun RosterScreen(
                                 onClick = { onNewStudentInClass(c) },
                                 modifier = Modifier.weight(1f).testTag("roster_class_add_$c"),
                                 shape = RoundedCornerShape(8.dp),
-                                contentPadding = PaddingValues(horizontal = 6.dp, vertical = 6.dp),
+                                contentPadding = PaddingValues(horizontal = 4.dp, vertical = 6.dp),
                                 border = BorderStroke(1.dp, SlateOutline)
                             ) {
                                 Icon(Icons.Rounded.Add, contentDescription = null, modifier = Modifier.size(14.dp))
-                                Text(" যোগ", fontSize = 11.5.sp)
+                                Text(" যোগ", fontSize = 11.sp, maxLines = 1)
                             }
                             OutlinedButton(
                                 onClick = { onOpenSheetInClass(c) },
-                                modifier = Modifier.weight(1f).testTag("roster_class_sheet_$c"),
+                                modifier = Modifier.weight(1.25f).testTag("roster_class_sheet_$c"),
                                 shape = RoundedCornerShape(8.dp),
-                                contentPadding = PaddingValues(horizontal = 6.dp, vertical = 6.dp),
+                                contentPadding = PaddingValues(horizontal = 4.dp, vertical = 6.dp),
                                 border = BorderStroke(1.dp, SlateOutline)
                             ) {
                                 Icon(Icons.Rounded.GridOn, contentDescription = null, modifier = Modifier.size(14.dp))
-                                Text(" শিট", fontSize = 11.5.sp)
+                                Text(" ব্যাচ এন্ট্রি", fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                             }
                             OutlinedButton(
                                 onClick = { onClassPdf(c) },
-                                modifier = Modifier.weight(1f).testTag("roster_class_pdf_$c"),
+                                modifier = Modifier.weight(0.95f).testTag("roster_class_pdf_$c"),
                                 shape = RoundedCornerShape(8.dp),
-                                contentPadding = PaddingValues(horizontal = 6.dp, vertical = 6.dp),
+                                contentPadding = PaddingValues(horizontal = 4.dp, vertical = 6.dp),
                                 border = BorderStroke(1.dp, SlateOutline)
                             ) {
                                 Icon(Icons.Rounded.Description, contentDescription = null, modifier = Modifier.size(14.dp))
-                                Text(" PDF", fontSize = 11.5.sp)
+                                Text(" PDF", fontSize = 11.sp, maxLines = 1)
                             }
                         }
 
@@ -311,7 +307,6 @@ fun RosterScreen(
                                     "C" -> AmberNotice
                                     else -> RoseDanger
                                 }
-                                val isSpeakingThis = speakingId == "student-${s.id}"
 
                                 TreeBranchItem(isLast = isLast) {
                                     Card(
@@ -388,29 +383,16 @@ fun RosterScreen(
                                                     fontSize = 11.sp,
                                                     color = if (hasEval) gradeColor else SlateMuted
                                                 )
-                                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                                    IconButton(
-                                                        onClick = { onSpeakStudent(s) },
-                                                        modifier = Modifier.size(48.dp).testTag("speak_student_${s.id}")
-                                                    ) {
-                                                        Icon(
-                                                            imageVector = if (isSpeakingThis) Icons.Rounded.Stop else Icons.Rounded.VolumeUp,
-                                                            contentDescription = if (isSpeakingThis) "পাঠ থামান" else "ফলাফল শুনুন",
-                                                            tint = if (isSpeakingThis) RoseDanger else TealPrimary,
-                                                            modifier = Modifier.size(18.dp)
-                                                        )
-                                                    }
-                                                    IconButton(
-                                                        onClick = { onPreviewStudent(s) },
-                                                        modifier = Modifier.size(48.dp).testTag("preview_student_${s.id}")
-                                                    ) {
-                                                        Icon(
-                                                            imageVector = Icons.Rounded.Visibility,
-                                                            contentDescription = "রিপোর্ট প্রিভিউ",
-                                                            tint = TealPrimary,
-                                                            modifier = Modifier.size(18.dp)
-                                                        )
-                                                    }
+                                                IconButton(
+                                                    onClick = { onPreviewStudent(s) },
+                                                    modifier = Modifier.size(48.dp).testTag("preview_student_${s.id}")
+                                                ) {
+                                                    Icon(
+                                                        imageVector = Icons.Rounded.Visibility,
+                                                        contentDescription = "রিপোর্ট প্রিভিউ",
+                                                        tint = TealPrimary,
+                                                        modifier = Modifier.size(18.dp)
+                                                    )
                                                 }
                                             }
                                         }

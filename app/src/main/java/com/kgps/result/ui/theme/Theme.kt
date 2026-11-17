@@ -52,45 +52,42 @@ private val ResultMakerColorScheme = lightColorScheme(
     error = RoseDanger,
     onError = Color.White,
     errorContainer = RoseBg,
-    onErrorContainer = RoseDanger
+    onErrorContainer = RoseDanger,
+    inverseSurface = Color(0xFF1E293B),
+    inverseOnSurface = Color.White,
+    inversePrimary = TealContainer
 )
 
 private val ResultMakerTypography = Typography(
     headlineSmall = TextStyle(
         fontWeight = FontWeight.Bold,
         fontSize = 22.sp,
-        lineHeight = 28.sp,
-        color = SlateText
+        lineHeight = 28.sp
     ),
     titleLarge = TextStyle(
         fontWeight = FontWeight.Bold,
         fontSize = 18.sp,
-        lineHeight = 24.sp,
-        color = SlateText
+        lineHeight = 24.sp
     ),
     titleMedium = TextStyle(
         fontWeight = FontWeight.SemiBold,
         fontSize = 15.sp,
-        lineHeight = 22.sp,
-        color = SlateText
+        lineHeight = 22.sp
     ),
     bodyLarge = TextStyle(
         fontWeight = FontWeight.Normal,
         fontSize = 15.sp,
-        lineHeight = 22.sp,
-        color = SlateText
+        lineHeight = 22.sp
     ),
     bodyMedium = TextStyle(
         fontWeight = FontWeight.Normal,
         fontSize = 13.sp,
-        lineHeight = 19.sp,
-        color = SlateText
+        lineHeight = 19.sp
     ),
     bodySmall = TextStyle(
         fontWeight = FontWeight.Normal,
         fontSize = 11.5.sp,
-        lineHeight = 16.sp,
-        color = SlateMuted
+        lineHeight = 16.sp
     ),
     labelLarge = TextStyle(
         fontWeight = FontWeight.SemiBold,

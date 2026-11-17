@@ -2,14 +2,15 @@
 
 package com.kgps.result
 
+import android.graphics.Color as AndroidColor
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.SystemBarStyle
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
@@ -30,8 +31,6 @@ import androidx.compose.material.icons.rounded.GridOn
 import androidx.compose.material.icons.rounded.MoreVert
 import androidx.compose.material.icons.rounded.People
 import androidx.compose.material.icons.rounded.Settings
-import androidx.compose.material.icons.rounded.Stop
-import androidx.compose.material.icons.rounded.VolumeUp
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -44,11 +43,10 @@ import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.NavigationRail
 import androidx.compose.material3.NavigationRailItem
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Snackbar
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
@@ -79,15 +77,22 @@ import com.kgps.result.ui.theme.ResultMakerTheme
 import com.kgps.result.ui.theme.SlateBg
 import com.kgps.result.ui.theme.SlateMuted
 import com.kgps.result.ui.theme.SlateText
-import com.kgps.result.ui.theme.TealContainer
-import com.kgps.result.ui.theme.TealDark
 import com.kgps.result.ui.theme.TealPrimary
 import com.kgps.result.ui.theme.TealSoft
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        enableEdgeToEdge()
+        enableEdgeToEdge(
+            statusBarStyle = SystemBarStyle.light(
+                AndroidColor.TRANSPARENT,
+                AndroidColor.TRANSPARENT
+            ),
+            navigationBarStyle = SystemBarStyle.light(
+                AndroidColor.TRANSPARENT,
+                AndroidColor.TRANSPARENT
+            )
+        )
         setContent {
             ResultMakerTheme {
                 ResultMakerApp()
@@ -104,7 +109,7 @@ private data class NavItem(
 
 private val PRIMARY_NAV_ITEMS = listOf(
     NavItem(NavSection.ROSTER, "শিক্ষার্থী", Icons.Rounded.People),
-    NavItem(NavSection.SHEET, "শিট এন্ট্রি", Icons.Rounded.GridOn),
+    NavItem(NavSection.SHEET, "ব্যাচ এন্ট্রি", Icons.Rounded.GridOn),
     NavItem(NavSection.STUDIO, "রিপোর্ট", Icons.Rounded.Description),
     NavItem(NavSection.ASSISTANT, "AI সহায়ক", Icons.Rounded.AutoAwesome)
 )
@@ -120,7 +125,6 @@ fun ResultMakerApp(vm: ResultMakerViewModel = viewModel()) {
     val studioStudentId by vm.studioStudentId.collectAsStateWithLifecycle()
     val csvImportState by vm.csvImportState.collectAsStateWithLifecycle()
     val snackbarMessage by vm.snackbarMessage.collectAsStateWithLifecycle()
-    val speakingId by vm.speakingId.collectAsStateWithLifecycle()
     val aiState by vm.aiState.collectAsStateWithLifecycle()
     val draftingTerm by vm.draftingRemarkTerm.collectAsStateWithLifecycle()
 
@@ -165,7 +169,25 @@ fun ResultMakerApp(vm: ResultMakerViewModel = viewModel()) {
 
         Scaffold(
             containerColor = SlateBg,
-            snackbarHost = { SnackbarHost(snackbarHostState) },
+            snackbarHost = {
+                SnackbarHost(hostState = snackbarHostState) { data ->
+                    Snackbar(
+                        snackbarData = data,
+                        containerColor = TealSoft,
+                        contentColor = SlateText,
+                        actionColor = TealPrimary,
+                        dismissActionContentColor = SlateMuted,
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier
+                            .padding(horizontal = 12.dp, vertical = 4.dp)
+                            .border(
+                                width = 1.dp,
+                                color = TealPrimary.copy(alpha = 0.35f),
+                                shape = RoundedCornerShape(12.dp)
+                            )
+                    )
+                }
+            },
             topBar = {
                 if (!isEditing) {
                     ResultMakerTopBar(
@@ -247,45 +269,12 @@ fun ResultMakerApp(vm: ResultMakerViewModel = viewModel()) {
                 }
 
                 Column(Modifier.weight(1f).fillMaxHeight()) {
-                    if (speakingId != null) {
-                        Surface(
-                            color = TealSoft,
-                            border = BorderStroke(1.dp, TealContainer),
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 12.dp, vertical = 4.dp),
-                            shape = RoundedCornerShape(10.dp)
-                        ) {
-                            Row(
-                                Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.SpaceBetween
-                            ) {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                                ) {
-                                    Icon(Icons.Rounded.VolumeUp, contentDescription = null, tint = TealPrimary, modifier = Modifier.size(16.dp))
-                                    Text("অডিও পাঠ চলছে...", fontSize = 12.sp, color = TealDark, fontWeight = FontWeight.Medium)
-                                }
-                                TextButton(
-                                    onClick = vm::stopSpeaking,
-                                    modifier = Modifier.testTag("tts_stop_banner_btn")
-                                ) {
-                                    Icon(Icons.Rounded.Stop, contentDescription = null, modifier = Modifier.size(16.dp))
-                                    Text(" থামান", fontSize = 12.sp)
-                                }
-                            }
-                        }
-                    }
-
                     Box(Modifier.weight(1f).fillMaxWidth()) {
                         val activeEdit = editingStudent
                         if (activeEdit != null) {
                             StudentEditorScreen(
                                 initialStudent = activeEdit,
                                 settings = settings,
-                                speakingId = speakingId,
                                 draftingRemarkTerm = draftingTerm,
                                 isPlaceholderAi = vm.isPlaceholderAi,
                                 onAddCustomField = vm::addCustomField,
@@ -294,7 +283,6 @@ fun ResultMakerApp(vm: ResultMakerViewModel = viewModel()) {
                                 onBack = vm::closeEditor,
                                 onPreview = { saved -> vm.openStudio(saved.id) },
                                 onPdf = { s -> makePdf(listOf(s), "${s.name.ifBlank { "student" }}.pdf") },
-                                onSpeakText = vm::speakText,
                                 onDraftRemark = vm::draftRemark,
                                 onShowMessage = vm::showMessage
                             )
@@ -304,11 +292,9 @@ fun ResultMakerApp(vm: ResultMakerViewModel = viewModel()) {
                                     students = students,
                                     settings = settings,
                                     cls = cls,
-                                    speakingId = speakingId,
                                     onSelectClass = vm::selectClass,
                                     onOpenStudent = { vm.openEditor(it, NavSection.ROSTER) },
                                     onPreviewStudent = { vm.openStudio(it.id) },
-                                    onSpeakStudent = vm::speakStudentSummary,
                                     onNewStudentInClass = { targetCls ->
                                         vm.selectClass(targetCls)
                                         vm.openNewStudentEditor(NavSection.ROSTER)
@@ -349,10 +335,8 @@ fun ResultMakerApp(vm: ResultMakerViewModel = viewModel()) {
                                     students = students,
                                     settings = settings,
                                     selectedId = studioStudentId,
-                                    speakingId = speakingId,
                                     onSelectId = vm::selectStudioStudent,
                                     onUpdateSettings = vm::updateSettings,
-                                    onSpeakStudent = vm::speakStudentSummary,
                                     onPrintStudent = { s ->
                                         PdfGen.printStudents(
                                             ctx,
@@ -368,7 +352,6 @@ fun ResultMakerApp(vm: ResultMakerViewModel = viewModel()) {
                                 NavSection.ASSISTANT -> AiAssistantScreen(
                                     state = aiState,
                                     students = students,
-                                    speakingId = speakingId,
                                     isPlaceholderAi = vm.isPlaceholderAi,
                                     onSetModelMode = vm::setAiModelMode,
                                     onSetContextStudent = vm::setAiContextStudent,
@@ -377,8 +360,7 @@ fun ResultMakerApp(vm: ResultMakerViewModel = viewModel()) {
                                     onPickMarksheetUri = vm::loadMarksheetImage,
                                     onClearImage = vm::clearMarksheetImage,
                                     onAnalyzeImage = vm::analyzeSelectedMarksheet,
-                                    onApplyExtracted = { ext -> vm.applyExtractedMarksheet(ext) },
-                                    onSpeakText = vm::speakText
+                                    onApplyExtracted = { ext -> vm.applyExtractedMarksheet(ext) }
                                 )
 
                                 NavSection.SETTINGS -> SettingsScreen(

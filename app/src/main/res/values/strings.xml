@@ -1,7 +1,7 @@
 <resources>
     <string name="app_name">Result Maker</string>
     <string name="nav_roster">শিক্ষার্থী তালিকা</string>
-    <string name="nav_sheet">শিট এন্ট্রি</string>
+    <string name="nav_sheet">ব্যাচ এন্ট্রি</string>
     <string name="nav_studio">রিপোর্ট স্টুডিও</string>
     <string name="nav_assistant">AI সহায়ক</string>
     <string name="nav_settings">সেটিংস</string>

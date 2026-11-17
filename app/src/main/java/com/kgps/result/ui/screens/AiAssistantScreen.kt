@@ -33,10 +33,10 @@ import androidx.compose.material.icons.rounded.DeleteSweep
 import androidx.compose.material.icons.rounded.DocumentScanner
 import androidx.compose.material.icons.rounded.Info
 import androidx.compose.material.icons.rounded.PhotoLibrary
-import androidx.compose.material.icons.rounded.Stop
-import androidx.compose.material.icons.rounded.VolumeUp
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -52,6 +52,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Tab
 import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -90,7 +91,6 @@ import com.kgps.result.ui.theme.TealSoft
 fun AiAssistantScreen(
     state: AiAssistantState,
     students: List<Student>,
-    speakingId: String?,
     isPlaceholderAi: Boolean,
     onSetModelMode: (AiModelMode) -> Unit,
     onSetContextStudent: (String?) -> Unit,
@@ -99,13 +99,14 @@ fun AiAssistantScreen(
     onPickMarksheetUri: (android.net.Uri) -> Unit,
     onClearImage: () -> Unit,
     onAnalyzeImage: (String) -> Unit,
-    onApplyExtracted: (ExtractedMarksheet) -> Unit,
-    onSpeakText: (String, String) -> Unit
+    onApplyExtracted: (ExtractedMarksheet) -> Unit
 ) {
     var activeTab by remember { mutableStateOf(0) }
     var chatInput by remember { mutableStateOf("") }
     var teacherNote by remember { mutableStateOf("") }
     var contextDropdownOpen by remember { mutableStateOf(false) }
+    var askClearChat by remember { mutableStateOf(false) }
+    var askClearImage by remember { mutableStateOf(false) }
 
     val photoPicker = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.PickVisualMedia()
@@ -196,7 +197,13 @@ fun AiAssistantScreen(
                         )
                         Spacer(Modifier.weight(1f))
                         OutlinedButton(
-                            onClick = onClearChat,
+                            onClick = {
+                                if (state.chatMessages.size > 1) {
+                                    askClearChat = true
+                                } else {
+                                    onClearChat()
+                                }
+                            },
                             contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
                             shape = RoundedCornerShape(8.dp),
                             border = BorderStroke(1.dp, SlateOutline),
@@ -260,8 +267,6 @@ fun AiAssistantScreen(
                     ) {
                         items(state.chatMessages, key = { it.id }) { msg ->
                             val isBot = !msg.isUser
-                            val speechKey = "chat-${msg.id}"
-                            val isSpeaking = speakingId == speechKey
                             Row(
                                 Modifier.fillMaxWidth(),
                                 horizontalArrangement = if (msg.isUser) Arrangement.End else Arrangement.Start
@@ -274,29 +279,12 @@ fun AiAssistantScreen(
                                 ) {
                                     Column(Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                                         if (isBot && !msg.modelLabel.isNullOrBlank()) {
-                                            Row(
-                                                Modifier.fillMaxWidth(),
-                                                horizontalArrangement = Arrangement.SpaceBetween,
-                                                verticalAlignment = Alignment.CenterVertically
-                                            ) {
-                                                Text(
-                                                    msg.modelLabel,
-                                                    fontSize = 10.sp,
-                                                    fontWeight = FontWeight.Bold,
-                                                    color = TealPrimary
-                                                )
-                                                IconButton(
-                                                    onClick = { onSpeakText(msg.text, speechKey) },
-                                                    modifier = Modifier.size(32.dp)
-                                                ) {
-                                                    Icon(
-                                                        imageVector = if (isSpeaking) Icons.Rounded.Stop else Icons.Rounded.VolumeUp,
-                                                        contentDescription = if (isSpeaking) "পাঠ থামান" else "উত্তর শুনুন",
-                                                        tint = if (isSpeaking) RoseDanger else TealPrimary,
-                                                        modifier = Modifier.size(16.dp)
-                                                    )
-                                                }
-                                            }
+                                            Text(
+                                                msg.modelLabel,
+                                                fontSize = 10.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                color = TealPrimary
+                                            )
                                         }
                                         Text(
                                             msg.text,
@@ -399,7 +387,7 @@ fun AiAssistantScreen(
                                 }
                                 if (state.selectedImageBitmap != null) {
                                     OutlinedButton(
-                                        onClick = onClearImage,
+                                        onClick = { askClearImage = true },
                                         shape = RoundedCornerShape(8.dp),
                                         modifier = Modifier.testTag("ai_clear_photo_btn")
                                     ) {
@@ -512,5 +500,47 @@ fun AiAssistantScreen(
                 }
             }
         }
+    }
+
+    if (askClearChat) {
+        AlertDialog(
+            onDismissRequest = { askClearChat = false },
+            title = { Text("চ্যাট কথোপকথন মুছবেন?") },
+            text = { Text("বর্তমান চ্যাট ইতিহাস মুছে নতুন কথোপকথন শুরু করা হবে।") },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        askClearChat = false
+                        onClearChat()
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = RoseDanger),
+                    modifier = Modifier.testTag("ai_confirm_clear_chat_btn")
+                ) { Text("হ্যাঁ, মুছুন") }
+            },
+            dismissButton = {
+                TextButton(onClick = { askClearChat = false }) { Text("বাতিল") }
+            }
+        )
+    }
+
+    if (askClearImage) {
+        AlertDialog(
+            onDismissRequest = { askClearImage = false },
+            title = { Text("নির্বাচিত ছবি মুছবেন?") },
+            text = { Text("নম্বরপত্রের ছবি ও বিশ্লেষিত তথ্য মুছে ফেলা হবে।") },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        askClearImage = false
+                        onClearImage()
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = RoseDanger),
+                    modifier = Modifier.testTag("ai_confirm_clear_photo_btn")
+                ) { Text("হ্যাঁ, মুছুন") }
+            },
+            dismissButton = {
+                TextButton(onClick = { askClearImage = false }) { Text("বাতিল") }
+            }
+        )
     }
 }

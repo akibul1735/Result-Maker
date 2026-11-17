@@ -29,9 +29,7 @@ import androidx.compose.material.icons.automirrored.rounded.KeyboardArrowLeft
 import androidx.compose.material.icons.automirrored.rounded.KeyboardArrowRight
 import androidx.compose.material.icons.rounded.Download
 import androidx.compose.material.icons.rounded.Print
-import androidx.compose.material.icons.rounded.Stop
 import androidx.compose.material.icons.rounded.Tune
-import androidx.compose.material.icons.rounded.VolumeUp
 import androidx.compose.material.icons.rounded.ZoomOutMap
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -85,10 +83,8 @@ fun ReportStudioScreen(
     students: List<Student>,
     settings: Settings,
     selectedId: String?,
-    speakingId: String?,
     onSelectId: (String) -> Unit,
     onUpdateSettings: (Settings) -> Unit,
-    onSpeakStudent: (Student) -> Unit,
     onPrintStudent: (Student) -> Unit,
     onExportPdf: (Student) -> Unit,
     onBack: () -> Unit
@@ -133,7 +129,6 @@ fun ReportStudioScreen(
     val marksBmp = remember(active, settings, showFoldGuide) {
         PdfGen.renderMarksBitmap(ctx, active, settings, showFoldGuide = showFoldGuide, scale = 2.0f)
     }
-    val isSpeaking = speakingId == "student-${active.id}"
 
     Column(
         modifier = Modifier.fillMaxSize().padding(horizontal = 10.dp, vertical = 6.dp),
@@ -344,16 +339,6 @@ fun ReportStudioScreen(
                     ) {
                         Icon(Icons.Rounded.Tune, contentDescription = null, modifier = Modifier.size(16.dp))
                         Text(" ফন্ট/লোগো", fontSize = 11.5.sp, maxLines = 1)
-                    }
-                    IconButton(
-                        onClick = { onSpeakStudent(active) },
-                        modifier = Modifier.size(48.dp).testTag("studio_speak_btn")
-                    ) {
-                        Icon(
-                            imageVector = if (isSpeaking) Icons.Rounded.Stop else Icons.Rounded.VolumeUp,
-                            contentDescription = if (isSpeaking) "পাঠ থামান" else "ফলাফল শুনুন",
-                            tint = TealPrimary
-                        )
                     }
                     OutlinedButton(
                         onClick = { onPrintStudent(active) },
