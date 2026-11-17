@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -24,11 +25,18 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.rounded.ExitToApp
+import androidx.compose.material.icons.automirrored.rounded.Logout
+import androidx.compose.material.icons.rounded.AdminPanelSettings
 import androidx.compose.material.icons.rounded.Backup
 import androidx.compose.material.icons.rounded.Close
+import androidx.compose.material.icons.rounded.ContentCopy
 import androidx.compose.material.icons.rounded.FontDownload
 import androidx.compose.material.icons.rounded.Group
+import androidx.compose.material.icons.rounded.PersonRemove
+import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.School
+import androidx.compose.material.icons.rounded.SwapHoriz
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
@@ -37,11 +45,13 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -53,11 +63,14 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.kgps.result.CLSN
@@ -69,13 +82,23 @@ import com.kgps.result.Repo
 import com.kgps.result.Settings
 import com.kgps.result.Student
 import com.kgps.result.bn
+import com.kgps.result.cloud.JoinRequestItem
+import com.kgps.result.cloud.MemberRole
+import com.kgps.result.cloud.SchoolMemberProfile
+import com.kgps.result.cloud.SchoolWorkspace
 import com.kgps.result.ui.components.TreeBranchItem
 import com.kgps.result.ui.components.TreeGroupCard
+import com.kgps.result.ui.theme.AmberBg
+import com.kgps.result.ui.theme.AmberBorder
+import com.kgps.result.ui.theme.AmberNotice
+import com.kgps.result.ui.theme.EmeraldGrade
 import com.kgps.result.ui.theme.RoseDanger
 import com.kgps.result.ui.theme.SlateBg
 import com.kgps.result.ui.theme.SlateMuted
 import com.kgps.result.ui.theme.SlateOutline
 import com.kgps.result.ui.theme.SlateText
+import com.kgps.result.ui.theme.TealContainer
+import com.kgps.result.ui.theme.TealDark
 import com.kgps.result.ui.theme.TealPrimary
 import com.kgps.result.ui.theme.TealSoft
 
@@ -84,6 +107,9 @@ import com.kgps.result.ui.theme.TealSoft
 fun SettingsScreen(
     students: List<Student>,
     settings: Settings,
+    currentUserId: String,
+    activeSchool: SchoolWorkspace?,
+    joinRequests: List<JoinRequestItem>,
     onUpdateSettings: (Settings) -> Unit,
     onAddCustomField: (String) -> Boolean,
     onRemoveCustomField: (String) -> Unit,
@@ -92,18 +118,36 @@ fun SettingsScreen(
     onExportAllPdf: () -> Unit,
     onResetSampleData: () -> Unit,
     onClearAllStudents: () -> Unit,
+    onRegenerateJoinCode: () -> Unit,
+    onSetApprovalRequired: (Boolean) -> Unit,
+    onApproveJoinRequest: (JoinRequestItem) -> Unit,
+    onRejectJoinRequest: (String) -> Unit,
+    onUpdateMemberRole: (String, MemberRole) -> Unit,
+    onRemoveMember: (String) -> Unit,
+    onLeaveSchool: () -> Unit,
+    onOpenSchoolHub: () -> Unit,
+    onSignOut: () -> Unit,
     onShowMessage: (String) -> Unit,
     onBack: () -> Unit
 ) {
     val ctx = LocalContext.current
+    val clipboard = LocalClipboardManager.current
     BackHandler { onBack() }
 
+    val isAdmin = activeSchool?.isAdmin(currentUserId) ?: true
+    val isOwner = activeSchool?.ownerUid == currentUserId
+
     var s by remember(settings) { mutableStateOf(settings) }
-    var expandedGroup by remember { mutableStateOf("school") } // school, font, teachers, backup
+    var expandedGroup by remember { mutableStateOf("collab") } // collab, school, font, teachers, backup
     var newFieldLabel by remember { mutableStateOf("") }
+
     var askReset by remember { mutableStateOf(false) }
     var askClear by remember { mutableStateOf(false) }
+    var askRegenerateCode by remember { mutableStateOf(false) }
+    var askLeaveSchool by remember { mutableStateOf(false) }
+    var askSignOut by remember { mutableStateOf(false) }
     var pendingRemoveField by remember { mutableStateOf<CustomFieldDef?>(null) }
+    var pendingRemoveMember by remember { mutableStateOf<SchoolMemberProfile?>(null) }
 
     val csvExportLauncher = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("text/csv")) { uri ->
         if (uri != null) {
@@ -165,11 +209,6 @@ fun SettingsScreen(
         }
     }
 
-    fun updateAndSave(next: Settings) {
-        s = next
-        onUpdateSettings(next)
-    }
-
     val activeFontLabel = PDF_FONT_LIST.find { it.id == s.pdfFont }?.labelBn?.substringBefore(" (") ?: s.pdfFont
     val activeLogoLabel = DPE_LOGO_LIST.find { it.id == s.dpeLogo }?.labelBn?.substringBefore(" (") ?: s.dpeLogo
 
@@ -185,7 +224,259 @@ fun SettingsScreen(
             Modifier.widthIn(max = 820.dp).fillMaxWidth(),
             verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            // Group 1: School Information
+            if (!isAdmin) {
+                Surface(
+                    color = AmberBg,
+                    border = BorderStroke(1.dp, AmberBorder),
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text(
+                        text = "আপনি এই বিদ্যালয়ে \"শিক্ষক\" ভূমিকায় যুক্ত আছেন। বিদ্যালয়ের নাম, কাস্টম ফিল্ড, সদস্য ব্যবস্থাপনা ও মুছে ফেলা সংক্রান্ত সেটিংস শুধুমাত্র অ্যাডমিন পরিবর্তন করতে পারবেন।",
+                        fontSize = 12.sp,
+                        color = AmberNotice,
+                        lineHeight = 17.sp,
+                        modifier = Modifier.padding(12.dp)
+                    )
+                }
+            }
+
+            // Group 1: Collaborative School Workspace, Join Code, Members & Approvals
+            if (activeSchool != null) {
+                TreeGroupCard(
+                    title = "বিদ্যালয় কোড ও সদস্যবৃন্দ",
+                    subtitle = "কোড: ${activeSchool.joinCode} · ${bn(activeSchool.members.size.toString())} জন শিক্ষক",
+                    badgeText = if (joinRequests.isNotEmpty() && isAdmin) "${bn(joinRequests.size.toString())} অনুরোধ" else activeSchool.roleOf(currentUserId).labelBn,
+                    badgeColor = if (joinRequests.isNotEmpty() && isAdmin) AmberNotice else TealPrimary,
+                    badgeContainerColor = if (joinRequests.isNotEmpty() && isAdmin) AmberBg else TealSoft,
+                    icon = Icons.Rounded.AdminPanelSettings,
+                    expanded = expandedGroup == "collab",
+                    headerTestTag = "settings_group_collab",
+                    onToggle = { expandedGroup = if (expandedGroup == "collab") "" else "collab" }
+                ) {
+                    TreeBranchItem(isLast = false) {
+                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Surface(
+                                color = TealSoft,
+                                border = BorderStroke(1.dp, TealPrimary.copy(alpha = 0.35f)),
+                                shape = RoundedCornerShape(12.dp),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(12.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    Column(Modifier.weight(1f)) {
+                                        Text("আমন্ত্রণ কোড (অন্য শিক্ষককে দিন)", fontSize = 11.5.sp, color = SlateMuted)
+                                        Text(
+                                            activeSchool.joinCode,
+                                            fontSize = 20.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = TealDark,
+                                            letterSpacing = 2.sp,
+                                            modifier = Modifier.testTag("settings_join_code_text")
+                                        )
+                                    }
+                                    OutlinedButton(
+                                        onClick = {
+                                            clipboard.setText(AnnotatedString(activeSchool.joinCode))
+                                            onShowMessage("স্কুল কোড কপি হয়েছে: ${activeSchool.joinCode}")
+                                        },
+                                        shape = RoundedCornerShape(8.dp),
+                                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp),
+                                        modifier = Modifier.testTag("settings_copy_code_btn")
+                                    ) {
+                                        Icon(Icons.Rounded.ContentCopy, contentDescription = null, modifier = Modifier.size(16.dp))
+                                        Spacer(Modifier.size(4.dp))
+                                        Text("কপি", fontSize = 12.sp)
+                                    }
+                                    if (isAdmin) {
+                                        IconButton(
+                                            onClick = { askRegenerateCode = true },
+                                            modifier = Modifier.size(44.dp).testTag("settings_regen_code_btn")
+                                        ) {
+                                            Icon(Icons.Rounded.Refresh, contentDescription = "নতুন কোড তৈরি করুন", tint = TealPrimary)
+                                        }
+                                    }
+                                }
+                            }
+
+                            if (isAdmin) {
+                                Surface(
+                                    color = SlateBg,
+                                    border = BorderStroke(1.dp, SlateOutline),
+                                    shape = RoundedCornerShape(10.dp),
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Row(
+                                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                    ) {
+                                        Column(Modifier.weight(1f)) {
+                                            Text("যোগদানে অ্যাডমিন অনুমোদন", fontWeight = FontWeight.Medium, fontSize = 13.sp)
+                                            Text(
+                                                if (activeSchool.approvalRequired) "চালু: নতুন শিক্ষককে আপনি অনুমোদন করবেন" else "বন্ধ: কোড দিলেই সরাসরি যুক্ত হতে পারবে",
+                                                fontSize = 11.sp,
+                                                color = SlateMuted
+                                            )
+                                        }
+                                        Switch(
+                                            checked = activeSchool.approvalRequired,
+                                            onCheckedChange = onSetApprovalRequired,
+                                            modifier = Modifier.testTag("settings_approval_switch")
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    if (isAdmin && joinRequests.isNotEmpty()) {
+                        TreeBranchItem(isLast = false) {
+                            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                Text("অপেক্ষমান যোগদানের অনুরোধ (${bn(joinRequests.size.toString())})", fontWeight = FontWeight.SemiBold, fontSize = 13.sp, color = AmberNotice)
+                                joinRequests.forEach { req ->
+                                    Surface(
+                                        color = AmberBg,
+                                        border = BorderStroke(1.dp, AmberBorder),
+                                        shape = RoundedCornerShape(10.dp),
+                                        modifier = Modifier.fillMaxWidth()
+                                    ) {
+                                        Row(
+                                            modifier = Modifier.padding(10.dp),
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                        ) {
+                                            Column(Modifier.weight(1f)) {
+                                                Text(req.displayName.ifBlank { "শিক্ষক" }, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+                                                if (req.email.isNotBlank()) {
+                                                    Text(req.email, fontSize = 11.sp, color = SlateMuted)
+                                                }
+                                            }
+                                            OutlinedButton(
+                                                onClick = { onRejectJoinRequest(req.uid) },
+                                                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                                                shape = RoundedCornerShape(8.dp)
+                                            ) { Text("বাতিল", fontSize = 11.5.sp, color = RoseDanger) }
+                                            Button(
+                                                onClick = { onApproveJoinRequest(req) },
+                                                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                                                shape = RoundedCornerShape(8.dp)
+                                            ) { Text("অনুমোদন", fontSize = 11.5.sp) }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    TreeBranchItem(isLast = false) {
+                        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Text("সদস্য তালিকা (${bn(activeSchool.members.size.toString())} জন)", fontWeight = FontWeight.SemiBold, fontSize = 13.sp, color = TealPrimary)
+                            activeSchool.members.forEach { member ->
+                                val memberIsOwner = member.uid == activeSchool.ownerUid
+                                val isSelf = member.uid == currentUserId
+                                Surface(
+                                    color = SlateBg,
+                                    border = BorderStroke(1.dp, SlateOutline),
+                                    shape = RoundedCornerShape(10.dp),
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Row(
+                                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                    ) {
+                                        Column(Modifier.weight(1f)) {
+                                            Text(
+                                                text = member.name.ifBlank { "শিক্ষক" } + if (isSelf) " (আপনি)" else "",
+                                                fontWeight = FontWeight.SemiBold,
+                                                fontSize = 13.sp,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis
+                                            )
+                                            if (member.email.isNotBlank()) {
+                                                Text(member.email, fontSize = 11.sp, color = SlateMuted, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                            }
+                                        }
+                                        Surface(
+                                            color = if (member.role == MemberRole.ADMIN) TealContainer else MaterialTheme.colorScheme.surfaceVariant,
+                                            shape = RoundedCornerShape(6.dp)
+                                        ) {
+                                            Text(
+                                                text = if (memberIsOwner) "প্রতিষ্ঠাতা" else member.role.labelBn,
+                                                fontSize = 10.5.sp,
+                                                fontWeight = FontWeight.SemiBold,
+                                                color = if (member.role == MemberRole.ADMIN) TealDark else SlateMuted,
+                                                modifier = Modifier.padding(horizontal = 7.dp, vertical = 3.dp)
+                                            )
+                                        }
+                                        if (isAdmin && !memberIsOwner && !isSelf) {
+                                            val nextRole = if (member.role == MemberRole.ADMIN) MemberRole.TEACHER else MemberRole.ADMIN
+                                            TextButton(
+                                                onClick = { onUpdateMemberRole(member.uid, nextRole) },
+                                                contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp)
+                                            ) {
+                                                Text(
+                                                    if (nextRole == MemberRole.ADMIN) "অ্যাডমিন" else "শিক্ষক",
+                                                    fontSize = 11.sp
+                                                )
+                                            }
+                                            IconButton(
+                                                onClick = { pendingRemoveMember = member },
+                                                modifier = Modifier.size(38.dp)
+                                            ) {
+                                                Icon(Icons.Rounded.PersonRemove, contentDescription = "সদস্য অপসারণ", tint = RoseDanger, modifier = Modifier.size(18.dp))
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    TreeBranchItem(isLast = true) {
+                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                                OutlinedButton(
+                                    onClick = onOpenSchoolHub,
+                                    shape = RoundedCornerShape(8.dp),
+                                    modifier = Modifier.weight(1f).testTag("settings_switch_school_btn")
+                                ) {
+                                    Icon(Icons.Rounded.SwapHoriz, contentDescription = null, modifier = Modifier.size(16.dp))
+                                    Spacer(Modifier.size(4.dp))
+                                    Text("বিদ্যালয় বদল/যোগ", fontSize = 12.sp)
+                                }
+                                OutlinedButton(
+                                    onClick = { askSignOut = true },
+                                    shape = RoundedCornerShape(8.dp),
+                                    modifier = Modifier.weight(1f).testTag("settings_sign_out_btn")
+                                ) {
+                                    Icon(Icons.AutoMirrored.Rounded.Logout, contentDescription = null, modifier = Modifier.size(16.dp), tint = RoseDanger)
+                                    Spacer(Modifier.size(4.dp))
+                                    Text("সাইন আউট", fontSize = 12.sp, color = RoseDanger)
+                                }
+                            }
+                            if (!isOwner) {
+                                OutlinedButton(
+                                    onClick = { askLeaveSchool = true },
+                                    shape = RoundedCornerShape(8.dp),
+                                    border = BorderStroke(1.dp, RoseDanger.copy(alpha = 0.5f)),
+                                    modifier = Modifier.fillMaxWidth().testTag("settings_leave_school_btn")
+                                ) {
+                                    Icon(Icons.AutoMirrored.Rounded.ExitToApp, contentDescription = null, modifier = Modifier.size(16.dp), tint = RoseDanger)
+                                    Spacer(Modifier.size(6.dp))
+                                    Text("এই বিদ্যালয় ত্যাগ করুন", fontSize = 12.sp, color = RoseDanger)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Group 2: School Information
             TreeGroupCard(
                 title = "বিদ্যালয় ও শিক্ষাবর্ষ",
                 subtitle = s.school.ifBlank { "বিদ্যালয়ের নাম ও ঠিকানা" },
@@ -196,33 +487,48 @@ fun SettingsScreen(
                 onToggle = { expandedGroup = if (expandedGroup == "school") "" else "school" }
             ) {
                 TreeBranchItem(isLast = true) {
-                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         OutlinedTextField(
                             value = s.school,
-                            onValueChange = { updateAndSave(s.copy(school = it)) },
+                            onValueChange = { if (isAdmin) s = s.copy(school = it) },
+                            enabled = isAdmin,
                             label = { Text("বিদ্যালয়ের নাম") },
                             singleLine = true,
                             modifier = Modifier.fillMaxWidth().testTag("settings_school_input")
                         )
                         OutlinedTextField(
                             value = s.schoolAddress,
-                            onValueChange = { updateAndSave(s.copy(schoolAddress = it)) },
+                            onValueChange = { if (isAdmin) s = s.copy(schoolAddress = it) },
+                            enabled = isAdmin,
                             label = { Text("বিদ্যালয়ের ঠিকানা (ব্যাক কভারে মুদ্রিত হবে)") },
                             singleLine = true,
                             modifier = Modifier.fillMaxWidth().testTag("settings_address_input")
                         )
                         OutlinedTextField(
                             value = s.year,
-                            onValueChange = { updateAndSave(s.copy(year = it)) },
+                            onValueChange = { if (isAdmin) s = s.copy(year = it) },
+                            enabled = isAdmin,
                             label = { Text("শিক্ষাবর্ষ") },
                             singleLine = true,
                             modifier = Modifier.fillMaxWidth().testTag("settings_year_input")
                         )
+                        if (isAdmin && (s.school != settings.school || s.schoolAddress != settings.schoolAddress || s.year != settings.year)) {
+                            Button(
+                                onClick = {
+                                    onUpdateSettings(s)
+                                    onShowMessage("বিদ্যালয়ের তথ্য সংরক্ষিত হয়েছে")
+                                },
+                                shape = RoundedCornerShape(8.dp),
+                                modifier = Modifier.fillMaxWidth().testTag("settings_save_school_btn")
+                            ) {
+                                Text("বিদ্যালয়ের তথ্য সংরক্ষণ করুন")
+                            }
+                        }
                     }
                 }
             }
 
-            // Group 2: PDF Fonts & DPE Cover Logo
+            // Group 3: PDF Fonts & DPE Cover Logo
             TreeGroupCard(
                 title = "PDF ফন্ট ও কভার লোগো",
                 subtitle = "$activeFontLabel · $activeLogoLabel",
@@ -244,7 +550,11 @@ fun SettingsScreen(
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .testTag("settings_font_${font.id}")
-                                    .clickable { updateAndSave(s.copy(pdfFont = font.id)) },
+                                    .clickable(enabled = isAdmin) {
+                                        val next = s.copy(pdfFont = font.id)
+                                        s = next
+                                        onUpdateSettings(next)
+                                    },
                                 color = if (selected) TealSoft else SlateBg,
                                 border = BorderStroke(1.dp, if (selected) TealPrimary else SlateOutline),
                                 shape = RoundedCornerShape(10.dp)
@@ -254,7 +564,15 @@ fun SettingsScreen(
                                     verticalAlignment = Alignment.CenterVertically,
                                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                                 ) {
-                                    RadioButton(selected = selected, onClick = { updateAndSave(s.copy(pdfFont = font.id)) })
+                                    RadioButton(
+                                        selected = selected,
+                                        enabled = isAdmin,
+                                        onClick = {
+                                            val next = s.copy(pdfFont = font.id)
+                                            s = next
+                                            onUpdateSettings(next)
+                                        }
+                                    )
                                     Column(Modifier.weight(1f)) {
                                         Text(font.labelBn, fontWeight = FontWeight.SemiBold, fontSize = 12.5.sp)
                                         Text(font.descriptionBn, fontSize = 11.sp, color = SlateMuted)
@@ -282,7 +600,11 @@ fun SettingsScreen(
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .testTag("settings_logo_${logo.id}")
-                                    .clickable { updateAndSave(s.copy(dpeLogo = logo.id)) },
+                                    .clickable(enabled = isAdmin) {
+                                        val next = s.copy(dpeLogo = logo.id)
+                                        s = next
+                                        onUpdateSettings(next)
+                                    },
                                 color = if (selected) TealSoft else SlateBg,
                                 border = BorderStroke(1.dp, if (selected) TealPrimary else SlateOutline),
                                 shape = RoundedCornerShape(10.dp)
@@ -292,7 +614,15 @@ fun SettingsScreen(
                                     verticalAlignment = Alignment.CenterVertically,
                                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                                 ) {
-                                    RadioButton(selected = selected, onClick = { updateAndSave(s.copy(dpeLogo = logo.id)) })
+                                    RadioButton(
+                                        selected = selected,
+                                        enabled = isAdmin,
+                                        onClick = {
+                                            val next = s.copy(dpeLogo = logo.id)
+                                            s = next
+                                            onUpdateSettings(next)
+                                        }
+                                    )
                                     if (thumbBmp != null) {
                                         Image(
                                             bitmap = thumbBmp.asImageBitmap(),
@@ -312,7 +642,7 @@ fun SettingsScreen(
                 }
             }
 
-            // Group 3: Teachers & Custom Fields
+            // Group 4: Teachers & Custom Fields
             TreeGroupCard(
                 title = "শ্রেণি শিক্ষক ও কাস্টম ফিল্ড",
                 subtitle = "১ম–৫ম শ্রেণি · ${bn(s.customFields.size.toString())}টি কাস্টম ফিল্ড",
@@ -329,19 +659,33 @@ fun SettingsScreen(
                             Row(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.fillMaxWidth()) {
                                 OutlinedTextField(
                                     value = s.teachers[c] ?: "",
-                                    onValueChange = { v -> updateAndSave(s.copy(teachers = s.teachers + (c to v))) },
+                                    onValueChange = { v -> if (isAdmin) s = s.copy(teachers = s.teachers + (c to v)) },
+                                    enabled = isAdmin,
                                     label = { Text("শিক্ষকের নাম", fontSize = 11.sp) },
                                     singleLine = true,
                                     modifier = Modifier.weight(1f)
                                 )
                                 OutlinedTextField(
                                     value = s.teacherMobiles[c] ?: "",
-                                    onValueChange = { v -> updateAndSave(s.copy(teacherMobiles = s.teacherMobiles + (c to v))) },
+                                    onValueChange = { v -> if (isAdmin) s = s.copy(teacherMobiles = s.teacherMobiles + (c to v)) },
+                                    enabled = isAdmin,
                                     label = { Text("মোবাইল", fontSize = 11.sp) },
                                     singleLine = true,
                                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
                                     modifier = Modifier.weight(0.85f)
                                 )
+                            }
+                        }
+                        if (isAdmin && (s.teachers != settings.teachers || s.teacherMobiles != settings.teacherMobiles)) {
+                            Button(
+                                onClick = {
+                                    onUpdateSettings(s)
+                                    onShowMessage("শ্রেণি শিক্ষকের তথ্য সংরক্ষিত হয়েছে")
+                                },
+                                shape = RoundedCornerShape(8.dp),
+                                modifier = Modifier.fillMaxWidth().testTag("settings_save_teachers_btn")
+                            ) {
+                                Text("শিক্ষকের তথ্য সংরক্ষণ করুন")
                             }
                         }
                     }
@@ -350,22 +694,24 @@ fun SettingsScreen(
                 TreeBranchItem(isLast = true) {
                     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                         Text("কাস্টম ডাটাবেস ফিল্ড", fontWeight = FontWeight.SemiBold, fontSize = 13.sp, color = TealPrimary)
-                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                            OutlinedTextField(
-                                value = newFieldLabel,
-                                onValueChange = { newFieldLabel = it },
-                                placeholder = { Text("যেমন: রক্তের গ্রুপ", fontSize = 12.sp) },
-                                singleLine = true,
-                                modifier = Modifier.weight(1f).testTag("settings_new_custom_field_input")
-                            )
-                            Button(
-                                onClick = {
-                                    if (onAddCustomField(newFieldLabel)) newFieldLabel = ""
-                                },
-                                enabled = newFieldLabel.isNotBlank(),
-                                shape = RoundedCornerShape(8.dp),
-                                modifier = Modifier.testTag("settings_add_custom_field_btn")
-                            ) { Text("+ যোগ", fontSize = 12.sp) }
+                        if (isAdmin) {
+                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                OutlinedTextField(
+                                    value = newFieldLabel,
+                                    onValueChange = { newFieldLabel = it },
+                                    placeholder = { Text("যেমন: রক্তের গ্রুপ", fontSize = 12.sp) },
+                                    singleLine = true,
+                                    modifier = Modifier.weight(1f).testTag("settings_new_custom_field_input")
+                                )
+                                Button(
+                                    onClick = {
+                                        if (onAddCustomField(newFieldLabel)) newFieldLabel = ""
+                                    },
+                                    enabled = newFieldLabel.isNotBlank(),
+                                    shape = RoundedCornerShape(8.dp),
+                                    modifier = Modifier.testTag("settings_add_custom_field_btn")
+                                ) { Text("+ যোগ", fontSize = 12.sp) }
+                            }
                         }
                         if (s.customFields.isEmpty()) {
                             Text("এখনো কোনো কাস্টম ফিল্ড নেই।", fontSize = 12.sp, color = SlateMuted)
@@ -373,15 +719,17 @@ fun SettingsScreen(
                             FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                                 s.customFields.forEach { cf: CustomFieldDef ->
                                     AssistChip(
-                                        onClick = { pendingRemoveField = cf },
+                                        onClick = { if (isAdmin) pendingRemoveField = cf },
                                         label = { Text(cf.label, fontSize = 12.sp) },
-                                        trailingIcon = {
-                                            Icon(
-                                                Icons.Rounded.Close,
-                                                contentDescription = "${cf.label} মুছুন",
-                                                modifier = Modifier.size(16.dp)
-                                            )
-                                        },
+                                        trailingIcon = if (isAdmin) {
+                                            {
+                                                Icon(
+                                                    Icons.Rounded.Close,
+                                                    contentDescription = "${cf.label} মুছুন",
+                                                    modifier = Modifier.size(16.dp)
+                                                )
+                                            }
+                                        } else null,
                                         modifier = Modifier.testTag("settings_remove_field_${cf.key}")
                                     )
                                 }
@@ -391,7 +739,7 @@ fun SettingsScreen(
                 }
             }
 
-            // Group 4: Database, CSV & Backup
+            // Group 5: Database, CSV & Backup
             TreeGroupCard(
                 title = "ডাটাবেস, CSV ও ব্যাকআপ",
                 subtitle = "মোট ${bn(students.size.toString())} জন শিক্ষার্থী সংরক্ষিত",
@@ -401,7 +749,7 @@ fun SettingsScreen(
                 headerTestTag = "settings_group_backup",
                 onToggle = { expandedGroup = if (expandedGroup == "backup") "" else "backup" }
             ) {
-                TreeBranchItem(isLast = false) {
+                TreeBranchItem(isLast = !isAdmin) {
                     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                         Button(
                             onClick = onExportAllPdf,
@@ -439,30 +787,34 @@ fun SettingsScreen(
                                 modifier = Modifier.weight(1f).testTag("settings_json_export_btn"),
                                 shape = RoundedCornerShape(8.dp)
                             ) { Text("JSON ব্যাকআপ", fontSize = 12.sp) }
-                            OutlinedButton(
-                                onClick = { jsonRestoreLauncher.launch(arrayOf("application/json", "*/*")) },
-                                modifier = Modifier.weight(1f).testTag("settings_json_restore_btn"),
-                                shape = RoundedCornerShape(8.dp)
-                            ) { Text("JSON রিস্টোর", fontSize = 12.sp) }
+                            if (isAdmin) {
+                                OutlinedButton(
+                                    onClick = { jsonRestoreLauncher.launch(arrayOf("application/json", "*/*")) },
+                                    modifier = Modifier.weight(1f).testTag("settings_json_restore_btn"),
+                                    shape = RoundedCornerShape(8.dp)
+                                ) { Text("JSON রিস্টোর", fontSize = 12.sp) }
+                            }
                         }
                     }
                 }
 
-                TreeBranchItem(isLast = true) {
-                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                        HorizontalDivider(color = SlateOutline)
-                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.fillMaxWidth()) {
-                            OutlinedButton(
-                                onClick = { askReset = true },
-                                modifier = Modifier.weight(1f).testTag("settings_reset_sample_btn"),
-                                shape = RoundedCornerShape(8.dp)
-                            ) { Text("নমুনা রিসেট", fontSize = 12.sp) }
-                            Button(
-                                onClick = { askClear = true },
-                                colors = ButtonDefaults.buttonColors(containerColor = RoseDanger),
-                                modifier = Modifier.weight(1f).testTag("settings_clear_all_btn"),
-                                shape = RoundedCornerShape(8.dp)
-                            ) { Text("সব মুছুন", fontSize = 12.sp) }
+                if (isAdmin) {
+                    TreeBranchItem(isLast = true) {
+                        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                            HorizontalDivider(color = SlateOutline)
+                            Row(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.fillMaxWidth()) {
+                                OutlinedButton(
+                                    onClick = { askReset = true },
+                                    modifier = Modifier.weight(1f).testTag("settings_reset_sample_btn"),
+                                    shape = RoundedCornerShape(8.dp)
+                                ) { Text("নমুনা রিসেট", fontSize = 12.sp) }
+                                Button(
+                                    onClick = { askClear = true },
+                                    colors = ButtonDefaults.buttonColors(containerColor = RoseDanger),
+                                    modifier = Modifier.weight(1f).testTag("settings_clear_all_btn"),
+                                    shape = RoundedCornerShape(8.dp)
+                                ) { Text("সব মুছুন", fontSize = 12.sp) }
+                            }
                         }
                     }
                 }
@@ -514,6 +866,59 @@ fun SettingsScreen(
         )
     }
 
+    if (askRegenerateCode) {
+        AlertDialog(
+            onDismissRequest = { askRegenerateCode = false },
+            title = { Text("নতুন স্কুল কোড তৈরি করবেন?") },
+            text = { Text("নতুন কোড তৈরি করলে পুরোনো কোড (${activeSchool?.joinCode.orEmpty()}) সাথে সাথে বাতিল হয়ে যাবে।") },
+            confirmButton = {
+                Button(
+                    onClick = { askRegenerateCode = false; onRegenerateJoinCode() },
+                    modifier = Modifier.testTag("settings_confirm_regen_code_btn")
+                ) { Text("নতুন কোড তৈরি করুন") }
+            },
+            dismissButton = {
+                TextButton(onClick = { askRegenerateCode = false }) { Text("বাতিল") }
+            }
+        )
+    }
+
+    if (askLeaveSchool) {
+        AlertDialog(
+            onDismissRequest = { askLeaveSchool = false },
+            title = { Text("বিদ্যালয় ত্যাগ করবেন?") },
+            text = { Text("আপনি \"${activeSchool?.settings?.school.orEmpty()}\" থেকে বের হয়ে যাবেন। পুনরায় যুক্ত হতে হলে আবার স্কুল কোড ব্যবহার করতে হবে।") },
+            confirmButton = {
+                Button(
+                    onClick = { askLeaveSchool = false; onLeaveSchool() },
+                    colors = ButtonDefaults.buttonColors(containerColor = RoseDanger),
+                    modifier = Modifier.testTag("settings_confirm_leave_school_btn")
+                ) { Text("হ্যাঁ, ত্যাগ করুন") }
+            },
+            dismissButton = {
+                TextButton(onClick = { askLeaveSchool = false }) { Text("বাতিল") }
+            }
+        )
+    }
+
+    if (askSignOut) {
+        AlertDialog(
+            onDismissRequest = { askSignOut = false },
+            title = { Text("সাইন আউট করবেন?") },
+            text = { Text("আপনার সকল ডেটা ক্লাউডে নিরাপদ থাকবে। পুনরায় Google দিয়ে সাইন-ইন করলে সব ফিরে পাবেন।") },
+            confirmButton = {
+                Button(
+                    onClick = { askSignOut = false; onSignOut() },
+                    colors = ButtonDefaults.buttonColors(containerColor = RoseDanger),
+                    modifier = Modifier.testTag("settings_confirm_signout_btn")
+                ) { Text("হ্যাঁ, সাইন আউট") }
+            },
+            dismissButton = {
+                TextButton(onClick = { askSignOut = false }) { Text("বাতিল") }
+            }
+        )
+    }
+
     pendingRemoveField?.let { field ->
         AlertDialog(
             onDismissRequest = { pendingRemoveField = null },
@@ -531,6 +936,27 @@ fun SettingsScreen(
             },
             dismissButton = {
                 TextButton(onClick = { pendingRemoveField = null }) { Text("বাতিল") }
+            }
+        )
+    }
+
+    pendingRemoveMember?.let { member ->
+        AlertDialog(
+            onDismissRequest = { pendingRemoveMember = null },
+            title = { Text("সদস্য অপসারণ করবেন?") },
+            text = { Text("\"${member.name.ifBlank { member.email }}\"-কে এই বিদ্যালয় থেকে অপসারণ করলে তিনি আর তথ্য দেখতে বা সম্পাদনা করতে পারবেন না।") },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        onRemoveMember(member.uid)
+                        pendingRemoveMember = null
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = RoseDanger),
+                    modifier = Modifier.testTag("settings_confirm_remove_member_btn")
+                ) { Text("অপসারণ করুন") }
+            },
+            dismissButton = {
+                TextButton(onClick = { pendingRemoveMember = null }) { Text("বাতিল") }
             }
         )
     }

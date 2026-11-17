@@ -1,0 +1,155 @@
+{
+  "entities": {
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "Authenticated teacher/admin profile and active school preference",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "description": "Firebase Auth UID" },
+        "displayName": { "type": "string", "description": "Teacher display name" },
+        "email": { "type": "string", "description": "Google account email" },
+        "activeSchoolId": { "type": "string", "description": "Currently selected school document ID" },
+        "createdAt": { "type": "string", "format": "date-time", "description": "Server timestamp" },
+        "updatedAt": { "type": "string", "format": "date-time", "description": "Server timestamp" }
+      },
+      "required": ["uid", "displayName", "email", "createdAt", "updatedAt"]
+    },
+    "SchoolCodeDirectory": {
+      "title": "SchoolCodeDirectory",
+      "description": "Lookup record mapping an invite code to a school workspace",
+      "type": "object",
+      "properties": {
+        "schoolId": { "type": "string" },
+        "schoolName": { "type": "string" },
+        "ownerUid": { "type": "string" },
+        "adminUids": { "type": "array" },
+        "approvalRequired": { "type": "boolean" },
+        "active": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["schoolId", "schoolName", "ownerUid", "adminUids", "approvalRequired", "active", "createdAt", "updatedAt"]
+    },
+    "SchoolWorkspace": {
+      "title": "SchoolWorkspace",
+      "description": "Shared primary school workspace holding school settings, invite code, and active members",
+      "type": "object",
+      "properties": {
+        "ownerUid": { "type": "string" },
+        "joinCode": { "type": "string" },
+        "approvalRequired": { "type": "boolean" },
+        "memberUids": { "type": "array" },
+        "adminUids": { "type": "array" },
+        "memberProfiles": { "type": "object" },
+        "school": { "type": "string" },
+        "schoolAddress": { "type": "string" },
+        "year": { "type": "string" },
+        "teachers": { "type": "object" },
+        "teacherMobiles": { "type": "object" },
+        "pdfFont": { "type": "string" },
+        "dpeLogo": { "type": "string", "enum": ["simple", "color"] },
+        "customFields": { "type": "array" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "ownerUid",
+        "joinCode",
+        "approvalRequired",
+        "memberUids",
+        "adminUids",
+        "memberProfiles",
+        "school",
+        "schoolAddress",
+        "year",
+        "teachers",
+        "teacherMobiles",
+        "pdfFont",
+        "dpeLogo",
+        "customFields",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "JoinRequest": {
+      "title": "JoinRequest",
+      "description": "Pending request submitted by a teacher using a school invite code when approval is enabled",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "displayName": { "type": "string" },
+        "email": { "type": "string" },
+        "schoolId": { "type": "string" },
+        "schoolName": { "type": "string" },
+        "schoolAdminUids": { "type": "array" },
+        "status": { "type": "string", "enum": ["PENDING"] },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "displayName", "email", "schoolId", "schoolName", "schoolAdminUids", "status", "createdAt", "updatedAt"]
+    },
+    "SchoolStudent": {
+      "title": "SchoolStudent",
+      "description": "Student record within a school workspace supporting concurrent field-level mark and attribute updates",
+      "type": "object",
+      "properties": {
+        "cls": { "type": "integer" },
+        "roll": { "type": "integer" },
+        "name": { "type": "string" },
+        "guardian": { "type": "string" },
+        "village": { "type": "string" },
+        "post": { "type": "string" },
+        "upazila": { "type": "string" },
+        "district": { "type": "string" },
+        "mobile": { "type": "string" },
+        "religion": { "type": "string" },
+        "m": { "type": "object" },
+        "x": { "type": "object" },
+        "updatedByUid": { "type": "string" },
+        "updatedByName": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "cls",
+        "roll",
+        "name",
+        "guardian",
+        "village",
+        "post",
+        "upazila",
+        "district",
+        "mobile",
+        "religion",
+        "m",
+        "x",
+        "updatedByUid",
+        "updatedByName",
+        "createdAt",
+        "updatedAt"
+      ]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/UserProfile" },
+      "description": "Private user profile and active school pointer"
+    },
+    "/schoolCodes/{code}": {
+      "schema": { "$ref": "#/entities/SchoolCodeDirectory" },
+      "description": "Invite code lookup directory for joining an existing school"
+    },
+    "/schools/{schoolId}": {
+      "schema": { "$ref": "#/entities/SchoolWorkspace" },
+      "description": "Collaborative primary school workspace and settings"
+    },
+    "/schools/{schoolId}/joinRequests/{requestUid}": {
+      "schema": { "$ref": "#/entities/JoinRequest" },
+      "description": "Pending teacher join requests when school approval is required"
+    },
+    "/schools/{schoolId}/students/{studentId}": {
+      "schema": { "$ref": "#/entities/SchoolStudent" },
+      "description": "Students, term marks, attendance, traits, and remarks scoped to a school"
+    }
+  }
+}

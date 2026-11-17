@@ -69,6 +69,7 @@ import com.kgps.result.RELIGIONS
 import com.kgps.result.Settings
 import com.kgps.result.Student
 import com.kgps.result.bn
+import com.kgps.result.cloud.StudentSyncMeta
 import com.kgps.result.fmt
 import com.kgps.result.fmtEn
 import com.kgps.result.fromBn
@@ -95,6 +96,7 @@ import com.kgps.result.ui.theme.TealSoft
 fun StudentEditorScreen(
     initialStudent: Student,
     settings: Settings,
+    syncMeta: StudentSyncMeta? = null,
     draftingRemarkTerm: Int?,
     isPlaceholderAi: Boolean,
     onAddCustomField: (String) -> Boolean,
@@ -156,10 +158,17 @@ fun StudentEditorScreen(
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
+                    val editorSub = buildString {
+                        append("শ্রেণি ${bn(s.cls.toString())} · রোল ${bn(s.roll.toString())}")
+                        val by = syncMeta?.updatedByName?.trim()
+                        if (!by.isNullOrBlank()) append(" · সর্বশেষ: $by")
+                    }
                     Text(
-                        "শ্রেণি ${bn(s.cls.toString())} · রোল ${bn(s.roll.toString())}",
+                        editorSub,
                         fontSize = 11.sp,
-                        color = SlateMuted
+                        color = SlateMuted,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
                     )
                 }
                 IconButton(

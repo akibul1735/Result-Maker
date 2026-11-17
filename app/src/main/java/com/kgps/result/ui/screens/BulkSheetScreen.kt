@@ -42,6 +42,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -121,6 +122,7 @@ fun BulkSheetScreen(
     cls: Int,
     onSelectClass: (Int) -> Unit,
     onUpsertStudent: (Student) -> Unit,
+    onPatchStudentField: (studentId: String, fieldPath: String, value: Any?) -> Unit,
     onOpenStudent: (Student) -> Unit,
     onClassPdf: () -> Unit,
     onShowMessage: (String) -> Unit
@@ -589,8 +591,11 @@ fun BulkSheetScreen(
                                                         .fillMaxHeight()
                                                         .background(badgeBg)
                                                         .clickable {
-                                                            val nextX = if (nextVal.isEmpty()) s.x - col.xKey else s.x + (col.xKey to nextVal)
-                                                            onUpsertStudent(s.copy(x = nextX))
+                                                            onPatchStudentField(
+                                                                s.id,
+                                                                "x.${col.xKey}",
+                                                                nextVal.ifEmpty { null }
+                                                            )
                                                         },
                                                     contentAlignment = Alignment.Center
                                                 ) {
@@ -621,8 +626,14 @@ fun BulkSheetScreen(
                                                     else -> ""
                                                 }
                                             }
-                                            var draft by remember(initialVal) { mutableStateOf(initialVal) }
+                                            var draft by remember(s.id, col.key, term) { mutableStateOf(initialVal) }
                                             var isFocused by remember { mutableStateOf(false) }
+
+                                            LaunchedEffect(initialVal, isFocused) {
+                                                if (!isFocused) {
+                                                    draft = initialVal
+                                                }
+                                            }
 
                                             val parsedNum = if (col.isNumeric && col.infoFieldKey != "mobile") fromBn(draft.trim()).toDoubleOrNull() else null
                                             val invalid = col.isNumeric && col.infoFieldKey != "mobile" && draft.isNotBlank() &&
@@ -633,37 +644,42 @@ fun BulkSheetScreen(
                                                 if (col.isMark && col.markSubKey != null && col.markCompKey != null) {
                                                     val k = mk(col.markSubKey, term, col.markCompKey)
                                                     if (clean.isEmpty()) {
-                                                        if (s.m.containsKey(k)) onUpsertStudent(s.copy(m = s.m - k))
+                                                        if (s.m.containsKey(k)) {
+                                                            onPatchStudentField(s.id, "m.$k", null)
+                                                        }
                                                     } else {
                                                         clean.toDoubleOrNull()?.let { d ->
                                                             if (d in 0.0..col.max.toDouble() && s.m[k] != d) {
-                                                                onUpsertStudent(s.copy(m = s.m + (k to d)))
+                                                                onPatchStudentField(s.id, "m.$k", d)
                                                             }
                                                         }
                                                     }
                                                 } else if (col.xKey != null) {
                                                     val rawTrim = text.trim()
                                                     if (rawTrim.isEmpty()) {
-                                                        if (s.x.containsKey(col.xKey)) onUpsertStudent(s.copy(x = s.x - col.xKey))
+                                                        if (s.x.containsKey(col.xKey)) {
+                                                            onPatchStudentField(s.id, "x.${col.xKey}", null)
+                                                        }
                                                     } else if (col.isNumeric) {
                                                         clean.toIntOrNull()?.let { iv ->
                                                             if (iv in 0..col.max && s.x[col.xKey] != iv.toString()) {
-                                                                onUpsertStudent(s.copy(x = s.x + (col.xKey to iv.toString())))
+                                                                onPatchStudentField(s.id, "x.${col.xKey}", iv.toString())
                                                             }
                                                         }
                                                     } else if (s.x[col.xKey] != rawTrim) {
-                                                        onUpsertStudent(s.copy(x = s.x + (col.xKey to rawTrim)))
+                                                        onPatchStudentField(s.id, "x.${col.xKey}", rawTrim)
                                                     }
                                                 } else if (col.infoFieldKey != null) {
                                                     val v = text.trim()
-                                                    val next = when (col.infoFieldKey) {
-                                                        "guardian" -> s.copy(guardian = v)
-                                                        "mobile" -> s.copy(mobile = v)
-                                                        "village" -> s.copy(village = v)
-                                                        "religion" -> s.copy(religion = v.ifBlank { s.religion })
-                                                        else -> s
+                                                    when (col.infoFieldKey) {
+                                                        "guardian" -> if (v != s.guardian) onPatchStudentField(s.id, "guardian", v)
+                                                        "mobile" -> if (v != s.mobile) onPatchStudentField(s.id, "mobile", v)
+                                                        "village" -> if (v != s.village) onPatchStudentField(s.id, "village", v)
+                                                        "religion" -> {
+                                                            val safeRel = v.ifBlank { s.religion }
+                                                            if (safeRel != s.religion) onPatchStudentField(s.id, "religion", safeRel)
+                                                        }
                                                     }
-                                                    if (next != s) onUpsertStudent(next)
                                                 }
                                             }
 

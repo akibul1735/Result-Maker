@@ -1,22 +1,41 @@
 package com.kgps.result
 
-import android.app.Application
+import android.content.ContentResolver
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.ImageDecoder
 import android.net.Uri
 import android.os.Build
-import androidx.lifecycle.AndroidViewModel
+import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.kgps.result.ai.AiChatMessage
 import com.kgps.result.ai.AiModelMode
 import com.kgps.result.ai.AiRepository
 import com.kgps.result.ai.ExtractedMarksheet
 import com.kgps.result.ai.PlaceholderAiRepository
+import com.kgps.result.cloud.CloudSessionState
+import com.kgps.result.cloud.JoinRequestItem
+import com.kgps.result.cloud.MemberRole
+import com.kgps.result.cloud.SchoolCloudRepository
+import com.kgps.result.cloud.SchoolCodePreview
+import com.kgps.result.cloud.SchoolWorkspace
+import com.kgps.result.cloud.StudentSyncMeta
+import com.kgps.result.cloud.UserCloudProfile
+import com.kgps.result.cloud.friendlyFirestoreErrorMessage
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -42,7 +61,7 @@ data class AiAssistantState(
         AiChatMessage(
             id = "welcome-msg",
             isUser = false,
-            text = "আসসালামু আলাইকুম! আমি আপনার শ্রেণিকক্ষ সহায়ক। নম্বর বিভাজন, অভিভাবক সভার সারসংক্ষেপ বা প্রান্তিক মতামতের খসড়া নিয়ে প্রশ্ন করতে পারেন।\n\nনোট: লাইভ Gemini AI ব্যবহারের জন্য Firebase প্রয়োজন — বর্তমানে নমুনা (Placeholder) উত্তর প্রদর্শিত হচ্ছে।",
+            text = "আসসালামু আলাইকুম! আমি আপনার শ্রেণিকক্ষ সহায়ক। নম্বর বিভাজন, অভিভাবক সভার সারসংক্ষেপ বা প্রান্তিক মতামতের খসড়া নিয়ে প্রশ্ন করতে পারেন।\n\nনোট: লাইভ Gemini AI ব্যবহারের জন্য Firebase AI Logic প্রয়োজন — বর্তমানে নমুনা (Placeholder) উত্তর প্রদর্শিত হচ্ছে।",
             modelLabel = "Sample Mode",
             isPlaceholder = true
         )
@@ -55,14 +74,145 @@ data class AiAssistantState(
     val analysisResult: ExtractedMarksheet? = null
 )
 
-class ResultMakerViewModel(application: Application) : AndroidViewModel(application) {
+@OptIn(ExperimentalCoroutinesApi::class)
+class ResultMakerViewModel(
+    private val cloudRepo: SchoolCloudRepository,
+    private val contentResolver: ContentResolver,
+    val currentUserId: String,
+    val currentUserDisplayName: String,
+    val currentUserEmail: String,
+    private val initialLocalSnapshot: Pair<List<Student>, Settings>? = null
+) : ViewModel() {
+
     private val aiRepository: AiRepository = PlaceholderAiRepository()
 
-    private val _students = MutableStateFlow<List<Student>>(emptyList())
-    val students: StateFlow<List<Student>> = _students.asStateFlow()
+    val localSeedCount: Int get() = initialLocalSnapshot?.first?.size ?: 0
+    val localSeedSettings: Settings? get() = initialLocalSnapshot?.second
 
-    private val _settings = MutableStateFlow(DEFAULT_SETTINGS)
-    val settings: StateFlow<Settings> = _settings.asStateFlow()
+    private val _isSigningOut = MutableStateFlow(false)
+    private val _suppressedSchoolId = MutableStateFlow<String?>(null)
+    private val _selectedSchoolOverrideId = MutableStateFlow<String?>(null)
+    private val _schoolsLoaded = MutableStateFlow(false)
+    private val _cloudInitError = MutableStateFlow<String?>(null)
+
+    private val _inSchoolHub = MutableStateFlow(false)
+    val inSchoolHub: StateFlow<Boolean> = _inSchoolHub.asStateFlow()
+
+    private val _hubBusy = MutableStateFlow(false)
+    val hubBusy: StateFlow<Boolean> = _hubBusy.asStateFlow()
+
+    private val _lookupBusy = MutableStateFlow(false)
+    val lookupBusy: StateFlow<Boolean> = _lookupBusy.asStateFlow()
+
+    private val _codePreview = MutableStateFlow<SchoolCodePreview?>(null)
+    val codePreview: StateFlow<SchoolCodePreview?> = _codePreview.asStateFlow()
+
+    private val _lookupError = MutableStateFlow<String?>(null)
+    val lookupError: StateFlow<String?> = _lookupError.asStateFlow()
+
+    private val _pendingJoinSchoolName = MutableStateFlow<String?>(null)
+    val pendingJoinSchoolName: StateFlow<String?> = _pendingJoinSchoolName.asStateFlow()
+
+    val userProfile: StateFlow<UserCloudProfile?> = cloudRepo.observeUserProfile()
+        .catch { e ->
+            if (e is CancellationException) throw e
+            if (!_isSigningOut.value) {
+                _snackbarMessage.value = friendlyFirestoreErrorMessage(e)
+            }
+            emit(null)
+        }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, null)
+
+    val mySchools: StateFlow<List<SchoolWorkspace>> = cloudRepo.observeMySchools()
+        .map { list ->
+            _schoolsLoaded.value = true
+            _cloudInitError.value = null
+            list.sortedBy { it.settings.school }
+        }
+        .catch { e ->
+            if (e is CancellationException) throw e
+            _schoolsLoaded.value = true
+            if (!_isSigningOut.value) {
+                _cloudInitError.value = friendlyFirestoreErrorMessage(e)
+            }
+            emit(emptyList())
+        }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+
+    val activeSchool: StateFlow<SchoolWorkspace?> = combine(
+        mySchools,
+        userProfile,
+        _selectedSchoolOverrideId,
+        _suppressedSchoolId
+    ) { schools, profile, overrideId, suppressedId ->
+        val filtered = if (suppressedId != null) schools.filter { it.id != suppressedId } else schools
+        val preferredId = overrideId ?: profile?.activeSchoolId
+        filtered.find { it.id == preferredId } ?: filtered.firstOrNull()
+    }.stateIn(viewModelScope, SharingStarted.Eagerly, null)
+
+    val sessionState: StateFlow<CloudSessionState> = combine(
+        _schoolsLoaded,
+        mySchools,
+        activeSchool,
+        _cloudInitError
+    ) { loaded, schools, active, err ->
+        when {
+            !loaded -> CloudSessionState.Loading
+            err != null && schools.isEmpty() -> CloudSessionState.Error(err)
+            else -> CloudSessionState.Ready(schools, active)
+        }
+    }.stateIn(viewModelScope, SharingStarted.Eagerly, CloudSessionState.Loading)
+
+    private val studentsAndMetaFlow: StateFlow<Pair<List<Student>, Map<String, StudentSyncMeta>>> =
+        activeSchool
+            .map { it?.id }
+            .distinctUntilChanged()
+            .flatMapLatest { schoolId ->
+                if (schoolId.isNullOrBlank()) {
+                    flowOf(emptyList<Student>() to emptyMap())
+                } else {
+                    cloudRepo.observeSchoolStudents(schoolId)
+                        .catch { e ->
+                            if (e is CancellationException) throw e
+                            if (!_isSigningOut.value && _suppressedSchoolId.value != schoolId) {
+                                _snackbarMessage.value = friendlyFirestoreErrorMessage(e)
+                            }
+                            emit(emptyList<Student>() to emptyMap())
+                        }
+                }
+            }
+            .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList<Student>() to emptyMap())
+
+    val students: StateFlow<List<Student>> = studentsAndMetaFlow
+        .map { it.first }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+
+    val studentSyncMeta: StateFlow<Map<String, StudentSyncMeta>> = studentsAndMetaFlow
+        .map { it.second }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, emptyMap())
+
+    val settings: StateFlow<Settings> = activeSchool
+        .map { it?.settings ?: DEFAULT_SETTINGS }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, DEFAULT_SETTINGS)
+
+    val joinRequests: StateFlow<List<JoinRequestItem>> =
+        activeSchool
+            .map { school ->
+                if (school != null && school.isAdmin(currentUserId)) school.id else null
+            }
+            .distinctUntilChanged()
+            .flatMapLatest { adminSchoolId ->
+                if (adminSchoolId.isNullOrBlank()) {
+                    flowOf(emptyList())
+                } else {
+                    cloudRepo.observeJoinRequests(adminSchoolId, currentUserId)
+                        .catch { e ->
+                            if (e is CancellationException) throw e
+                            emit(emptyList())
+                        }
+                }
+            }
+            .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
     private val _selectedClass = MutableStateFlow(1)
     val selectedClass: StateFlow<Int> = _selectedClass.asStateFlow()
@@ -94,16 +244,232 @@ class ResultMakerViewModel(application: Application) : AndroidViewModel(applicat
     val isPlaceholderAi: Boolean get() = aiRepository.isPlaceholderBackend
 
     init {
-        val (loadedStudents, loadedSettings) = Repo.load(application)
-        _students.value = loadedStudents
-        _settings.value = loadedSettings
-    }
-
-    private fun persist(nextStudents: List<Student> = _students.value, nextSettings: Settings = _settings.value) {
-        viewModelScope.launch(Dispatchers.IO) {
-            Repo.save(getApplication(), nextStudents, nextSettings)
+        viewModelScope.launch {
+            cloudRepo.ensureUserProfile().onFailure { e ->
+                if (!_isSigningOut.value) {
+                    _snackbarMessage.value = friendlyFirestoreErrorMessage(e)
+                }
+            }
         }
     }
+
+    fun prepareForSignOut() {
+        _isSigningOut.value = true
+        _suppressedSchoolId.value = activeSchool.value?.id
+    }
+
+    // ---------- School Hub & Collaborative Admin ----------
+
+    fun openSchoolHub() {
+        _editingStudent.value = null
+        _lookupError.value = null
+        _codePreview.value = null
+        _inSchoolHub.value = true
+    }
+
+    fun closeSchoolHub() {
+        if (activeSchool.value != null) {
+            _inSchoolHub.value = false
+        }
+    }
+
+    fun selectSchool(schoolId: String) {
+        _selectedSchoolOverrideId.value = schoolId
+        _editingStudent.value = null
+        _studioStudentId.value = null
+        _currentSection.value = NavSection.ROSTER
+        _inSchoolHub.value = false
+        viewModelScope.launch {
+            cloudRepo.setActiveSchoolId(schoolId).onFailure { e ->
+                showMessage(friendlyFirestoreErrorMessage(e))
+            }
+        }
+    }
+
+    fun createSchool(
+        name: String,
+        address: String,
+        year: String,
+        approvalRequired: Boolean,
+        importLocalData: Boolean
+    ) {
+        if (_hubBusy.value) return
+        val cleanName = name.trim()
+        if (cleanName.isEmpty()) {
+            showMessage("বিদ্যালয়ের নাম লিখুন")
+            return
+        }
+        val seedStudents = if (importLocalData) initialLocalSnapshot?.first.orEmpty() else emptyList()
+        val seedSettings = if (importLocalData) (initialLocalSnapshot?.second ?: DEFAULT_SETTINGS) else DEFAULT_SETTINGS
+
+        _hubBusy.value = true
+        viewModelScope.launch {
+            cloudRepo.createSchool(
+                schoolName = cleanName,
+                schoolAddress = address,
+                year = year,
+                approvalRequired = approvalRequired,
+                baseSettings = seedSettings,
+                initialStudents = seedStudents
+            ).onSuccess { created ->
+                _selectedSchoolOverrideId.value = created.id
+                _inSchoolHub.value = false
+                _currentSection.value = NavSection.ROSTER
+                showMessage("বিদ্যালয় তৈরি হয়েছে! স্কুল কোড: ${created.joinCode}")
+            }.onFailure { e ->
+                showMessage(friendlyFirestoreErrorMessage(e))
+            }
+            _hubBusy.value = false
+        }
+    }
+
+    fun lookupSchoolCode(rawCode: String) {
+        if (_lookupBusy.value) return
+        _lookupError.value = null
+        _codePreview.value = null
+        _lookupBusy.value = true
+        viewModelScope.launch {
+            cloudRepo.lookupSchoolCode(rawCode)
+                .onSuccess { preview ->
+                    if (preview == null) {
+                        _lookupError.value = "এই কোডে কোনো সক্রিয় বিদ্যালয় পাওয়া যায়নি"
+                    } else {
+                        _codePreview.value = preview
+                    }
+                }
+                .onFailure { e ->
+                    _lookupError.value = friendlyFirestoreErrorMessage(e)
+                }
+            _lookupBusy.value = false
+        }
+    }
+
+    fun clearCodePreview() {
+        _codePreview.value = null
+        _lookupError.value = null
+    }
+
+    fun joinWithCodePreview(preview: SchoolCodePreview) {
+        if (_hubBusy.value) return
+        _hubBusy.value = true
+        viewModelScope.launch {
+            cloudRepo.joinSchoolWithCode(preview)
+                .onSuccess { joinedDirectly ->
+                    _codePreview.value = null
+                    _lookupError.value = null
+                    if (joinedDirectly) {
+                        _pendingJoinSchoolName.value = null
+                        _selectedSchoolOverrideId.value = preview.schoolId
+                        _inSchoolHub.value = false
+                        _currentSection.value = NavSection.ROSTER
+                        showMessage("\"${preview.schoolName}\"-এ যুক্ত হয়েছেন!")
+                    } else {
+                        _pendingJoinSchoolName.value = preview.schoolName
+                        showMessage("যোগদানের অনুরোধ পাঠানো হয়েছে — অ্যাডমিন অনুমোদনের অপেক্ষায়")
+                    }
+                }
+                .onFailure { e ->
+                    showMessage(friendlyFirestoreErrorMessage(e))
+                }
+            _hubBusy.value = false
+        }
+    }
+
+    fun approveJoinRequest(req: JoinRequestItem) {
+        val school = activeSchool.value ?: return
+        if (!school.isAdmin(currentUserId)) {
+            showMessage("শুধুমাত্র অ্যাডমিন অনুমোদন করতে পারবেন")
+            return
+        }
+        viewModelScope.launch {
+            cloudRepo.approveJoinRequest(school.id, req)
+                .onSuccess { showMessage("${req.displayName.ifBlank { "শিক্ষক" }}-কে বিদ্যালয়ে যুক্ত করা হয়েছে") }
+                .onFailure { e -> showMessage(friendlyFirestoreErrorMessage(e)) }
+        }
+    }
+
+    fun rejectJoinRequest(requestUid: String) {
+        val school = activeSchool.value ?: return
+        if (!school.isAdmin(currentUserId)) return
+        viewModelScope.launch {
+            cloudRepo.rejectJoinRequest(school.id, requestUid)
+                .onSuccess { showMessage("অনুরোধ বাতিল করা হয়েছে") }
+                .onFailure { e -> showMessage(friendlyFirestoreErrorMessage(e)) }
+        }
+    }
+
+    fun regenerateJoinCode() {
+        val school = activeSchool.value ?: return
+        if (!school.isAdmin(currentUserId)) {
+            showMessage("শুধুমাত্র অ্যাডমিন কোড পরিবর্তন করতে পারবেন")
+            return
+        }
+        viewModelScope.launch {
+            cloudRepo.regenerateJoinCode(school)
+                .onSuccess { newCode -> showMessage("নতুন স্কুল কোড তৈরি হয়েছে: $newCode") }
+                .onFailure { e -> showMessage(friendlyFirestoreErrorMessage(e)) }
+        }
+    }
+
+    fun setApprovalRequired(required: Boolean) {
+        val school = activeSchool.value ?: return
+        if (!school.isAdmin(currentUserId)) return
+        viewModelScope.launch {
+            cloudRepo.setApprovalRequired(school, required)
+                .onSuccess {
+                    showMessage(if (required) "অ্যাডমিন অনুমোদন চালু হয়েছে" else "সরাসরি যোগদান চালু হয়েছে")
+                }
+                .onFailure { e -> showMessage(friendlyFirestoreErrorMessage(e)) }
+        }
+    }
+
+    fun updateMemberRole(targetUid: String, role: MemberRole) {
+        val school = activeSchool.value ?: return
+        if (!school.isAdmin(currentUserId)) return
+        viewModelScope.launch {
+            cloudRepo.updateMemberRole(school, targetUid, role)
+                .onSuccess { showMessage("সদস্যের ভূমিকা হালনাগাদ হয়েছে") }
+                .onFailure { e -> showMessage(friendlyFirestoreErrorMessage(e)) }
+        }
+    }
+
+    fun removeMember(targetUid: String) {
+        val school = activeSchool.value ?: return
+        if (!school.isAdmin(currentUserId)) return
+        viewModelScope.launch {
+            cloudRepo.removeMember(school, targetUid)
+                .onSuccess { showMessage("সদস্যকে বিদ্যালয় থেকে অপসারণ করা হয়েছে") }
+                .onFailure { e -> showMessage(friendlyFirestoreErrorMessage(e)) }
+        }
+    }
+
+    fun leaveActiveSchool() {
+        val school = activeSchool.value ?: return
+        if (school.ownerUid == currentUserId) {
+            showMessage("বিদ্যালয়ের প্রতিষ্ঠাতা নিজে বিদ্যালয় ত্যাগ করতে পারবেন না")
+            return
+        }
+        viewModelScope.launch {
+            _suppressedSchoolId.value = school.id
+            cloudRepo.leaveSchool(school)
+                .onSuccess {
+                    if (_selectedSchoolOverrideId.value == school.id) {
+                        _selectedSchoolOverrideId.value = null
+                    }
+                    _suppressedSchoolId.value = null
+                    _editingStudent.value = null
+                    _studioStudentId.value = null
+                    _inSchoolHub.value = true
+                    showMessage("\"${school.settings.school}\" ত্যাগ করা হয়েছে")
+                }
+                .onFailure { e ->
+                    _suppressedSchoolId.value = null
+                    showMessage(friendlyFirestoreErrorMessage(e))
+                }
+        }
+    }
+
+    // ---------- Navigation & Student CRUD ----------
 
     fun selectClass(cls: Int) {
         if (cls in 1..5) _selectedClass.value = cls
@@ -127,7 +493,7 @@ class ResultMakerViewModel(application: Application) : AndroidViewModel(applicat
 
     fun openNewStudentEditor(returnTo: NavSection = _currentSection.value) {
         val cls = _selectedClass.value
-        val nextRoll = (_students.value.filter { it.cls == cls }.maxOfOrNull { it.roll } ?: 0) + 1
+        val nextRoll = (students.value.filter { it.cls == cls }.maxOfOrNull { it.roll } ?: 0) + 1
         _editReturnSection.value = returnTo
         _editingStudent.value = createEmptyStudent(cls, nextRoll)
     }
@@ -165,49 +531,81 @@ class ResultMakerViewModel(application: Application) : AndroidViewModel(applicat
     }
 
     fun upsertStudent(student: Student) {
-        val cur = _students.value
-        val next = if (cur.any { it.id == student.id }) {
-            cur.map { if (it.id == student.id) student else it }
-        } else {
-            cur + student
+        val schoolId = activeSchool.value?.id ?: return
+        val existing = students.value.find { it.id == student.id }
+        viewModelScope.launch {
+            cloudRepo.upsertStudent(schoolId, student, existing).onFailure { e ->
+                showMessage(friendlyFirestoreErrorMessage(e))
+            }
         }
-        _students.value = next
-        persist(nextStudents = next)
+    }
+
+    fun patchStudentField(studentId: String, fieldPath: String, value: Any?) {
+        val schoolId = activeSchool.value?.id ?: return
+        viewModelScope.launch {
+            cloudRepo.patchStudentField(schoolId, studentId, fieldPath, value).onFailure { e ->
+                showMessage(friendlyFirestoreErrorMessage(e))
+            }
+        }
     }
 
     fun deleteStudent(id: String) {
-        val target = _students.value.find { it.id == id }
-        val next = _students.value.filter { it.id != id }
-        _students.value = next
+        val schoolId = activeSchool.value?.id ?: return
+        val target = students.value.find { it.id == id }
         if (_studioStudentId.value == id) _studioStudentId.value = null
-        persist(nextStudents = next)
-        val label = target?.name?.ifBlank { "রোল ${bn(target.roll.toString())}" } ?: "শিক্ষার্থী"
-        showMessage("$label মুছে ফেলা হয়েছে")
+        viewModelScope.launch {
+            cloudRepo.deleteStudent(schoolId, id)
+                .onSuccess {
+                    val label = target?.name?.ifBlank { "রোল ${bn(target.roll.toString())}" } ?: "শিক্ষার্থী"
+                    showMessage("$label মুছে ফেলা হয়েছে")
+                }
+                .onFailure { e ->
+                    showMessage(friendlyFirestoreErrorMessage(e))
+                }
+        }
     }
 
     fun updateSettings(newSettings: Settings) {
-        _settings.value = newSettings
-        persist(nextSettings = newSettings)
+        val school = activeSchool.value ?: return
+        if (!school.isAdmin(currentUserId)) {
+            showMessage("বিদ্যালয়ের সেটিংস পরিবর্তনের অনুমতি শুধুমাত্র অ্যাডমিনের")
+            return
+        }
+        viewModelScope.launch {
+            cloudRepo.updateSchoolSettings(school, newSettings).onFailure { e ->
+                showMessage(friendlyFirestoreErrorMessage(e))
+            }
+        }
     }
 
     fun addCustomField(label: String): Boolean {
+        val school = activeSchool.value ?: return false
+        if (!school.isAdmin(currentUserId)) {
+            showMessage("নতুন কাস্টম ফিল্ড যোগ করার অনুমতি শুধুমাত্র অ্যাডমিনের")
+            return false
+        }
         val trimmed = label.trim()
         if (trimmed.isEmpty()) return false
-        val existing = _settings.value.customFields
+        val existing = settings.value.customFields
         if (existing.any { it.label.equals(trimmed, ignoreCase = true) }) {
             showMessage("এই নামে একটি ফিল্ড ইতিমধ্যে আছে")
             return false
         }
         val key = Repo.makeCustomFieldKey(trimmed, existing.map { it.key }.toSet())
-        val next = _settings.value.copy(customFields = existing + CustomFieldDef(key, trimmed))
+        val next = settings.value.copy(customFields = existing + CustomFieldDef(key, trimmed))
         updateSettings(next)
         return true
     }
 
     fun removeCustomField(key: String) {
-        val removed = _settings.value.customFields.find { it.key == key }
-        val next = _settings.value.copy(
-            customFields = _settings.value.customFields.filter { it.key != key }
+        val school = activeSchool.value ?: return
+        if (!school.isAdmin(currentUserId)) {
+            showMessage("কাস্টম ফিল্ড মুছার অনুমতি শুধুমাত্র অ্যাডমিনের")
+            return
+        }
+        val removed = settings.value.customFields.find { it.key == key }
+        val next = settings.value.copy(
+            customFields = settings.value.customFields.filter { it.key != key }
         )
         updateSettings(next)
         if (removed != null) {
@@ -216,43 +614,86 @@ class ResultMakerViewModel(application: Application) : AndroidViewModel(applicat
     }
 
     fun applyCsvImport(summary: Repo.CsvImportSummary) {
-        _students.value = summary.students
-        _settings.value = summary.settings
-        persist(summary.students, summary.settings)
+        val school = activeSchool.value ?: return
+        val prevList = students.value
         closeCsvImport()
-        val msg = buildString {
-            append("ইমপোর্ট সম্পন্ন: নতুন ${bn(summary.addedCount.toString())} জন, হালনাগাদ ${bn(summary.updatedCount.toString())} জন")
-            if (summary.createdFields.isNotEmpty()) {
-                append(", নতুন ফিল্ড ${bn(summary.createdFields.size.toString())}টি")
+        viewModelScope.launch {
+            if (summary.createdFields.isNotEmpty() && school.isAdmin(currentUserId)) {
+                cloudRepo.updateSchoolSettings(school, summary.settings)
             }
+            cloudRepo.syncBatchStudents(school.id, prevList, summary.students, deleteRemoved = false)
+                .onSuccess {
+                    val msg = buildString {
+                        append("ইমপোর্ট সম্পন্ন: নতুন ${bn(summary.addedCount.toString())} জন, হালনাগাদ ${bn(summary.updatedCount.toString())} জন")
+                        if (summary.createdFields.isNotEmpty() && school.isAdmin(currentUserId)) {
+                            append(", নতুন ফিল্ড ${bn(summary.createdFields.size.toString())}টি")
+                        }
+                    }
+                    showMessage(msg)
+                }
+                .onFailure { e ->
+                    showMessage(friendlyFirestoreErrorMessage(e))
+                }
         }
-        showMessage(msg)
     }
 
     fun restoreBackupJson(rawText: String) {
+        val school = activeSchool.value ?: return
+        if (!school.isAdmin(currentUserId)) {
+            showMessage("JSON রিস্টোর শুধুমাত্র বিদ্যালয়ের অ্যাডমিন করতে পারবেন")
+            return
+        }
         try {
             val (restoredStudents, restoredSettings) = Repo.fromJson(rawText)
-            _students.value = restoredStudents
-            _settings.value = restoredSettings
-            persist(restoredStudents, restoredSettings)
-            showMessage("ব্যাকআপ রিস্টোর হয়েছে (${bn(restoredStudents.size.toString())} জন শিক্ষার্থী)")
+            val prevList = students.value
+            viewModelScope.launch {
+                cloudRepo.updateSchoolSettings(school, restoredSettings)
+                cloudRepo.syncBatchStudents(school.id, prevList, restoredStudents, deleteRemoved = true)
+                    .onSuccess {
+                        showMessage("ব্যাকআপ রিস্টোর হয়েছে (${bn(restoredStudents.size.toString())} জন শিক্ষার্থী)")
+                    }
+                    .onFailure { e ->
+                        showMessage(friendlyFirestoreErrorMessage(e))
+                    }
+            }
         } catch (e: Exception) {
             showMessage("রিস্টোর ব্যর্থ হয়েছে: ${e.message ?: "অবৈধ ফাইল"}")
         }
     }
 
     fun resetSampleData() {
-        _students.value = SAMPLE_STUDENTS
-        _settings.value = DEFAULT_SETTINGS
-        persist(SAMPLE_STUDENTS, DEFAULT_SETTINGS)
-        showMessage("নমুনা ডাটা রিসেট করা হয়েছে")
+        val school = activeSchool.value ?: return
+        if (!school.isAdmin(currentUserId)) {
+            showMessage("নমুনা ডাটা রিসেট শুধুমাত্র অ্যাডমিন করতে পারবেন")
+            return
+        }
+        val prevList = students.value
+        viewModelScope.launch {
+            val keepSchoolSettings = DEFAULT_SETTINGS.copy(
+                school = school.settings.school.ifBlank { DEFAULT_SETTINGS.school },
+                schoolAddress = school.settings.schoolAddress,
+                year = school.settings.year
+            )
+            cloudRepo.updateSchoolSettings(school, keepSchoolSettings)
+            cloudRepo.syncBatchStudents(school.id, prevList, SAMPLE_STUDENTS, deleteRemoved = true)
+                .onSuccess { showMessage("নমুনা ডাটা রিসেট করা হয়েছে") }
+                .onFailure { e -> showMessage(friendlyFirestoreErrorMessage(e)) }
+        }
     }
 
     fun clearAllStudents() {
-        _students.value = emptyList()
+        val school = activeSchool.value ?: return
+        if (!school.isAdmin(currentUserId)) {
+            showMessage("সকল শিক্ষার্থী মুছে ফেলার অনুমতি শুধুমাত্র অ্যাডমিনের")
+            return
+        }
+        val ids = students.value.map { it.id }
         _studioStudentId.value = null
-        persist(nextStudents = emptyList())
-        showMessage("সকল শিক্ষার্থীর তথ্য মুছে ফেলা হয়েছে")
+        viewModelScope.launch {
+            cloudRepo.deleteAllSchoolStudents(school.id, ids)
+                .onSuccess { showMessage("সকল শিক্ষার্থীর তথ্য মুছে ফেলা হয়েছে") }
+                .onFailure { e -> showMessage(friendlyFirestoreErrorMessage(e)) }
+        }
     }
 
     // ---------- AI Assistant & Drafting ----------
@@ -272,7 +713,7 @@ class ResultMakerViewModel(application: Application) : AndroidViewModel(applicat
                     AiChatMessage(
                         id = UUID.randomUUID().toString(),
                         isUser = false,
-                        text = "নতুন কথোপকথন শুরু হয়েছে। শ্রেণিকক্ষ বা ফলাফল সংক্রান্ত যেকোনো প্রশ্ন করুন।\n\nনোট: লাইভ Gemini AI-এর জন্য Firebase প্রয়োজন।",
+                        text = "নতুন কথোপকথন শুরু হয়েছে। শ্রেণিকক্ষ বা ফলাফল সংক্রান্ত যেকোনো প্রশ্ন করুন।\n\nনোট: লাইভ Gemini AI-এর জন্য Firebase AI Logic প্রয়োজন।",
                         modelLabel = "Sample Mode",
                         isPlaceholder = true
                     )
@@ -302,7 +743,7 @@ class ResultMakerViewModel(application: Application) : AndroidViewModel(applicat
             text = clean
         )
         val selectedStudent = _aiState.value.contextStudentId?.let { id ->
-            _students.value.find { it.id == id }
+            students.value.find { it.id == id }
         }
         val contextText = selectedStudent?.let { buildStudentAiContext(it) }
         val prevHistory = _aiState.value.chatMessages
@@ -332,6 +773,8 @@ class ResultMakerViewModel(application: Application) : AndroidViewModel(applicat
                         chatLoading = false
                     )
                 }
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
                 _aiState.update {
                     it.copy(
@@ -380,6 +823,8 @@ class ResultMakerViewModel(application: Application) : AndroidViewModel(applicat
             try {
                 val result = aiRepository.analyzeMarksheetImage(bmp, teacherNote)
                 _aiState.update { it.copy(analyzingImage = false, analysisResult = result) }
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
                 _aiState.update {
                     it.copy(
@@ -394,9 +839,9 @@ class ResultMakerViewModel(application: Application) : AndroidViewModel(applicat
     fun applyExtractedMarksheet(ext: ExtractedMarksheet): Student {
         val cls = (ext.student.cls ?: _selectedClass.value).coerceIn(1, 5)
         val roll = ext.student.roll?.takeIf { it > 0 }
-            ?: ((_students.value.filter { it.cls == cls }.maxOfOrNull { it.roll } ?: 0) + 1)
+            ?: ((students.value.filter { it.cls == cls }.maxOfOrNull { it.roll } ?: 0) + 1)
 
-        val existing = _students.value.find { it.cls == cls && it.roll == roll }
+        val existing = students.value.find { it.cls == cls && it.roll == roll }
         val base = existing ?: createEmptyStudent(cls, roll)
 
         val nextM = base.m.toMutableMap()
@@ -438,8 +883,10 @@ class ResultMakerViewModel(application: Application) : AndroidViewModel(applicat
                 val res = aiRepository.draftRemark(buildStudentAiContext(student), term)
                 onResult(res.remark)
                 if (res.isPlaceholder) {
-                    showMessage("নমুনা মতামত খসড়া যুক্ত হয়েছে (লাইভ AI-এর জন্য Firebase প্রয়োজন)")
+                    showMessage("নমুনা মতামত খসড়া যুক্ত হয়েছে (লাইভ AI-এর জন্য Firebase AI Logic প্রয়োজন)")
                 }
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
                 showMessage("খসড়া তৈরি করা যায়নি: ${e.message ?: "ত্রুটি"}")
             } finally {
@@ -449,10 +896,9 @@ class ResultMakerViewModel(application: Application) : AndroidViewModel(applicat
     }
 
     private fun decodeAndScaleBitmap(uri: Uri, maxDim: Int): Bitmap? {
-        val resolver = getApplication<Application>().contentResolver
         return try {
             val raw = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-                val source = ImageDecoder.createSource(resolver, uri)
+                val source = ImageDecoder.createSource(contentResolver, uri)
                 ImageDecoder.decodeBitmap(source) { decoder, info, _ ->
                     val w = info.size.width
                     val h = info.size.height
@@ -464,7 +910,7 @@ class ResultMakerViewModel(application: Application) : AndroidViewModel(applicat
                     decoder.allocator = ImageDecoder.ALLOCATOR_SOFTWARE
                 }
             } else {
-                resolver.openInputStream(uri)?.use { stream ->
+                contentResolver.openInputStream(uri)?.use { stream ->
                     BitmapFactory.decodeStream(stream)
                 }
             } ?: return null

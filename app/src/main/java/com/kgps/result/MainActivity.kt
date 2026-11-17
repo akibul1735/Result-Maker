@@ -10,7 +10,9 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.border
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
@@ -19,6 +21,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -31,10 +34,15 @@ import androidx.compose.material.icons.rounded.GridOn
 import androidx.compose.material.icons.rounded.MoreVert
 import androidx.compose.material.icons.rounded.People
 import androidx.compose.material.icons.rounded.Settings
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExtendedFloatingActionButton
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -46,14 +54,18 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Snackbar
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -64,16 +76,33 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.credentials.CredentialManager
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.lifecycle.viewmodel.initializer
+import androidx.lifecycle.viewmodel.viewModelFactory
+import com.google.firebase.Firebase
+import com.google.firebase.auth.auth
+import com.google.firebase.firestore.FirebaseFirestore
+import com.kgps.result.cloud.CloudSessionState
+import com.kgps.result.cloud.SchoolCloudRepository
+import com.kgps.result.cloud.SchoolWorkspace
+import com.kgps.result.cloud.attemptAutoSignIn
+import com.kgps.result.cloud.authStateFlow
+import com.kgps.result.cloud.onGoogleSignInClicked
+import com.kgps.result.cloud.signOutFromGoogle
 import com.kgps.result.ui.screens.AiAssistantScreen
+import com.kgps.result.ui.screens.AuthScreen
 import com.kgps.result.ui.screens.BulkSheetScreen
 import com.kgps.result.ui.screens.ReportStudioScreen
 import com.kgps.result.ui.screens.RosterScreen
+import com.kgps.result.ui.screens.SchoolHubScreen
 import com.kgps.result.ui.screens.SettingsScreen
 import com.kgps.result.ui.screens.SmartCsvImportDialog
 import com.kgps.result.ui.screens.StudentEditorScreen
+import com.kgps.result.ui.theme.EmeraldGrade
 import com.kgps.result.ui.theme.ResultMakerTheme
+import com.kgps.result.ui.theme.RoseDanger
 import com.kgps.result.ui.theme.SlateBg
 import com.kgps.result.ui.theme.SlateMuted
 import com.kgps.result.ui.theme.SlateText
@@ -95,7 +124,7 @@ class MainActivity : ComponentActivity() {
         )
         setContent {
             ResultMakerTheme {
-                ResultMakerApp()
+                AppRoot()
             }
         }
     }
@@ -115,27 +144,265 @@ private val PRIMARY_NAV_ITEMS = listOf(
 )
 
 @Composable
-fun ResultMakerApp(vm: ResultMakerViewModel = viewModel()) {
+private fun AppRoot() {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val credentialManager = remember(context) { CredentialManager.create(context) }
+
+    val currentUser by Firebase.auth.authStateFlow().collectAsStateWithLifecycle(
+        initialValue = Firebase.auth.currentUser
+    )
+    var checkingAutoSignIn by remember { mutableStateOf(Firebase.auth.currentUser == null) }
+    var isSigningIn by remember { mutableStateOf(false) }
+    var authError by remember { mutableStateOf<String?>(null) }
+
+    LaunchedEffect(Unit) {
+        if (Firebase.auth.currentUser == null) {
+            attemptAutoSignIn(
+                context = context,
+                credentialManager = credentialManager,
+                onAuthSuccess = {
+                    checkingAutoSignIn = false
+                    authError = null
+                },
+                onUnauthenticated = {
+                    checkingAutoSignIn = false
+                },
+                scope = scope
+            )
+        } else {
+            checkingAutoSignIn = false
+        }
+    }
+
+    val user = currentUser
+    if (checkingAutoSignIn && user == null) {
+        Surface(Modifier.fillMaxSize(), color = SlateBg) {
+            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    CircularProgressIndicator(color = TealPrimary)
+                    Text("অ্যাকাউন্ট যাচাই করা হচ্ছে...", color = SlateMuted, fontSize = 13.sp)
+                }
+            }
+        }
+        return
+    }
+
+    if (user == null) {
+        AuthScreen(
+            isSigningIn = isSigningIn,
+            errorMessage = authError,
+            onGoogleSignIn = {
+                isSigningIn = true
+                authError = null
+                onGoogleSignInClicked(
+                    context = context,
+                    credentialManager = credentialManager,
+                    onAuthSuccess = {
+                        isSigningIn = false
+                        authError = null
+                    },
+                    onAuthError = { msg ->
+                        isSigningIn = false
+                        authError = msg
+                    },
+                    onAuthCancelled = {
+                        isSigningIn = false
+                    },
+                    scope = scope
+                )
+            }
+        )
+        return
+    }
+
+    key(user.uid) {
+        val appContext = context.applicationContext
+        val vm: ResultMakerViewModel = viewModel(
+            key = user.uid,
+            factory = viewModelFactory {
+                initializer {
+                    val db = FirebaseFirestore.getInstance(appContext.getString(R.string.firestore_database_id))
+                    val cloudRepo = SchoolCloudRepository(db)
+                    val localSeed = Repo.load(appContext)
+                    ResultMakerViewModel(
+                        cloudRepo = cloudRepo,
+                        contentResolver = appContext.contentResolver,
+                        currentUserId = user.uid,
+                        currentUserDisplayName = user.displayName.orEmpty(),
+                        currentUserEmail = user.email.orEmpty(),
+                        initialLocalSnapshot = localSeed
+                    )
+                }
+            }
+        )
+
+        val snackbarMessage by vm.snackbarMessage.collectAsStateWithLifecycle()
+        val snackbarHostState = remember { SnackbarHostState() }
+        LaunchedEffect(snackbarMessage) {
+            val msg = snackbarMessage
+            if (!msg.isNullOrBlank()) {
+                snackbarHostState.showSnackbar(msg)
+                vm.clearMessage()
+            }
+        }
+
+        val sessionState by vm.sessionState.collectAsStateWithLifecycle()
+        val inSchoolHub by vm.inSchoolHub.collectAsStateWithLifecycle()
+        val schools by vm.mySchools.collectAsStateWithLifecycle()
+        val activeSchool by vm.activeSchool.collectAsStateWithLifecycle()
+        val hubBusy by vm.hubBusy.collectAsStateWithLifecycle()
+        val lookupBusy by vm.lookupBusy.collectAsStateWithLifecycle()
+        val codePreview by vm.codePreview.collectAsStateWithLifecycle()
+        val lookupError by vm.lookupError.collectAsStateWithLifecycle()
+        val pendingJoinSchoolName by vm.pendingJoinSchoolName.collectAsStateWithLifecycle()
+
+        val performSignOut: () -> Unit = {
+            signOutFromGoogle(
+                credentialManager = credentialManager,
+                scope = scope,
+                onBeforeSignOut = { vm.prepareForSignOut() }
+            )
+        }
+
+        Box(Modifier.fillMaxSize()) {
+            when (val state = sessionState) {
+                is CloudSessionState.Loading -> {
+                    Surface(Modifier.fillMaxSize(), color = SlateBg) {
+                        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                            Column(
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                verticalArrangement = Arrangement.spacedBy(12.dp)
+                            ) {
+                                CircularProgressIndicator(color = TealPrimary)
+                                Text("বিদ্যালয়ের তথ্য লোড হচ্ছে...", color = SlateMuted, fontSize = 13.sp)
+                            }
+                        }
+                    }
+                }
+
+                is CloudSessionState.Error -> {
+                    SchoolHubScreen(
+                        userDisplayName = vm.currentUserDisplayName,
+                        userEmail = vm.currentUserEmail,
+                        currentUserId = vm.currentUserId,
+                        schools = schools,
+                        activeSchoolId = activeSchool?.id.orEmpty(),
+                        pendingJoinSchoolName = pendingJoinSchoolName,
+                        localSeedCount = vm.localSeedCount,
+                        localSeedSettings = vm.localSeedSettings,
+                        isBusy = hubBusy,
+                        lookupBusy = lookupBusy,
+                        codePreview = codePreview,
+                        lookupError = lookupError ?: state.message,
+                        onSelectSchool = vm::selectSchool,
+                        onCreateSchool = vm::createSchool,
+                        onLookupCode = vm::lookupSchoolCode,
+                        onClearCodePreview = vm::clearCodePreview,
+                        onJoinWithPreview = vm::joinWithCodePreview,
+                        onBackToApp = null,
+                        onSignOut = performSignOut
+                    )
+                }
+
+                is CloudSessionState.Ready -> {
+                    val currentActive = activeSchool
+                    if (inSchoolHub || currentActive == null) {
+                        SchoolHubScreen(
+                            userDisplayName = vm.currentUserDisplayName,
+                            userEmail = vm.currentUserEmail,
+                            currentUserId = vm.currentUserId,
+                            schools = schools,
+                            activeSchoolId = currentActive?.id.orEmpty(),
+                            pendingJoinSchoolName = pendingJoinSchoolName,
+                            localSeedCount = vm.localSeedCount,
+                            localSeedSettings = vm.localSeedSettings,
+                            isBusy = hubBusy,
+                            lookupBusy = lookupBusy,
+                            codePreview = codePreview,
+                            lookupError = lookupError,
+                            onSelectSchool = vm::selectSchool,
+                            onCreateSchool = vm::createSchool,
+                            onLookupCode = vm::lookupSchoolCode,
+                            onClearCodePreview = vm::clearCodePreview,
+                            onJoinWithPreview = vm::joinWithCodePreview,
+                            onBackToApp = if (currentActive != null) ({ vm.closeSchoolHub() }) else null,
+                            onSignOut = performSignOut
+                        )
+                    } else {
+                        ResultMakerWorkspace(
+                            vm = vm,
+                            activeSchool = currentActive,
+                            snackbarHostState = snackbarHostState,
+                            onOpenSchoolHub = vm::openSchoolHub,
+                            onSignOut = performSignOut
+                        )
+                    }
+                }
+            }
+
+            // Global snackbar overlay for Auth/SchoolHub when workspace Scaffold isn't mounted
+            if (inSchoolHub || activeSchool == null) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .navigationBarsPadding()
+                        .padding(bottom = 12.dp),
+                    contentAlignment = Alignment.BottomCenter
+                ) {
+                    ResultMakerSnackbarHost(snackbarHostState)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ResultMakerSnackbarHost(snackbarHostState: SnackbarHostState) {
+    SnackbarHost(hostState = snackbarHostState) { data ->
+        Snackbar(
+            snackbarData = data,
+            containerColor = TealSoft,
+            contentColor = SlateText,
+            actionColor = TealPrimary,
+            dismissActionContentColor = SlateMuted,
+            shape = RoundedCornerShape(12.dp),
+            modifier = Modifier
+                .padding(horizontal = 12.dp, vertical = 4.dp)
+                .border(
+                    width = 1.dp,
+                    color = TealPrimary.copy(alpha = 0.35f),
+                    shape = RoundedCornerShape(12.dp)
+                )
+        )
+    }
+}
+
+@Composable
+fun ResultMakerWorkspace(
+    vm: ResultMakerViewModel,
+    activeSchool: SchoolWorkspace,
+    snackbarHostState: SnackbarHostState,
+    onOpenSchoolHub: () -> Unit,
+    onSignOut: () -> Unit
+) {
     val ctx = LocalContext.current
     val students by vm.students.collectAsStateWithLifecycle()
+    val syncMeta by vm.studentSyncMeta.collectAsStateWithLifecycle()
     val settings by vm.settings.collectAsStateWithLifecycle()
+    val joinRequests by vm.joinRequests.collectAsStateWithLifecycle()
     val cls by vm.selectedClass.collectAsStateWithLifecycle()
     val section by vm.currentSection.collectAsStateWithLifecycle()
     val editingStudent by vm.editingStudent.collectAsStateWithLifecycle()
     val studioStudentId by vm.studioStudentId.collectAsStateWithLifecycle()
     val csvImportState by vm.csvImportState.collectAsStateWithLifecycle()
-    val snackbarMessage by vm.snackbarMessage.collectAsStateWithLifecycle()
     val aiState by vm.aiState.collectAsStateWithLifecycle()
     val draftingTerm by vm.draftingRemarkTerm.collectAsStateWithLifecycle()
 
-    val snackbarHostState = remember { SnackbarHostState() }
-    LaunchedEffect(snackbarMessage) {
-        val msg = snackbarMessage
-        if (!msg.isNullOrBlank()) {
-            snackbarHostState.showSnackbar(msg)
-            vm.clearMessage()
-        }
-    }
+    var askSignOut by remember { mutableStateOf(false) }
 
     var pendingPdfStudents by remember { mutableStateOf<List<Student>>(emptyList()) }
     val pdfLauncher = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/pdf")) { uri ->
@@ -169,29 +436,14 @@ fun ResultMakerApp(vm: ResultMakerViewModel = viewModel()) {
 
         Scaffold(
             containerColor = SlateBg,
-            snackbarHost = {
-                SnackbarHost(hostState = snackbarHostState) { data ->
-                    Snackbar(
-                        snackbarData = data,
-                        containerColor = TealSoft,
-                        contentColor = SlateText,
-                        actionColor = TealPrimary,
-                        dismissActionContentColor = SlateMuted,
-                        shape = RoundedCornerShape(12.dp),
-                        modifier = Modifier
-                            .padding(horizontal = 12.dp, vertical = 4.dp)
-                            .border(
-                                width = 1.dp,
-                                color = TealPrimary.copy(alpha = 0.35f),
-                                shape = RoundedCornerShape(12.dp)
-                            )
-                    )
-                }
-            },
+            snackbarHost = { ResultMakerSnackbarHost(snackbarHostState) },
             topBar = {
                 if (!isEditing) {
                     ResultMakerTopBar(
                         settings = settings,
+                        activeSchool = activeSchool,
+                        currentUserId = vm.currentUserId,
+                        pendingRequestCount = joinRequests.size,
                         isSettings = isSettings,
                         onBackFromSettings = { vm.navigate(NavSection.ROSTER) },
                         onOpenSettings = { vm.navigate(NavSection.SETTINGS) },
@@ -201,7 +453,9 @@ fun ResultMakerApp(vm: ResultMakerViewModel = viewModel()) {
                                 students.sortedWith(compareBy({ it.cls }, { it.roll })),
                                 "সব-শ্রেণির-প্রতিবেদন.pdf"
                             )
-                        }
+                        },
+                        onOpenSchoolHub = onOpenSchoolHub,
+                        onRequestSignOut = { askSignOut = true }
                     )
                 }
             },
@@ -275,6 +529,7 @@ fun ResultMakerApp(vm: ResultMakerViewModel = viewModel()) {
                             StudentEditorScreen(
                                 initialStudent = activeEdit,
                                 settings = settings,
+                                syncMeta = syncMeta[activeEdit.id],
                                 draftingRemarkTerm = draftingTerm,
                                 isPlaceholderAi = vm.isPlaceholderAi,
                                 onAddCustomField = vm::addCustomField,
@@ -321,6 +576,7 @@ fun ResultMakerApp(vm: ResultMakerViewModel = viewModel()) {
                                     cls = cls,
                                     onSelectClass = vm::selectClass,
                                     onUpsertStudent = vm::upsertStudent,
+                                    onPatchStudentField = vm::patchStudentField,
                                     onOpenStudent = { vm.openEditor(it, NavSection.SHEET) },
                                     onClassPdf = {
                                         makePdf(
@@ -366,6 +622,9 @@ fun ResultMakerApp(vm: ResultMakerViewModel = viewModel()) {
                                 NavSection.SETTINGS -> SettingsScreen(
                                     students = students,
                                     settings = settings,
+                                    currentUserId = vm.currentUserId,
+                                    activeSchool = activeSchool,
+                                    joinRequests = joinRequests,
                                     onUpdateSettings = vm::updateSettings,
                                     onAddCustomField = vm::addCustomField,
                                     onRemoveCustomField = vm::removeCustomField,
@@ -379,6 +638,15 @@ fun ResultMakerApp(vm: ResultMakerViewModel = viewModel()) {
                                     },
                                     onResetSampleData = vm::resetSampleData,
                                     onClearAllStudents = vm::clearAllStudents,
+                                    onRegenerateJoinCode = vm::regenerateJoinCode,
+                                    onSetApprovalRequired = vm::setApprovalRequired,
+                                    onApproveJoinRequest = vm::approveJoinRequest,
+                                    onRejectJoinRequest = vm::rejectJoinRequest,
+                                    onUpdateMemberRole = vm::updateMemberRole,
+                                    onRemoveMember = vm::removeMember,
+                                    onLeaveSchool = vm::leaveActiveSchool,
+                                    onOpenSchoolHub = onOpenSchoolHub,
+                                    onSignOut = onSignOut,
                                     onShowMessage = vm::showMessage,
                                     onBack = { vm.navigate(NavSection.ROSTER) }
                                 )
@@ -401,18 +669,45 @@ fun ResultMakerApp(vm: ResultMakerViewModel = viewModel()) {
             )
         }
     }
+
+    if (askSignOut) {
+        AlertDialog(
+            onDismissRequest = { askSignOut = false },
+            title = { Text("সাইন আউট করবেন?") },
+            text = { Text("আপনার সকল ডেটা ক্লাউডে নিরাপদ থাকবে। পুনরায় Google দিয়ে সাইন-ইন করলে সব ফিরে পাবেন।") },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        askSignOut = false
+                        onSignOut()
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = RoseDanger),
+                    modifier = Modifier.testTag("topbar_confirm_signout_btn")
+                ) { Text("হ্যাঁ, সাইন আউট") }
+            },
+            dismissButton = {
+                TextButton(onClick = { askSignOut = false }) { Text("বাতিল") }
+            }
+        )
+    }
 }
 
 @Composable
 private fun ResultMakerTopBar(
     settings: Settings,
+    activeSchool: SchoolWorkspace,
+    currentUserId: String,
+    pendingRequestCount: Int,
     isSettings: Boolean,
     onBackFromSettings: () -> Unit,
     onOpenSettings: () -> Unit,
     onCsvImport: () -> Unit,
-    onAllPdf: () -> Unit
+    onAllPdf: () -> Unit,
+    onOpenSchoolHub: () -> Unit,
+    onRequestSignOut: () -> Unit
 ) {
     var menuOpen by remember { mutableStateOf(false) }
+    val isAdmin = activeSchool.isAdmin(currentUserId)
 
     TopAppBar(
         colors = TopAppBarDefaults.topAppBarColors(
@@ -431,16 +726,36 @@ private fun ResultMakerTopBar(
         },
         title = {
             Column {
-                Text(
-                    if (isSettings) "সেটিংস ও ব্যাকআপ" else "Result Maker",
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 18.sp,
-                    maxLines = 1,
-                    modifier = Modifier.testTag("top_bar_title")
-                )
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    Text(
+                        if (isSettings) "সেটিংস ও সদস্য" else "Result Maker",
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 18.sp,
+                        maxLines = 1,
+                        modifier = Modifier.testTag("top_bar_title")
+                    )
+                    if (!isSettings) {
+                        Surface(
+                            color = TealSoft,
+                            border = BorderStroke(1.dp, EmeraldGrade.copy(alpha = 0.35f)),
+                            shape = RoundedCornerShape(6.dp)
+                        ) {
+                            Text(
+                                text = "● লাইভ · ${bn(activeSchool.memberUids.size.toString())} জন",
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = EmeraldGrade,
+                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                            )
+                        }
+                    }
+                }
                 if (!isSettings) {
                     Text(
-                        settings.school.ifBlank { "প্রাথমিক বিদ্যালয় প্রতিবেদন" },
+                        "${settings.school.ifBlank { "প্রাথমিক বিদ্যালয়" }} · ${if (isAdmin) "অ্যাডমিন" else "শিক্ষক"}",
                         fontSize = 11.sp,
                         color = SlateMuted,
                         maxLines = 1,
@@ -455,7 +770,10 @@ private fun ResultMakerTopBar(
                     onClick = onOpenSettings,
                     modifier = Modifier.size(48.dp).testTag("top_bar_settings_btn")
                 ) {
-                    Icon(Icons.Rounded.Settings, contentDescription = "সেটিংস ও ব্যাকআপ")
+                    Icon(
+                        Icons.Rounded.Settings,
+                        contentDescription = if (pendingRequestCount > 0) "সেটিংস (${pendingRequestCount}টি নতুন অনুরোধ)" else "সেটিংস ও সদস্য"
+                    )
                 }
 
                 Box {
@@ -473,6 +791,17 @@ private fun ResultMakerTopBar(
                         DropdownMenuItem(
                             text = { Text("সব শ্রেণির সব শিক্ষার্থীর PDF") },
                             onClick = { menuOpen = false; onAllPdf() }
+                        )
+                        HorizontalDivider()
+                        DropdownMenuItem(
+                            text = { Text("বিদ্যালয় পরিবর্তন / যোগ") },
+                            onClick = { menuOpen = false; onOpenSchoolHub() },
+                            modifier = Modifier.testTag("menu_switch_school")
+                        )
+                        DropdownMenuItem(
+                            text = { Text("সাইন আউট", color = RoseDanger) },
+                            onClick = { menuOpen = false; onRequestSignOut() },
+                            modifier = Modifier.testTag("menu_sign_out")
                         )
                     }
                 }

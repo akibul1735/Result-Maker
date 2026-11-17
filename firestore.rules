@@ -1,0 +1,295 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // 1. Global Safety Net: Default-deny catch-all
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // 2. Hardened Global Primitives
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function isValidCode(code) {
+      return code is string && code.size() >= 6 && code.size() <= 12 && code.matches('^[A-Z0-9]+$');
+    }
+
+    function schoolData(schoolId) {
+      return get(/databases/$(database)/documents/schools/$(schoolId)).data;
+    }
+
+    function isSchoolMember(schoolId) {
+      return isSignedIn() && request.auth.uid in schoolData(schoolId).memberUids;
+    }
+
+    function isSchoolAdmin(schoolId) {
+      return isSignedIn() && request.auth.uid in schoolData(schoolId).adminUids;
+    }
+
+    // 3. Entity Validation Blueprints
+    function isValidUserProfile(data) {
+      return data.uid is string && data.uid.size() >= 1 && data.uid.size() <= 128 &&
+             data.displayName is string && data.displayName.size() <= 100 &&
+             data.email is string && data.email.size() <= 150 &&
+             (!('activeSchoolId' in data) || (data.activeSchoolId is string && data.activeSchoolId.size() <= 128)) &&
+             data.createdAt is timestamp && data.createdAt <= request.time &&
+             data.updatedAt is timestamp && data.updatedAt <= request.time;
+    }
+
+    function isValidSchoolCode(data) {
+      return isValidId(data.schoolId) &&
+             data.schoolName is string && data.schoolName.size() >= 1 && data.schoolName.size() <= 160 &&
+             data.ownerUid is string && data.ownerUid.size() >= 1 && data.ownerUid.size() <= 128 &&
+             data.adminUids is list && data.adminUids.size() >= 1 && data.adminUids.size() <= 20 &&
+             (data.adminUids.size() == 0 || data.adminUids[0] is string) &&
+             data.approvalRequired is bool &&
+             data.active is bool &&
+             data.createdAt is timestamp && data.createdAt <= request.time &&
+             data.updatedAt is timestamp && data.updatedAt <= request.time;
+    }
+
+    function isValidSchool(data) {
+      return data.ownerUid is string && data.ownerUid.size() >= 1 && data.ownerUid.size() <= 128 &&
+             isValidCode(data.joinCode) &&
+             data.approvalRequired is bool &&
+             data.memberUids is list && data.memberUids.size() >= 1 && data.memberUids.size() <= 50 &&
+             (data.memberUids.size() == 0 || data.memberUids[0] is string) &&
+             data.adminUids is list && data.adminUids.size() >= 1 && data.adminUids.size() <= 20 &&
+             (data.adminUids.size() == 0 || data.adminUids[0] is string) &&
+             data.memberProfiles is map && data.memberProfiles.size() >= 1 && data.memberProfiles.size() <= 50 &&
+             data.school is string && data.school.size() >= 1 && data.school.size() <= 160 &&
+             data.schoolAddress is string && data.schoolAddress.size() <= 240 &&
+             data.year is string && data.year.size() >= 1 && data.year.size() <= 40 &&
+             data.teachers is map && data.teachers.size() <= 10 &&
+             data.teacherMobiles is map && data.teacherMobiles.size() <= 10 &&
+             data.pdfFont is string && data.pdfFont.size() >= 1 && data.pdfFont.size() <= 40 &&
+             data.dpeLogo in ['simple', 'color'] &&
+             data.customFields is list && data.customFields.size() <= 30 &&
+             (data.customFields.size() == 0 || data.customFields[0] is map) &&
+             data.createdAt is timestamp && data.createdAt <= request.time &&
+             data.updatedAt is timestamp && data.updatedAt <= request.time;
+    }
+
+    function isValidJoinRequest(data) {
+      return data.uid is string && data.uid.size() >= 1 && data.uid.size() <= 128 &&
+             data.displayName is string && data.displayName.size() <= 100 &&
+             data.email is string && data.email.size() <= 150 &&
+             isValidId(data.schoolId) &&
+             data.schoolName is string && data.schoolName.size() >= 1 && data.schoolName.size() <= 160 &&
+             data.schoolAdminUids is list && data.schoolAdminUids.size() >= 1 && data.schoolAdminUids.size() <= 20 &&
+             (data.schoolAdminUids.size() == 0 || data.schoolAdminUids[0] is string) &&
+             data.status == 'PENDING' &&
+             data.createdAt is timestamp && data.createdAt <= request.time &&
+             data.updatedAt is timestamp && data.updatedAt <= request.time;
+    }
+
+    function isValidStudent(data) {
+      return data.cls is int && data.cls >= 1 && data.cls <= 5 &&
+             data.roll is int && data.roll >= 1 && data.roll <= 9999 &&
+             data.name is string && data.name.size() <= 120 &&
+             data.guardian is string && data.guardian.size() <= 120 &&
+             data.village is string && data.village.size() <= 120 &&
+             data.post is string && data.post.size() <= 120 &&
+             data.upazila is string && data.upazila.size() <= 120 &&
+             data.district is string && data.district.size() <= 120 &&
+             data.mobile is string && data.mobile.size() <= 30 &&
+             data.religion is string && data.religion.size() >= 1 && data.religion.size() <= 40 &&
+             data.m is map && data.m.size() <= 200 &&
+             data.x is map && data.x.size() <= 120 &&
+             data.updatedByUid is string && data.updatedByUid.size() >= 1 && data.updatedByUid.size() <= 128 &&
+             data.updatedByName is string && data.updatedByName.size() <= 100 &&
+             data.createdAt is timestamp && data.createdAt <= request.time &&
+             data.updatedAt is timestamp && data.updatedAt <= request.time;
+    }
+
+    // 4. Users Collection (PII strictly isolated to owner)
+    match /users/{userId} {
+      allow get, list: if isSignedIn() && request.auth.uid == userId;
+
+      allow create: if isSignedIn() &&
+                       isValidId(userId) &&
+                       request.auth.uid == userId &&
+                       incoming().uid == request.auth.uid &&
+                       incoming().keys().hasAll(['uid', 'displayName', 'email', 'createdAt', 'updatedAt']) &&
+                       incoming().keys().hasOnly(['uid', 'displayName', 'email', 'activeSchoolId', 'createdAt', 'updatedAt']) &&
+                       isValidUserProfile(incoming());
+
+      allow update: if isSignedIn() &&
+                       isValidId(userId) &&
+                       request.auth.uid == userId &&
+                       isValidUserProfile(incoming()) &&
+                       incoming().uid == existing().uid &&
+                       incoming().createdAt == existing().createdAt &&
+                       incoming().diff(existing()).affectedKeys().hasOnly(['displayName', 'email', 'activeSchoolId', 'updatedAt']);
+
+      allow delete: if isSignedIn() && isValidId(userId) && request.auth.uid == userId;
+    }
+
+    // 5. School Invite Code Lookup (get by exact code only; list forbidden)
+    match /schoolCodes/{code} {
+      allow get: if isSignedIn() && isValidCode(code);
+      allow list: if false;
+
+      allow create: if isSignedIn() &&
+                       isValidCode(code) &&
+                       incoming().ownerUid == request.auth.uid &&
+                       request.auth.uid in incoming().adminUids &&
+                       incoming().keys().hasAll(['schoolId', 'schoolName', 'ownerUid', 'adminUids', 'approvalRequired', 'active', 'createdAt', 'updatedAt']) &&
+                       incoming().keys().hasOnly(['schoolId', 'schoolName', 'ownerUid', 'adminUids', 'approvalRequired', 'active', 'createdAt', 'updatedAt']) &&
+                       isValidSchoolCode(incoming()) &&
+                       existsAfter(/databases/$(database)/documents/schools/$(incoming().schoolId));
+
+      allow update: if isSignedIn() &&
+                       isValidCode(code) &&
+                       isValidSchoolCode(incoming()) &&
+                       request.auth.uid in existing().adminUids &&
+                       incoming().schoolId == existing().schoolId &&
+                       incoming().ownerUid == existing().ownerUid &&
+                       incoming().createdAt == existing().createdAt &&
+                       incoming().diff(existing()).affectedKeys().hasOnly(['schoolName', 'adminUids', 'approvalRequired', 'active', 'updatedAt']);
+
+      allow delete: if isSignedIn() &&
+                       isValidCode(code) &&
+                       (request.auth.uid == existing().ownerUid || request.auth.uid in existing().adminUids);
+    }
+
+    // 6. Collaborative School Workspaces
+    match /schools/{schoolId} {
+      allow get: if isSignedIn() &&
+                    isValidId(schoolId) &&
+                    (request.auth.uid in existing().memberUids || request.auth.uid == existing().ownerUid);
+
+      allow list: if isSignedIn() && request.auth.uid in resource.data.memberUids;
+
+      allow create: if isSignedIn() &&
+                       isValidId(schoolId) &&
+                       incoming().ownerUid == request.auth.uid &&
+                       request.auth.uid in incoming().adminUids &&
+                       request.auth.uid in incoming().memberUids &&
+                       request.auth.uid in incoming().memberProfiles &&
+                       incoming().memberProfiles[request.auth.uid].uid == request.auth.uid &&
+                       incoming().memberProfiles[request.auth.uid].role == 'ADMIN' &&
+                       incoming().keys().hasAll(['ownerUid', 'joinCode', 'approvalRequired', 'memberUids', 'adminUids', 'memberProfiles', 'school', 'schoolAddress', 'year', 'teachers', 'teacherMobiles', 'pdfFont', 'dpeLogo', 'customFields', 'createdAt', 'updatedAt']) &&
+                       incoming().keys().hasOnly(['ownerUid', 'joinCode', 'approvalRequired', 'memberUids', 'adminUids', 'memberProfiles', 'school', 'schoolAddress', 'year', 'teachers', 'teacherMobiles', 'pdfFont', 'dpeLogo', 'customFields', 'createdAt', 'updatedAt']) &&
+                       isValidSchool(incoming()) &&
+                       existsAfter(/databases/$(database)/documents/schoolCodes/$(incoming().joinCode));
+
+      allow update: if isSignedIn() &&
+                       isValidId(schoolId) &&
+                       isValidSchool(incoming()) &&
+                       incoming().ownerUid == existing().ownerUid &&
+                       incoming().createdAt == existing().createdAt && (
+                         // Action 1: Admin updates school settings, code, or member list
+                         (
+                           request.auth.uid in existing().adminUids &&
+                           existing().ownerUid in incoming().adminUids &&
+                           existing().ownerUid in incoming().memberUids &&
+                           incoming().diff(existing()).affectedKeys().hasOnly([
+                             'joinCode', 'approvalRequired', 'memberUids', 'adminUids', 'memberProfiles',
+                             'school', 'schoolAddress', 'year', 'teachers', 'teacherMobiles',
+                             'pdfFont', 'dpeLogo', 'customFields', 'updatedAt'
+                           ])
+                         ) ||
+                         // Action 2: Self-join directly when approval is disabled
+                         (
+                           !existing().approvalRequired &&
+                           !(request.auth.uid in existing().memberUids) &&
+                           incoming().diff(existing()).affectedKeys().hasOnly(['memberUids', 'memberProfiles', 'updatedAt']) &&
+                           incoming().memberUids.size() == existing().memberUids.size() + 1 &&
+                           request.auth.uid in incoming().memberUids &&
+                           incoming().memberUids.hasAll(existing().memberUids) &&
+                           incoming().memberProfiles.diff(existing().memberProfiles).affectedKeys().hasOnly([request.auth.uid]) &&
+                           request.auth.uid in incoming().memberProfiles &&
+                           incoming().memberProfiles[request.auth.uid].uid == request.auth.uid &&
+                           incoming().memberProfiles[request.auth.uid].role == 'TEACHER' &&
+                           exists(/databases/$(database)/documents/schoolCodes/$(existing().joinCode))
+                         ) ||
+                         // Action 3: Non-owner member leaves school
+                         (
+                           request.auth.uid in existing().memberUids &&
+                           request.auth.uid != existing().ownerUid &&
+                           incoming().diff(existing()).affectedKeys().hasOnly(['memberUids', 'adminUids', 'memberProfiles', 'updatedAt']) &&
+                           !(request.auth.uid in incoming().memberUids) &&
+                           !(request.auth.uid in incoming().adminUids) &&
+                           !(request.auth.uid in incoming().memberProfiles) &&
+                           existing().memberUids.hasAll(incoming().memberUids) &&
+                           existing().adminUids.hasAll(incoming().adminUids) &&
+                           existing().memberProfiles.diff(incoming().memberProfiles).affectedKeys().hasOnly([request.auth.uid]) &&
+                           incoming().memberUids.size() == existing().memberUids.size() - 1
+                         )
+                       );
+
+      allow delete: if isSignedIn() && isValidId(schoolId) && request.auth.uid == existing().ownerUid;
+
+      // 7. Pending Join Requests Subcollection
+      match /joinRequests/{requestUid} {
+        allow get: if isSignedIn() &&
+                      isValidId(schoolId) &&
+                      isValidId(requestUid) &&
+                      (request.auth.uid == requestUid || isSchoolAdmin(schoolId));
+
+        allow list: if isSignedIn() &&
+                       (resource.data.uid == request.auth.uid || request.auth.uid in resource.data.schoolAdminUids);
+
+        allow create: if isSignedIn() &&
+                         isValidId(schoolId) &&
+                         isValidId(requestUid) &&
+                         request.auth.uid == requestUid &&
+                         incoming().uid == request.auth.uid &&
+                         incoming().schoolId == schoolId &&
+                         incoming().keys().hasAll(['uid', 'displayName', 'email', 'schoolId', 'schoolName', 'schoolAdminUids', 'status', 'createdAt', 'updatedAt']) &&
+                         incoming().keys().hasOnly(['uid', 'displayName', 'email', 'schoolId', 'schoolName', 'schoolAdminUids', 'status', 'createdAt', 'updatedAt']) &&
+                         isValidJoinRequest(incoming()) &&
+                         exists(/databases/$(database)/documents/schools/$(schoolId)) &&
+                         incoming().schoolAdminUids == schoolData(schoolId).adminUids;
+
+        allow update: if false;
+
+        allow delete: if isSignedIn() &&
+                         isValidId(schoolId) &&
+                         isValidId(requestUid) &&
+                         (request.auth.uid == requestUid || isSchoolAdmin(schoolId));
+      }
+
+      // 8. School Students Subcollection (Real-time concurrent field-level entry)
+      match /students/{studentId} {
+        allow get: if isValidId(schoolId) && isValidId(studentId) && isSchoolMember(schoolId);
+        allow list: if isValidId(schoolId) && isSchoolMember(schoolId);
+
+        allow create: if isValidId(schoolId) &&
+                         isValidId(studentId) &&
+                         isSchoolMember(schoolId) &&
+                         incoming().updatedByUid == request.auth.uid &&
+                         incoming().keys().hasAll(['cls', 'roll', 'name', 'guardian', 'village', 'post', 'upazila', 'district', 'mobile', 'religion', 'm', 'x', 'updatedByUid', 'updatedByName', 'createdAt', 'updatedAt']) &&
+                         incoming().keys().hasOnly(['cls', 'roll', 'name', 'guardian', 'village', 'post', 'upazila', 'district', 'mobile', 'religion', 'm', 'x', 'updatedByUid', 'updatedByName', 'createdAt', 'updatedAt']) &&
+                         isValidStudent(incoming());
+
+        allow update: if isValidId(schoolId) &&
+                         isValidId(studentId) &&
+                         isSchoolMember(schoolId) &&
+                         isValidStudent(incoming()) &&
+                         incoming().updatedByUid == request.auth.uid &&
+                         incoming().createdAt == existing().createdAt &&
+                         incoming().diff(existing()).affectedKeys().hasOnly([
+                           'cls', 'roll', 'name', 'guardian', 'village', 'post', 'upazila', 'district',
+                           'mobile', 'religion', 'm', 'x', 'updatedByUid', 'updatedByName', 'updatedAt'
+                         ]);
+
+        allow delete: if isValidId(schoolId) && isValidId(studentId) && isSchoolMember(schoolId);
+      }
+    }
+  }
+}
