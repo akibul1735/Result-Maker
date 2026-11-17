@@ -82,23 +82,15 @@ android {
         compose = true
     }
 
-    applicationVariants.all {
-        val variant = this
-        outputs.configureEach {
-            val out = this as? com.android.build.gradle.internal.api.BaseVariantOutputImpl
-            if (variant.buildType.name == "release") {
-                out?.outputFileName = "result_maker_release.apk"
-            } else if (variant.buildType.name == "debug") {
-                out?.outputFileName = "result_maker_debug.apk"
-            }
-        }
-    }
-
     packaging {
         resources {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
         }
     }
+}
+
+base {
+    archivesName.set("result_maker")
 }
 
 dependencies {
