@@ -215,7 +215,7 @@ export default function App() {
             <img
               src="/app-icon.png"
               alt="Result Maker icon"
-              className="w-8 h-8 rounded-lg object-cover border border-slate-200"
+              className="w-8 h-8 rounded-lg object-contain"
             />
             <span>Result Maker</span>
           </button>
