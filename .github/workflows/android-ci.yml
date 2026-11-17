@@ -2,7 +2,7 @@ name: Android CI Build
 
 on:
   push:
-    branches: [ main, develop ]
+    branches: [ main, master, develop ]
     paths:
       - 'app/**'
       - 'build.gradle.kts'
@@ -10,7 +10,7 @@ on:
       - 'gradle.properties'
       - '.github/workflows/android-ci.yml'
   pull_request:
-    branches: [ main ]
+    branches: [ main, master ]
     paths:
       - 'app/**'
       - 'build.gradle.kts'
@@ -47,11 +47,21 @@ jobs:
             gradle lintDebug assembleDebug --no-daemon
           fi
 
+      - name: Prepare Debug APK Output
+        run: |
+          mkdir -p debug-output
+          APK_SRC=$(find app/build/outputs/apk/debug -name "*.apk" | head -n 1)
+          if [ -z "$APK_SRC" ]; then
+            echo "::error::Debug APK not found."
+            exit 1
+          fi
+          cp "$APK_SRC" debug-output/result_maker_debug.apk
+
       - name: Upload Debug APK Artifact
         uses: actions/upload-artifact@v4
         with:
           name: result-maker-debug-apk
-          path: app/build/outputs/apk/debug/*.apk
+          path: debug-output/result_maker_debug.apk
           if-no-files-found: error
           retention-days: 14
 

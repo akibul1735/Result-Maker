@@ -2,7 +2,7 @@ name: Web Companion CI & Deploy
 
 on:
   push:
-    branches: [ main ]
+    branches: [ main, master ]
     paths:
       - 'src/**'
       - 'server.ts'
@@ -11,7 +11,7 @@ on:
       - 'vite.config.ts'
       - '.github/workflows/web-ci-deploy.yml'
   pull_request:
-    branches: [ main ]
+    branches: [ main, master ]
     paths:
       - 'src/**'
       - 'server.ts'
@@ -36,10 +36,14 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '22'
-          cache: 'npm'
 
       - name: Install dependencies
-        run: npm ci
+        run: |
+          if [ -f package-lock.json ]; then
+            npm ci
+          else
+            npm install
+          fi
 
       - name: TypeScript typecheck
         run: npm run lint
@@ -57,7 +61,7 @@ jobs:
   deploy-pages:
     name: Deploy Static Preview to GitHub Pages
     needs: verify-and-build
-    if: github.ref == 'refs/heads/main' && vars.ENABLE_GITHUB_PAGES == 'true'
+    if: (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master') && vars.ENABLE_GITHUB_PAGES == 'true'
     runs-on: ubuntu-latest
     environment:
       name: github-pages

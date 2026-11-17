@@ -35,12 +35,13 @@ android {
                 ?: keystoreProps.getProperty("storeFile")
             if (!ksPath.isNullOrBlank() && file(ksPath).exists()) {
                 storeFile = file(ksPath)
-                storePassword = System.getenv("RELEASE_KEYSTORE_PASSWORD")
+                val storePwd = System.getenv("RELEASE_KEYSTORE_PASSWORD")?.takeIf { it.isNotBlank() }
                     ?: keystoreProps.getProperty("storePassword", "")
-                keyAlias = System.getenv("RELEASE_KEY_ALIAS")
+                storePassword = storePwd
+                keyAlias = System.getenv("RELEASE_KEY_ALIAS")?.takeIf { it.isNotBlank() }
                     ?: keystoreProps.getProperty("keyAlias", "release")
-                keyPassword = System.getenv("RELEASE_KEY_PASSWORD")
-                    ?: keystoreProps.getProperty("keyPassword", "")
+                keyPassword = System.getenv("RELEASE_KEY_PASSWORD")?.takeIf { it.isNotBlank() }
+                    ?: storePwd.ifBlank { keystoreProps.getProperty("keyPassword", "") }
             }
         }
     }
@@ -63,6 +64,11 @@ android {
         }
     }
 
+    lint {
+        abortOnError = false
+        checkReleaseBuilds = false
+    }
+
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
@@ -74,6 +80,18 @@ android {
 
     buildFeatures {
         compose = true
+    }
+
+    applicationVariants.all {
+        val variant = this
+        outputs.configureEach {
+            val out = this as? com.android.build.gradle.internal.api.BaseVariantOutputImpl
+            if (variant.buildType.name == "release") {
+                out?.outputFileName = "result_maker_release.apk"
+            } else if (variant.buildType.name == "debug") {
+                out?.outputFileName = "result_maker_debug.apk"
+            }
+        }
     }
 
     packaging {

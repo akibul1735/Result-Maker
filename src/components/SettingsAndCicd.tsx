@@ -434,7 +434,7 @@ export const SettingsAndCicd: React.FC<SettingsAndCicdProps> = ({
             </div>
             <ul className="space-y-1 text-slate-600">
               <li>1. <span className="font-mono">android-ci.yml</span>: Push/PR-এ Lint + Debug APK বিল্ড ও আর্টিফ্যাক্ট আপলোড</li>
-              <li>2. <span className="font-mono">android-release-deploy.yml</span>: <span className="font-mono">v*.*.*</span> ট্যাগে Signed APK/AAB বিল্ড, Fingerprint যাচাই, GitHub Release এবং Play Store ডিপ্লয়</li>
+              <li>2. <span className="font-mono">android-release-deploy.yml</span>: <span className="font-mono">main</span> পুশ বা <span className="font-mono">v*</span> ট্যাগে Signed <span className="font-mono">result_maker_release.apk</span> ও AAB বিল্ড করে GitHub Releases-এ প্রকাশ</li>
               <li>3. <span className="font-mono">web-ci-deploy.yml</span>: TypeScript check, Vite build ও GitHub Pages ডিপ্লয়</li>
             </ul>
           </div>
