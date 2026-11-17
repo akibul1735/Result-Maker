@@ -469,15 +469,17 @@ export function renderCoverPage(
     11
   );
 
-  // 2-Column Dotted-Line Student Info Form
-  drawDottedField(ctx, "শিক্ষার্থীর নাম:", s.name, 456, 304, 801, 10.5);
+  // 2-Column Dotted-Line Student Info Form (compact 32pt row spacing, positioned in lower half)
+  const formY0 = 360;
+  const formDy = 32;
+  drawDottedField(ctx, "শিক্ষার্থীর নাম:", s.name, 456, formY0, 801, 10.5);
 
   drawDottedField(
     ctx,
     "শ্রেণি:",
     CLSN[s.cls - 1] ?? "প্রথম",
     456,
-    352,
+    formY0 + formDy,
     622,
     10.5
   );
@@ -486,25 +488,25 @@ export function renderCoverPage(
     "রোল/আইডি:",
     bn(String(s.roll)),
     632,
-    352,
+    formY0 + formDy,
     801,
     10.5
   );
 
-  drawDottedField(ctx, "গ্রাম:", s.village, 456, 400, 622, 10.5);
-  drawDottedField(ctx, "পোস্ট:", s.post ?? "", 632, 400, 801, 10.5);
+  drawDottedField(ctx, "গ্রাম:", s.village, 456, formY0 + formDy * 2, 622, 10.5);
+  drawDottedField(ctx, "পোস্ট:", s.post ?? "", 632, formY0 + formDy * 2, 801, 10.5);
 
-  drawDottedField(ctx, "উপজেলা/থানা:", s.upazila, 456, 448, 636, 10.5);
-  drawDottedField(ctx, "জেলা:", s.district, 646, 448, 801, 10.5);
+  drawDottedField(ctx, "উপজেলা/থানা:", s.upazila, 456, formY0 + formDy * 3, 636, 10.5);
+  drawDottedField(ctx, "জেলা:", s.district, 646, formY0 + formDy * 3, 801, 10.5);
 
-  drawDottedField(ctx, "অভিভাবকের নাম:", s.guardian, 456, 496, 656, 10.5);
-  drawDottedField(ctx, "মোবাইল:", bn(s.mobile), 664, 496, 801, 10.5);
+  drawDottedField(ctx, "অভিভাবকের নাম:", s.guardian, 456, formY0 + formDy * 4, 656, 10.5);
+  drawDottedField(ctx, "মোবাইল:", bn(s.mobile), 664, formY0 + formDy * 4, 801, 10.5);
 
   drawCenter(
     ctx,
     `(${CLSN[s.cls - 1] ?? "প্রথম"} শ্রেণি — শিখন অগ্রগতি প্রতিবেদন)`,
     frontCx,
-    544,
+    536,
     9.5,
     true,
     340,

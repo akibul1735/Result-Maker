@@ -438,26 +438,28 @@ object PdfGen {
         )
         dottedField(ctx, c, "শিক্ষাবর্ষ:", bn(st.year), 556f, 254f, 701f, 11f, f)
 
-        dottedField(ctx, c, "শিক্ষার্থীর নাম:", s.name, 456f, 304f, 801f, 10.5f, f)
+        val formY0 = 360f
+        val formDy = 32f
+        dottedField(ctx, c, "শিক্ষার্থীর নাম:", s.name, 456f, formY0, 801f, 10.5f, f)
 
-        dottedField(ctx, c, "শ্রেণি:", CLSN[s.cls - 1], 456f, 352f, 622f, 10.5f, f)
-        dottedField(ctx, c, "রোল/আইডি:", bn(s.roll.toString()), 632f, 352f, 801f, 10.5f, f)
+        dottedField(ctx, c, "শ্রেণি:", CLSN[s.cls - 1], 456f, formY0 + formDy, 622f, 10.5f, f)
+        dottedField(ctx, c, "রোল/আইডি:", bn(s.roll.toString()), 632f, formY0 + formDy, 801f, 10.5f, f)
 
-        dottedField(ctx, c, "গ্রাম:", s.village, 456f, 400f, 622f, 10.5f, f)
-        dottedField(ctx, c, "পোস্ট:", s.post, 632f, 400f, 801f, 10.5f, f)
+        dottedField(ctx, c, "গ্রাম:", s.village, 456f, formY0 + formDy * 2, 622f, 10.5f, f)
+        dottedField(ctx, c, "পোস্ট:", s.post, 632f, formY0 + formDy * 2, 801f, 10.5f, f)
 
-        dottedField(ctx, c, "উপজেলা/থানা:", s.upazila, 456f, 448f, 636f, 10.5f, f)
-        dottedField(ctx, c, "জেলা:", s.district, 646f, 448f, 801f, 10.5f, f)
+        dottedField(ctx, c, "উপজেলা/থানা:", s.upazila, 456f, formY0 + formDy * 3, 636f, 10.5f, f)
+        dottedField(ctx, c, "জেলা:", s.district, 646f, formY0 + formDy * 3, 801f, 10.5f, f)
 
-        dottedField(ctx, c, "অভিভাবকের নাম:", s.guardian, 456f, 496f, 656f, 10.5f, f)
-        dottedField(ctx, c, "মোবাইল:", bn(s.mobile), 664f, 496f, 801f, 10.5f, f)
+        dottedField(ctx, c, "অভিভাবকের নাম:", s.guardian, 456f, formY0 + formDy * 4, 656f, 10.5f, f)
+        dottedField(ctx, c, "মোবাইল:", bn(s.mobile), 664f, formY0 + formDy * 4, 801f, 10.5f, f)
 
         center(
             ctx,
             c,
             "(${CLSN[s.cls - 1]} শ্রেণি — শিখন অগ্রগতি প্রতিবেদন)",
             frontCx,
-            544f,
+            536f,
             9.5f,
             true,
             340f,
