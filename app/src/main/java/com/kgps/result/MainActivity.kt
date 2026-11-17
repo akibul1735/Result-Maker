@@ -572,8 +572,8 @@ fun StudioScreen(
     val coverBmp = remember(active, st.settings, showFoldGuide) {
         PdfGen.renderCoverBitmap(ctx, active, st.settings, showFoldGuide = showFoldGuide, scale = 1.8f)
     }
-    val marksBmp = remember(active, st.settings) {
-        PdfGen.renderMarksBitmap(ctx, active, st.settings, scale = 1.8f)
+    val marksBmp = remember(active, st.settings, showFoldGuide) {
+        PdfGen.renderMarksBitmap(ctx, active, st.settings, showFoldGuide = showFoldGuide, scale = 1.8f)
     }
 
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -747,6 +747,7 @@ fun EditScreen(
                     }
                     Field("অভিভাবকের নাম", s.guardian) { s = s.copy(guardian = it) }
                     Field("গ্রাম", s.village) { s = s.copy(village = it) }
+                    Field("পোস্ট অফিস", s.post) { s = s.copy(post = it) }
                     Field("উপজেলা", s.upazila) { s = s.copy(upazila = it) }
                     Field("জেলা", s.district) { s = s.copy(district = it) }
                     Field("মোবাইল নম্বর", s.mobile, number = true) { s = s.copy(mobile = it) }

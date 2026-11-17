@@ -6,27 +6,60 @@ import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.DashPathEffect
 import android.graphics.Paint
+import android.graphics.Path
+import android.graphics.RectF
 import android.graphics.Typeface
 import android.graphics.pdf.PdfDocument
 import java.io.OutputStream
 import java.util.concurrent.ConcurrentHashMap
+import kotlin.math.PI
+import kotlin.math.cos
+import kotlin.math.max
+import kotlin.math.sin
 
 /**
- * প্রতি শিক্ষার্থীর জন্য ২টি A4 Landscape পাতা:
- *  পাতা-১ (বাইরের পাশ): বাম অর্ধেক = ব্যাক কভার (মতামত/স্বাক্ষর/গ্রেড স্কেল), ডান অর্ধেক = ফ্রন্ট কভার (শিক্ষার্থীর তথ্য)
- *  পাতা-২ (ভেতরের পাশ): মূল নম্বর পাতা (নম্বর, গুণাবলি, উপস্থিতি)
- * মাঝখানে ভাঁজ করলে A5 বইয়ের মতো হবে।
+ * প্রতি শিক্ষার্থীর জন্য ২টি A4 Landscape পাতা (মাঝখানে x=421 বরাবর ভাঁজ করলে ৪-পাতার A5 বুকলেট):
+ *  পাতা-১ (বাইরের পাশ):
+ *    - বাম অর্ধেক (পৃষ্ঠা-৪ / ব্যাক কভার): মতামত ও স্বাক্ষর, গ্রেড স্কেল, শ্রেণি শিক্ষক ও NCTB মনোগ্রাম
+ *    - ডান অর্ধেক (পৃষ্ঠা-১ / ফ্রন্ট কভার): শিখন অগ্রগতি প্রতিবেদন ব্যানার, প্রাথমিক শিক্ষা অধিদপ্তর সিল, বিদ্যালয় ও শিক্ষার্থীর তথ্য (পোস্টসহ)
+ *  পাতা-২ (ভেতরের পাশ):
+ *    - বাম অর্ধেক (পৃষ্ঠা-২): বিষয় + ১ম ও ২য় প্রান্তিকের নম্বর এবং নিচে ব্যক্তিগত ও সামাজিক গুণাবলি
+ *    - ডান অর্ধেক (পৃষ্ঠা-৩): ৩য় প্রান্তিক + চূড়ান্ত ফলাফল এবং নিচে উপস্থিতি সারণি
  */
 object PdfGen {
     const val W = 842
     const val H = 595
-    private val stroke = Paint().apply { color = Color.BLACK; style = Paint.Style.STROKE; strokeWidth = 0.8f }
-    private val gray = Paint().apply { color = 0xFFEAEAEA.toInt(); style = Paint.Style.FILL }
+    private const val FOLD_X = W / 2f
+
+    private val stroke = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = 0xFF0F172A.toInt()
+        style = Paint.Style.STROKE
+        strokeWidth = 0.75f
+    }
+    private val thickFrame = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = 0xFF0F172A.toInt()
+        style = Paint.Style.STROKE
+        strokeWidth = 2.4f
+    }
+    private val gray = Paint().apply {
+        color = 0xFFE2E8F0.toInt()
+        style = Paint.Style.FILL
+    }
+    private val darkFill = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = 0xFF0F172A.toInt()
+        style = Paint.Style.FILL
+    }
     private val foldPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = 0xFF94A3B8.toInt()
         style = Paint.Style.STROKE
         strokeWidth = 1f
-        pathEffect = DashPathEffect(floatArrayOf(5f, 5f), 0f)
+        pathEffect = DashPathEffect(floatArrayOf(4f, 4f), 0f)
+    }
+    private val dottedPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = 0xFF334155.toInt()
+        style = Paint.Style.STROKE
+        strokeWidth = 0.85f
+        pathEffect = DashPathEffect(floatArrayOf(1.6f, 2.4f), 0f)
     }
 
     private val fontCache = ConcurrentHashMap<String, Typeface>()
@@ -59,8 +92,15 @@ object PdfGen {
         return Typeface.create(base, if (bold) Typeface.BOLD else Typeface.NORMAL)
     }
 
-    private fun tp(ctx: Context?, size: Float, bold: Boolean = false, fontId: String = "noto_serif") = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        textSize = size; color = Color.BLACK
+    private fun tp(
+        ctx: Context?,
+        size: Float,
+        bold: Boolean = false,
+        fontId: String = "noto_serif",
+        textColor: Int = 0xFF0F172A.toInt()
+    ) = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        textSize = size
+        color = textColor
         typeface = resolveTypeface(ctx, fontId, bold)
     }
 
@@ -70,40 +110,209 @@ object PdfGen {
             var cur = ""
             para.split(" ").forEach { word ->
                 val t = if (cur.isEmpty()) word else "$cur $word"
-                if (p.measureText(t) <= w || cur.isEmpty()) cur = t else { out.add(cur); cur = word }
+                if (p.measureText(t) <= w || cur.isEmpty()) cur = t else {
+                    out.add(cur)
+                    cur = word
+                }
             }
             out.add(cur)
         }
         return out
     }
 
-    private fun cell(ctx: Context?, c: Canvas, t: String, l: Float, top: Float, w: Float, h: Float,
-                     size: Float = 9f, bold: Boolean = false, fill: Boolean = false, fontId: String = "noto_serif") {
+    private fun drawPanelFrames(c: Canvas, showFoldGuide: Boolean) {
+        if (showFoldGuide) {
+            c.drawLine(FOLD_X, 6f, FOLD_X, H - 6f, foldPaint)
+        }
+        // বাম A5 ফ্রেম (18..409)
+        c.drawRect(18f, 18f, 409f, 577f, thickFrame)
+        c.drawRect(24f, 24f, 403f, 571f, stroke)
+
+        // ডান A5 ফ্রেম (433..824)
+        c.drawRect(433f, 18f, 824f, 577f, thickFrame)
+        c.drawRect(439f, 24f, 818f, 571f, stroke)
+    }
+
+    private fun cell(
+        ctx: Context?,
+        c: Canvas,
+        t: String,
+        l: Float,
+        top: Float,
+        w: Float,
+        h: Float,
+        size: Float = 9f,
+        bold: Boolean = false,
+        fill: Boolean = false,
+        fontId: String = "noto_serif"
+    ) {
         if (fill) c.drawRect(l, top, l + w, top + h, gray)
         c.drawRect(l, top, l + w, top + h, stroke)
         if (t.isEmpty()) return
-        val p = tp(ctx, size, bold, fontId); p.textAlign = Paint.Align.CENTER
+        val p = tp(ctx, size, bold, fontId)
+        p.textAlign = Paint.Align.CENTER
         val lines = t.split("\n")
-        while (lines.maxOf { p.measureText(it) } > w - 4 && p.textSize > 5f) p.textSize -= 0.5f
-        val lh = p.textSize * 1.25f
-        var y = top + (h - lh * lines.size) / 2 + p.textSize * 0.95f
-        lines.forEach { c.drawText(it, l + w / 2, y, p); y += lh }
+        while (lines.maxOf { p.measureText(it) } > w - 4 && p.textSize > 4.5f) {
+            p.textSize -= 0.4f
+        }
+        val lh = p.textSize * 1.24f
+        var y = top + (h - lh * lines.size) / 2 + p.textSize * 0.92f
+        lines.forEach {
+            c.drawText(it, l + w / 2, y, p)
+            y += lh
+        }
     }
 
-    private fun box(ctx: Context?, c: Canvas, t: String, l: Float, top: Float, w: Float, h: Float, size: Float = 8f, fontId: String = "noto_serif") {
+    private fun box(
+        ctx: Context?,
+        c: Canvas,
+        t: String,
+        l: Float,
+        top: Float,
+        w: Float,
+        h: Float,
+        size: Float = 7.2f,
+        fontId: String = "noto_serif"
+    ) {
         c.drawRect(l, top, l + w, top + h, stroke)
+        if (t.isEmpty()) return
         val p = tp(ctx, size, false, fontId)
-        var y = top + size + 3
-        wrap(t, p, w - 8).forEach { if (y < top + h) c.drawText(it, l + 4, y, p); y += size * 1.3f }
+        var lines = wrap(t, p, w - 7f)
+        while (lines.size * (p.textSize * 1.25f) > h - 4f && p.textSize > 5.2f) {
+            p.textSize -= 0.3f
+            lines = wrap(t, p, w - 7f)
+        }
+        val lh = p.textSize * 1.25f
+        val totalH = lines.size * lh
+        var y = top + max(p.textSize + 2f, (h - totalH) / 2 + p.textSize * 0.9f)
+        lines.forEach {
+            if (y < top + h - 2f) c.drawText(it, l + 3.5f, y, p)
+            y += lh
+        }
     }
 
-    private fun center(ctx: Context?, c: Canvas, t: String, cx: Float, y: Float, size: Float, bold: Boolean = false, maxW: Float = 340f, fontId: String = "noto_serif") {
-        val p = tp(ctx, size, bold, fontId); p.textAlign = Paint.Align.CENTER
-        while (p.measureText(t) > maxW && p.textSize > 6f) p.textSize -= 0.5f
+    private fun center(
+        ctx: Context?,
+        c: Canvas,
+        t: String,
+        cx: Float,
+        y: Float,
+        size: Float,
+        bold: Boolean = false,
+        maxW: Float = 340f,
+        fontId: String = "noto_serif",
+        textColor: Int = 0xFF0F172A.toInt()
+    ) {
+        val p = tp(ctx, size, bold, fontId, textColor)
+        p.textAlign = Paint.Align.CENTER
+        while (p.measureText(t) > maxW && p.textSize > 5.5f) {
+            p.textSize -= 0.5f
+        }
         c.drawText(t, cx, y, p)
     }
 
-    fun renderCoverBitmap(ctx: Context, s: Student, st: Settings, showFoldGuide: Boolean = true, scale: Float = 2f): Bitmap {
+    private fun dottedField(
+        ctx: Context?,
+        c: Canvas,
+        label: String,
+        value: String,
+        x: Float,
+        y: Float,
+        maxX: Float,
+        fontSize: Float = 10.5f,
+        fontId: String = "noto_serif"
+    ) {
+        val lp = tp(ctx, fontSize, false, fontId)
+        c.drawText(label, x, y, lp)
+        val lineStart = x + lp.measureText(label) + 5f
+        c.drawLine(lineStart, y + 3f, maxX, y + 3f, dottedPaint)
+
+        val v = value.trim()
+        if (v.isNotEmpty()) {
+            val vp = tp(ctx, fontSize, true, fontId)
+            val avail = max(20f, maxX - lineStart - 4f)
+            while (vp.measureText(v) > avail && vp.textSize > 6.5f) {
+                vp.textSize -= 0.4f
+            }
+            c.drawText(v, lineStart + 3f, y - 0.5f, vp)
+        }
+    }
+
+    private fun drawDpeEmblem(ctx: Context?, c: Canvas, cx: Float, cy: Float, r: Float, fontId: String) {
+        val sealStroke = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = 0xFF0F172A.toInt()
+            style = Paint.Style.STROKE
+            strokeWidth = 1.6f
+        }
+        c.drawCircle(cx, cy, r, sealStroke)
+        sealStroke.strokeWidth = 0.8f
+        c.drawCircle(cx, cy, r - 4f, sealStroke)
+        c.drawCircle(cx, cy, r - 14f, sealStroke)
+
+        sealStroke.strokeWidth = 1.1f
+        c.drawArc(RectF(cx - 7f, cy - 4f, cx + 7f, cy + 10f), 180f, 180f, false, sealStroke)
+
+        var deg = -150
+        while (deg <= -30) {
+            val rad = deg * PI / 180.0
+            c.drawLine(
+                (cx + cos(rad) * 9.0).toFloat(),
+                (cy + 3f + sin(rad) * 9.0).toFloat(),
+                (cx + cos(rad) * 12.5).toFloat(),
+                (cy + 3f + sin(rad) * 12.5).toFloat(),
+                sealStroke
+            )
+            deg += 30
+        }
+
+        val book = Path().apply {
+            moveTo(cx, cy + 5f)
+            quadTo(cx - 6f, cy + 2f, cx - 12f, cy + 5f)
+            lineTo(cx - 12f, cy + 12f)
+            quadTo(cx - 6f, cy + 9f, cx, cy + 12f)
+            quadTo(cx + 6f, cy + 9f, cx + 12f, cy + 12f)
+            lineTo(cx + 12f, cy + 5f)
+            quadTo(cx + 6f, cy + 2f, cx, cy + 5f)
+        }
+        c.drawPath(book, sealStroke)
+
+        center(ctx, c, "সবার জন্য মানসম্মত শিক্ষা", cx, cy - r + 11.5f, 6.2f, true, r * 1.6f, fontId)
+        center(ctx, c, "প্রাথমিক শিক্ষা অধিদপ্তর", cx, cy + r + 12f, 8.5f, true, 160f, fontId)
+    }
+
+    private fun drawNctbEmblem(ctx: Context?, c: Canvas, cx: Float, cy: Float, r: Float, fontId: String) {
+        val sealStroke = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = 0xFF0F172A.toInt()
+            style = Paint.Style.STROKE
+            strokeWidth = 1.4f
+        }
+        c.drawCircle(cx, cy, r, sealStroke)
+        sealStroke.strokeWidth = 0.7f
+        c.drawCircle(cx, cy, r - 3.5f, sealStroke)
+
+        sealStroke.strokeWidth = 1.1f
+        c.drawLine(cx, cy - 10f, cx, cy + 8f, sealStroke)
+
+        val wings = Path().apply {
+            moveTo(cx - 8f, cy + 4f)
+            quadTo(cx - 4f, cy + 1f, cx, cy + 4f)
+            quadTo(cx + 4f, cy + 1f, cx + 8f, cy + 4f)
+        }
+        c.drawPath(wings, sealStroke)
+        c.drawCircle(cx, cy - 6f, 3.2f, sealStroke)
+
+        val p = tp(ctx, 6.5f, true, fontId)
+        p.textAlign = Paint.Align.CENTER
+        c.drawText("NCTB", cx, cy + 12.5f, p)
+    }
+
+    fun renderCoverBitmap(
+        ctx: Context,
+        s: Student,
+        st: Settings,
+        showFoldGuide: Boolean = true,
+        scale: Float = 2f
+    ): Bitmap {
         val bmp = Bitmap.createBitmap((W * scale).toInt(), (H * scale).toInt(), Bitmap.Config.ARGB_8888)
         val c = Canvas(bmp)
         c.drawColor(Color.WHITE)
@@ -112,12 +321,18 @@ object PdfGen {
         return bmp
     }
 
-    fun renderMarksBitmap(ctx: Context, s: Student, st: Settings, scale: Float = 2f): Bitmap {
+    fun renderMarksBitmap(
+        ctx: Context,
+        s: Student,
+        st: Settings,
+        showFoldGuide: Boolean = true,
+        scale: Float = 2f
+    ): Bitmap {
         val bmp = Bitmap.createBitmap((W * scale).toInt(), (H * scale).toInt(), Bitmap.Config.ARGB_8888)
         val c = Canvas(bmp)
         c.drawColor(Color.WHITE)
         c.scale(scale, scale)
-        marks(ctx, c, s, st.pdfFont)
+        marks(ctx, c, s, st.pdfFont, showFoldGuide)
         return bmp
     }
 
@@ -126,161 +341,362 @@ object PdfGen {
         var n = 1
         students.forEach { s ->
             val p1 = doc.startPage(PdfDocument.PageInfo.Builder(W, H, n++).create())
-            cover(ctx, p1.canvas, s, st, showFoldGuide = false); doc.finishPage(p1)
+            cover(ctx, p1.canvas, s, st, showFoldGuide = false)
+            doc.finishPage(p1)
+
             val p2 = doc.startPage(PdfDocument.PageInfo.Builder(W, H, n++).create())
-            marks(ctx, p2.canvas, s, st.pdfFont); doc.finishPage(p2)
+            marks(ctx, p2.canvas, s, st.pdfFont, showFoldGuide = false)
+            doc.finishPage(p2)
         }
-        doc.writeTo(out); doc.close()
+        doc.writeTo(out)
+        doc.close()
     }
 
-    // ================= বাইরের পাশ =================
+    // ================= পাতা-১: বাইরের পাশ (বাম = ব্যাক কভার, ডান = ফ্রন্ট কভার) =================
     private fun cover(ctx: Context?, c: Canvas, s: Student, st: Settings, showFoldGuide: Boolean) {
         val f = st.pdfFont
-        if (showFoldGuide) {
-            c.drawLine(W / 2f, 10f, W / 2f, H - 10f, foldPaint)
-        }
+        drawPanelFrames(c, showFoldGuide)
 
-        // ---- বাম অর্ধেক: ব্যাক কভার ----
-        val x0 = 22f
-        center(ctx, c, "শ্রেণি শিক্ষকের সার্বিক মতামত ও স্বাক্ষর", x0 + 377f / 2, 32f, 12f, true, 370f, f)
-        val cw = floatArrayOf(44f, 125f, 70f, 70f, 68f)
-        val hd = listOf("প্রান্তিক", "শ্রেণি শিক্ষকের\nসার্বিক মতামত", "শ্রেণি শিক্ষকের\nস্বাক্ষর", "প্রধান শিক্ষকের\nস্বাক্ষর", "অভিভাবকের\nস্বাক্ষর")
-        var x = x0
-        hd.forEachIndexed { i, h -> cell(ctx, c, h, x, 42f, cw[i], 30f, 8.5f, true, true, f); x += cw[i] }
+        // ---- বাম অর্ধেক (x: 18..409): ব্যাক কভার ----
+        val bx0 = 32f
+        val bCw = floatArrayOf(34f, 134f, 65f, 65f, 65f) // 363
+        val bHd = listOf(
+            "প্রান্তিক",
+            "শ্রেণি শিক্ষকের\nসার্বিক মতামত",
+            "শ্রেণি শিক্ষকের\nস্বাক্ষর",
+            "প্রধান শিক্ষকের\nস্বাক্ষর",
+            "অভিভাবকের\nস্বাক্ষর"
+        )
+        var x = bx0
+        bHd.forEachIndexed { i, h ->
+            cell(ctx, c, h, x, 36f, bCw[i], 30f, 8f, true, true, f)
+            x += bCw[i]
+        }
         val tl = listOf("১ম\nপ্রান্তিক", "২য়\nপ্রান্তিক", "৩য়\nপ্রান্তিক")
         for (t in 1..3) {
-            val y = 72f + (t - 1) * 78f
-            x = x0
-            cell(ctx, c, tl[t - 1], x, y, cw[0], 78f, 8.5f, true, false, f); x += cw[0]
-            box(ctx, c, s.x["REM_$t"] ?: "", x, y, cw[1], 78f, 8f, f); x += cw[1]
-            for (i in 2..4) { cell(ctx, c, "", x, y, cw[i], 78f, 9f, false, false, f); x += cw[i] }
+            val y = 66f + (t - 1) * 66f
+            x = bx0
+            cell(ctx, c, tl[t - 1], x, y, bCw[0], 66f, 8f, true, false, f); x += bCw[0]
+            box(ctx, c, s.x["REM_$t"] ?: "", x, y, bCw[1], 66f, 7.5f, f); x += bCw[1]
+            for (i in 2..4) {
+                cell(ctx, c, "", x, y, bCw[i], 66f, 9f, false, false, f)
+                x += bCw[i]
+            }
         }
-        val gy = 322f
-        val gw = floatArrayOf(120f, 70f, 187f)
-        x = x0
-        listOf("প্রাপ্ত নম্বর", "গ্রেড", "শিখন অর্জন").forEachIndexed { i, h -> cell(ctx, c, h, x, gy, gw[i], 24f, 9.5f, true, true, f); x += gw[i] }
+
+        val gy = 282f
+        val gw = floatArrayOf(102f, 54f, 140f) // 296
+        val gx = bx0 + (363f - 296f) / 2f
+        x = gx
+        listOf("প্রাপ্ত নম্বর", "গ্রেড", "শিখন অর্জন").forEachIndexed { i, h ->
+            cell(ctx, c, h, x, gy, gw[i], 22f, 9f, true, true, f)
+            x += gw[i]
+        }
         val scale = listOf(
-            Triple("৮০%-১০০%", "A", "অতি উত্তম"), Triple("৬০%-৭৯%", "B", "উত্তম"),
-            Triple("৪০%-৫৯%", "C", "সন্তোষজনক"), Triple("০%-৩৯%", "D", "সহায়তা প্রয়োজন")
+            Triple("৮০%-১০০%", "A", "অতি উত্তম"),
+            Triple("৬০%-৭৯%", "B", "উত্তম"),
+            Triple("৪০%-৫৯%", "C", "সন্তোষজনক"),
+            Triple("০%-৩৯%", "D", "সহায়তা প্রয়োজন")
         )
         scale.forEachIndexed { r, (a, g, d) ->
-            x = x0; val y = gy + 24f + r * 26f
-            cell(ctx, c, a, x, y, gw[0], 26f, 10f, false, false, f); x += gw[0]
-            cell(ctx, c, g, x, y, gw[1], 26f, 11f, true, false, f); x += gw[1]
-            cell(ctx, c, d, x, y, gw[2], 26f, 10f, false, false, f)
+            x = gx
+            val y = gy + 22f + r * 23f
+            drawCellRow(ctx, c, a, g, d, x, y, gw, f)
         }
-        val tn = st.teachers[s.cls] ?: ""; val tm = st.teacherMobiles[s.cls] ?: ""
-        val lp = tp(ctx, 11f, false, f)
-        c.drawText("শ্রেণি শিক্ষকের নাম: $tn", x0, 480f, lp)
-        c.drawText("মোবাইল নম্বর: ${bn(tm)}", x0, 504f, lp)
-        center(ctx, c, "জাতীয় শিক্ষাক্রম ও পাঠ্যপুস্তক বোর্ড, বাংলাদেশ", x0 + 377f / 2, 560f, 11f, true, 370f, f)
 
-        // ---- ডান অর্ধেক: ফ্রন্ট কভার ----
-        val l = 441f; val w = 379f
-        val thick = Paint().apply { color = Color.BLACK; style = Paint.Style.STROKE; strokeWidth = 3f }
-        c.drawRect(l, 22f, l + w, 573f, thick)
-        c.drawRect(l + 7, 29f, l + w - 7, 566f, stroke)
-        val cx = l + w / 2
-        center(ctx, c, "শিখন অগ্রগতি প্রতিবেদন", cx, 105f, 26f, true, 340f, f)
-        center(ctx, c, "শিক্ষাবর্ষ: ${bn(st.year)}", cx, 135f, 13f, false, 340f, f)
-        center(ctx, c, st.school.ifBlank { "বিদ্যালয়ের নাম" }, cx, 175f, 17f, true, 345f, f)
-        center(ctx, c, "(${CLSN[s.cls - 1]} শ্রেণি)", cx, 202f, 13f, false, 340f, f)
-        val rows = listOf(
-            "শিক্ষার্থীর নাম" to s.name, "শ্রেণি" to CLSN[s.cls - 1], "রোল" to bn(s.roll.toString()),
-            "অভিভাবকের নাম" to s.guardian, "গ্রাম" to s.village, "উপজেলা" to s.upazila,
-            "জেলা" to s.district, "মোবাইল নম্বর" to bn(s.mobile)
+        val tn = st.teachers[s.cls] ?: ""
+        val tm = st.teacherMobiles[s.cls] ?: ""
+        dottedField(ctx, c, "শ্রেণি শিক্ষকের নাম:", tn, 32f, 438f, 240f, 9.5f, f)
+        dottedField(ctx, c, "মোবাইল নম্বর:", bn(tm), 246f, 438f, 395f, 9.5f, f)
+
+        val backCx = 18f + 391f / 2f
+        drawNctbEmblem(ctx, c, backCx, 488f, 19f, f)
+        center(ctx, c, "জাতীয় শিক্ষাক্রম ও পাঠ্যপুস্তক বোর্ড, বাংলাদেশ", backCx, 532f, 10.5f, true, 355f, f)
+        center(ctx, c, "প্রাথমিক শিক্ষা স্তর (১ম–৫ম শ্রেণি)", backCx, 549f, 8f, false, 355f, f, 0xFF475569.toInt())
+
+        // ---- ডান অর্ধেক (x: 433..824): ফ্রন্ট কভার ----
+        val frontCx = 433f + 391f / 2f // 628.5
+        val pillW = 312f
+        val pillH = 44f
+        val pillX = frontCx - pillW / 2f
+        val pillY = 46f
+        c.drawRoundRect(RectF(pillX, pillY, pillX + pillW, pillY + pillH), 22f, 22f, darkFill)
+        center(ctx, c, "শিখন অগ্রগতি প্রতিবেদন", frontCx, 75f, 20f, true, 290f, f, Color.WHITE)
+
+        drawDpeEmblem(ctx, c, frontCx, 144f, 34f, f)
+
+        dottedField(
+            ctx,
+            c,
+            "বিদ্যালয়ের নাম:",
+            st.school.ifBlank { "বিদ্যালয়ের নাম" },
+            456f,
+            224f,
+            801f,
+            11f,
+            f
         )
-        var y = 262f
-        rows.forEach { (lab, v) ->
-            val lpnt = tp(ctx, 12f, false, f); val vp = tp(ctx, 12f, true, f)
-            val tx = l + 22
-            c.drawText("$lab :", tx, y, lpnt)
-            val vx = tx + 112f
-            c.drawText(v, vx, y - 1, vp)
-            c.drawLine(vx, y + 4, l + w - 22, y + 4, stroke)
-            y += 36f
-        }
+        dottedField(ctx, c, "শিক্ষাবর্ষ:", bn(st.year), 556f, 254f, 701f, 11f, f)
+
+        dottedField(ctx, c, "শিক্ষার্থীর নাম:", s.name, 456f, 304f, 801f, 10.5f, f)
+
+        dottedField(ctx, c, "শ্রেণি:", CLSN[s.cls - 1], 456f, 352f, 622f, 10.5f, f)
+        dottedField(ctx, c, "রোল/আইডি:", bn(s.roll.toString()), 632f, 352f, 801f, 10.5f, f)
+
+        dottedField(ctx, c, "গ্রাম:", s.village, 456f, 400f, 622f, 10.5f, f)
+        dottedField(ctx, c, "পোস্ট:", s.post, 632f, 400f, 801f, 10.5f, f)
+
+        dottedField(ctx, c, "উপজেলা/থানা:", s.upazila, 456f, 448f, 636f, 10.5f, f)
+        dottedField(ctx, c, "জেলা:", s.district, 646f, 448f, 801f, 10.5f, f)
+
+        dottedField(ctx, c, "অভিভাবকের নাম:", s.guardian, 456f, 496f, 656f, 10.5f, f)
+        dottedField(ctx, c, "মোবাইল:", bn(s.mobile), 664f, 496f, 801f, 10.5f, f)
+
+        center(
+            ctx,
+            c,
+            "(${CLSN[s.cls - 1]} শ্রেণি — শিখন অগ্রগতি প্রতিবেদন)",
+            frontCx,
+            544f,
+            9.5f,
+            true,
+            340f,
+            f,
+            0xFF334155.toInt()
+        )
     }
 
-    // ================= ভেতরের পাশ =================
-    private fun marks(ctx: Context?, c: Canvas, s: Student, f: String) {
-        val subs = s.subs(); val L = 24f
-        center(ctx, c, "শিখন অগ্রগতি প্রতিবেদন — ${s.name}   |   শ্রেণি: ${CLSN[s.cls - 1]}   |   রোল: ${bn(s.roll.toString())}", W / 2f, 28f, 13f, true, 790f, f)
-        var y = 40f
-        val sw = 170f; val cw = (W - 2 * L - sw) / 12f
-        cell(ctx, c, "বিষয় (পূর্ণমান)", L, y, sw, 50f, 9.5f, true, true, f)
-        val ord = listOf("১ম", "২য়", "৩য়")
-        for (t in 0..2) cell(ctx, c, "${ord[t]} প্রান্তিক", L + sw + t * 3 * cw, y, 3 * cw, 22f, 9f, true, true, f)
-        cell(ctx, c, "চূড়ান্ত ফলাফল", L + sw + 9 * cw, y, 3 * cw, 22f, 9f, true, true, f)
-        val sub1 = listOf("ধারাবাহিক\nনম্বর", "সামষ্টিক\nনম্বর", "মোট\nনম্বর")
-        val sub2 = listOf("প্রান্তিকের\nগড় নম্বর", "বিষয়\nগ্রেড", "সমন্বিত\nগ্রেড")
-        for (t in 0..2) for (i in 0..2) cell(ctx, c, sub1[i], L + sw + (t * 3 + i) * cw, y + 22f, cw, 28f, 7.5f, true, true, f)
-        for (i in 0..2) cell(ctx, c, sub2[i], L + sw + (9 + i) * cw, y + 22f, cw, 28f, 7.5f, true, true, f)
-        y += 50f
-        val rh = 32f
+    private fun drawCellRow(
+        ctx: Context?,
+        c: Canvas,
+        a: String,
+        g: String,
+        d: String,
+        x: Float,
+        y: Float,
+        gw: FloatArray,
+        f: String
+    ) {
+        cell(ctx, c, a, x, y, gw[0], 23f, 9f, false, false, f)
+        cell(ctx, c, g, x + gw[0], y, gw[1], 23f, 10f, true, false, f)
+        cell(ctx, c, d, x + gw[0] + gw[1], y, gw[2], 23f, 9f, false, false, f)
+    }
+
+    // ================= পাতা-২: ভেতরের পাশ (বাম = ১ম+২য় ও গুণাবলি, ডান = ৩য়+চূড়ান্ত ও উপস্থিতি) =================
+    private fun marks(ctx: Context?, c: Canvas, s: Student, f: String, showFoldGuide: Boolean) {
+        drawPanelFrames(c, showFoldGuide)
+
+        val subs = s.subs()
         val anyData = (1..3).any { s.hasTerm(it) }
-        subs.forEachIndexed { i, sub ->
-            val ry = y + i * rh
-            cell(ctx, c, "${sub.bn} (${bn(sub.max.toString())})", L, ry, sw, rh, 9f, false, false, f)
-            for (t in 1..3) {
-                val has = s.hasSub(sub, t); val b = L + sw + (t - 1) * 3 * cw
-                cell(ctx, c, if (has) fmt(s.cont(sub, t)) else "", b, ry, cw, rh, 9f, false, false, f)
-                cell(ctx, c, if (sub.written == 0) "--" else if (has) fmt(s.wr(sub, t)) else "", b + cw, ry, cw, rh, 9f, false, false, f)
-                cell(ctx, c, if (has) fmt(s.total(sub, t)) else "", b + 2 * cw, ry, cw, rh, 9f, true, false, f)
-            }
-            val a = s.avg(sub)
-            cell(ctx, c, if (anyData) fmt(a) else "", L + sw + 9 * cw, ry, cw, rh, 9f, true, false, f)
-            cell(ctx, c, if (anyData) gradeOf(a / sub.max * 100) else "", L + sw + 10 * cw, ry, cw, rh, 10f, true, false, f)
-        }
-        // সমন্বিত গ্রেড (মার্জড ঘর)
-        val pct = s.overallPct()
-        cell(ctx, c, if (anyData) "${gradeOf(pct)}\n${fmt(pct)}%" else "", L + sw + 11 * cw, y, cw, rh * subs.size, 12f, true, false, f)
-        // মোট সারি
-        val ty = y + subs.size * rh
         val totMax = subs.sumOf { it.max }
-        cell(ctx, c, "সর্বমোট নম্বর (${bn(totMax.toString())})", L, ty, sw, rh, 9f, true, true, f)
-        for (t in 1..3) {
-            val b = L + sw + (t - 1) * 3 * cw; val has = s.hasTerm(t)
-            cell(ctx, c, if (has) fmt(subs.sumOf { s.cont(it, t) }) else "", b, ty, cw, rh, 9f, false, true, f)
-            cell(ctx, c, if (has) fmt(subs.sumOf { s.wr(it, t) }) else "", b + cw, ty, cw, rh, 9f, false, true, f)
-            cell(ctx, c, if (has) fmt(subs.sumOf { s.total(it, t) }) else "", b + 2 * cw, ty, cw, rh, 9f, true, true, f)
-        }
-        cell(ctx, c, if (anyData) fmt(subs.sumOf { s.avg(it) }) else "", L + sw + 9 * cw, ty, cw, rh, 9f, true, true, f)
-        cell(ctx, c, "", L + sw + 10 * cw, ty, cw, rh, 9f, false, true, f)
-        cell(ctx, c, "", L + sw + 11 * cw, ty, cw, rh, 9f, false, true, f)
 
-        // ---- ব্যক্তিগত ও সামাজিক গুণাবলি ----
-        var by = ty + rh + 18f
-        val qw = floatArrayOf(70f, 270f, 46f, 46f, 46f)  // মোট 478
-        var x = L
-        listOf("গুণাবলি", "বর্ণনা", "১ম প্রান্তিক", "২য় প্রান্তিক", "৩য় প্রান্তিক").forEachIndexed { i, h ->
-            cell(ctx, c, h, x, by, qw[i], 24f, 8.5f, true, true, f); x += qw[i]
+        // উভয় ভেতরের পাতার শীর্ষে সংক্ষিপ্ত পরিচিতি
+        val topLeftP = tp(ctx, 8.5f, true, f, 0xFF334155.toInt())
+        val topRightP = tp(ctx, 8.5f, true, f, 0xFF334155.toInt()).apply { textAlign = Paint.Align.RIGHT }
+        c.drawText("শিক্ষার্থীর নাম: ${s.name}", 28f, 38f, topLeftP)
+        c.drawText("শ্রেণি: ${CLSN[s.cls - 1]}", 399f, 38f, topRightP)
+
+        c.drawText("রোল/আইডি: ${bn(s.roll.toString())}", 443f, 38f, topLeftP)
+        c.drawText("ধর্ম: ${s.religion}", 814f, 38f, topRightP)
+
+        // ---- বাম ভেতরের অর্ধেক (x: 28..399) ----
+        val lx = 28f
+        val sw = 125f
+        val lcw = 41f // 125 + 6*41 = 371
+        val ty0 = 46f
+        val hdr1H = 18f
+        val hdr2H = 26f
+        val hdrH = hdr1H + hdr2H // 44
+        val rh = 27.5f
+
+        cell(ctx, c, "বিষয় (পূর্ণমান)", lx, ty0, sw, hdrH, 8.5f, true, true, f)
+        cell(ctx, c, "১ম প্রান্তিক", lx + sw, ty0, 3 * lcw, hdr1H, 8.5f, true, true, f)
+        cell(ctx, c, "২য় প্রান্তিক", lx + sw + 3 * lcw, ty0, 3 * lcw, hdr1H, 8.5f, true, true, f)
+
+        val termSubHdr = listOf("ধারাবাহিক\nনম্বর", "সামষ্টিক\nনম্বর", "মোট\nনম্বর")
+        for (t in 0..1) {
+            for (i in 0..2) {
+                cell(ctx, c, termSubHdr[i], lx + sw + (t * 3 + i) * lcw, ty0 + hdr1H, lcw, hdr2H, 7f, true, true, f)
+            }
         }
-        val q = listOf(
-            Triple("সক্রিয়তা", "ACT", "শিক্ষকের নির্দেশনামতো পাঠ্যপুস্তকের কাজ সম্পন্ন করা; বাড়ির কাজ সময়মতো করা; জোড়ায়/দলগত কাজে অংশগ্রহণ; প্রশ্নোত্তরে অংশ নেওয়া ইত্যাদি"),
+
+        val rowsStartY = ty0 + hdrH
+        subs.forEachIndexed { i, sub ->
+            val ry = rowsStartY + i * rh
+            cell(ctx, c, "${sub.bn} (${bn(sub.max.toString())})", lx, ry, sw, rh, 8f, false, false, f)
+            for (t in 1..2) {
+                val has = s.hasSub(sub, t)
+                val b = lx + sw + (t - 1) * 3 * lcw
+                val contTxt = if (sub.key == "ART") "......" else if (has) fmt(s.cont(sub, t)) else ""
+                val wrTxt = if (sub.written == 0) "......" else if (has) fmt(s.wr(sub, t)) else ""
+                val totTxt = if (has) fmt(s.total(sub, t)) else ""
+
+                cell(ctx, c, contTxt, b, ry, lcw, rh, 8f, false, false, f)
+                cell(ctx, c, wrTxt, b + lcw, ry, lcw, rh, 8f, false, false, f)
+                cell(ctx, c, totTxt, b + 2 * lcw, ry, lcw, rh, 8.5f, true, false, f)
+            }
+        }
+
+        // বাম মোট সারি
+        val ty = rowsStartY + subs.size * rh
+        val totalH = 26f
+        cell(ctx, c, "সর্বমোট নম্বর (${bn(totMax.toString())})", lx, ty, sw, totalH, 8f, true, true, f)
+        for (t in 1..2) {
+            val b = lx + sw + (t - 1) * 3 * lcw
+            val has = s.hasTerm(t)
+            val label = if (t == 1) "১ম প্রান্তিকে মোট" else "২য় প্রান্তিকে মোট"
+            cell(ctx, c, label, b, ty, 2 * lcw, totalH, 7.5f, true, true, f)
+            cell(
+                ctx,
+                c,
+                if (has) fmt(subs.sumOf { s.total(it, t) }) else "",
+                b + 2 * lcw,
+                ty,
+                lcw,
+                totalH,
+                8.5f,
+                true,
+                true,
+                f
+            )
+        }
+
+        // ---- নিচে বামে: ব্যক্তিগত ও সামাজিক গুণাবলি (width = 371) ----
+        val by = ty + totalH + 14f
+        val qw = floatArrayOf(52f, 187f, 44f, 44f, 44f)
+        val qTopH = 16f
+        val qSub1H = 13f
+        val qSub2H = 19f
+        val qHdrH = qTopH + qSub1H + qSub2H // 48
+        val qRowH = 42f
+
+        cell(ctx, c, "ব্যক্তিগত ও সামাজিক গুণাবলি", lx, by, 177f, qTopH, 7.5f, true, true, f)
+        cell(ctx, c, "অবস্থান", lx + 177f, by, 62f, qTopH, 7.5f, true, true, f)
+        cell(ctx, c, "উত্তম", lx + 239f, by, qw[2], qTopH, 7.2f, true, true, f)
+        cell(ctx, c, "সন্তোষজনক", lx + 239f + qw[2], by, qw[3], qTopH, 6.8f, true, true, f)
+        cell(ctx, c, "উন্নতি প্রয়োজন", lx + 239f + qw[2] + qw[3], by, qw[4], qTopH, 6.4f, true, true, f)
+
+        cell(ctx, c, "গুণাবলি", lx, by + qTopH, qw[0], qSub1H + qSub2H, 8f, true, true, f)
+        cell(ctx, c, "বর্ণনা", lx + qw[0], by + qTopH, qw[1], qSub1H + qSub2H, 8f, true, true, f)
+        val kkg = listOf("ক", "খ", "গ")
+        val termShort = listOf("১ম প্রান্তিক", "২য় প্রান্তিক", "৩য় প্রান্তিক")
+        for (i in 0..2) {
+            val cx = lx + qw[0] + qw[1] + i * qw[2 + i]
+            cell(ctx, c, kkg[i], cx, by + qTopH, qw[2 + i], qSub1H, 7.5f, true, true, f)
+            cell(ctx, c, termShort[i], cx, by + qTopH + qSub1H, qw[2 + i], qSub2H, 6.8f, true, true, f)
+        }
+
+        val traits = listOf(
+            Triple("সক্রিয়তা", "ACT", "শিক্ষকের নির্দেশনামতো পাঠ্যপুস্তকের কাজ সম্পন্ন করা; বাড়ির কাজ সময়মতো করা; জোড়ায় বা দলগত কাজে অংশ নেওয়া; প্রশ্নোত্তরে অংশগ্রহণ ইত্যাদি"),
             Triple("শৃঙ্খলা", "DISC", "বিদ্যালয়ে নিয়মিত উপস্থিত থাকা; বিদ্যালয়ের নিয়ম-শৃঙ্খলা মেনে চলা; পরিষ্কার-পরিচ্ছন্ন থাকা ইত্যাদি"),
-            Triple("আচরণ", "COND", "শিক্ষক/বড়দের সম্মান করা; ছোটদের স্নেহ করা; সহযোগিতা করা; ভুল হলে স্বীকার করা; অন্যকে কষ্ট না দেওয়া ইত্যাদি")
+            Triple("আচরণ", "COND", "শিক্ষক ও বড়দের সম্মান করা; ছোটদের স্নেহ করা; সহযোগিতা করা; ভুল হলে তা স্বীকার করা; অন্যকে কষ্ট না দেওয়া ইত্যাদি")
         )
-        q.forEachIndexed { r, (lab, k, d) ->
-            val yy = by + 24f + r * 38f; x = L
-            cell(ctx, c, lab, x, yy, qw[0], 38f, 9f, true, false, f); x += qw[0]
-            box(ctx, c, d, x, yy, qw[1], 38f, 7f, f); x += qw[1]
-            for (t in 1..3) { cell(ctx, c, s.x["${k}_$t"] ?: "", x, yy, qw[1 + t], 38f, 11f, true, false, f); x += qw[1 + t] }
+        traits.forEachIndexed { r, (lab, k, d) ->
+            val yy = by + qHdrH + r * qRowH
+            var cx = lx
+            cell(ctx, c, lab, cx, yy, qw[0], qRowH, 8.5f, true, false, f); cx += qw[0]
+            box(ctx, c, d, cx, yy, qw[1], qRowH, 6.8f, f); cx += qw[1]
+            for (t in 1..3) {
+                cell(ctx, c, s.x["${k}_$t"] ?: "", cx, yy, qw[1 + t], qRowH, 10f, true, false, f)
+                cx += qw[1 + t]
+            }
         }
-        val lg = tp(ctx, 8f, false, f)
-        c.drawText("ক = উত্তম,  খ = সন্তোষজনক,  গ = উন্নতি প্রয়োজন", L, by + 24f + 3 * 38f + 12f, lg)
+        val lg = tp(ctx, 7.5f, false, f, 0xFF334155.toInt())
+        c.drawText("ক = উত্তম,  খ = সন্তোষজনক,  গ = উন্নতি প্রয়োজন", lx, by + qHdrH + 3 * qRowH + 11f, lg)
 
-        // ---- উপস্থিতি ----
-        val ax = L + 478f + 16f
-        val aw = floatArrayOf(108f, 64f, 64f, 64f)
-        x = ax
-        listOf("উপস্থিতি", "১ম প্রান্তিক", "২য় প্রান্তিক", "৩য় প্রান্তিক").forEachIndexed { i, h ->
-            cell(ctx, c, h, x, by, aw[i], 24f, 8.5f, true, true, f); x += aw[i]
+        // ---- ডান ভেতরের অর্ধেক (x: 443..814) ----
+        val rx = 443f
+        val rW = 371f
+        val rcw = rW / 6f
+
+        cell(ctx, c, "৩য় প্রান্তিক", rx, ty0, 3 * rcw, hdr1H, 8.5f, true, true, f)
+        cell(ctx, c, "চূড়ান্ত ফলাফল", rx + 3 * rcw, ty0, 3 * rcw, hdr1H, 8.5f, true, true, f)
+
+        val finalSubHdr = listOf("প্রান্তিকের\nগড় নম্বর", "বিষয়\nগ্রেড", "সমন্বিত\nগ্রেড")
+        for (i in 0..2) {
+            cell(ctx, c, termSubHdr[i], rx + i * rcw, ty0 + hdr1H, rcw, hdr2H, 7f, true, true, f)
+            cell(ctx, c, finalSubHdr[i], rx + (3 + i) * rcw, ty0 + hdr1H, rcw, hdr2H, 7f, true, true, f)
         }
-        val labels = listOf("মোট কার্যদিবস", "শিক্ষার্থীর উপস্থিতি", "উপস্থিতির হার")
-        labels.forEachIndexed { r, lab ->
-            val yy = by + 24f + r * 38f; x = ax
-            cell(ctx, c, lab, x, yy, aw[0], 38f, 9f, true, false, f); x += aw[0]
+
+        subs.forEachIndexed { i, sub ->
+            val ry = rowsStartY + i * rh
+            val has3 = s.hasSub(sub, 3)
+            val cont3 = if (sub.key == "ART") "......" else if (has3) fmt(s.cont(sub, 3)) else ""
+            val wr3 = if (sub.written == 0) "......" else if (has3) fmt(s.wr(sub, 3)) else ""
+            val tot3 = if (has3) fmt(s.total(sub, 3)) else ""
+
+            cell(ctx, c, cont3, rx, ry, rcw, rh, 8f, false, false, f)
+            cell(ctx, c, wr3, rx + rcw, ry, rcw, rh, 8f, false, false, f)
+            cell(ctx, c, tot3, rx + 2 * rcw, ry, rcw, rh, 8.5f, true, false, f)
+
+            val a = s.avg(sub)
+            cell(ctx, c, if (anyData) fmt(a) else "", rx + 3 * rcw, ry, rcw, rh, 8.5f, true, false, f)
+            cell(ctx, c, if (anyData) gradeOf(a / sub.max * 100) else "", rx + 4 * rcw, ry, rcw, rh, 9.5f, true, false, f)
+        }
+
+        val pct = s.overallPct()
+        cell(
+            ctx,
+            c,
+            if (anyData) "${gradeOf(pct)}\n${fmt(pct)}%" else "",
+            rx + 5 * rcw,
+            rowsStartY,
+            rcw,
+            rh * subs.size,
+            11.5f,
+            true,
+            false,
+            f
+        )
+
+        val has3Term = s.hasTerm(3)
+        cell(ctx, c, "৩য় প্রান্তিকে মোট", rx, ty, 2 * rcw, totalH, 7.5f, true, true, f)
+        cell(
+            ctx,
+            c,
+            if (has3Term) fmt(subs.sumOf { s.total(it, 3) }) else "",
+            rx + 2 * rcw,
+            ty,
+            rcw,
+            totalH,
+            8.5f,
+            true,
+            true,
+            f
+        )
+        cell(ctx, c, "প্রান্তিকের গড় মোট", rx + 3 * rcw, ty, rcw, totalH, 7f, true, true, f)
+        cell(
+            ctx,
+            c,
+            if (anyData) fmt(subs.sumOf { s.avg(it) }) else "",
+            rx + 4 * rcw,
+            ty,
+            rcw,
+            totalH,
+            8.5f,
+            true,
+            true,
+            f
+        )
+        cell(ctx, c, "", rx + 5 * rcw, ty, rcw, totalH, 8f, false, true, f)
+
+        // ---- নিচে ডানে: উপস্থিতি (গুণাবলির সাথে সারিবদ্ধ) ----
+        val aw = floatArrayOf(125f, 82f, 82f, 82f)
+        val attTopH = 20f
+        val attSubH = 28f
+        cell(ctx, c, "উপস্থিতি", rx, by, rW, attTopH, 9f, true, true, f)
+        var ax = rx
+        listOf("বিবরণ", "১ম প্রান্তিক", "২য় প্রান্তিক", "৩য় প্রান্তিক").forEachIndexed { i, h ->
+            cell(ctx, c, h, ax, by + attTopH, aw[i], attSubH, 8f, true, true, f)
+            ax += aw[i]
+        }
+
+        val attLabels = listOf("মোট কার্যদিবস", "শিক্ষার্থীর উপস্থিতি", "উপস্থিতির হার")
+        attLabels.forEachIndexed { r, lab ->
+            val yy = by + qHdrH + r * qRowH
+            ax = rx
+            cell(ctx, c, lab, ax, yy, aw[0], qRowH, 8.5f, true, false, f)
+            ax += aw[0]
             for (t in 1..3) {
                 val d = s.x["DAYS_$t"]?.let { fromBn(it).toDoubleOrNull() }
                 val p = s.x["PRES_$t"]?.let { fromBn(it).toDoubleOrNull() }
@@ -289,8 +705,10 @@ object PdfGen {
                     1 -> p?.let { fmt(it) } ?: ""
                     else -> if (d != null && p != null && d > 0) "${fmt(p / d * 100)}%" else ""
                 }
-                cell(ctx, c, txt, x, yy, aw[t], 38f, 10f, false, false, f); x += aw[t]
+                cell(ctx, c, txt, ax, yy, aw[t], qRowH, 9.5f, r == 2, false, f)
+                ax += aw[t]
             }
         }
+        c.drawText("উপস্থিতির হার = (শিক্ষার্থীর উপস্থিতি ÷ মোট কার্যদিবস) × ১০০%", rx, by + qHdrH + 3 * qRowH + 11f, lg)
     }
 }

@@ -90,7 +90,7 @@ export const ReportStudio: React.FC<ReportStudioProps> = ({
         const ctx = canvas.getContext("2d");
         if (ctx) {
           ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-          renderMarksPage(ctx, activeStudent, settings.pdfFont);
+          renderMarksPage(ctx, activeStudent, settings.pdfFont, showFoldGuide);
         }
       }
     };

@@ -5,6 +5,7 @@ export interface Student {
   name: string;
   guardian: string;
   village: string;
+  post?: string;
   upazila: string;
   district: string;
   mobile: string;
@@ -241,6 +242,7 @@ export function createEmptyStudent(cls: number, roll: number): Student {
     name: "",
     guardian: "",
     village: "",
+    post: "",
     upazila: "",
     district: "",
     mobile: "",
@@ -257,6 +259,7 @@ const BASE_COLS = [
   "name",
   "guardian",
   "village",
+  "post",
   "upazila",
   "district",
   "mobile",
@@ -334,6 +337,7 @@ export function fromJson(txt: string): { students: Student[]; settings: Settings
     name: typeof j.name === "string" ? j.name : "",
     guardian: typeof j.guardian === "string" ? j.guardian : "",
     village: typeof j.village === "string" ? j.village : "",
+    post: typeof j.post === "string" ? j.post : "",
     upazila: typeof j.upazila === "string" ? j.upazila : "",
     district: typeof j.district === "string" ? j.district : "",
     mobile: typeof j.mobile === "string" ? j.mobile : "",
@@ -362,6 +366,7 @@ export function toCsv(list: Student[]): string {
       s.name,
       s.guardian,
       s.village,
+      s.post ?? "",
       s.upazila,
       s.district,
       s.mobile,
@@ -454,6 +459,7 @@ export function importCsv(txt: string, existing: Student[]): Student[] {
       name: g("name") || base.name,
       guardian: g("guardian") || base.guardian,
       village: g("village") || base.village,
+      post: g("post") || base.post || "",
       upazila: g("upazila") || base.upazila,
       district: g("district") || base.district,
       mobile: g("mobile") || base.mobile,
@@ -495,6 +501,7 @@ export const SAMPLE_STUDENTS: Student[] = [
     name: "তানভীর আহমেদ",
     guardian: "মোঃ করিম উদ্দিন",
     village: "কামারখালী",
+    post: "কামারখালী",
     upazila: "মধুখালী",
     district: "ফরিদপুর",
     mobile: "01711223344",
@@ -538,6 +545,7 @@ export const SAMPLE_STUDENTS: Student[] = [
     name: "নুসরাত জাহান মিম",
     guardian: "মোঃ শফিকুল ইসলাম",
     village: "গোয়ালপাড়া",
+    post: "কামারখালী",
     upazila: "মধুখালী",
     district: "ফরিদপুর",
     mobile: "01819445566",
@@ -584,6 +592,7 @@ export const SAMPLE_STUDENTS: Student[] = [
     name: "অনিক চক্রবর্তী",
     guardian: "সুমন চক্রবর্তী",
     village: "বাগাট",
+    post: "বাগাট",
     upazila: "মধুখালী",
     district: "ফরিদপুর",
     mobile: "01915667788",

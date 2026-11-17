@@ -7,7 +7,7 @@ import java.io.File
 import java.util.UUID
 
 object Repo {
-    private val BASE = listOf("cls", "roll", "name", "guardian", "village", "upazila", "district", "mobile", "religion")
+    private val BASE = listOf("cls", "roll", "name", "guardian", "village", "post", "upazila", "district", "mobile", "religion")
     val MARK_KEYS: List<String> = listOf("BAN", "ENG", "MATH", "SOC", "SCI", "BGW", "REL", "PE", "ART").flatMap { s ->
         (1..3).flatMap { t -> listOf("TB", "ACT", "LANG", "CT", "WR", "TOTAL").map { c -> mk(s, t, c) } }
     }
@@ -26,7 +26,7 @@ object Repo {
         list.forEach { s ->
             a.put(JSONObject().apply {
                 put("id", s.id); put("cls", s.cls); put("roll", s.roll); put("name", s.name)
-                put("guardian", s.guardian); put("village", s.village); put("upazila", s.upazila)
+                put("guardian", s.guardian); put("village", s.village); put("post", s.post); put("upazila", s.upazila)
                 put("district", s.district); put("mobile", s.mobile); put("religion", s.religion)
                 put("m", JSONObject().also { j -> s.m.forEach { (k, v) -> j.put(k, v) } })
                 put("x", JSONObject().also { j -> s.x.forEach { (k, v) -> j.put(k, v) } })
@@ -53,7 +53,7 @@ object Repo {
             Student(
                 id = j.optString("id", UUID.randomUUID().toString()), cls = j.optInt("cls", 1), roll = j.optInt("roll"),
                 name = j.optString("name"), guardian = j.optString("guardian"), village = j.optString("village"),
-                upazila = j.optString("upazila"), district = j.optString("district"), mobile = j.optString("mobile"),
+                post = j.optString("post"), upazila = j.optString("upazila"), district = j.optString("district"), mobile = j.optString("mobile"),
                 religion = j.optString("religion", "ইসলাম"),
                 m = mj?.keys()?.asSequence()?.associateWith { mj.getDouble(it) } ?: emptyMap(),
                 x = xj?.keys()?.asSequence()?.associateWith { xj.getString(it) } ?: emptyMap()
@@ -77,7 +77,7 @@ object Repo {
         val sb = StringBuilder("\uFEFF")
         sb.append(header().joinToString(",")).append("\n")
         list.sortedWith(compareBy({ it.cls }, { it.roll })).forEach { s ->
-            val row = listOf(s.cls.toString(), s.roll.toString(), s.name, s.guardian, s.village, s.upazila, s.district, s.mobile, s.religion) +
+            val row = listOf(s.cls.toString(), s.roll.toString(), s.name, s.guardian, s.village, s.post, s.upazila, s.district, s.mobile, s.religion) +
                 MARK_KEYS.map { k -> s.m[k]?.let { fmtEn(it) } ?: "" } +
                 TEXT_KEYS.map { k -> s.x[k] ?: "" }
             sb.append(row.joinToString(",") { q(it) }).append("\n")
@@ -124,7 +124,7 @@ object Repo {
             val base = if (pos >= 0) out[pos] else Student(UUID.randomUUID().toString(), cls, roll, "")
             val upd = base.copy(
                 name = g("name").ifBlank { base.name }, guardian = g("guardian").ifBlank { base.guardian },
-                village = g("village").ifBlank { base.village }, upazila = g("upazila").ifBlank { base.upazila },
+                village = g("village").ifBlank { base.village }, post = g("post").ifBlank { base.post }, upazila = g("upazila").ifBlank { base.upazila },
                 district = g("district").ifBlank { base.district }, mobile = g("mobile").ifBlank { base.mobile },
                 religion = g("religion").ifBlank { base.religion },
                 m = base.m + m, x = base.x + x

@@ -314,18 +314,33 @@ export const StudentEditor: React.FC<StudentEditorProps> = ({
               />
             </div>
 
-            <div>
-              <label className="block text-xs font-medium text-slate-600 mb-1.5">
-                গ্রাম / মহল্লা
-              </label>
-              <input
-                type="text"
-                value={draft.village}
-                onChange={(e) =>
-                  updateDraft((p) => ({ ...p, village: e.target.value }))
-                }
-                className="w-full px-3.5 py-2.5 text-sm rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-teal-700/20 focus:border-teal-700"
-              />
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="block text-xs font-medium text-slate-600 mb-1.5">
+                  গ্রাম / মহল্লা
+                </label>
+                <input
+                  type="text"
+                  value={draft.village}
+                  onChange={(e) =>
+                    updateDraft((p) => ({ ...p, village: e.target.value }))
+                  }
+                  className="w-full px-3.5 py-2.5 text-sm rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-teal-700/20 focus:border-teal-700"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-slate-600 mb-1.5">
+                  পোস্ট অফিস
+                </label>
+                <input
+                  type="text"
+                  value={draft.post || ""}
+                  onChange={(e) =>
+                    updateDraft((p) => ({ ...p, post: e.target.value }))
+                  }
+                  className="w-full px-3.5 py-2.5 text-sm rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-teal-700/20 focus:border-teal-700"
+                />
+              </div>
             </div>
 
             <div className="grid grid-cols-2 gap-4">
