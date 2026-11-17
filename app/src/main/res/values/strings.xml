@@ -1,3 +1,9 @@
 <resources>
     <string name="app_name">Result Maker</string>
+    <string name="nav_roster">শিক্ষার্থী তালিকা</string>
+    <string name="nav_sheet">শিট এন্ট্রি</string>
+    <string name="nav_studio">রিপোর্ট স্টুডিও</string>
+    <string name="nav_assistant">AI সহায়ক</string>
+    <string name="nav_settings">সেটিংস</string>
+    <string name="ai_firebase_notice">নোট: লাইভ Gemini AI (চ্যাট, নম্বরপত্র ছবি স্ক্যান ও মতামত খসড়া) ব্যবহারের জন্য Firebase AI Logic প্রয়োজন। বর্তমানে নমুনা (Placeholder) উত্তর দেখানো হচ্ছে।</string>
 </resources>

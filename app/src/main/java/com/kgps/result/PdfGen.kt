@@ -11,6 +11,15 @@ import android.graphics.Path
 import android.graphics.RectF
 import android.graphics.Typeface
 import android.graphics.pdf.PdfDocument
+import android.os.Bundle
+import android.os.CancellationSignal
+import android.os.ParcelFileDescriptor
+import android.print.PageRange
+import android.print.PrintAttributes
+import android.print.PrintDocumentAdapter
+import android.print.PrintDocumentInfo
+import android.print.PrintManager
+import java.io.FileOutputStream
 import java.io.OutputStream
 import java.util.concurrent.ConcurrentHashMap
 import kotlin.math.PI
@@ -326,6 +335,55 @@ object PdfGen {
         }
         doc.writeTo(out)
         doc.close()
+    }
+
+    fun printStudents(ctx: Context, students: List<Student>, st: Settings, jobName: String) {
+        if (students.isEmpty()) return
+        val printManager = ctx.getSystemService(Context.PRINT_SERVICE) as? PrintManager ?: return
+        val adapter = object : PrintDocumentAdapter() {
+            override fun onLayout(
+                oldAttributes: PrintAttributes?,
+                newAttributes: PrintAttributes,
+                cancellationSignal: CancellationSignal?,
+                callback: LayoutResultCallback,
+                extras: Bundle?
+            ) {
+                if (cancellationSignal?.isCanceled == true) {
+                    callback.onLayoutCancelled()
+                    return
+                }
+                val info = PrintDocumentInfo.Builder(jobName)
+                    .setContentType(PrintDocumentInfo.CONTENT_TYPE_DOCUMENT)
+                    .setPageCount(students.size * 2)
+                    .build()
+                callback.onLayoutFinished(info, true)
+            }
+
+            override fun onWrite(
+                pages: Array<out PageRange>?,
+                destination: ParcelFileDescriptor,
+                cancellationSignal: CancellationSignal?,
+                callback: WriteResultCallback
+            ) {
+                if (cancellationSignal?.isCanceled == true) {
+                    callback.onWriteCancelled()
+                    return
+                }
+                try {
+                    FileOutputStream(destination.fileDescriptor).use { fos ->
+                        write(ctx, students, st, fos)
+                    }
+                    callback.onWriteFinished(arrayOf(PageRange.ALL_PAGES))
+                } catch (e: Exception) {
+                    callback.onWriteFailed(e.message)
+                }
+            }
+        }
+        val attrs = PrintAttributes.Builder()
+            .setMediaSize(PrintAttributes.MediaSize.ISO_A4.asLandscape())
+            .setMinMargins(PrintAttributes.Margins.NO_MARGINS)
+            .build()
+        printManager.print(jobName, adapter, attrs)
     }
 
     // ================= পাতা-১: বাইরের পাশ (বাম = ব্যাক কভার, ডান = ফ্রন্ট কভার) =================

@@ -43,8 +43,9 @@ data class PdfFontInfo(val id: String, val labelBn: String, val descriptionBn: S
 
 val PDF_FONT_LIST = listOf(
     PdfFontInfo("noto_serif", "নোতো সেরিফ বাংলা (প্রাতিষ্ঠানিক)", "সরকারি নথি ও আনুষ্ঠানিক প্রিন্টের জন্য আদর্শ সেরিফ ফন্ট"),
+    PdfFontInfo("tiro_bangla", "তিরো বাংলা (বই ও সনদপত্র)", "মুদ্রিত বই, সনদপত্র ও মার্জিত কভার শিরোনামের জন্য উপযোগী"),
     PdfFontInfo("noto_sans", "নোতো স্যান্স বাংলা (স্ট্যান্ডার্ড)", "পরিচ্ছন্ন ও আধুনিক ডিজিটাল ফরম্যাট"),
-    PdfFontInfo("default", "সিস্টেম ডিফল্ট", "ডিভাইসের নিজস্ব বাংলা ফন্ট")
+    PdfFontInfo("hind_siliguri", "হিন্দ শিলিগুড়ি (পরিচ্ছন্ন টেবিল)", "নম্বর টেবিল ও সংখ্যার স্পষ্ট পাঠযোগ্যতার জন্য আধুনিক স্যান্স ফন্ট")
 )
 
 val PDF_FONTS = PDF_FONT_LIST.map { it.id to it.labelBn }
@@ -109,6 +110,14 @@ fun Student.overallPct(): Double {
     val maxSum = ss.sumOf { it.max }
     return if (maxSum == 0) 0.0 else ss.sumOf { avg(it) } / maxSum * 100
 }
+
+fun createEmptyStudent(cls: Int, roll: Int, religion: String = "ইসলাম"): Student = Student(
+    id = java.util.UUID.randomUUID().toString(),
+    cls = cls.coerceIn(1, 5),
+    roll = roll.coerceAtLeast(1),
+    name = "",
+    religion = religion
+)
 
 val DEFAULT_SETTINGS = Settings(
     school = "কামারখালী সরকারি প্রাথমিক বিদ্যালয়",
