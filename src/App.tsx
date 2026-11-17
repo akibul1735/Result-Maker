@@ -204,15 +204,20 @@ export default function App() {
       {/* Three-Zone Top Bar Contract */}
       <header className="sticky top-0 z-30 bg-white/95 backdrop-blur-xs border-b border-slate-200 print:hidden">
         <div className="max-w-[1280px] mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between gap-8">
-          {/* Zone 1: Brand wordmark */}
+          {/* Zone 1: Brand wordmark + app icon */}
           <button
             onClick={() => {
               setEditingStudent(null);
               setSection("roster");
             }}
-            className="text-lg font-bold tracking-tight text-slate-900 whitespace-nowrap shrink-0 cursor-pointer"
+            className="inline-flex items-center gap-2.5 text-lg font-bold tracking-tight text-slate-900 whitespace-nowrap shrink-0 cursor-pointer"
           >
-            Result Maker
+            <img
+              src="/app-icon.png"
+              alt="Result Maker icon"
+              className="w-8 h-8 rounded-lg object-cover border border-slate-200"
+            />
+            <span>Result Maker</span>
           </button>
 
           {/* Zone 2: Single-line navigation links */}

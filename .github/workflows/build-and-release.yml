@@ -14,13 +14,13 @@ on:
   workflow_dispatch:
     inputs:
       version_name:
-        description: 'Release version name (e.g. 1.0.1)'
-        required: true
-        default: '1.0.0'
+        description: 'Release version name (leave blank for auto 1.0.<run_number>)'
+        required: false
+        default: ''
       version_code:
-        description: 'Numeric Android versionCode'
-        required: true
-        default: '1'
+        description: 'Numeric Android versionCode (leave blank for auto run_number)'
+        required: false
+        default: ''
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -44,6 +44,8 @@ jobs:
           if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
             VER="${{ inputs.version_name }}"
             CODE="${{ inputs.version_code }}"
+            VER="${VER:-1.0.${{ github.run_number }}}"
+            CODE="${CODE:-${{ github.run_number }}}"
             TAG="v${VER}"
           elif [[ "${{ github.ref_type }}" == "tag" ]]; then
             VER="${GITHUB_REF_NAME#v}"
@@ -84,7 +86,15 @@ jobs:
         with:
           gradle-version: '8.9'
 
+      - name: Restore Cached Fallback Keystore
+        id: ks_cache
+        uses: actions/cache/restore@v4
+        with:
+          path: app/release.keystore
+          key: result-maker-fallback-keystore-v1
+
       - name: Prepare Release Signing Keystore
+        id: ks_prep
         env:
           RELEASE_KEYSTORE_BASE64: ${{ secrets.RELEASE_KEYSTORE_BASE64 }}
           RELEASE_KEYSTORE_PASSWORD: ${{ secrets.RELEASE_KEYSTORE_PASSWORD }}
@@ -104,8 +114,15 @@ jobs:
             fi
             KEY_ALIAS="${RELEASE_KEY_ALIAS:-release}"
             KEY_PWD="${RELEASE_KEY_PASSWORD:-$STORE_PWD}"
+            echo "generated_fallback=false" >> "$GITHUB_OUTPUT"
+          elif [ -f app/release.keystore ] && [ -s app/release.keystore ]; then
+            echo "Reusing cached CI release keystore so APK updates over previous cached builds."
+            STORE_PWD="android"
+            KEY_ALIAS="release"
+            KEY_PWD="android"
+            echo "generated_fallback=false" >> "$GITHUB_OUTPUT"
           else
-            echo "::warning::RELEASE_KEYSTORE_BASE64 secret not set. Signing with generated temporary release keystore."
+            echo "::warning::RELEASE_KEYSTORE_BASE64 secret not set. Generating fallback keystore and caching it (configure RELEASE_KEYSTORE_BASE64 for permanent upgrade continuity across >7-day gaps)."
             rm -f app/release.keystore
             keytool -genkeypair -v \
               -keystore app/release.keystore \
@@ -119,6 +136,7 @@ jobs:
             STORE_PWD="android"
             KEY_ALIAS="release"
             KEY_PWD="android"
+            echo "generated_fallback=true" >> "$GITHUB_OUTPUT"
           fi
           {
             echo "RELEASE_KEYSTORE_PATH=release.keystore"
@@ -126,6 +144,13 @@ jobs:
             echo "RELEASE_KEY_ALIAS=${KEY_ALIAS}"
             echo "RELEASE_KEY_PASSWORD=${KEY_PWD}"
           } >> "$GITHUB_ENV"
+
+      - name: Cache Generated Fallback Keystore
+        if: steps.ks_prep.outputs.generated_fallback == 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: app/release.keystore
+          key: result-maker-fallback-keystore-v1
 
       - name: Build Signed Release APK
         env:
@@ -158,7 +183,7 @@ jobs:
             "$APKSIGNER" verify --print-certs release-output/result_maker_release.apk
           fi
 
-      - name: Clean up decoded keystore
+      - name: Clean up keystore file
         if: always()
         run: rm -f app/release.keystore
 
