@@ -260,9 +260,11 @@ jobs:
           fail_on_unmatched_files: true
           files: release-output/result_maker_release.apk
 
-      - name: Generate Workflow Inspection Log Report
+      - name: Prepare Inspection Log Report Files
+        id: inspect_files
         if: always()
         run: |
+          mkdir -p build-logs/gradle-reports
           {
             echo "# Result Maker CI Inspection Report"
             echo ""
@@ -270,8 +272,8 @@ jobs:
             echo "|---|---|"
             echo "| Trigger | \`${{ github.event_name }}\` (\`${{ github.ref_name }}\`) |"
             echo "| Commit | \`${{ github.sha }}\` |"
-            echo "| Version | \`${{ steps.meta.outputs.version_name }}\` (code \`${{ steps.meta.outputs.version_code }}\`) |"
-            echo "| Release Tag | \`${{ steps.meta.outputs.release_tag }}\` |"
+            echo "| Version | \`${{ steps.meta.outputs.version_name || 'unknown' }}\` (code \`${{ steps.meta.outputs.version_code || 'unknown' }}\`) |"
+            echo "| Release Tag | \`${{ steps.meta.outputs.release_tag || 'unknown' }}\` |"
             echo "| Keystore Mode | \`${{ steps.ks_prep.outputs.keystore_mode || 'not-run' }}\` |"
             echo ""
             echo "## Step Outcomes"
@@ -326,19 +328,37 @@ jobs:
               echo "- Ensure **Settings -> Actions -> General -> Workflow permissions** is set to **Read and write permissions** so \`GITHUB_TOKEN\` can create GitHub Releases."
               echo ""
             fi
-          } | tee build-logs/inspection-summary.md >> "$GITHUB_STEP_SUMMARY"
+          } > build-logs/inspection-summary.md
 
-          # Collect Gradle reports if generated
-          mkdir -p build-logs/gradle-reports
           if [ -d build/reports ]; then cp -r build/reports build-logs/gradle-reports/root-reports 2>/dev/null || true; fi
           if [ -d app/build/reports ]; then cp -r app/build/reports build-logs/gradle-reports/app-reports 2>/dev/null || true; fi
           if [ -d app/build/outputs/logs ]; then cp -r app/build/outputs/logs build-logs/gradle-reports/output-logs 2>/dev/null || true; fi
+          ls -lhR build-logs > build-logs/files-manifest.txt 2>&1 || true
 
       - name: Upload Inspection Log Report Artifact
+        id: upload_logs
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: workflow-inspection-logs-${{ github.run_number }}
           path: build-logs/
-          if-no-files-found: warn
+          if-no-files-found: error
           retention-days: 14
+
+      - name: Publish Summary & Artifact Download Link
+        if: always()
+        run: |
+          {
+            echo "## Download Inspection Logs"
+            echo ""
+            if [ -n "${{ steps.upload_logs.outputs.artifact-url }}" ]; then
+              echo "- **Direct ZIP Download:** [Download workflow-inspection-logs-${{ github.run_number }}](${{ steps.upload_logs.outputs.artifact-url }})"
+            else
+              echo "- **Artifact Upload Status:** \`${{ steps.upload_logs.outcome }}\` (check the **Artifacts** section at the bottom of the workflow run summary)"
+            fi
+            echo "- **Run Summary & Artifacts Page:** https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+            echo ""
+            if [ -s build-logs/inspection-summary.md ]; then
+              cat build-logs/inspection-summary.md
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
