@@ -11,6 +11,8 @@ import {
 } from "lucide-react";
 import {
   CLSN,
+  DPE_LOGO_OPTIONS,
+  DpeLogoStyle,
   PDF_FONT_OPTIONS,
   PdfFontId,
   Settings,
@@ -233,6 +235,58 @@ export const SettingsAndCicd: React.FC<SettingsAndCicdProps> = ({
                     </div>
                     <div className="mt-1 text-[11px] text-slate-500">
                       {opt.descriptionBn}
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          <div className="border-t border-slate-200 pt-4 space-y-2.5">
+            <div className="flex items-center justify-between">
+              <div className="text-xs font-semibold text-slate-700">
+                প্রাথমিক শিক্ষা অধিদপ্তরের লোগো (কভার পৃষ্ঠা)
+              </div>
+              <span className="text-[11px] text-slate-400">
+                রঙিন অথবা সাদাকালো
+              </span>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+              {DPE_LOGO_OPTIONS.map((opt) => {
+                const selected = (settings.dpeLogo || "simple") === opt.id;
+                return (
+                  <button
+                    key={opt.id}
+                    type="button"
+                    onClick={() =>
+                      onUpdateSettings({
+                        ...settings,
+                        dpeLogo: opt.id as DpeLogoStyle,
+                      })
+                    }
+                    className={`text-left p-3 rounded-lg border transition-colors flex items-center gap-3 cursor-pointer ${
+                      selected
+                        ? "border-teal-700 bg-teal-50/50"
+                        : "border-slate-200 bg-white hover:bg-slate-50"
+                    }`}
+                  >
+                    <img
+                      src={opt.src}
+                      alt={opt.labelBn}
+                      className="w-12 h-14 object-contain rounded border border-slate-200 bg-white p-1 shrink-0"
+                    />
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-xs font-semibold text-slate-900">
+                          {opt.labelBn}
+                        </span>
+                        {selected && (
+                          <Check className="w-3.5 h-3.5 text-teal-700 shrink-0" />
+                        )}
+                      </div>
+                      <div className="mt-1 text-[11px] text-slate-500 leading-snug">
+                        {opt.descriptionBn}
+                      </div>
                     </div>
                   </button>
                 );

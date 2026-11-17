@@ -22,6 +22,7 @@ object Repo {
         o.put("teachers", JSONObject().also { j -> st.teachers.forEach { (k, v) -> j.put(k.toString(), v) } })
         o.put("teacherMobiles", JSONObject().also { j -> st.teacherMobiles.forEach { (k, v) -> j.put(k.toString(), v) } })
         o.put("pdfFont", st.pdfFont)
+        o.put("dpeLogo", st.dpeLogo)
         val a = JSONArray()
         list.forEach { s ->
             a.put(JSONObject().apply {
@@ -41,10 +42,12 @@ object Repo {
 
     fun fromJson(txt: String): Pair<List<Student>, Settings> {
         val o = JSONObject(txt)
+        val rawLogo = o.optString("dpeLogo", "simple")
         val st = Settings(
             school = o.optString("school"), year = o.optString("year", "২০২৬"),
             teachers = intMap(o.optJSONObject("teachers")), teacherMobiles = intMap(o.optJSONObject("teacherMobiles")),
-            pdfFont = o.optString("pdfFont", "noto_serif").ifBlank { "noto_serif" }
+            pdfFont = o.optString("pdfFont", "noto_serif").ifBlank { "noto_serif" },
+            dpeLogo = if (rawLogo == "color") "color" else "simple"
         )
         val a = o.optJSONArray("students") ?: JSONArray()
         val list = (0 until a.length()).map { i ->

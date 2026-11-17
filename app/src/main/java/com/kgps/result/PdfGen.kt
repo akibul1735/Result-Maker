@@ -2,6 +2,7 @@ package com.kgps.result
 
 import android.content.Context
 import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.DashPathEffect
@@ -63,6 +64,22 @@ object PdfGen {
     }
 
     private val fontCache = ConcurrentHashMap<String, Typeface>()
+    private val logoCache = ConcurrentHashMap<String, Bitmap>()
+
+    fun resolveLogoBitmap(ctx: Context?, logoId: String): Bitmap? {
+        if (ctx == null) return null
+        val path = if (logoId == "color") "logos/dpe_logo_color.png" else "logos/dpe_logo_simple.png"
+        logoCache[path]?.let { return it }
+        return try {
+            ctx.assets.open(path).use { stream ->
+                BitmapFactory.decodeStream(stream)
+            }?.also { bmp ->
+                logoCache[path] = bmp
+            }
+        } catch (_: Exception) {
+            null
+        }
+    }
 
     fun resolveTypeface(ctx: Context?, fontId: String, bold: Boolean): Typeface {
         val assetPath = when (fontId) {
@@ -238,45 +255,30 @@ object PdfGen {
         }
     }
 
-    private fun drawDpeEmblem(ctx: Context?, c: Canvas, cx: Float, cy: Float, r: Float, fontId: String) {
+    private fun drawDpeLogo(
+        ctx: Context?,
+        c: Canvas,
+        cx: Float,
+        topY: Float,
+        targetH: Float,
+        logoId: String,
+        fontId: String
+    ) {
+        val bmp = resolveLogoBitmap(ctx, logoId)
+        if (bmp != null && bmp.width > 0 && bmp.height > 0) {
+            val w = (bmp.width.toFloat() / bmp.height.toFloat()) * targetH
+            val dst = RectF(cx - w / 2f, topY, cx + w / 2f, topY + targetH)
+            c.drawBitmap(bmp, null, dst, Paint(Paint.FILTER_BITMAP_FLAG))
+            return
+        }
+        val cy = topY + targetH / 2f - 4f
+        val r = 34f
         val sealStroke = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             color = 0xFF0F172A.toInt()
             style = Paint.Style.STROKE
             strokeWidth = 1.6f
         }
         c.drawCircle(cx, cy, r, sealStroke)
-        sealStroke.strokeWidth = 0.8f
-        c.drawCircle(cx, cy, r - 4f, sealStroke)
-        c.drawCircle(cx, cy, r - 14f, sealStroke)
-
-        sealStroke.strokeWidth = 1.1f
-        c.drawArc(RectF(cx - 7f, cy - 4f, cx + 7f, cy + 10f), 180f, 180f, false, sealStroke)
-
-        var deg = -150
-        while (deg <= -30) {
-            val rad = deg * PI / 180.0
-            c.drawLine(
-                (cx + cos(rad) * 9.0).toFloat(),
-                (cy + 3f + sin(rad) * 9.0).toFloat(),
-                (cx + cos(rad) * 12.5).toFloat(),
-                (cy + 3f + sin(rad) * 12.5).toFloat(),
-                sealStroke
-            )
-            deg += 30
-        }
-
-        val book = Path().apply {
-            moveTo(cx, cy + 5f)
-            quadTo(cx - 6f, cy + 2f, cx - 12f, cy + 5f)
-            lineTo(cx - 12f, cy + 12f)
-            quadTo(cx - 6f, cy + 9f, cx, cy + 12f)
-            quadTo(cx + 6f, cy + 9f, cx + 12f, cy + 12f)
-            lineTo(cx + 12f, cy + 5f)
-            quadTo(cx + 6f, cy + 2f, cx, cy + 5f)
-        }
-        c.drawPath(book, sealStroke)
-
-        center(ctx, c, "সবার জন্য মানসম্মত শিক্ষা", cx, cy - r + 11.5f, 6.2f, true, r * 1.6f, fontId)
         center(ctx, c, "প্রাথমিক শিক্ষা অধিদপ্তর", cx, cy + r + 12f, 8.5f, true, 160f, fontId)
     }
 
@@ -423,7 +425,7 @@ object PdfGen {
         c.drawRoundRect(RectF(pillX, pillY, pillX + pillW, pillY + pillH), 22f, 22f, darkFill)
         center(ctx, c, "শিখন অগ্রগতি প্রতিবেদন", frontCx, 75f, 20f, true, 290f, f, Color.WHITE)
 
-        drawDpeEmblem(ctx, c, frontCx, 144f, 34f, f)
+        drawDpeLogo(ctx, c, frontCx, 102f, 104f, st.dpeLogo, f)
 
         dottedField(
             ctx,
@@ -431,12 +433,12 @@ object PdfGen {
             "বিদ্যালয়ের নাম:",
             st.school.ifBlank { "বিদ্যালয়ের নাম" },
             456f,
-            224f,
+            236f,
             801f,
             11f,
             f
         )
-        dottedField(ctx, c, "শিক্ষাবর্ষ:", bn(st.year), 556f, 254f, 701f, 11f, f)
+        dottedField(ctx, c, "শিক্ষাবর্ষ:", bn(st.year), 556f, 266f, 701f, 11f, f)
 
         val formY0 = 360f
         val formDy = 32f

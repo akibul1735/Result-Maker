@@ -18,6 +18,8 @@ import {
 import {
   CLSN,
   DEFAULT_SETTINGS,
+  DPE_LOGO_OPTIONS,
+  DpeLogoStyle,
   PDF_FONT_OPTIONS,
   PdfFontId,
   SAMPLE_STUDENTS,
@@ -358,6 +360,54 @@ export default function App() {
                           {selected && (
                             <Check className="w-4 h-4 text-teal-700 shrink-0" />
                           )}
+                        </button>
+                      );
+                    })}
+                  </div>
+
+                  <div className="my-2 border-t border-slate-200" />
+
+                  <div className="px-3.5 py-1 flex items-center justify-between">
+                    <span className="text-[11px] font-semibold text-slate-500">
+                      কভার লোগো (অধিদপ্তর)
+                    </span>
+                    <span className="text-[11px] text-teal-700 font-medium">
+                      {(settings.dpeLogo || "simple") === "color"
+                        ? "রঙিন"
+                        : "সাদাকালো"}
+                    </span>
+                  </div>
+                  <div className="px-2 grid grid-cols-2 gap-1.5 pb-1">
+                    {DPE_LOGO_OPTIONS.map((opt) => {
+                      const selected =
+                        (settings.dpeLogo || "simple") === opt.id;
+                      return (
+                        <button
+                          key={opt.id}
+                          role="menuitemradio"
+                          aria-checked={selected}
+                          onClick={() => {
+                            setSettings((prev) => ({
+                              ...prev,
+                              dpeLogo: opt.id as DpeLogoStyle,
+                            }));
+                            showToast(`লোগো নির্বাচিত হয়েছে: ${opt.labelBn}`);
+                            setMenuOpen(false);
+                          }}
+                          className={`px-2 py-1.5 rounded-lg border text-xs font-medium flex items-center gap-2 transition-colors cursor-pointer ${
+                            selected
+                              ? "border-teal-700 bg-teal-50 text-teal-900"
+                              : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
+                          }`}
+                        >
+                          <img
+                            src={opt.src}
+                            alt={opt.labelBn}
+                            className="w-6 h-7 object-contain shrink-0"
+                          />
+                          <span className="truncate">
+                            {opt.id === "color" ? "রঙিন" : "সাদাকালো"}
+                          </span>
                         </button>
                       );
                     })}

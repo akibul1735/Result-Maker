@@ -21,7 +21,15 @@ data class Settings(
     val year: String = "২০২৬",
     val teachers: Map<Int, String> = emptyMap(),
     val teacherMobiles: Map<Int, String> = emptyMap(),
-    val pdfFont: String = "noto_serif"
+    val pdfFont: String = "noto_serif",
+    val dpeLogo: String = "simple"
+)
+
+data class DpeLogoInfo(val id: String, val labelBn: String, val descriptionBn: String)
+
+val DPE_LOGO_LIST = listOf(
+    DpeLogoInfo("simple", "সাদাকালো লোগো (Simple)", "সাদাকালো ফটোকপি ও সাধারণ প্রিন্টের জন্য স্পষ্ট লাইন-আর্ট লোগো"),
+    DpeLogoInfo("color", "রঙিন লোগো (Color)", "রঙিন মুদ্রণ ও ডিজিটাল প্রদর্শনের জন্য মূল রঙিন লোগো")
 )
 
 data class PdfFontInfo(val id: String, val labelBn: String, val descriptionBn: String)

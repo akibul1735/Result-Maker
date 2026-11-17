@@ -1,6 +1,7 @@
 import { jsPDF } from "jspdf";
 import {
   CLSN,
+  DpeLogoStyle,
   PdfFontId,
   Settings,
   Student,
@@ -24,14 +25,37 @@ export const PAGE_H = 595;
 const FOLD_X = PAGE_W / 2; // 421pt
 
 let activeFontFamily = getPdfFontOption("noto_serif").cssFamily;
+const logoImgCache: Partial<Record<DpeLogoStyle, HTMLImageElement>> = {};
+
+function loadImage(src: string): Promise<HTMLImageElement> {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => resolve(img);
+    img.onerror = () => reject(new Error(`Failed to load ${src}`));
+    img.src = src;
+  });
+}
 
 export async function ensurePdfFontLoaded(fontId?: PdfFontId): Promise<void> {
   const opt = getPdfFontOption(fontId);
+  const logoPromises = (
+    [
+      ["simple", "/dpe-logo-simple.png"],
+      ["color", "/dpe-logo-color.png"],
+    ] as const
+  ).map(async ([key, src]) => {
+    if (!logoImgCache[key]) {
+      logoImgCache[key] = await loadImage(src);
+    }
+  });
   if (document.fonts?.load) {
     await Promise.allSettled([
       document.fonts.load(`400 16px "${opt.primaryFace}"`, "শিখন অগ্রগতি প্রতিবেদন ০১২৩"),
       document.fonts.load(`700 16px "${opt.primaryFace}"`, "শিখন অগ্রগতি প্রতিবেদন ০১২৩"),
+      ...logoPromises,
     ]);
+  } else {
+    await Promise.allSettled(logoPromises);
   }
   if (document.fonts?.ready) {
     await document.fonts.ready;
@@ -242,53 +266,29 @@ function drawDottedField(
   }
 }
 
-function drawDpeEmblem(ctx: CanvasRenderingContext2D, cx: number, cy: number, r = 34) {
+function drawDpeLogo(
+  ctx: CanvasRenderingContext2D,
+  cx: number,
+  topY: number,
+  targetH: number,
+  style: DpeLogoStyle = "simple"
+) {
+  const img = logoImgCache[style] || logoImgCache.simple;
+  if (img && img.naturalWidth > 0 && img.naturalHeight > 0) {
+    const w = (img.naturalWidth / img.naturalHeight) * targetH;
+    ctx.drawImage(img, cx - w / 2, topY, w, targetH);
+    return;
+  }
+
+  // Fallback vector seal if bitmap is still loading
+  const cy = topY + targetH / 2 - 4;
+  const r = 34;
   ctx.save();
   ctx.strokeStyle = "#0F172A";
-  ctx.fillStyle = "#0F172A";
-
-  // Outer & inner concentric seal circles
   ctx.lineWidth = 1.6;
   ctx.beginPath();
   ctx.arc(cx, cy, r, 0, Math.PI * 2);
   ctx.stroke();
-
-  ctx.lineWidth = 0.8;
-  ctx.beginPath();
-  ctx.arc(cx, cy, r - 4, 0, Math.PI * 2);
-  ctx.stroke();
-
-  ctx.beginPath();
-  ctx.arc(cx, cy, r - 14, 0, Math.PI * 2);
-  ctx.stroke();
-
-  // Rising sun & open book motif in inner circle
-  ctx.lineWidth = 1.1;
-  ctx.beginPath();
-  ctx.arc(cx, cy + 3, 7, Math.PI, 0);
-  ctx.stroke();
-
-  for (let deg = -150; deg <= -30; deg += 30) {
-    const rad = (deg * Math.PI) / 180;
-    ctx.beginPath();
-    ctx.moveTo(cx + Math.cos(rad) * 9, cy + 3 + Math.sin(rad) * 9);
-    ctx.lineTo(cx + Math.cos(rad) * 12.5, cy + 3 + Math.sin(rad) * 12.5);
-    ctx.stroke();
-  }
-
-  // Open book pages
-  ctx.beginPath();
-  ctx.moveTo(cx, cy + 5);
-  ctx.quadraticCurveTo(cx - 6, cy + 2, cx - 12, cy + 5);
-  ctx.lineTo(cx - 12, cy + 12);
-  ctx.quadraticCurveTo(cx - 6, cy + 9, cx, cy + 12);
-  ctx.quadraticCurveTo(cx + 6, cy + 9, cx + 12, cy + 12);
-  ctx.lineTo(cx + 12, cy + 5);
-  ctx.quadraticCurveTo(cx + 6, cy + 2, cx, cy + 5);
-  ctx.stroke();
-
-  // Seal inscriptions
-  drawCenter(ctx, "সবার জন্য মানসম্মত শিক্ষা", cx, cy - r + 11.5, 6.2, true, r * 1.6);
   drawCenter(ctx, "প্রাথমিক শিক্ষা অধিদপ্তর", cx, cy + r + 12, 8.5, true, 160);
   ctx.restore();
 }
@@ -446,8 +446,8 @@ export function renderCoverPage(
   ctx.restore();
   drawCenter(ctx, "শিখন অগ্রগতি প্রতিবেদন", frontCx, 75, 20, true, 290, "#FFFFFF");
 
-  // DPE Seal Emblem
-  drawDpeEmblem(ctx, frontCx, 144, 34);
+  // Official DPE Logo (Simple B&W or Color per Settings)
+  drawDpeLogo(ctx, frontCx, 102, 104, st.dpeLogo || "simple");
 
   // School Name & Academic Year with dotted lines
   drawDottedField(
@@ -455,7 +455,7 @@ export function renderCoverPage(
     "বিদ্যালয়ের নাম:",
     st.school.trim() || "বিদ্যালয়ের নাম",
     456,
-    224,
+    236,
     801,
     11
   );
@@ -464,7 +464,7 @@ export function renderCoverPage(
     "শিক্ষাবর্ষ:",
     bn(st.year),
     556,
-    254,
+    266,
     701,
     11
   );

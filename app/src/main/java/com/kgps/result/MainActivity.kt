@@ -285,6 +285,31 @@ fun AppHeaderBar(
                             )
                         }
                         HorizontalDivider()
+                        Text(
+                            "কভার লোগো (প্রাথমিক শিক্ষা অধিদপ্তর)",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = SlateMuted,
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
+                        )
+                        DPE_LOGO_LIST.forEach { logo ->
+                            val selected = st.settings.dpeLogo == logo.id
+                            DropdownMenuItem(
+                                text = {
+                                    Text(
+                                        if (selected) "✓ ${logo.labelBn}" else "   ${logo.labelBn}",
+                                        fontSize = 13.sp,
+                                        fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
+                                        color = if (selected) TealPrimary else SlateText
+                                    )
+                                },
+                                onClick = {
+                                    st.updateSettings(st.settings.copy(dpeLogo = logo.id))
+                                    toast(ctx, "লোগো: ${logo.labelBn}")
+                                    menuOpen = false
+                                }
+                            )
+                        }
+                        HorizontalDivider()
                         DropdownMenuItem(
                             text = { Text("সব শ্রেণির সব শিক্ষার্থীর PDF") },
                             onClick = { menuOpen = false; onAllPdf() }
@@ -880,6 +905,47 @@ fun SettingsScreen(st: AppState, onBack: () -> Unit, makePdf: (List<Student>, St
                     Spacer(Modifier.height(4.dp))
                     Text("শিখন অগ্রগতি প্রতিবেদন — ২০২৬", fontFamily = sampleFamily, fontSize = 15.sp, color = SlateText)
                     Text(font.descriptionBn, fontSize = 11.sp, color = SlateMuted)
+                }
+            }
+        }
+
+        Text("কভার লোগো (প্রাথমিক শিক্ষা অধিদপ্তর)", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(top = 6.dp))
+        DPE_LOGO_LIST.forEach { logo ->
+            val selected = st.settings.dpeLogo == logo.id
+            val thumb = remember(logo.id) { PdfGen.resolveLogoBitmap(ctx, logo.id) }
+            Card(
+                modifier = Modifier.fillMaxWidth().clickable { st.updateSettings(st.settings.copy(dpeLogo = logo.id)) },
+                colors = CardDefaults.cardColors(containerColor = if (selected) TealContainer.copy(alpha = 0.35f) else Color.White),
+                border = BorderStroke(1.dp, if (selected) TealPrimary else SlateOutline),
+                shape = RoundedCornerShape(10.dp)
+            ) {
+                Row(
+                    Modifier.padding(12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    if (thumb != null) {
+                        Surface(
+                            color = Color.White,
+                            border = BorderStroke(1.dp, SlateOutline),
+                            shape = RoundedCornerShape(8.dp)
+                        ) {
+                            Image(
+                                bitmap = thumb.asImageBitmap(),
+                                contentDescription = logo.labelBn,
+                                contentScale = ContentScale.Fit,
+                                modifier = Modifier.size(width = 48.dp, height = 54.dp).padding(4.dp)
+                            )
+                        }
+                    }
+                    Column(Modifier.weight(1f)) {
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) {
+                            Text(logo.labelBn, fontWeight = FontWeight.SemiBold, fontSize = 13.sp, color = SlateText)
+                            if (selected) Text("✓ নির্বাচিত", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = TealPrimary)
+                        }
+                        Spacer(Modifier.height(2.dp))
+                        Text(logo.descriptionBn, fontSize = 11.sp, color = SlateMuted)
+                    }
                 }
             }
         }

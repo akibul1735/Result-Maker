@@ -70,10 +70,35 @@ export function getPdfFontOption(id?: string): PdfFontOption {
   );
 }
 
+export type DpeLogoStyle = "simple" | "color";
+
+export interface DpeLogoOption {
+  id: DpeLogoStyle;
+  labelBn: string;
+  descriptionBn: string;
+  src: string;
+}
+
+export const DPE_LOGO_OPTIONS: DpeLogoOption[] = [
+  {
+    id: "simple",
+    labelBn: "সাদাকালো লোগো (Simple)",
+    descriptionBn: "সাদাকালো ফটোকপি ও সাধারণ প্রিন্টের জন্য স্পষ্ট লাইন-আর্ট লোগো",
+    src: "/dpe-logo-simple.png",
+  },
+  {
+    id: "color",
+    labelBn: "রঙিন লোগো (Color)",
+    descriptionBn: "রঙিন মুদ্রণ ও ডিজিটাল প্রদর্শনের জন্য মূল রঙিন লোগো",
+    src: "/dpe-logo-color.png",
+  },
+];
+
 export interface Settings {
   school: string;
   year: string;
   pdfFont?: PdfFontId;
+  dpeLogo?: DpeLogoStyle;
   teachers: Record<number, string>;
   teacherMobiles: Record<number, string>;
 }
@@ -293,6 +318,7 @@ export function toJson(list: Student[], st: Settings): string {
       school: st.school,
       year: st.year,
       pdfFont: st.pdfFont || "noto_serif",
+      dpeLogo: st.dpeLogo || "simple",
       teachers: st.teachers,
       teacherMobiles: st.teacherMobiles,
       students: list,
@@ -322,10 +348,12 @@ export function fromJson(txt: string): { students: Student[]; settings: Settings
   const pdfFont = PDF_FONT_OPTIONS.some((f) => f.id === rawFont)
     ? (rawFont as PdfFontId)
     : "noto_serif";
+  const dpeLogo: DpeLogoStyle = o.dpeLogo === "color" ? "color" : "simple";
   const settings: Settings = {
     school: typeof o.school === "string" ? o.school : "",
     year: typeof o.year === "string" ? o.year : "২০২৬",
     pdfFont,
+    dpeLogo,
     teachers,
     teacherMobiles,
   };
@@ -477,6 +505,7 @@ export const DEFAULT_SETTINGS: Settings = {
   school: "কামারখালী সরকারি প্রাথমিক বিদ্যালয়",
   year: "২০২৬",
   pdfFont: "noto_serif",
+  dpeLogo: "simple",
   teachers: {
     1: "মোসাঃ তাসলিমা খাতুন",
     2: "মোঃ রফিকুল ইসলাম",
