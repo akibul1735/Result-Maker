@@ -22,6 +22,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
+import androidx.compose.material.icons.automirrored.rounded.MenuBook
 import androidx.compose.material.icons.rounded.AutoAwesome
 import androidx.compose.material.icons.rounded.Badge
 import androidx.compose.material.icons.rounded.Check
@@ -31,7 +32,6 @@ import androidx.compose.material.icons.rounded.Description
 import androidx.compose.material.icons.rounded.EventAvailable
 import androidx.compose.material.icons.rounded.FolderOpen
 import androidx.compose.material.icons.rounded.Home
-import androidx.compose.material.icons.rounded.MenuBook
 import androidx.compose.material.icons.rounded.Tune
 import androidx.compose.material.icons.rounded.Visibility
 import androidx.compose.material3.AlertDialog
@@ -441,7 +441,7 @@ fun StudentEditorScreen(
                                             subtitle = "পূর্ণমান ${bn(sub.max.toString())}",
                                             badgeText = if (subHas) "${fmt(subTot)} ($subGrade)" else "—",
                                             badgeColor = if (subHas) TealPrimary else SlateMuted,
-                                            icon = Icons.Rounded.MenuBook,
+                                            icon = Icons.AutoMirrored.Rounded.MenuBook,
                                             expanded = expandedSubKey == subKeyForTerm,
                                             headerTestTag = "editor_sub_${t}_${sub.key}",
                                             onToggle = {

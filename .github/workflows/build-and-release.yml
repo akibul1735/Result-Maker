@@ -38,6 +38,9 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Initialize log workspace
+        run: mkdir -p build-logs release-output
+
       - name: Resolve release metadata
         id: meta
         run: |
@@ -60,16 +63,63 @@ jobs:
           echo "version_code=${CODE}" >> "$GITHUB_OUTPUT"
           echo "release_tag=${TAG}" >> "$GITHUB_OUTPUT"
 
-      - name: Set up JDK 17
+      - name: Set up JDK 21
         uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: '17'
+          java-version: '21'
 
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v4
         with:
-          gradle-version: '8.9'
+          gradle-version: '8.11.1'
+
+      - name: Pre-flight environment & config check
+        id: precheck
+        run: |
+          {
+            echo "=== Timestamp (UTC) ==="
+            date -u
+            echo ""
+            echo "=== Java ==="
+            java -version 2>&1 || true
+            echo ""
+            echo "=== Gradle ==="
+            gradle --version 2>&1 || true
+            echo ""
+            echo "=== Android SDK ==="
+            SDK_DIR="${ANDROID_HOME:-$ANDROID_SDK_ROOT}"
+            echo "SDK_DIR=$SDK_DIR"
+            if [ -n "$SDK_DIR" ]; then
+              ls -1 "$SDK_DIR/platforms" 2>/dev/null || echo "No platforms listed"
+              ls -1 "$SDK_DIR/build-tools" 2>/dev/null || echo "No build-tools listed"
+              if [ -x "$SDK_DIR/cmdline-tools/latest/bin/sdkmanager" ]; then
+                yes | "$SDK_DIR/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null 2>&1 || true
+              fi
+            fi
+            echo ""
+            echo "=== Firebase & Manifest Files ==="
+            if [ -s app/google-services.json ]; then
+              echo "app/google-services.json: PRESENT ($(wc -c < app/google-services.json) bytes)"
+              if grep -q '"package_name": "com.kgps.result"' app/google-services.json; then
+                echo "google-services.json package match: OK (com.kgps.result)"
+              else
+                echo "google-services.json package match: WARNING (com.kgps.result not found)"
+              fi
+            else
+              echo "app/google-services.json: MISSING"
+            fi
+            if [ -s app/src/main/res/values/firebase_applet_config.xml ]; then
+              echo "firebase_applet_config.xml: PRESENT"
+            else
+              echo "firebase_applet_config.xml: MISSING"
+            fi
+          } | tee build-logs/environment.log
+
+          if [ ! -s app/google-services.json ]; then
+            echo "::error::app/google-services.json is missing or empty. Ensure Firebase config is committed."
+            exit 1
+          fi
 
       - name: Restore Cached Fallback Keystore
         id: ks_cache
@@ -100,12 +150,14 @@ jobs:
             KEY_ALIAS="${RELEASE_KEY_ALIAS:-release}"
             KEY_PWD="${RELEASE_KEY_PASSWORD:-$STORE_PWD}"
             echo "generated_fallback=false" >> "$GITHUB_OUTPUT"
+            echo "keystore_mode=secret" >> "$GITHUB_OUTPUT"
           elif [ -f app/release.keystore ] && [ -s app/release.keystore ]; then
             echo "Reusing cached CI release keystore so APK updates over previous cached builds."
             STORE_PWD="android"
             KEY_ALIAS="release"
             KEY_PWD="android"
             echo "generated_fallback=false" >> "$GITHUB_OUTPUT"
+            echo "keystore_mode=cached_fallback" >> "$GITHUB_OUTPUT"
           else
             echo "::warning::RELEASE_KEYSTORE_BASE64 secret not set. Generating fallback keystore and caching it (configure RELEASE_KEYSTORE_BASE64 for permanent upgrade continuity across >7-day gaps)."
             rm -f app/release.keystore
@@ -117,11 +169,13 @@ jobs:
               -validity 10000 \
               -storepass android \
               -keypass android \
-              -dname "CN=Result Maker, OU=KGPS, O=Result Maker, L=Dhaka, C=BD"
+              -dname "CN=Result Maker, OU=KGPS, O=Result Maker, L=Dhaka, C=BD" \
+              >> build-logs/keystore.log 2>&1
             STORE_PWD="android"
             KEY_ALIAS="release"
             KEY_PWD="android"
             echo "generated_fallback=true" >> "$GITHUB_OUTPUT"
+            echo "keystore_mode=new_fallback" >> "$GITHUB_OUTPUT"
           fi
           {
             echo "RELEASE_KEYSTORE_PATH=release.keystore"
@@ -138,34 +192,45 @@ jobs:
           key: result-maker-fallback-keystore-v1
 
       - name: Build Signed Release APK
+        id: gradle_build
         env:
           VERSION_NAME: ${{ steps.meta.outputs.version_name }}
           VERSION_CODE: ${{ steps.meta.outputs.version_code }}
         run: |
+          set -o pipefail
           if [ -f ./gradlew ]; then
             chmod +x ./gradlew
-            ./gradlew assembleRelease --no-daemon
+            ./gradlew assembleRelease --no-daemon --stacktrace --info 2>&1 | tee build-logs/gradle-build.log
           else
-            gradle assembleRelease --no-daemon
+            gradle assembleRelease --no-daemon --stacktrace --info 2>&1 | tee build-logs/gradle-build.log
           fi
 
       - name: Stage result_maker_release.apk
+        id: stage_apk
         run: |
-          mkdir -p release-output
           APK_SRC=$(find app/build/outputs/apk/release -name "*.apk" | head -n 1)
           if [ -z "$APK_SRC" ]; then
             echo "::error::No release APK found in app/build/outputs/apk/release"
+            ls -la app/build/outputs/apk/release 2>&1 | tee -a build-logs/environment.log || true
             exit 1
           fi
           cp "$APK_SRC" release-output/result_maker_release.apk
+          APK_SIZE=$(du -h release-output/result_maker_release.apk | cut -f1)
+          APK_SHA256=$(sha256sum release-output/result_maker_release.apk | awk '{print $1}')
+          echo "apk_source=${APK_SRC}" >> "$GITHUB_OUTPUT"
+          echo "apk_size=${APK_SIZE}" >> "$GITHUB_OUTPUT"
+          echo "apk_sha256=${APK_SHA256}" >> "$GITHUB_OUTPUT"
           ls -lh release-output/result_maker_release.apk
 
       - name: Verify APK Signature
+        id: apk_verify
         run: |
           SDK_DIR="${ANDROID_HOME:-$ANDROID_SDK_ROOT}"
           APKSIGNER=$(find "$SDK_DIR/build-tools" -name "apksigner" 2>/dev/null | sort -V | tail -n 1 || true)
           if [ -n "$APKSIGNER" ]; then
-            "$APKSIGNER" verify --print-certs release-output/result_maker_release.apk
+            "$APKSIGNER" verify --print-certs release-output/result_maker_release.apk 2>&1 | tee build-logs/apksigner.log
+          else
+            echo "apksigner binary not found under $SDK_DIR/build-tools" | tee build-logs/apksigner.log
           fi
 
       - name: Clean up keystore file
@@ -173,6 +238,7 @@ jobs:
         run: rm -f app/release.keystore
 
       - name: Upload APK Artifact
+        id: upload_apk
         uses: actions/upload-artifact@v4
         with:
           name: result_maker_release
@@ -181,9 +247,11 @@ jobs:
           retention-days: 30
 
       - name: Publish GitHub Release (APK only)
+        id: gh_release
         if: github.event_name != 'pull_request'
         uses: softprops/action-gh-release@v2
         with:
+          token: ${{ secrets.GITHUB_TOKEN }}
           tag_name: ${{ steps.meta.outputs.release_tag }}
           target_commitish: ${{ github.sha }}
           name: Result Maker ${{ steps.meta.outputs.release_tag }}
@@ -191,3 +259,86 @@ jobs:
           make_latest: true
           fail_on_unmatched_files: true
           files: release-output/result_maker_release.apk
+
+      - name: Generate Workflow Inspection Log Report
+        if: always()
+        run: |
+          {
+            echo "# Result Maker CI Inspection Report"
+            echo ""
+            echo "| Field | Value |"
+            echo "|---|---|"
+            echo "| Trigger | \`${{ github.event_name }}\` (\`${{ github.ref_name }}\`) |"
+            echo "| Commit | \`${{ github.sha }}\` |"
+            echo "| Version | \`${{ steps.meta.outputs.version_name }}\` (code \`${{ steps.meta.outputs.version_code }}\`) |"
+            echo "| Release Tag | \`${{ steps.meta.outputs.release_tag }}\` |"
+            echo "| Keystore Mode | \`${{ steps.ks_prep.outputs.keystore_mode || 'not-run' }}\` |"
+            echo ""
+            echo "## Step Outcomes"
+            echo ""
+            echo "| Step | Outcome |"
+            echo "|---|---|"
+            echo "| Environment & Config Pre-check | \`${{ steps.precheck.outcome }}\` |"
+            echo "| Keystore Preparation | \`${{ steps.ks_prep.outcome }}\` |"
+            echo "| Gradle Release Build | \`${{ steps.gradle_build.outcome }}\` |"
+            echo "| Stage APK | \`${{ steps.stage_apk.outcome }}\` |"
+            echo "| Verify APK Signature | \`${{ steps.apk_verify.outcome }}\` |"
+            echo "| Upload APK Artifact | \`${{ steps.upload_apk.outcome }}\` |"
+            echo "| Publish GitHub Release | \`${{ steps.gh_release.outcome }}\` |"
+            echo ""
+
+            if [ -n "${{ steps.stage_apk.outputs.apk_size }}" ]; then
+              echo "## Release APK Details"
+              echo "- **Source**: \`${{ steps.stage_apk.outputs.apk_source }}\`"
+              echo "- **Size**: \`${{ steps.stage_apk.outputs.apk_size }}\`"
+              echo "- **SHA-256**: \`${{ steps.stage_apk.outputs.apk_sha256 }}\`"
+              echo ""
+            fi
+
+            if [ -s build-logs/environment.log ]; then
+              echo "## Environment & Firebase Config"
+              echo '```text'
+              cat build-logs/environment.log
+              echo '```'
+              echo ""
+            fi
+
+            if [ -s build-logs/apksigner.log ]; then
+              echo "## APK Signature Verification"
+              echo '```text'
+              cat build-logs/apksigner.log
+              echo '```'
+              echo ""
+            fi
+
+            if [ -s build-logs/gradle-build.log ]; then
+              echo "## Gradle Warnings / Errors Excerpt"
+              echo '```text'
+              grep -nE "FAILURE:|What went wrong:|Execution failed|Exception:|ERROR:|e: |w: " build-logs/gradle-build.log | tail -n 80 || true
+              echo "--- Tail of gradle-build.log (last 80 lines) ---"
+              tail -n 80 build-logs/gradle-build.log
+              echo '```'
+              echo ""
+            fi
+
+            if [ "${{ steps.gh_release.outcome }}" = "failure" ]; then
+              echo "## Release Publish Troubleshooting"
+              echo "- Ensure **Settings -> Actions -> General -> Workflow permissions** is set to **Read and write permissions** so \`GITHUB_TOKEN\` can create GitHub Releases."
+              echo ""
+            fi
+          } | tee build-logs/inspection-summary.md >> "$GITHUB_STEP_SUMMARY"
+
+          # Collect Gradle reports if generated
+          mkdir -p build-logs/gradle-reports
+          if [ -d build/reports ]; then cp -r build/reports build-logs/gradle-reports/root-reports 2>/dev/null || true; fi
+          if [ -d app/build/reports ]; then cp -r app/build/reports build-logs/gradle-reports/app-reports 2>/dev/null || true; fi
+          if [ -d app/build/outputs/logs ]; then cp -r app/build/outputs/logs build-logs/gradle-reports/output-logs 2>/dev/null || true; fi
+
+      - name: Upload Inspection Log Report Artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: workflow-inspection-logs-${{ github.run_number }}
+          path: build-logs/
+          if-no-files-found: warn
+          retention-days: 14
