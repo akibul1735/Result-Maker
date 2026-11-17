@@ -1,0 +1,6 @@
+{
+  "name": "Result Maker",
+  "description": "Primary school learning progress report card maker (Class 1-5) with A4 landscape foldable PDF generation, CSV/JSON import-export, and Gemini AI teacher tools.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
