@@ -1,6 +1,7 @@
 import React, { useMemo, useState } from "react";
 import {
   FileDown,
+  FileUp,
   Pencil,
   Plus,
   Search,
@@ -28,6 +29,7 @@ interface StudentRosterProps {
   onSelectClass: (cls: number) => void;
   onOpenStudent: (student: Student) => void;
   onNewStudent: () => void;
+  onOpenCsvImport: (initialText?: string, initialFileName?: string) => void;
   onPreviewPdf: (student: Student) => void;
   onExportClassPdf: (cls: number) => void;
   onSpeakSummary: (student: Student) => Promise<void>;
@@ -42,6 +44,7 @@ export const StudentRoster: React.FC<StudentRosterProps> = ({
   onSelectClass,
   onOpenStudent,
   onNewStudent,
+  onOpenCsvImport,
   onPreviewPdf,
   onExportClassPdf,
   onSpeakSummary,
@@ -60,7 +63,9 @@ export const StudentRoster: React.FC<StudentRosterProps> = ({
           s.name.toLowerCase().includes(q) ||
           String(s.roll).includes(q) ||
           bn(String(s.roll)).includes(q) ||
-          s.guardian.toLowerCase().includes(q)
+          s.guardian.toLowerCase().includes(q) ||
+          s.mobile.toLowerCase().includes(q) ||
+          Object.values(s.x).some((v) => v.toLowerCase().includes(q))
         );
       })
       .sort((a, b) => a.roll - b.roll);
@@ -129,6 +134,14 @@ export const StudentRoster: React.FC<StudentRosterProps> = ({
               className="pl-9 pr-3 py-2 text-sm bg-white border border-slate-200 rounded-lg text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-teal-700/20 focus:border-teal-700 w-56"
             />
           </div>
+          <button
+            type="button"
+            onClick={() => onOpenCsvImport()}
+            className="inline-flex items-center gap-1.5 px-3.5 py-2 text-sm font-medium rounded-lg border border-slate-200 bg-white text-slate-700 hover:bg-slate-50 transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+          >
+            <FileUp className="w-4 h-4 text-teal-700" />
+            <span>CSV ইমপোর্ট</span>
+          </button>
           <button
             onClick={() => onExportClassPdf(selectedClass)}
             disabled={classStudents.length === 0 || exportingPdf}
@@ -199,13 +212,21 @@ export const StudentRoster: React.FC<StudentRosterProps> = ({
             <p className="mt-1 text-sm text-slate-500 max-w-md mx-auto">
               নতুন শিক্ষার্থী যোগ করুন অথবা সেটিংস থেকে CSV / JSON ফাইল ইমপোর্ট করুন।
             </p>
-            <div className="mt-5">
+            <div className="mt-5 flex flex-wrap items-center justify-center gap-3">
               <button
                 onClick={onNewStudent}
-                className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-lg bg-teal-700 text-white hover:bg-teal-800 transition-colors whitespace-nowrap"
+                className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-lg bg-teal-700 text-white hover:bg-teal-800 transition-colors whitespace-nowrap cursor-pointer"
               >
                 <Plus className="w-4 h-4" />
                 <span>নতুন শিক্ষার্থী যোগ করুন</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => onOpenCsvImport()}
+                className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-lg border border-slate-200 bg-white text-slate-700 hover:bg-slate-50 transition-colors whitespace-nowrap cursor-pointer"
+              >
+                <FileUp className="w-4 h-4 text-teal-700" />
+                <span>CSV / Excel ইমপোর্ট</span>
               </button>
             </div>
           </div>

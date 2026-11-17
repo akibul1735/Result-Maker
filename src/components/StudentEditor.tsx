@@ -10,6 +10,7 @@ import {
 import {
   CLSN,
   RELIGIONS,
+  Settings,
   Student,
   bn,
   cont,
@@ -18,6 +19,7 @@ import {
   fromBn,
   gradeLabelBn,
   gradeOf,
+  makeCustomFieldKey,
   mk,
   overallPct,
   studentSubs,
@@ -27,6 +29,8 @@ import {
 
 interface StudentEditorProps {
   student: Student;
+  settings: Settings;
+  onUpdateSettings: (settings: Settings) => void;
   onSave: (student: Student) => void;
   onDelete: (id: string) => void;
   onBack: () => void;
@@ -37,6 +41,8 @@ interface StudentEditorProps {
 
 export const StudentEditor: React.FC<StudentEditorProps> = ({
   student,
+  settings,
+  onUpdateSettings,
   onSave,
   onDelete,
   onBack,
@@ -46,6 +52,7 @@ export const StudentEditor: React.FC<StudentEditorProps> = ({
 }) => {
   const [draft, setDraft] = useState<Student>(student);
   const [tab, setTab] = useState<"info" | "marks" | "traits">("info");
+  const [newCustomLabel, setNewCustomLabel] = useState("");
   const [term, setTerm] = useState<number>(1);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [draftingTerm, setDraftingTerm] = useState<number | null>(null);
@@ -371,6 +378,80 @@ export const StudentEditor: React.FC<StudentEditorProps> = ({
                 />
               </div>
             </div>
+          </div>
+
+          {/* Custom / Extra Database Fields */}
+          <div className="border-t border-slate-200 pt-5 space-y-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+              <div>
+                <h3 className="text-sm font-semibold text-slate-900">
+                  অতিরিক্ত ও কাস্টম ডাটাবেস ফিল্ড
+                </h3>
+                <p className="text-xs text-slate-500">
+                  CSV ইমপোর্ট বা হাতে তৈরি কাস্টম তথ্যসমূহ (যেমন: মাতার নাম, জন্মতারিখ, জন্মনিবন্ধন নম্বর, লিঙ্গ)
+                </p>
+              </div>
+              <div className="flex items-center gap-2">
+                <input
+                  type="text"
+                  value={newCustomLabel}
+                  onChange={(e) => setNewCustomLabel(e.target.value)}
+                  placeholder="নতুন ফিল্ডের নাম..."
+                  className="px-3 py-1.5 text-xs rounded-lg border border-slate-200 focus:outline-none focus:border-teal-700 w-44"
+                />
+                <button
+                  type="button"
+                  disabled={!newCustomLabel.trim()}
+                  onClick={() => {
+                    const label = newCustomLabel.trim();
+                    if (!label) return;
+                    const curFields = settings.customFields ?? [];
+                    if (
+                      curFields.some(
+                        (f) => f.label.trim().toLowerCase() === label.toLowerCase()
+                      )
+                    ) {
+                      setNewCustomLabel("");
+                      return;
+                    }
+                    const key = makeCustomFieldKey(
+                      label,
+                      new Set(curFields.map((f) => f.key))
+                    );
+                    onUpdateSettings({
+                      ...settings,
+                      customFields: [...curFields, { key, label }],
+                    });
+                    setNewCustomLabel("");
+                  }}
+                  className="px-3 py-1.5 text-xs font-medium rounded-lg bg-slate-900 text-white hover:bg-slate-800 disabled:opacity-40 cursor-pointer whitespace-nowrap"
+                >
+                  + নতুন ফিল্ড
+                </button>
+              </div>
+            </div>
+
+            {(settings.customFields ?? []).length === 0 ? (
+              <p className="text-xs text-slate-400">
+                এখনো কোনো কাস্টম ফিল্ড যোগ করা হয়নি। CSV ইমপোর্টে নতুন কলাম থাকলে স্বয়ংক্রিয়ভাবে এখানে যুক্ত হবে।
+              </p>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                {(settings.customFields ?? []).map((cf) => (
+                  <div key={cf.key}>
+                    <label className="block text-xs font-medium text-slate-600 mb-1.5">
+                      {cf.label}
+                    </label>
+                    <input
+                      type="text"
+                      value={draft.x[cf.key] || ""}
+                      onChange={(e) => setExtra(cf.key, e.target.value)}
+                      className="w-full px-3.5 py-2 text-sm rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-teal-700/20 focus:border-teal-700"
+                    />
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         </div>
       )}

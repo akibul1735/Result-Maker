@@ -16,6 +16,11 @@ data class Student(
     val x: Map<String, String> = emptyMap()    // DAYS_1, PRES_1, ACT_1, DISC_1, COND_1, REM_1 ...
 )
 
+data class CustomFieldDef(
+    val key: String,
+    val label: String
+)
+
 data class Settings(
     val school: String = "",
     val schoolAddress: String = "",
@@ -23,7 +28,8 @@ data class Settings(
     val teachers: Map<Int, String> = emptyMap(),
     val teacherMobiles: Map<Int, String> = emptyMap(),
     val pdfFont: String = "noto_serif",
-    val dpeLogo: String = "simple"
+    val dpeLogo: String = "simple",
+    val customFields: List<CustomFieldDef> = emptyList()
 )
 
 data class DpeLogoInfo(val id: String, val labelBn: String, val descriptionBn: String)

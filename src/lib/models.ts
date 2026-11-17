@@ -94,6 +94,11 @@ export const DPE_LOGO_OPTIONS: DpeLogoOption[] = [
   },
 ];
 
+export interface CustomFieldDef {
+  key: string;
+  label: string;
+}
+
 export interface Settings {
   school: string;
   schoolAddress?: string;
@@ -102,6 +107,7 @@ export interface Settings {
   dpeLogo?: DpeLogoStyle;
   teachers: Record<number, string>;
   teacherMobiles: Record<number, string>;
+  customFields?: CustomFieldDef[];
 }
 
 export interface Comp {
@@ -323,6 +329,7 @@ export function toJson(list: Student[], st: Settings): string {
       dpeLogo: st.dpeLogo || "simple",
       teachers: st.teachers,
       teacherMobiles: st.teacherMobiles,
+      customFields: st.customFields ?? [],
       students: list,
     },
     null,
@@ -351,6 +358,17 @@ export function fromJson(txt: string): { students: Student[]; settings: Settings
     ? (rawFont as PdfFontId)
     : "noto_serif";
   const dpeLogo: DpeLogoStyle = o.dpeLogo === "color" ? "color" : "simple";
+  const customFields: CustomFieldDef[] = Array.isArray(o.customFields)
+    ? o.customFields
+        .filter(
+          (cf: unknown): cf is CustomFieldDef =>
+            Boolean(cf) &&
+            typeof cf === "object" &&
+            typeof (cf as CustomFieldDef).key === "string" &&
+            typeof (cf as CustomFieldDef).label === "string"
+        )
+        .map((cf: CustomFieldDef) => ({ key: cf.key, label: cf.label }))
+    : [];
   const settings: Settings = {
     school: typeof o.school === "string" ? o.school : "",
     schoolAddress: typeof o.schoolAddress === "string" ? o.schoolAddress : "",
@@ -359,6 +377,7 @@ export function fromJson(txt: string): { students: Student[]; settings: Settings
     dpeLogo,
     teachers,
     teacherMobiles,
+    customFields,
   };
   const arr = Array.isArray(o.students) ? o.students : [];
   const students: Student[] = arr.map((j: Record<string, unknown>) => ({
@@ -386,9 +405,10 @@ function csvEscape(s: string): string {
   return s;
 }
 
-export function toCsv(list: Student[]): string {
-  const header = [...BASE_COLS, ...MARK_KEYS, ...TEXT_KEYS];
-  const lines = [header.join(",")];
+export function toCsv(list: Student[], customFields: CustomFieldDef[] = []): string {
+  const cfHeaders = customFields.map((cf) => cf.label);
+  const header = [...BASE_COLS, ...cfHeaders, ...MARK_KEYS, ...TEXT_KEYS];
+  const lines = [header.map(csvEscape).join(",")];
   const sorted = [...list].sort((a, b) => a.cls - b.cls || a.roll - b.roll);
   for (const s of sorted) {
     const row = [
@@ -402,6 +422,7 @@ export function toCsv(list: Student[]): string {
       s.district,
       s.mobile,
       s.religion,
+      ...customFields.map((cf) => s.x[cf.key] ?? ""),
       ...MARK_KEYS.map((k) => (s.m[k] !== undefined ? fmtEn(s.m[k]) : "")),
       ...TEXT_KEYS.map((k) => s.x[k] ?? ""),
     ];
@@ -410,8 +431,29 @@ export function toCsv(list: Student[]): string {
   return "\uFEFF" + lines.join("\n") + "\n";
 }
 
+function detectDelimiter(text: string): "," | "\t" | ";" {
+  const firstLine = text.split(/\r?\n/)[0] || "";
+  let inQ = false;
+  let commas = 0;
+  let tabs = 0;
+  let semis = 0;
+  for (let i = 0; i < firstLine.length; i++) {
+    const c = firstLine[i];
+    if (c === '"') inQ = !inQ;
+    else if (!inQ) {
+      if (c === ",") commas++;
+      else if (c === "\t") tabs++;
+      else if (c === ";") semis++;
+    }
+  }
+  if (tabs >= commas && tabs >= semis && tabs > 0) return "\t";
+  if (semis > commas && semis > 0) return ";";
+  return ",";
+}
+
 export function parseCsv(t0: string): string[][] {
   const t = t0.replace(/^\uFEFF/, "");
+  const sep = detectDelimiter(t);
   const rows: string[][] = [];
   let row: string[] = [];
   let cur = "";
@@ -431,7 +473,7 @@ export function parseCsv(t0: string): string[][] {
       }
     } else if (c === '"') {
       inQ = true;
-    } else if (c === ",") {
+    } else if (c === sep) {
       row.push(cur);
       cur = "";
     } else if (c === "\n") {
@@ -452,56 +494,366 @@ export function parseCsv(t0: string): string[][] {
   return rows.filter((r) => r.some((cell) => cell.trim().length > 0));
 }
 
-export function importCsv(txt: string, existing: Student[]): Student[] {
-  const rows = parseCsv(txt);
-  if (rows.length < 2) return existing;
-  const idx = new Map<string, number>();
-  rows[0].forEach((h, i) => idx.set(h.trim(), i));
-  const out = [...existing];
+export function parseClassNum(raw: string): number | null {
+  const s = fromBn(raw).trim().toLowerCase();
+  if (!s) return null;
+  const direct = Number.parseInt(s, 10);
+  if (Number.isInteger(direct) && direct >= 1 && direct <= 5) return direct;
+  if (/প্রথম|১ম|\b1st\b|\bone\b|class\s*1|শ্রেণি\s*1/.test(s)) return 1;
+  if (/দ্বিতীয়|দ্বিতীয়|২য়|২য়|\b2nd\b|\btwo\b|class\s*2|শ্রেণি\s*2/.test(s)) return 2;
+  if (/তৃতীয়|তৃতীয়|৩য়|৩য়|\b3rd\b|\bthree\b|class\s*3|শ্রেণি\s*3/.test(s)) return 3;
+  if (/চতুর্থ|৪র্থ|\b4th\b|\bfour\b|class\s*4|শ্রেণি\s*4/.test(s)) return 4;
+  if (/পঞ্চম|৫ম|\b5th\b|\bfive\b|class\s*5|শ্রেণি\s*5/.test(s)) return 5;
+  const digitMatch = s.match(/[1-5]/);
+  return digitMatch ? Number(digitMatch[0]) : null;
+}
 
-  for (const r of rows.slice(1)) {
-    const g = (k: string) => {
-      const col = idx.get(k);
-      return col !== undefined ? (r[col] ?? "").trim() : "";
-    };
-    const cls = Number.parseInt(fromBn(g("cls")), 10);
-    if (!Number.isInteger(cls) || cls < 1 || cls > 5) continue;
-    const roll = Number.parseInt(fromBn(g("roll")), 10);
-    if (!Number.isInteger(roll)) continue;
+export type StandardStudentFieldKey =
+  | "cls"
+  | "roll"
+  | "name"
+  | "guardian"
+  | "mobile"
+  | "village"
+  | "post"
+  | "upazila"
+  | "district"
+  | "religion";
 
-    const m: Record<string, number> = {};
-    const x: Record<string, string> = {};
-    for (const k of MARK_KEYS) {
-      const val = g(k);
-      if (val) {
-        const num = Number.parseFloat(fromBn(val));
-        if (!Number.isNaN(num)) m[k] = num;
+export interface StandardFieldOption {
+  key: StandardStudentFieldKey;
+  labelBn: string;
+}
+
+export const STANDARD_STUDENT_FIELDS: StandardFieldOption[] = [
+  { key: "cls", labelBn: "শ্রেণি (cls)" },
+  { key: "roll", labelBn: "রোল নম্বর (roll)" },
+  { key: "name", labelBn: "শিক্ষার্থীর নাম (name)" },
+  { key: "guardian", labelBn: "পিতা / অভিভাবকের নাম (guardian)" },
+  { key: "mobile", labelBn: "মোবাইল নম্বর (mobile)" },
+  { key: "village", labelBn: "গ্রাম (village)" },
+  { key: "post", labelBn: "পোস্ট অফিস (post)" },
+  { key: "upazila", labelBn: "উপজেলা (upazila)" },
+  { key: "district", labelBn: "জেলা (district)" },
+  { key: "religion", labelBn: "ধর্ম (religion)" },
+];
+
+export type CsvColumnMappingAction =
+  | { type: "standard"; field: StandardStudentFieldKey }
+  | { type: "mark"; key: string }
+  | { type: "text"; key: string }
+  | { type: "custom"; key: string; label: string }
+  | { type: "create_new"; newLabel: string }
+  | { type: "skip" };
+
+export interface DetectedCsvColumn {
+  colIndex: number;
+  header: string;
+  samples: string[];
+  isNew: boolean;
+  autoMatchedLabel?: string;
+  mapping: CsvColumnMappingAction;
+}
+
+function normalizeHeader(h: string): string {
+  return h
+    .trim()
+    .toLowerCase()
+    .replace(/[\u200B-\u200D\uFEFF]/g, "")
+    .replace(/[?:*।.,()_-]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+const STANDARD_HEADER_ALIASES: Record<StandardStudentFieldKey, string[]> = {
+  cls: ["cls", "class", "class name", "শ্রেণি", "শ্রেণী", "শ্রেণি নাম"],
+  roll: ["roll", "roll no", "roll number", "রোল", "রোল নম্বর", "রোল নং"],
+  name: ["name", "student name", "শিক্ষার্থীর নাম", "নাম", "ছাত্র ছাত্রীর নাম"],
+  guardian: [
+    "guardian",
+    "guardian name",
+    "father",
+    "father name",
+    "fathers name",
+    "father's name",
+    "অভিভাবক",
+    "অভিভাবকের নাম",
+    "পিতার নাম",
+    "পিতা অভিভাবক",
+  ],
+  mobile: [
+    "mobile",
+    "mobile no",
+    "mobile number",
+    "phone",
+    "phone number",
+    "contact",
+    "মোবাইল",
+    "মোবাইল নম্বর",
+    "মোবাইল নং",
+    "ফোন",
+    "অভিভাবকের মোবাইল",
+  ],
+  village: ["village", "গ্রাম", "গ্রাম মহল্লা", "মহল্লা"],
+  post: ["post", "post office", "পোস্ট", "পোস্ট অফিস", "ডাকঘর"],
+  upazila: ["upazila", "thana", "উপজেলা", "থানা"],
+  district: ["district", "zilla", "জেলা"],
+  religion: ["religion", "ধর্ম"],
+};
+
+export function makeCustomFieldKey(label: string, existingKeys: Set<string>): string {
+  const ascii = label
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "");
+  let hash = 0;
+  for (let i = 0; i < label.length; i++) {
+    hash = (hash * 31 + label.charCodeAt(i)) >>> 0;
+  }
+  const base = ascii ? `cf_${ascii}` : `cf_${hash.toString(36)}`;
+  let candidate = base;
+  let n = 2;
+  while (existingKeys.has(candidate)) {
+    candidate = `${base}_${n++}`;
+  }
+  return candidate;
+}
+
+export function detectCsvColumns(
+  rows: string[][],
+  existingCustomFields: CustomFieldDef[] = []
+): DetectedCsvColumn[] {
+  if (rows.length === 0) return [];
+  const headers = rows[0];
+  const dataRows = rows.slice(1);
+  const markSet = new Set(MARK_KEYS);
+  const textSet = new Set(TEXT_KEYS);
+
+  return headers.map((rawHeader, colIndex) => {
+    const header = rawHeader.trim() || `কলাম_${colIndex + 1}`;
+    const norm = normalizeHeader(header);
+    const samples = dataRows
+      .map((r) => (r[colIndex] ?? "").trim())
+      .filter((v) => v.length > 0)
+      .slice(0, 3);
+
+    // 1. Check standard student fields
+    for (const opt of STANDARD_STUDENT_FIELDS) {
+      const aliases = STANDARD_HEADER_ALIASES[opt.key];
+      if (aliases.some((a) => normalizeHeader(a) === norm)) {
+        return {
+          colIndex,
+          header,
+          samples,
+          isNew: false,
+          autoMatchedLabel: opt.labelBn,
+          mapping: { type: "standard", field: opt.key },
+        };
       }
     }
-    for (const k of TEXT_KEYS) {
-      const val = g(k);
-      if (val) x[k] = val;
+
+    // 2. Check mark keys or attendance/trait keys
+    if (markSet.has(header.trim())) {
+      return {
+        colIndex,
+        header,
+        samples,
+        isNew: false,
+        autoMatchedLabel: `নম্বর (${header.trim()})`,
+        mapping: { type: "mark", key: header.trim() },
+      };
+    }
+    if (textSet.has(header.trim())) {
+      return {
+        colIndex,
+        header,
+        samples,
+        isNew: false,
+        autoMatchedLabel: `উপস্থিতি/মতামত (${header.trim()})`,
+        mapping: { type: "text", key: header.trim() },
+      };
     }
 
-    const pos = out.findIndex((s) => s.cls === cls && s.roll === roll);
-    const base = pos >= 0 ? out[pos] : createEmptyStudent(cls, roll);
+    // 3. Check existing custom fields in settings
+    const existingCf = existingCustomFields.find(
+      (cf) =>
+        cf.key === header.trim() || normalizeHeader(cf.label) === norm
+    );
+    if (existingCf) {
+      return {
+        colIndex,
+        header,
+        samples,
+        isNew: false,
+        autoMatchedLabel: `কাস্টম ফিল্ড: ${existingCf.label}`,
+        mapping: { type: "custom", key: existingCf.key, label: existingCf.label },
+      };
+    }
+
+    // 4. Unmatched / NEW column
+    return {
+      colIndex,
+      header,
+      samples,
+      isNew: true,
+      mapping: { type: "create_new", newLabel: header },
+    };
+  });
+}
+
+export function applyMappedCsvImport(
+  rows: string[][],
+  columns: DetectedCsvColumn[],
+  existingStudents: Student[],
+  existingSettings: Settings,
+  defaultCls = 1
+): {
+  students: Student[];
+  settings: Settings;
+  addedCount: number;
+  updatedCount: number;
+  createdFields: CustomFieldDef[];
+} {
+  if (rows.length < 2) {
+    return {
+      students: existingStudents,
+      settings: existingSettings,
+      addedCount: 0,
+      updatedCount: 0,
+      createdFields: [],
+    };
+  }
+
+  const nextCustomFields: CustomFieldDef[] = [
+    ...(existingSettings.customFields ?? []),
+  ];
+  const existingKeySet = new Set<string>([
+    ...nextCustomFields.map((cf) => cf.key),
+    ...TEXT_KEYS,
+  ]);
+  const createdFields: CustomFieldDef[] = [];
+
+  // Resolve any create_new columns into stable custom fields
+  const resolvedMappings = columns.map((col) => {
+    if (col.mapping.type === "create_new") {
+      const label = col.mapping.newLabel.trim() || col.header;
+      const already = nextCustomFields.find(
+        (cf) => normalizeHeader(cf.label) === normalizeHeader(label)
+      );
+      if (already) {
+        return { colIndex: col.colIndex, action: { type: "custom" as const, key: already.key, label: already.label } };
+      }
+      const key = makeCustomFieldKey(label, existingKeySet);
+      existingKeySet.add(key);
+      const def = { key, label };
+      nextCustomFields.push(def);
+      createdFields.push(def);
+      return { colIndex: col.colIndex, action: { type: "custom" as const, key, label } };
+    }
+    return { colIndex: col.colIndex, action: col.mapping };
+  });
+
+  const out = [...existingStudents];
+  let addedCount = 0;
+  let updatedCount = 0;
+  const autoRollByCls = new Map<number, number>();
+
+  for (const r of rows.slice(1)) {
+    if (!r.some((c) => c.trim().length > 0)) continue;
+
+    let clsVal: number | null = null;
+    let rollVal: number | null = null;
+    const stdUpdates: Partial<Record<Exclude<StandardStudentFieldKey, "cls" | "roll">, string>> = {};
+    const m: Record<string, number> = {};
+    const x: Record<string, string> = {};
+
+    for (const { colIndex, action } of resolvedMappings) {
+      if (action.type === "skip") continue;
+      const raw = (r[colIndex] ?? "").trim();
+      if (!raw) continue;
+
+      if (action.type === "standard") {
+        if (action.field === "cls") {
+          clsVal = parseClassNum(raw);
+        } else if (action.field === "roll") {
+          const parsedRoll = Number.parseInt(fromBn(raw), 10);
+          if (Number.isInteger(parsedRoll) && parsedRoll > 0) rollVal = parsedRoll;
+        } else {
+          // If multiple CSV columns are mapped to the same standard field (e.g., ঠিকানা + গ্রাম), append if distinct
+          const prev = stdUpdates[action.field];
+          stdUpdates[action.field] = prev && prev !== raw ? `${prev}, ${raw}` : raw;
+        }
+      } else if (action.type === "mark") {
+        const num = Number.parseFloat(fromBn(raw));
+        if (!Number.isNaN(num)) m[action.key] = num;
+      } else if (action.type === "text") {
+        x[action.key] = raw;
+      } else if (action.type === "custom") {
+        const prev = x[action.key];
+        x[action.key] = prev && prev !== raw ? `${prev}, ${raw}` : raw;
+      }
+    }
+
+    const cls = clsVal ?? defaultCls;
+    if (cls < 1 || cls > 5) continue;
+
+    // Require at least roll or name to avoid blank rows
+    if (rollVal === null && !stdUpdates.name) continue;
+    if (rollVal === null) {
+      const nextAuto =
+        (autoRollByCls.get(cls) ??
+          out.filter((s) => s.cls === cls).reduce((mx, s) => Math.max(mx, s.roll), 0)) + 1;
+      rollVal = nextAuto;
+      autoRollByCls.set(cls, nextAuto);
+    }
+
+    const pos = out.findIndex((s) => s.cls === cls && s.roll === rollVal);
+    const base = pos >= 0 ? out[pos] : createEmptyStudent(cls, rollVal);
     const upd: Student = {
       ...base,
-      name: g("name") || base.name,
-      guardian: g("guardian") || base.guardian,
-      village: g("village") || base.village,
-      post: g("post") || base.post || "",
-      upazila: g("upazila") || base.upazila,
-      district: g("district") || base.district,
-      mobile: g("mobile") || base.mobile,
-      religion: g("religion") || base.religion,
+      name: stdUpdates.name || base.name,
+      guardian: stdUpdates.guardian || base.guardian,
+      village: stdUpdates.village || base.village,
+      post: stdUpdates.post || base.post || "",
+      upazila: stdUpdates.upazila || base.upazila,
+      district: stdUpdates.district || base.district,
+      mobile: stdUpdates.mobile || base.mobile,
+      religion: stdUpdates.religion || base.religion,
       m: { ...base.m, ...m },
       x: { ...base.x, ...x },
     };
-    if (pos >= 0) out[pos] = upd;
-    else out.push(upd);
+    if (pos >= 0) {
+      out[pos] = upd;
+      updatedCount++;
+    } else {
+      out.push(upd);
+      addedCount++;
+    }
   }
-  return out;
+
+  return {
+    students: out,
+    settings: {
+      ...existingSettings,
+      customFields: nextCustomFields,
+    },
+    addedCount,
+    updatedCount,
+    createdFields,
+  };
+}
+
+export function importCsv(txt: string, existing: Student[]): Student[] {
+  const rows = parseCsv(txt);
+  if (rows.length < 2) return existing;
+  const cols = detectCsvColumns(rows, []);
+  return applyMappedCsvImport(
+    rows,
+    cols,
+    existing,
+    DEFAULT_SETTINGS,
+    1
+  ).students;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -524,6 +876,7 @@ export const DEFAULT_SETTINGS: Settings = {
     4: "01712345604",
     5: "01712345605",
   },
+  customFields: [],
 };
 
 export const SAMPLE_STUDENTS: Student[] = [

@@ -3,12 +3,14 @@ import {
   ArrowDown,
   ArrowRight,
   FileDown,
+  FileUp,
   Grid2X2,
   Plus,
   UserPlus,
 } from "lucide-react";
 import {
   CLSN,
+  CustomFieldDef,
   RELIGIONS,
   Student,
   bn,
@@ -23,7 +25,7 @@ import {
   subjectsFor,
 } from "../lib/models";
 
-type SheetMode = "subject" | "all_subjects" | "attendance";
+type SheetMode = "subject" | "all_subjects" | "attendance" | "info";
 type AllSubjectField = "PRIMARY" | "TB" | "ACT" | "LANG" | "CT";
 
 interface SheetColDef {
@@ -31,9 +33,9 @@ interface SheetColDef {
   label: string;
   subLabel?: string;
   max: number;
-  kind: "mark" | "text_num" | "trait";
+  kind: "mark" | "text_num" | "trait" | "text_field";
   resolveKey: (student: Student) => {
-    bucket: "m" | "x";
+    bucket: "m" | "x" | "base";
     key: string;
     max: number;
   } | null;
@@ -41,11 +43,13 @@ interface SheetColDef {
 
 interface BulkSheetEntryProps {
   students: Student[];
+  customFields: CustomFieldDef[];
   selectedClass: number;
   onSelectClass: (cls: number) => void;
   onUpsertStudent: (s: Student) => void;
   onBatchUpdateStudents: (updated: Student[]) => void;
   onOpenStudent: (s: Student) => void;
+  onOpenCsvImport: () => void;
   onExportClassPdf: (cls: number) => void;
   onShowToast: (msg: string) => void;
   exportingPdf: boolean;
@@ -190,11 +194,13 @@ const SheetCellInput: React.FC<CellProps> = ({
 
 export const BulkSheetEntry: React.FC<BulkSheetEntryProps> = ({
   students,
+  customFields,
   selectedClass,
   onSelectClass,
   onUpsertStudent,
   onBatchUpdateStudents,
   onOpenStudent,
+  onOpenCsvImport,
   onExportClassPdf,
   onShowToast,
   exportingPdf,
@@ -321,6 +327,41 @@ export const BulkSheetEntry: React.FC<BulkSheetEntryProps> = ({
       });
     }
 
+    if (mode === "info") {
+      const baseInfoCols: SheetColDef[] = [
+        {
+          id: "base_guardian",
+          label: "পিতা / অভিভাবক",
+          max: 0,
+          kind: "text_field",
+          resolveKey: () => ({ bucket: "base", key: "guardian", max: 0 }),
+        },
+        {
+          id: "base_mobile",
+          label: "মোবাইল নম্বর",
+          max: 0,
+          kind: "text_field",
+          resolveKey: () => ({ bucket: "base", key: "mobile", max: 0 }),
+        },
+        {
+          id: "base_village",
+          label: "গ্রাম",
+          max: 0,
+          kind: "text_field",
+          resolveKey: () => ({ bucket: "base", key: "village", max: 0 }),
+        },
+      ];
+      const cfCols: SheetColDef[] = customFields.map((cf) => ({
+        id: `cf_${cf.key}`,
+        label: cf.label,
+        subLabel: "কাস্টম",
+        max: 0,
+        kind: "text_field",
+        resolveKey: () => ({ bucket: "x", key: cf.key, max: 0 }),
+      }));
+      return [...baseInfoCols, ...cfCols];
+    }
+
     // attendance & traits mode
     return [
       {
@@ -364,7 +405,7 @@ export const BulkSheetEntry: React.FC<BulkSheetEntryProps> = ({
         resolveKey: () => ({ bucket: "x", key: `COND_${term}`, max: 1 }),
       },
     ];
-  }, [mode, activeSub, classSubs, allSubField, term]);
+  }, [mode, activeSub, classSubs, allSubField, term, customFields]);
 
   // Ref grid [row][col] for instant spreadsheet cursor jumps
   const inputRefs = useRef<Record<string, HTMLInputElement | null>>({});
@@ -407,6 +448,9 @@ export const BulkSheetEntry: React.FC<BulkSheetEntryProps> = ({
   const getCellDisplay = (s: Student, col: SheetColDef): string => {
     const resolved = col.resolveKey(s);
     if (!resolved) return "";
+    if (resolved.bucket === "base") {
+      return String((s as unknown as Record<string, unknown>)[resolved.key] ?? "");
+    }
     if (resolved.bucket === "m") {
       const val = s.m[resolved.key];
       return val !== undefined ? fmtEn(val) : "";
@@ -417,6 +461,10 @@ export const BulkSheetEntry: React.FC<BulkSheetEntryProps> = ({
   const applyCellValue = (s: Student, col: SheetColDef, rawVal: string): Student => {
     const resolved = col.resolveKey(s);
     if (!resolved) return s;
+
+    if (resolved.bucket === "base") {
+      return { ...s, [resolved.key]: rawVal.trim() };
+    }
 
     if (resolved.bucket === "m") {
       const nextM = { ...s.m };
@@ -545,6 +593,15 @@ export const BulkSheetEntry: React.FC<BulkSheetEntryProps> = ({
 
             <button
               type="button"
+              onClick={onOpenCsvImport}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg border border-slate-200 bg-white text-slate-700 hover:bg-slate-50 cursor-pointer"
+            >
+              <FileUp className="w-3.5 h-3.5 text-teal-700" />
+              <span>CSV ইমপোর্ট</span>
+            </button>
+
+            <button
+              type="button"
               onClick={() => onExportClassPdf(selectedClass)}
               disabled={classStudents.length === 0 || exportingPdf}
               className="inline-flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-medium rounded-lg bg-teal-700 text-white hover:bg-teal-800 disabled:opacity-50 cursor-pointer"
@@ -609,6 +666,7 @@ export const BulkSheetEntry: React.FC<BulkSheetEntryProps> = ({
                 ["subject", "বিষয়ভিত্তিক শিট (সব অংশ)"],
                 ["all_subjects", "সকল বিষয় (একসাথে)"],
                 ["attendance", "উপস্থিতি ও গুণাবলি"],
+                ["info", `শিক্ষার্থী তথ্য ও কাস্টম (${bn(String(customFields.length))})`],
               ] as const
             ).map(([mId, mLabel]) => {
               const active = mode === mId;
@@ -823,7 +881,9 @@ export const BulkSheetEntry: React.FC<BulkSheetEntryProps> = ({
                             ) : (
                               <SheetCellInput
                                 value={cellValue}
-                                max={col.max}
+                                max={col.kind === "text_field" ? undefined : col.max}
+                                isText={col.kind === "text_field"}
+                                align={col.kind === "text_field" ? "left" : "center"}
                                 onCommit={(val) => handleCellCommit(s, col, val)}
                                 registerRef={(el) => {
                                   inputRefs.current[`${rIdx}:${cIdx}`] = el;

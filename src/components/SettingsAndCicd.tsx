@@ -18,7 +18,6 @@ import {
   Settings,
   Student,
   bn,
-  importCsv,
   toCsv,
   toJson,
   fromJson,
@@ -35,6 +34,7 @@ interface SettingsAndCicdProps {
   settings: Settings;
   onUpdateSettings: (settings: Settings) => void;
   onReplaceAll: (students: Student[], settings: Settings) => void;
+  onOpenCsvImport: (initialText?: string, initialFileName?: string) => void;
   onExportAllPdf: () => Promise<void>;
   onResetSampleData: () => void;
   exportingPdf: boolean;
@@ -57,6 +57,7 @@ export const SettingsAndCicd: React.FC<SettingsAndCicdProps> = ({
   settings,
   onUpdateSettings,
   onReplaceAll,
+  onOpenCsvImport,
   onExportAllPdf,
   onResetSampleData,
   exportingPdf,
@@ -90,15 +91,9 @@ export const SettingsAndCicd: React.FC<SettingsAndCicdProps> = ({
     reader.onload = () => {
       try {
         const text = String(reader.result || "");
-        const before = students.length;
-        const merged = importCsv(text, students);
-        onReplaceAll(merged, settings);
-        const added = merged.length - before;
-        setNotice(
-          `CSV ইমপোর্ট সম্পন্ন হয়েছে (নতুন ${bn(String(Math.max(0, added)))} জন, মোট ${bn(String(merged.length))} জন)।`
-        );
+        onOpenCsvImport(text, file.name);
       } catch (err) {
-        setError(`CSV ইমপোর্ট ব্যর্থ: ${(err as Error).message}`);
+        setError(`CSV ফাইল পড়া যায়নি: ${(err as Error).message}`);
       }
     };
     reader.readAsText(file, "UTF-8");
@@ -383,14 +378,14 @@ export const SettingsAndCicd: React.FC<SettingsAndCicdProps> = ({
 
           <div className="border-t border-slate-200 pt-4 space-y-2.5">
             <div className="text-xs font-semibold text-slate-700">
-              CSV (Excel) ইমপোর্ট ও এক্সপোর্ট
+              CSV (Excel) স্মার্ট ইমপোর্ট ও এক্সপোর্ট
             </div>
             <div className="grid grid-cols-2 gap-2.5">
               <button
                 onClick={() =>
                   downloadTextFile(
                     "শিক্ষার্থী-তথ্য.csv",
-                    toCsv(students),
+                    toCsv(students, settings.customFields ?? []),
                     "text/csv;charset=utf-8;"
                   )
                 }
@@ -403,7 +398,7 @@ export const SettingsAndCicd: React.FC<SettingsAndCicdProps> = ({
                 onClick={() =>
                   downloadTextFile(
                     "খালি-টেমপ্লেট.csv",
-                    toCsv([]),
+                    toCsv([], settings.customFields ?? []),
                     "text/csv;charset=utf-8;"
                   )
                 }
@@ -413,16 +408,58 @@ export const SettingsAndCicd: React.FC<SettingsAndCicdProps> = ({
                 <span>খালি টেমপ্লেট</span>
               </button>
             </div>
-            <label className="w-full inline-flex items-center justify-center gap-2 px-3 py-2 text-xs font-medium rounded-lg border border-slate-200 text-slate-700 hover:bg-slate-50 cursor-pointer">
-              <FileUp className="w-3.5 h-3.5" />
-              <span>CSV ইমপোর্ট (শ্রেণি+রোল মিললে হালনাগাদ)</span>
-              <input
-                type="file"
-                accept=".csv,text/csv"
-                onChange={handleCsvImport}
-                className="hidden"
-              />
-            </label>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              <label className="inline-flex items-center justify-center gap-2 px-3 py-2 text-xs font-medium rounded-lg border border-teal-200 bg-teal-50/60 text-teal-800 hover:bg-teal-50 cursor-pointer">
+                <FileUp className="w-3.5 h-3.5" />
+                <span>ফাইল থেকে CSV ইমপোর্ট</span>
+                <input
+                  type="file"
+                  accept=".csv,.tsv,.txt,text/csv,text/tab-separated-values"
+                  onChange={handleCsvImport}
+                  className="hidden"
+                />
+              </label>
+              <button
+                type="button"
+                onClick={() => onOpenCsvImport()}
+                className="inline-flex items-center justify-center gap-2 px-3 py-2 text-xs font-medium rounded-lg border border-slate-200 text-slate-700 hover:bg-slate-50 cursor-pointer"
+              >
+                <FileUp className="w-3.5 h-3.5 text-teal-700" />
+                <span>পেস্ট / কলাম ম্যাপিং</span>
+              </button>
+            </div>
+            {(settings.customFields ?? []).length > 0 && (
+              <div className="pt-2 border-t border-slate-100 space-y-1.5">
+                <div className="text-[11px] font-medium text-slate-500">
+                  ডাটাবেসে যুক্ত কাস্টম ফিল্ডসমূহ ({bn(String((settings.customFields ?? []).length))}টি):
+                </div>
+                <div className="flex flex-wrap gap-1.5">
+                  {(settings.customFields ?? []).map((cf) => (
+                    <span
+                      key={cf.key}
+                      className="inline-flex items-center gap-1 px-2 py-0.5 text-[11px] rounded bg-slate-100 text-slate-700 border border-slate-200"
+                    >
+                      <span>{cf.label}</span>
+                      <button
+                        type="button"
+                        title="ফিল্ডের তালিকা থেকে সরান"
+                        onClick={() =>
+                          onUpdateSettings({
+                            ...settings,
+                            customFields: (settings.customFields ?? []).filter(
+                              (item) => item.key !== cf.key
+                            ),
+                          })
+                        }
+                        className="text-slate-400 hover:text-rose-600 font-bold cursor-pointer"
+                      >
+                        ×
+                      </button>
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
 
           <div className="border-t border-slate-200 pt-4 space-y-2.5">

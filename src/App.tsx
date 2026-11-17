@@ -41,6 +41,7 @@ import { StudentEditor } from "./components/StudentEditor";
 import { ReportStudio } from "./components/ReportStudio";
 import { AiAssistantPanel } from "./components/AiAssistantPanel";
 import { SettingsAndCicd } from "./components/SettingsAndCicd";
+import { SmartCsvImportModal } from "./components/SmartCsvImportModal";
 
 const STORAGE_STUDENTS_KEY = "result_maker_students_v1";
 const STORAGE_SETTINGS_KEY = "result_maker_settings_v1";
@@ -84,6 +85,11 @@ export default function App() {
   const [toastMsg, setToastMsg] = useState<string | null>(null);
   const [audioUrl, setAudioUrl] = useState<string | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [csvModal, setCsvModal] = useState<{
+    open: boolean;
+    initialText?: string;
+    initialFileName?: string;
+  }>({ open: false });
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const menuRef = useRef<HTMLDivElement | null>(null);
 
@@ -467,6 +473,8 @@ export default function App() {
         {editingStudent ? (
           <StudentEditor
             student={editingStudent}
+            settings={settings}
+            onUpdateSettings={setSettings}
             onSave={upsertStudent}
             onDelete={deleteStudent}
             onBack={() => setEditingStudent(null)}
@@ -484,6 +492,9 @@ export default function App() {
             onSelectClass={setSelectedClass}
             onOpenStudent={(s) => setEditingStudent(s)}
             onNewStudent={handleNewStudent}
+            onOpenCsvImport={(initialText, initialFileName) =>
+              setCsvModal({ open: true, initialText, initialFileName })
+            }
             onPreviewPdf={(s) => {
               setStudioStudentId(s.id);
               setSection("studio");
@@ -501,11 +512,13 @@ export default function App() {
         ) : section === "sheet" ? (
           <BulkSheetEntry
             students={students}
+            customFields={settings.customFields ?? []}
             selectedClass={selectedClass}
             onSelectClass={setSelectedClass}
             onUpsertStudent={upsertStudent}
             onBatchUpdateStudents={(updatedList) => setStudents(updatedList)}
             onOpenStudent={(s) => setEditingStudent(s)}
+            onOpenCsvImport={() => setCsvModal({ open: true })}
             onExportClassPdf={(cls) => {
               const list = students
                 .filter((s) => s.cls === cls)
@@ -546,6 +559,9 @@ export default function App() {
               setStudents(list);
               setSettings(st);
             }}
+            onOpenCsvImport={(initialText, initialFileName) =>
+              setCsvModal({ open: true, initialText, initialFileName })
+            }
             onExportAllPdf={() => {
               const sorted = [...students].sort(
                 (a, b) => a.cls - b.cls || a.roll - b.roll
@@ -561,6 +577,22 @@ export default function App() {
           />
         )}
       </main>
+
+      <SmartCsvImportModal
+        isOpen={csvModal.open}
+        initialCsvText={csvModal.initialText}
+        initialFileName={csvModal.initialFileName}
+        students={students}
+        settings={settings}
+        defaultClass={selectedClass}
+        onClose={() => setCsvModal({ open: false })}
+        onImportComplete={(nextStudents, nextSettings, msg) => {
+          setStudents(nextStudents);
+          setSettings(nextSettings);
+          setCsvModal({ open: false });
+          showToast(msg);
+        }}
+      />
 
       {/* Audio Player Drawer (when TTS audio is generated) */}
       {audioUrl && (

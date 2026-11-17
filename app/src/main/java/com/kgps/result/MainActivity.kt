@@ -121,6 +121,8 @@ fun App(st: AppState) {
     var studioStudentId by remember { mutableStateOf<String?>(null) }
     var cls by remember { mutableStateOf(1) }
     var pending by remember { mutableStateOf<List<Student>>(emptyList()) }
+    var showCsvImport by remember { mutableStateOf(false) }
+    var initialCsvText by remember { mutableStateOf("") }
 
     val pdfLauncher = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/pdf")) { uri ->
         if (uri != null) {
@@ -163,6 +165,7 @@ fun App(st: AppState) {
                     onOpen = { editing = it; editReturnScreen = "list"; screen = "edit" },
                     onPreview = { studioStudentId = it.id; screen = "studio" },
                     onNew = openNew,
+                    onCsvImport = { initialCsvText = ""; showCsvImport = true },
                     onClassPdf = {
                         makePdf(st.students.filter { it.cls == cls }.sortedBy { it.roll }, "শ্রেণি-${cls}-প্রতিবেদন.pdf")
                     }
@@ -200,9 +203,34 @@ fun App(st: AppState) {
                         onPdf = { makePdf(listOf(it), "${it.name.ifBlank { "student" }}.pdf") }
                     )
                 }
-                else -> SettingsScreen(st = st, onBack = { screen = "list" }, makePdf = makePdf)
+                else -> SettingsScreen(
+                    st = st,
+                    onBack = { screen = "list" },
+                    onOpenCsvImport = { txt -> initialCsvText = txt; showCsvImport = true },
+                    makePdf = makePdf
+                )
             }
         }
+    }
+
+    if (showCsvImport) {
+        SmartCsvImportDialog(
+            st = st,
+            defaultCls = cls,
+            initialText = initialCsvText,
+            onDismiss = { showCsvImport = false },
+            onImported = { summary ->
+                st.replaceAll(summary.students, summary.settings)
+                showCsvImport = false
+                val msg = buildString {
+                    append("ইমপোর্ট সম্পন্ন: নতুন ${bn(summary.addedCount.toString())} জন, হালনাগাদ ${bn(summary.updatedCount.toString())} জন")
+                    if (summary.createdFields.isNotEmpty()) {
+                        append(", নতুন ফিল্ড ${bn(summary.createdFields.size.toString())}টি")
+                    }
+                }
+                toast(ctx, msg)
+            }
+        )
     }
 }
 
@@ -389,6 +417,7 @@ fun ListScreen(
     onOpen: (Student) -> Unit,
     onPreview: (Student) -> Unit,
     onNew: () -> Unit,
+    onCsvImport: () -> Unit,
     onClassPdf: () -> Unit
 ) {
     var query by remember { mutableStateOf("") }
@@ -402,7 +431,9 @@ fun ListScreen(
             it.name.lowercase().contains(q) ||
                 it.roll.toString().contains(q) ||
                 bn(it.roll.toString()).contains(q) ||
-                it.guardian.lowercase().contains(q)
+                it.guardian.lowercase().contains(q) ||
+                it.mobile.lowercase().contains(q) ||
+                it.x.values.any { v -> v.lowercase().contains(q) }
         }
     }
     val evaluated = allInClass.filter { s -> (1..3).any { s.hasTerm(it) } }
@@ -568,17 +599,27 @@ fun ListScreen(
             }
         }
 
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Button(onClick = onNew, modifier = Modifier.weight(1f), shape = RoundedCornerShape(10.dp)) {
-                Text("+ শিক্ষার্থী")
+        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            Button(onClick = onNew, modifier = Modifier.weight(1f), shape = RoundedCornerShape(10.dp), contentPadding = PaddingValues(horizontal = 8.dp, vertical = 10.dp)) {
+                Text("+ শিক্ষার্থী", fontSize = 12.sp)
+            }
+            OutlinedButton(
+                onClick = onCsvImport,
+                modifier = Modifier.weight(1f),
+                shape = RoundedCornerShape(10.dp),
+                border = BorderStroke(1.dp, SlateOutline),
+                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 10.dp)
+            ) {
+                Text("CSV ইমপোর্ট", fontSize = 12.sp)
             }
             OutlinedButton(
                 onClick = onClassPdf,
                 modifier = Modifier.weight(1f),
                 shape = RoundedCornerShape(10.dp),
-                border = BorderStroke(1.dp, SlateOutline)
+                border = BorderStroke(1.dp, SlateOutline),
+                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 10.dp)
             ) {
-                Text("শ্রেণির সব PDF")
+                Text("শ্রেণির PDF", fontSize = 12.sp)
             }
         }
     }
@@ -798,6 +839,39 @@ fun EditScreen(
                     Field("উপজেলা", s.upazila) { s = s.copy(upazila = it) }
                     Field("জেলা", s.district) { s = s.copy(district = it) }
                     Field("মোবাইল নম্বর", s.mobile, number = true) { s = s.copy(mobile = it) }
+
+                    Spacer(Modifier.height(10.dp))
+                    HorizontalDivider(color = SlateOutline)
+                    Spacer(Modifier.height(8.dp))
+                    Text("অতিরিক্ত ও কাস্টম ডাটাবেস ফিল্ড", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                    var newFieldLabel by remember { mutableStateOf("") }
+                    Row(Modifier.fillMaxWidth().padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        OutlinedTextField(
+                            value = newFieldLabel,
+                            onValueChange = { newFieldLabel = it },
+                            placeholder = { Text("নতুন ফিল্ডের নাম (যেমন: মাতার নাম)", fontSize = 12.sp) },
+                            singleLine = true,
+                            modifier = Modifier.weight(1f)
+                        )
+                        Button(
+                            onClick = {
+                                val lbl = newFieldLabel.trim()
+                                if (lbl.isNotEmpty()) {
+                                    val existing = st.settings.customFields
+                                    if (existing.none { it.label.equals(lbl, ignoreCase = true) }) {
+                                        val k = Repo.makeCustomFieldKey(lbl, existing.map { it.key }.toSet())
+                                        st.updateSettings(st.settings.copy(customFields = existing + CustomFieldDef(k, lbl)))
+                                    }
+                                    newFieldLabel = ""
+                                }
+                            },
+                            enabled = newFieldLabel.isNotBlank(),
+                            shape = RoundedCornerShape(8.dp)
+                        ) { Text("+ ফিল্ড", fontSize = 12.sp) }
+                    }
+                    st.settings.customFields.forEach { cf ->
+                        Field(cf.label, s.x[cf.key] ?: "") { setX(cf.key, it) }
+                    }
                 }
                 1 -> {
                     Text("সমন্বিত ফলাফল: ${fmt(s.overallPct())}%  —  গ্রেড ${gradeOf(s.overallPct())} (${gradeLabelBn(gradeOf(s.overallPct()))})", fontWeight = FontWeight.Bold)
@@ -880,7 +954,12 @@ fun EditScreen(
 }
 
 @Composable
-fun SettingsScreen(st: AppState, onBack: () -> Unit, makePdf: (List<Student>, String) -> Unit) {
+fun SettingsScreen(
+    st: AppState,
+    onBack: () -> Unit,
+    onOpenCsvImport: (String) -> Unit,
+    makePdf: (List<Student>, String) -> Unit
+) {
     val ctx = LocalContext.current
     var payload by remember { mutableStateOf("") }
     var restoreUri by remember { mutableStateOf<Uri?>(null) }
@@ -895,10 +974,8 @@ fun SettingsScreen(st: AppState, onBack: () -> Unit, makePdf: (List<Student>, St
     }
     val csvOpen = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { u ->
         if (u != null) try {
-            val before = st.students.size
-            st.replaceAll(Repo.importCsv(readText(ctx, u), st.students), st.settings)
-            toast(ctx, "ইমপোর্ট সম্পন্ন (নতুন ${bn((st.students.size - before).toString())} জন)")
-        } catch (e: Exception) { toast(ctx, "ইমপোর্ট ব্যর্থ: ${e.message}") }
+            onOpenCsvImport(readText(ctx, u))
+        } catch (e: Exception) { toast(ctx, "CSV পড়া যায়নি: ${e.message}") }
     }
     val jsonOpen = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { u -> if (u != null) restoreUri = u }
 
@@ -986,9 +1063,10 @@ fun SettingsScreen(st: AppState, onBack: () -> Unit, makePdf: (List<Student>, St
         Button(onClick = { makePdf(st.students.sortedWith(compareBy({ it.cls }, { it.roll })), "সব-শ্রেণির-প্রতিবেদন.pdf") }, modifier = Modifier.fillMaxWidth()) { Text("সব শ্রেণির সব শিক্ষার্থীর PDF") }
 
         Text("CSV (Excel)", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(top = 8.dp))
-        OutlinedButton(onClick = { payload = Repo.toCsv(st.students); csvSave.launch("শিক্ষার্থী-তথ্য.csv") }, modifier = Modifier.fillMaxWidth()) { Text("CSV এক্সপোর্ট") }
-        OutlinedButton(onClick = { payload = Repo.toCsv(emptyList()); csvSave.launch("খালি-টেমপ্লেট.csv") }, modifier = Modifier.fillMaxWidth()) { Text("খালি CSV টেমপ্লেট") }
-        OutlinedButton(onClick = { csvOpen.launch(arrayOf("*/*")) }, modifier = Modifier.fillMaxWidth()) { Text("CSV ইমপোর্ট (শ্রেণি+রোল মিললে হালনাগাদ)") }
+        OutlinedButton(onClick = { payload = Repo.toCsv(st.students, st.settings.customFields); csvSave.launch("শিক্ষার্থী-তথ্য.csv") }, modifier = Modifier.fillMaxWidth()) { Text("CSV এক্সপোর্ট") }
+        OutlinedButton(onClick = { payload = Repo.toCsv(emptyList(), st.settings.customFields); csvSave.launch("খালি-টেমপ্লেট.csv") }, modifier = Modifier.fillMaxWidth()) { Text("খালি CSV টেমপ্লেট") }
+        OutlinedButton(onClick = { csvOpen.launch(arrayOf("*/*")) }, modifier = Modifier.fillMaxWidth()) { Text("ফাইল থেকে স্মার্ট CSV ইমপোর্ট") }
+        OutlinedButton(onClick = { onOpenCsvImport("") }, modifier = Modifier.fillMaxWidth()) { Text("পেস্ট / কলাম ম্যাপিং CSV ইমপোর্ট") }
 
         Text("ব্যাকআপ / রিস্টোর", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(top = 8.dp))
         OutlinedButton(onClick = { payload = Repo.toJson(st.students, st.settings); jsonSave.launch("ব্যাকআপ.json") }, modifier = Modifier.fillMaxWidth()) { Text("সম্পূর্ণ ব্যাকআপ এক্সপোর্ট") }
@@ -1651,4 +1729,199 @@ fun BulkSheetScreen(
         }
     }
 }
+
+@Composable
+fun SmartCsvImportDialog(
+    st: AppState,
+    defaultCls: Int,
+    initialText: String,
+    onDismiss: () -> Unit,
+    onImported: (Repo.CsvImportSummary) -> Unit
+) {
+    val ctx = LocalContext.current
+    var rawText by remember(initialText) { mutableStateOf(initialText) }
+    var fallbackCls by remember(defaultCls) { mutableStateOf(defaultCls) }
+    val parsedRows = remember(rawText) { if (rawText.isBlank()) emptyList() else Repo.parseCsv(rawText) }
+    var columns by remember(parsedRows, st.settings.customFields) {
+        mutableStateOf(Repo.detectCsvColumns(parsedRows, st.settings.customFields))
+    }
+
+    val filePicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) {
+            try {
+                rawText = readText(ctx, uri)
+            } catch (e: Exception) {
+                toast(ctx, "ফাইল পড়া যায়নি: ${e.message}")
+            }
+        }
+    }
+
+    val summary = remember(parsedRows, columns, st.students, st.settings, fallbackCls) {
+        if (parsedRows.size >= 2 && columns.isNotEmpty()) {
+            Repo.applyMappedCsvImport(parsedRows, columns, st.students, st.settings, fallbackCls)
+        } else null
+    }
+    val hasRollOrName = columns.any { it.targetType == "standard" && (it.targetKey == "roll" || it.targetKey == "name") }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Text("স্মার্ট CSV / Excel ইমপোর্ট", fontWeight = FontWeight.Bold, fontSize = 16.sp)
+        },
+        text = {
+            Column(
+                Modifier.fillMaxWidth().heightIn(max = 460.dp).verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                OutlinedButton(
+                    onClick = { filePicker.launch(arrayOf("*/*")) },
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(8.dp)
+                ) {
+                    Text("CSV / TSV ফাইল নির্বাচন করুন", fontSize = 12.sp)
+                }
+
+                OutlinedTextField(
+                    value = rawText,
+                    onValueChange = { rawText = it },
+                    label = { Text("অথবা Excel/CSV ডাটা এখানে পেস্ট করুন", fontSize = 11.sp) },
+                    minLines = if (parsedRows.isEmpty()) 4 else 2,
+                    maxLines = 4,
+                    modifier = Modifier.fillMaxWidth()
+                )
+
+                if (parsedRows.isNotEmpty()) {
+                    val newCols = columns.count { it.isNew }
+                    val matchedCols = columns.size - newCols
+                    Text(
+                        "মোট কলাম: ${bn(columns.size.toString())}টি · শনাক্ত: ${bn(matchedCols.toString())}টি · নতুন: ${bn(newCols.toString())}টি",
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = if (newCols > 0) Color(0xFFB45309) else TealPrimary
+                    )
+
+                    Text("ডিফল্ট শ্রেণি (CSV-তে না থাকলে):", fontSize = 11.sp, color = SlateMuted)
+                    Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                        (1..5).forEach { c ->
+                            FilterChip(selected = fallbackCls == c, onClick = { fallbackCls = c }, label = { Text(CLS_SHORT[c - 1], fontSize = 11.sp) })
+                        }
+                    }
+
+                    columns.forEachIndexed { idx, col ->
+                        var dropdownOpen by remember(col.colIndex) { mutableStateOf(false) }
+                        val targetDesc = when (col.targetType) {
+                            "create_new" -> "+ নতুন ফিল্ড: ${col.newLabel}"
+                            "skip" -> "✕ বাদ দিন"
+                            "standard" -> Repo.STANDARD_FIELDS.find { it.first == col.targetKey }?.second ?: col.targetKey
+                            "custom" -> "কাস্টম: ${st.settings.customFields.find { it.key == col.targetKey }?.label ?: col.targetKey}"
+                            else -> col.targetKey
+                        }
+
+                        Card(
+                            Modifier.fillMaxWidth(),
+                            colors = CardDefaults.cardColors(containerColor = if (col.isNew) Color(0xFFFFFBEB) else SlateBg),
+                            border = BorderStroke(1.dp, if (col.isNew) Color(0xFFFCD34D) else SlateOutline),
+                            shape = RoundedCornerShape(8.dp)
+                        ) {
+                            Column(Modifier.padding(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                                    Text("${bn((idx + 1).toString())}. ${col.header}", fontWeight = FontWeight.Bold, fontSize = 13.sp, modifier = Modifier.weight(1f))
+                                    Text(
+                                        if (col.isNew) "নতুন কলাম" else "মিলেছে",
+                                        fontSize = 10.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = if (col.isNew) Color(0xFFB45309) else Color(0xFF047857)
+                                    )
+                                }
+                                if (col.samples.isNotEmpty()) {
+                                    Text("নমুনা: ${col.samples.joinToString(" · ")}", fontSize = 11.sp, color = SlateMuted, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                }
+                                Box {
+                                    OutlinedButton(
+                                        onClick = { dropdownOpen = true },
+                                        modifier = Modifier.fillMaxWidth(),
+                                        shape = RoundedCornerShape(6.dp),
+                                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)
+                                    ) {
+                                        Text("$targetDesc ▾", fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                    }
+                                    DropdownMenu(expanded = dropdownOpen, onDismissRequest = { dropdownOpen = false }) {
+                                        DropdownMenuItem(
+                                            text = { Text("+ নতুন ফিল্ড তৈরি করুন (ডাটাবেসে যোগ হবে)", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = Color(0xFFB45309)) },
+                                            onClick = {
+                                                columns = columns.map { if (it.colIndex == col.colIndex) it.copy(targetType = "create_new", newLabel = it.header) else it }
+                                                dropdownOpen = false
+                                            }
+                                        )
+                                        DropdownMenuItem(
+                                            text = { Text("✕ বাদ দিন (ইমপোর্ট করবেন না)", fontSize = 12.sp, color = SlateMuted) },
+                                            onClick = {
+                                                columns = columns.map { if (it.colIndex == col.colIndex) it.copy(targetType = "skip") else it }
+                                                dropdownOpen = false
+                                            }
+                                        )
+                                        HorizontalDivider()
+                                        Repo.STANDARD_FIELDS.forEach { (fKey, fLabel) ->
+                                            DropdownMenuItem(
+                                                text = { Text(fLabel, fontSize = 12.sp) },
+                                                onClick = {
+                                                    columns = columns.map { if (it.colIndex == col.colIndex) it.copy(targetType = "standard", targetKey = fKey) else it }
+                                                    dropdownOpen = false
+                                                }
+                                            )
+                                        }
+                                        if (st.settings.customFields.isNotEmpty()) {
+                                            HorizontalDivider()
+                                            st.settings.customFields.forEach { cf ->
+                                                DropdownMenuItem(
+                                                    text = { Text("কাস্টম: ${cf.label}", fontSize = 12.sp) },
+                                                    onClick = {
+                                                        columns = columns.map { if (it.colIndex == col.colIndex) it.copy(targetType = "custom", targetKey = cf.key) else it }
+                                                        dropdownOpen = false
+                                                    }
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+                                if (col.targetType == "create_new") {
+                                    OutlinedTextField(
+                                        value = col.newLabel,
+                                        onValueChange = { lbl ->
+                                            columns = columns.map { if (it.colIndex == col.colIndex) it.copy(newLabel = lbl) else it }
+                                        },
+                                        label = { Text("নতুন ডাটাবেস ফিল্ডের নাম", fontSize = 10.sp) },
+                                        singleLine = true,
+                                        modifier = Modifier.fillMaxWidth()
+                                    )
+                                }
+                            }
+                        }
+                    }
+
+                    if (summary != null) {
+                        Text(
+                            "নতুন ${bn(summary.addedCount.toString())} জন · হালনাগাদ ${bn(summary.updatedCount.toString())} জন · নতুন ফিল্ড ${bn(summary.createdFields.size.toString())}টি",
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = TealPrimary
+                        )
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = { if (summary != null) onImported(summary) },
+                enabled = summary != null && hasRollOrName && (summary.addedCount + summary.updatedCount > 0)
+            ) {
+                Text("ইমপোর্ট করুন")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("বাতিল") }
+        }
+    )
+}
+
 
