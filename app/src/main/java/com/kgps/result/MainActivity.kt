@@ -21,19 +21,28 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -107,6 +116,7 @@ private fun writeText(ctx: Context, uri: Uri, t: String) {
 fun App(st: AppState) {
     val ctx = LocalContext.current
     var screen by remember { mutableStateOf("list") }
+    var editReturnScreen by remember { mutableStateOf("list") }
     var editing by remember { mutableStateOf<Student?>(null) }
     var studioStudentId by remember { mutableStateOf<String?>(null) }
     var cls by remember { mutableStateOf(1) }
@@ -127,6 +137,7 @@ fun App(st: AppState) {
     val openNew: () -> Unit = {
         val next = (st.students.filter { it.cls == cls }.maxOfOrNull { it.roll } ?: 0) + 1
         editing = Student(UUID.randomUUID().toString(), cls, next, "")
+        editReturnScreen = if (screen == "sheet") "sheet" else "list"
         screen = "edit"
     }
 
@@ -149,9 +160,18 @@ fun App(st: AppState) {
                     st = st,
                     cls = cls,
                     onCls = { cls = it },
-                    onOpen = { editing = it; screen = "edit" },
+                    onOpen = { editing = it; editReturnScreen = "list"; screen = "edit" },
                     onPreview = { studioStudentId = it.id; screen = "studio" },
                     onNew = openNew,
+                    onClassPdf = {
+                        makePdf(st.students.filter { it.cls == cls }.sortedBy { it.roll }, "শ্রেণি-${cls}-প্রতিবেদন.pdf")
+                    }
+                )
+                "sheet" -> BulkSheetScreen(
+                    st = st,
+                    cls = cls,
+                    onCls = { cls = it },
+                    onOpenStudent = { editing = it; editReturnScreen = "sheet"; screen = "edit" },
                     onClassPdf = {
                         makePdf(st.students.filter { it.cls == cls }.sortedBy { it.roll }, "শ্রেণি-${cls}-প্রতিবেদন.pdf")
                     }
@@ -167,7 +187,7 @@ fun App(st: AppState) {
                     EditScreen(
                         st = st,
                         init = e,
-                        onBack = { screen = "list" },
+                        onBack = { screen = editReturnScreen },
                         onPreview = { saved ->
                             if (saved.name.isNotBlank()) {
                                 st.upsert(saved)
@@ -233,6 +253,7 @@ fun AppHeaderBar(
                         )
                         listOf(
                             "list" to "শিক্ষার্থী তালিকা",
+                            "sheet" to "দ্রুত শিট এন্ট্রি",
                             "studio" to "রিপোর্ট স্টুডিও (PDF প্রিভিউ)",
                             "settings" to "সেটিংস, শিক্ষক ও ব্যাকআপ"
                         ).forEach { (key, label) ->
@@ -333,6 +354,7 @@ fun AppHeaderBar(
             ) {
                 listOf(
                     "list" to "শিক্ষার্থী তালিকা",
+                    "sheet" to "শিট এন্ট্রি",
                     "studio" to "রিপোর্ট স্টুডিও",
                     "settings" to "সেটিংস"
                 ).forEach { (key, label) ->
@@ -1005,3 +1027,628 @@ fun SettingsScreen(st: AppState, onBack: () -> Unit, makePdf: (List<Student>, St
         dismissButton = { TextButton(onClick = { askClearAll = false }) { Text("না") } }
     )
 }
+
+private data class AndroidSheetCol(
+    val id: String,
+    val label: String,
+    val subLabel: String,
+    val max: Int,
+    val kind: String, // "mark", "days", "trait"
+    val subKey: String? = null,
+    val compKey: String? = null,
+    val xKey: String? = null
+)
+
+@Composable
+fun BulkSheetScreen(
+    st: AppState,
+    cls: Int,
+    onCls: (Int) -> Unit,
+    onOpenStudent: (Student) -> Unit,
+    onClassPdf: () -> Unit
+) {
+    val ctx = LocalContext.current
+    var term by remember { mutableStateOf(1) }
+    var mode by remember { mutableStateOf("subject") } // "subject", "all", "attendance"
+    var allSubField by remember { mutableStateOf("PRIMARY") }
+    var enterMovesDown by remember { mutableStateOf(true) }
+
+    val classSubs = remember(cls) { subjectsFor(cls, "ইসলাম") }
+    var selectedSubKey by remember(cls) { mutableStateOf(classSubs.firstOrNull()?.key ?: "BAN") }
+    LaunchedEffect(classSubs) {
+        if (classSubs.none { it.key == selectedSubKey }) {
+            selectedSubKey = classSubs.firstOrNull()?.key ?: "BAN"
+        }
+    }
+    val activeSub = remember(classSubs, selectedSubKey) {
+        classSubs.find { it.key == selectedSubKey } ?: classSubs.firstOrNull()
+    }
+
+    val classStudents = remember(st.students, cls) {
+        st.students.filter { it.cls == cls }.sortedWith(compareBy({ it.roll }, { it.name }))
+    }
+
+    val columns = remember(mode, activeSub, classSubs, allSubField, term) {
+        when (mode) {
+            "subject" -> {
+                if (activeSub == null) emptyList()
+                else buildList {
+                    activeSub.comps.forEach { c ->
+                        val shortLabel = when (c.key) {
+                            "TB" -> "পাঠ্যবই"
+                            "ACT" -> "সক্রিয়তা"
+                            "LANG" -> "ভাষা"
+                            "CT" -> "ক্লাস টেস্ট"
+                            else -> "মোট"
+                        }
+                        add(
+                            AndroidSheetCol(
+                                id = "${activeSub.key}_${c.key}",
+                                label = shortLabel,
+                                subLabel = "(${bn(c.max.toString())})",
+                                max = c.max,
+                                kind = "mark",
+                                subKey = activeSub.key,
+                                compKey = c.key
+                            )
+                        )
+                    }
+                    if (activeSub.written > 0) {
+                        add(
+                            AndroidSheetCol(
+                                id = "${activeSub.key}_WR",
+                                label = "সামষ্টিক",
+                                subLabel = "(${bn(activeSub.written.toString())})",
+                                max = activeSub.written,
+                                kind = "mark",
+                                subKey = activeSub.key,
+                                compKey = "WR"
+                            )
+                        )
+                    }
+                }
+            }
+            "all" -> {
+                classSubs.map { sub ->
+                    val targetCompKey: String
+                    val targetMax: Int
+                    val targetSubLabel: String
+                    if (allSubField == "PRIMARY") {
+                        when {
+                            sub.written > 0 -> {
+                                targetCompKey = "WR"
+                                targetMax = sub.written
+                                targetSubLabel = "লিখিত (${bn(targetMax.toString())})"
+                            }
+                            sub.key == "ART" -> {
+                                targetCompKey = "TOTAL"
+                                targetMax = sub.max
+                                targetSubLabel = "মোট (${bn(targetMax.toString())})"
+                            }
+                            else -> {
+                                targetCompKey = "TB"
+                                targetMax = sub.comps.firstOrNull()?.max ?: 20
+                                targetSubLabel = "পাঠ্য (${bn(targetMax.toString())})"
+                            }
+                        }
+                    } else {
+                        val comp = if (sub.key == "ART") sub.comps.first() else (sub.comps.find { it.key == allSubField } ?: sub.comps.first())
+                        targetCompKey = comp.key
+                        targetMax = comp.max
+                        targetSubLabel = "${if (comp.key == "TOTAL") "মোট" else comp.key} (${bn(comp.max.toString())})"
+                    }
+                    val shortTitle = when (sub.key) {
+                        "REL" -> "ধর্ম"
+                        "SOC" -> "সমাজ/বিজ্ঞান"
+                        "BGW" -> "বাওবি"
+                        "PE" -> "শারীরিক"
+                        else -> sub.bn
+                    }
+                    AndroidSheetCol(
+                        id = "${sub.key}_$targetCompKey",
+                        label = shortTitle,
+                        subLabel = targetSubLabel,
+                        max = targetMax,
+                        kind = "mark",
+                        subKey = sub.key,
+                        compKey = targetCompKey
+                    )
+                }
+            }
+            else -> listOf(
+                AndroidSheetCol("DAYS_$term", "কার্যদিবস", "দিন", 365, "days", xKey = "DAYS_$term"),
+                AndroidSheetCol("PRES_$term", "উপস্থিতি", "দিন", 365, "days", xKey = "PRES_$term"),
+                AndroidSheetCol("ACT_$term", "সক্রিয়তা", "ট্যাপ", 1, "trait", xKey = "ACT_$term"),
+                AndroidSheetCol("DISC_$term", "শৃঙ্খলা", "ট্যাপ", 1, "trait", xKey = "DISC_$term"),
+                AndroidSheetCol("COND_$term", "আচরণ", "ট্যাপ", 1, "trait", xKey = "COND_$term")
+            )
+        }
+    }
+
+    val focusRequesters = remember(cls, term, mode, selectedSubKey, allSubField, classStudents.size, columns.size) {
+        mutableMapOf<Pair<Int, Int>, FocusRequester>()
+    }
+
+    fun moveFocusFrom(r: Int, c: Int) {
+        var nr = if (enterMovesDown) r + 1 else r
+        var nc = if (enterMovesDown) c else c + 1
+        if (enterMovesDown && nr >= classStudents.size) {
+            if (c + 1 < columns.size && columns[c + 1].kind != "trait") {
+                nr = 0
+                nc = c + 1
+            } else return
+        } else if (!enterMovesDown && nc >= columns.size) {
+            if (r + 1 < classStudents.size) {
+                nr = r + 1
+                nc = 0
+            } else return
+        }
+        focusRequesters[nr to nc]?.requestFocus()
+    }
+
+    // Quick add student inputs
+    val suggestedRoll = remember(classStudents) { (classStudents.maxOfOrNull { it.roll } ?: 0) + 1 }
+    var newRoll by remember { mutableStateOf("") }
+    var newName by remember { mutableStateOf("") }
+
+    val vScroll = rememberScrollState()
+    val hScroll = rememberScrollState()
+    val rowHeight = 46.dp
+    val headerHeight = 48.dp
+    val colWidth = 84.dp
+
+    Column(Modifier.fillMaxSize().padding(horizontal = 10.dp, vertical = 8.dp)) {
+        // Class & Term Controls Card
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            colors = CardDefaults.cardColors(containerColor = Color.White),
+            border = BorderStroke(1.dp, SlateOutline),
+            shape = RoundedCornerShape(12.dp)
+        ) {
+            Column(Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Row(
+                    Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text("দ্রুত শিট এন্ট্রি", fontWeight = FontWeight.Bold, fontSize = 15.sp, color = SlateText)
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        OutlinedButton(
+                            onClick = { enterMovesDown = !enterMovesDown },
+                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                            shape = RoundedCornerShape(8.dp),
+                            border = BorderStroke(1.dp, SlateOutline),
+                            modifier = Modifier.height(30.dp)
+                        ) {
+                            Text(
+                                if (enterMovesDown) "Enter: ↓ নিচে" else "Enter: → ডানে",
+                                fontSize = 11.sp,
+                                color = TealPrimary,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        }
+                        Button(
+                            onClick = onClassPdf,
+                            enabled = classStudents.isNotEmpty(),
+                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp),
+                            shape = RoundedCornerShape(8.dp),
+                            modifier = Modifier.height(30.dp)
+                        ) {
+                            Text("শ্রেণির PDF", fontSize = 11.sp)
+                        }
+                    }
+                }
+
+                // Class chips
+                Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    (1..5).forEach { c ->
+                        val count = st.students.count { it.cls == c }
+                        FilterChip(
+                            selected = cls == c,
+                            onClick = { onCls(c) },
+                            label = { Text("${CLS_SHORT[c - 1]} (${bn(count.toString())})", fontSize = 12.sp) }
+                        )
+                    }
+                }
+
+                // Term + Mode chips
+                Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    (1..3).forEach { t ->
+                        FilterChip(
+                            selected = term == t,
+                            onClick = { term = t },
+                            label = { Text("${bn(t.toString())} প্রান্তিক", fontSize = 12.sp) }
+                        )
+                    }
+                    VerticalDivider(Modifier.height(28.dp).align(Alignment.CenterVertically))
+                    listOf(
+                        "subject" to "বিষয়ভিত্তিক",
+                        "all" to "সকল বিষয়",
+                        "attendance" to "উপস্থিতি/গুণাবলি"
+                    ).forEach { (mId, mLabel) ->
+                        FilterChip(
+                            selected = mode == mId,
+                            onClick = { mode = mId },
+                            label = { Text(mLabel, fontSize = 12.sp) }
+                        )
+                    }
+                }
+
+                // Sub-selector chips
+                if (mode == "subject") {
+                    Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        classSubs.forEach { sub ->
+                            val shortName = when (sub.key) {
+                                "REL" -> "ধর্মশিক্ষা"
+                                "SOC" -> "সমাজ ও বিজ্ঞান"
+                                "PE" -> "শারীরিক শিক্ষা"
+                                else -> sub.bn
+                            }
+                            FilterChip(
+                                selected = activeSub?.key == sub.key,
+                                onClick = { selectedSubKey = sub.key },
+                                label = { Text(shortName, fontSize = 11.sp) }
+                            )
+                        }
+                    }
+                } else if (mode == "all") {
+                    Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        listOf(
+                            "PRIMARY" to "সামষ্টিক/মূল",
+                            "TB" to "পাঠ্যবই",
+                            "CT" to "ক্লাস টেস্ট",
+                            "ACT" to "সক্রিয়তা",
+                            "LANG" to "ভাষাদক্ষতা"
+                        ).forEach { (fId, fLabel) ->
+                            FilterChip(
+                                selected = allSubField == fId,
+                                onClick = { allSubField = fId },
+                                label = { Text(fLabel, fontSize = 11.sp) }
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
+        Spacer(Modifier.height(8.dp))
+
+        // Frozen Left (Roll + Name) + Horizontally Scrollable Right Spreadsheet Grid
+        Surface(
+            modifier = Modifier.weight(1f).fillMaxWidth(),
+            color = Color.White,
+            border = BorderStroke(1.dp, SlateOutline),
+            shape = RoundedCornerShape(12.dp)
+        ) {
+            if (classStudents.isEmpty()) {
+                Column(
+                    Modifier.fillMaxSize().padding(24.dp),
+                    verticalArrangement = Arrangement.Center,
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Text("${CLSN[cls - 1]} শ্রেণিতে এখনো কোনো শিক্ষার্থী নেই", fontWeight = FontWeight.SemiBold)
+                    Spacer(Modifier.height(4.dp))
+                    Text("নিচের বক্স থেকে দ্রুত নতুন শিক্ষার্থী যোগ করুন।", fontSize = 12.sp, color = SlateMuted)
+                }
+            } else {
+                Box(Modifier.fillMaxSize().verticalScroll(vScroll)) {
+                    Row(Modifier.fillMaxWidth()) {
+                        // Sticky Left Column: Roll + Name
+                        Column(Modifier.width(146.dp).background(Color.White)) {
+                            Row(
+                                Modifier.fillMaxWidth().height(headerHeight).background(SlateSurfaceVariant).padding(horizontal = 6.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text("রোল", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = SlateText, modifier = Modifier.width(34.dp), textAlign = TextAlign.Center)
+                                Text("শিক্ষার্থীর নাম", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = SlateText, modifier = Modifier.weight(1f).padding(start = 4.dp))
+                            }
+                            HorizontalDivider(color = SlateOutline)
+                            classStudents.forEach { s ->
+                                Row(
+                                    Modifier.fillMaxWidth().height(rowHeight).clickable { onOpenStudent(s) }.padding(horizontal = 6.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(
+                                        bn(s.roll.toString()),
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = SlateMuted,
+                                        modifier = Modifier.width(34.dp),
+                                        textAlign = TextAlign.Center
+                                    )
+                                    Text(
+                                        s.name.ifBlank { "(নাম নেই)" },
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.Medium,
+                                        color = SlateText,
+                                        maxLines = 2,
+                                        overflow = TextOverflow.Ellipsis,
+                                        modifier = Modifier.weight(1f).padding(start = 4.dp)
+                                    )
+                                }
+                                HorizontalDivider(color = SlateOutline)
+                            }
+                        }
+
+                        // Vertical divider separating frozen Roll+Name from scrollable marks
+                        Box(Modifier.width(2.dp).height(headerHeight + (rowHeight + 1.dp) * classStudents.size).background(Color(0xFFCBD5E1)))
+
+                        // Scrollable Right Columns
+                        Column(Modifier.weight(1f).horizontalScroll(hScroll)) {
+                            // Header Row
+                            Row(Modifier.height(headerHeight).background(SlateSurfaceVariant), verticalAlignment = Alignment.CenterVertically) {
+                                columns.forEach { col ->
+                                    Column(
+                                        Modifier.width(colWidth).fillMaxHeight().padding(horizontal = 4.dp),
+                                        verticalArrangement = Arrangement.Center,
+                                        horizontalAlignment = Alignment.CenterHorizontally
+                                    ) {
+                                        Text(col.label, fontSize = 11.sp, fontWeight = FontWeight.Bold, color = SlateText, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                        Text(col.subLabel, fontSize = 10.sp, color = SlateMuted, maxLines = 1)
+                                    }
+                                    Box(Modifier.width(1.dp).fillMaxHeight().background(SlateOutline))
+                                }
+                                if (mode == "subject" && activeSub != null) {
+                                    Column(Modifier.width(68.dp).fillMaxHeight(), verticalArrangement = Arrangement.Center, horizontalAlignment = Alignment.CenterHorizontally) {
+                                        Text("ধারাবাহিক", fontSize = 10.sp, fontWeight = FontWeight.SemiBold, color = SlateMuted)
+                                        Text("(${bn((activeSub.max - activeSub.written).toString())})", fontSize = 10.sp, color = SlateMuted)
+                                    }
+                                    Box(Modifier.width(1.dp).fillMaxHeight().background(SlateOutline))
+                                    Column(Modifier.width(68.dp).fillMaxHeight().background(TealContainer.copy(alpha = 0.45f)), verticalArrangement = Arrangement.Center, horizontalAlignment = Alignment.CenterHorizontally) {
+                                        Text("মোট", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = TealPrimary)
+                                        Text("(${bn(activeSub.max.toString())})", fontSize = 10.sp, color = TealPrimary)
+                                    }
+                                } else if (mode == "attendance") {
+                                    Column(Modifier.width(68.dp).fillMaxHeight().background(TealContainer.copy(alpha = 0.45f)), verticalArrangement = Arrangement.Center, horizontalAlignment = Alignment.CenterHorizontally) {
+                                        Text("হার %", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = TealPrimary)
+                                    }
+                                }
+                            }
+                            HorizontalDivider(color = SlateOutline)
+
+                            // Data Rows
+                            classStudents.forEachIndexed { rIdx, s ->
+                                Row(Modifier.height(rowHeight), verticalAlignment = Alignment.CenterVertically) {
+                                    columns.forEachIndexed { cIdx, col ->
+                                        val fr = remember(rIdx, cIdx) { FocusRequester() }
+                                        focusRequesters[rIdx to cIdx] = fr
+
+                                        if (col.kind == "trait" && col.xKey != null) {
+                                            val curTrait = s.x[col.xKey] ?: ""
+                                            Box(
+                                                Modifier
+                                                    .width(colWidth)
+                                                    .fillMaxHeight()
+                                                    .clickable {
+                                                        val nextTrait = when (curTrait) {
+                                                            "" -> "ক"
+                                                            "ক" -> "খ"
+                                                            "খ" -> "গ"
+                                                            else -> ""
+                                                        }
+                                                        val nextX = s.x.toMutableMap().apply {
+                                                            if (nextTrait.isBlank()) remove(col.xKey) else put(col.xKey, nextTrait)
+                                                        }
+                                                        st.upsert(s.copy(x = nextX))
+                                                    },
+                                                contentAlignment = Alignment.Center
+                                            ) {
+                                                Text(
+                                                    curTrait.ifBlank { "—" },
+                                                    fontSize = 14.sp,
+                                                    fontWeight = if (curTrait.isNotBlank()) FontWeight.Bold else FontWeight.Normal,
+                                                    color = if (curTrait.isNotBlank()) TealPrimary else SlateMuted
+                                                )
+                                            }
+                                        } else {
+                                            val storedStr = when (col.kind) {
+                                                "mark" -> {
+                                                    val k = mk(col.subKey!!, term, col.compKey!!)
+                                                    s.m[k]?.let { fmtEn(it) } ?: ""
+                                                }
+                                                else -> s.x[col.xKey!!] ?: ""
+                                            }
+                                            var draft by remember(s.id, col.id, term, storedStr) { mutableStateOf(storedStr) }
+                                            var isFocused by remember { mutableStateOf(false) }
+
+                                            val parsedNum = fromBn(draft.trim()).toDoubleOrNull()
+                                            val invalid = draft.isNotBlank() && (parsedNum == null || parsedNum < 0 || parsedNum > col.max)
+
+                                            fun commitDraft(textVal: String) {
+                                                val clean = fromBn(textVal.trim())
+                                                if (col.kind == "mark") {
+                                                    val k = mk(col.subKey!!, term, col.compKey!!)
+                                                    val nextM = s.m.toMutableMap()
+                                                    if (clean.isEmpty()) {
+                                                        if (nextM.containsKey(k)) {
+                                                            nextM.remove(k)
+                                                            st.upsert(s.copy(m = nextM))
+                                                        }
+                                                    } else {
+                                                        clean.toDoubleOrNull()?.let { d ->
+                                                            val clamped = d.coerceIn(0.0, col.max.toDouble())
+                                                            draft = fmtEn(clamped)
+                                                            if (nextM[k] != clamped) {
+                                                                nextM[k] = clamped
+                                                                st.upsert(s.copy(m = nextM))
+                                                            }
+                                                        }
+                                                    }
+                                                } else if (col.xKey != null) {
+                                                    val nextX = s.x.toMutableMap()
+                                                    if (clean.isEmpty()) {
+                                                        if (nextX.containsKey(col.xKey)) {
+                                                            nextX.remove(col.xKey)
+                                                            st.upsert(s.copy(x = nextX))
+                                                        }
+                                                    } else {
+                                                        clean.toIntOrNull()?.let { iv ->
+                                                            val clamped = iv.coerceIn(0, col.max)
+                                                            draft = clamped.toString()
+                                                            if (nextX[col.xKey] != draft) {
+                                                                nextX[col.xKey] = draft
+                                                                st.upsert(s.copy(x = nextX))
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                            }
+
+                                            Box(
+                                                Modifier
+                                                    .width(colWidth)
+                                                    .fillMaxHeight()
+                                                    .background(
+                                                        when {
+                                                            invalid -> Color(0xFFFFF1F2)
+                                                            isFocused -> TealContainer.copy(alpha = 0.45f)
+                                                            else -> Color.Transparent
+                                                        }
+                                                    )
+                                                    .padding(horizontal = 4.dp),
+                                                contentAlignment = Alignment.Center
+                                            ) {
+                                                BasicTextField(
+                                                    value = draft,
+                                                    onValueChange = { next ->
+                                                        draft = next
+                                                        val clean = fromBn(next.trim())
+                                                        if (col.kind == "mark") {
+                                                            val k = mk(col.subKey!!, term, col.compKey!!)
+                                                            if (clean.isEmpty()) {
+                                                                val nextM = s.m.toMutableMap().apply { remove(k) }
+                                                                st.upsert(s.copy(m = nextM))
+                                                            } else {
+                                                                clean.toDoubleOrNull()?.let { d ->
+                                                                    if (d in 0.0..col.max.toDouble()) {
+                                                                        val nextM = s.m.toMutableMap().apply { put(k, d) }
+                                                                        st.upsert(s.copy(m = nextM))
+                                                                    }
+                                                                }
+                                                            }
+                                                        } else if (col.xKey != null) {
+                                                            if (clean.isEmpty()) {
+                                                                val nextX = s.x.toMutableMap().apply { remove(col.xKey) }
+                                                                st.upsert(s.copy(x = nextX))
+                                                            } else {
+                                                                clean.toIntOrNull()?.let { iv ->
+                                                                    if (iv in 0..col.max) {
+                                                                        val nextX = s.x.toMutableMap().apply { put(col.xKey, iv.toString()) }
+                                                                        st.upsert(s.copy(x = nextX))
+                                                                    }
+                                                                }
+                                                            }
+                                                        }
+                                                    },
+                                                    singleLine = true,
+                                                    textStyle = TextStyle(
+                                                        fontSize = 14.sp,
+                                                        fontWeight = FontWeight.Medium,
+                                                        color = if (invalid) Color(0xFFBE123C) else SlateText,
+                                                        textAlign = TextAlign.Center
+                                                    ),
+                                                    cursorBrush = SolidColor(TealPrimary),
+                                                    keyboardOptions = KeyboardOptions(
+                                                        keyboardType = KeyboardType.Decimal,
+                                                        imeAction = ImeAction.Next
+                                                    ),
+                                                    keyboardActions = KeyboardActions(
+                                                        onNext = {
+                                                            commitDraft(draft)
+                                                            moveFocusFrom(rIdx, cIdx)
+                                                        }
+                                                    ),
+                                                    modifier = Modifier
+                                                        .fillMaxWidth()
+                                                        .focusRequester(fr)
+                                                        .onFocusChanged { fs ->
+                                                            if (isFocused && !fs.isFocused) commitDraft(draft)
+                                                            isFocused = fs.isFocused
+                                                        }
+                                                )
+                                                if (draft.isEmpty() && !isFocused) {
+                                                    Text("—", fontSize = 12.sp, color = Color(0xFFCBD5E1))
+                                                }
+                                            }
+                                        }
+                                        Box(Modifier.width(1.dp).fillMaxHeight().background(SlateOutline))
+                                    }
+
+                                    if (mode == "subject" && activeSub != null) {
+                                        val subForStudent = s.subs().find { it.key == activeSub.key } ?: activeSub
+                                        val cScore = s.cont(subForStudent, term)
+                                        val tScore = s.total(subForStudent, term)
+                                        Box(Modifier.width(68.dp).fillMaxHeight().background(SlateBg), contentAlignment = Alignment.Center) {
+                                            Text(fmt(cScore), fontSize = 12.sp, color = SlateMuted)
+                                        }
+                                        Box(Modifier.width(1.dp).fillMaxHeight().background(SlateOutline))
+                                        Box(Modifier.width(68.dp).fillMaxHeight().background(TealContainer.copy(alpha = 0.25f)), contentAlignment = Alignment.Center) {
+                                            Text(fmt(tScore), fontSize = 12.sp, fontWeight = FontWeight.Bold, color = TealPrimary)
+                                        }
+                                    } else if (mode == "attendance") {
+                                        val dVal = s.x["DAYS_$term"]?.let { fromBn(it).toDoubleOrNull() }
+                                        val pVal = s.x["PRES_$term"]?.let { fromBn(it).toDoubleOrNull() }
+                                        val pctStr = if (dVal != null && pVal != null && dVal > 0) "${fmt((pVal / dVal) * 100)}%" else "—"
+                                        Box(Modifier.width(68.dp).fillMaxHeight().background(TealContainer.copy(alpha = 0.25f)), contentAlignment = Alignment.Center) {
+                                            Text(pctStr, fontSize = 12.sp, fontWeight = FontWeight.Bold, color = TealPrimary)
+                                        }
+                                    }
+                                }
+                                HorizontalDivider(color = SlateOutline)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        Spacer(Modifier.height(6.dp))
+
+        // Quick Add Student Footer Bar
+        Surface(
+            color = Color.White,
+            border = BorderStroke(1.dp, SlateOutline),
+            shape = RoundedCornerShape(10.dp)
+        ) {
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                OutlinedTextField(
+                    value = newRoll,
+                    onValueChange = { newRoll = it },
+                    placeholder = { Text(bn(suggestedRoll.toString()), fontSize = 12.sp) },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    modifier = Modifier.width(62.dp)
+                )
+                OutlinedTextField(
+                    value = newName,
+                    onValueChange = { newName = it },
+                    placeholder = { Text("দ্রুত নতুন শিক্ষার্থীর নাম...", fontSize = 12.sp) },
+                    singleLine = true,
+                    modifier = Modifier.weight(1f)
+                )
+                Button(
+                    onClick = {
+                        val trimmed = newName.trim()
+                        if (trimmed.isNotEmpty()) {
+                            val rNum = fromBn(newRoll.trim()).toIntOrNull() ?: suggestedRoll
+                            st.upsert(Student(UUID.randomUUID().toString(), cls, rNum, trimmed))
+                            newName = ""
+                            newRoll = ""
+                            toast(ctx, "$trimmed (রোল ${bn(rNum.toString())}) যোগ হয়েছে")
+                        }
+                    },
+                    enabled = newName.isNotBlank(),
+                    shape = RoundedCornerShape(8.dp),
+                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 10.dp)
+                ) {
+                    Text("+ যোগ", fontSize = 12.sp)
+                }
+            }
+        }
+    }
+}
+

@@ -36,6 +36,7 @@ import {
 import { exportStudentsToPdf } from "./lib/pdfRenderer";
 import { requestTtsAudio } from "./lib/tts";
 import { StudentRoster } from "./components/StudentRoster";
+import { BulkSheetEntry } from "./components/BulkSheetEntry";
 import { StudentEditor } from "./components/StudentEditor";
 import { ReportStudio } from "./components/ReportStudio";
 import { AiAssistantPanel } from "./components/AiAssistantPanel";
@@ -44,7 +45,7 @@ import { SettingsAndCicd } from "./components/SettingsAndCicd";
 const STORAGE_STUDENTS_KEY = "result_maker_students_v1";
 const STORAGE_SETTINGS_KEY = "result_maker_settings_v1";
 
-type NavSection = "roster" | "studio" | "assistant" | "settings";
+type NavSection = "roster" | "sheet" | "studio" | "assistant" | "settings";
 
 function loadInitialStudents(): Student[] {
   try {
@@ -230,6 +231,7 @@ export default function App() {
             {(
               [
                 ["roster", "শিক্ষার্থী তালিকা"],
+                ["sheet", "শিট এন্ট্রি"],
                 ["studio", "রিপোর্ট স্টুডিও"],
                 ["assistant", "AI সহকারী"],
                 ["settings", "সেটিংস"],
@@ -285,6 +287,7 @@ export default function App() {
                   {(
                     [
                       ["roster", "শিক্ষার্থী তালিকা"],
+                      ["sheet", "দ্রুত শিট এন্ট্রি (Bulk Marks)"],
                       ["studio", "রিপোর্ট স্টুডিও (PDF প্রিভিউ)"],
                       ["assistant", "AI সহকারী"],
                       ["settings", "সেটিংস, ব্যাকআপ ও CI/CD"],
@@ -493,6 +496,23 @@ export default function App() {
             }}
             onSpeakSummary={handleSpeakStudentSummary}
             speakingId={speakingId}
+            exportingPdf={exportingPdf}
+          />
+        ) : section === "sheet" ? (
+          <BulkSheetEntry
+            students={students}
+            selectedClass={selectedClass}
+            onSelectClass={setSelectedClass}
+            onUpsertStudent={upsertStudent}
+            onBatchUpdateStudents={(updatedList) => setStudents(updatedList)}
+            onOpenStudent={(s) => setEditingStudent(s)}
+            onExportClassPdf={(cls) => {
+              const list = students
+                .filter((s) => s.cls === cls)
+                .sort((a, b) => a.roll - b.roll);
+              handleExportPdf(list, `শ্রেণি-${cls}-প্রতিবেদন.pdf`);
+            }}
+            onShowToast={showToast}
             exportingPdf={exportingPdf}
           />
         ) : section === "studio" ? (
