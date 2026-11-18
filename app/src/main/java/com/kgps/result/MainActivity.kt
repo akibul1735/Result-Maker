@@ -482,6 +482,7 @@ fun ResultMakerWorkspace(
                         onBackFromSettings = { vm.navigate(NavSection.ROSTER) },
                         onOpenSettings = { vm.navigate(NavSection.SETTINGS) },
                         onCsvImport = { vm.openCsvImport("") },
+                        onAiScan = vm::openAiScanner,
                         onAllPdf = {
                             val allowedCls = permissions.effectiveClasses().toSet()
                             makePdf(
@@ -596,6 +597,7 @@ fun ResultMakerWorkspace(
                                     },
                                     onOpenSheetInClass = vm::openSheetForClass,
                                     onCsvImport = { vm.openCsvImport("") },
+                                    onAiScan = vm::openAiScanner,
                                     onClassPdf = { targetCls ->
                                         makePdf(
                                             students.filter { it.cls == targetCls }.sortedBy { it.roll },
@@ -678,15 +680,30 @@ fun ResultMakerWorkspace(
                                 NavSection.ASSISTANT -> AiAssistantScreen(
                                     state = aiState,
                                     students = students,
+                                    selectedClass = cls,
+                                    permissions = permissions,
                                     isPlaceholderAi = vm.isPlaceholderAi,
+                                    onSetActiveTab = vm::setAiAssistantTab,
                                     onSetModelMode = vm::setAiModelMode,
                                     onSetContextStudent = vm::setAiContextStudent,
                                     onClearChat = vm::clearAiChat,
                                     onSendChat = vm::sendChatMessage,
+                                    onOpenCsvImport = { vm.openCsvImport("") },
                                     onPickMarksheetUri = vm::loadMarksheetImage,
                                     onClearImage = vm::clearMarksheetImage,
                                     onAnalyzeImage = vm::analyzeSelectedMarksheet,
-                                    onApplyExtracted = { ext -> vm.applyExtractedMarksheet(ext) }
+                                    onApplyExtracted = { ext -> vm.applyExtractedMarksheet(ext) },
+                                    onAnalyzeClassSheet = vm::analyzeClassSheet,
+                                    onLoadSampleClassPreview = vm::loadSampleClassSheetPreview,
+                                    onUpdateClassSheetMeta = vm::updateClassSheetMeta,
+                                    onToggleScannedRowSelected = vm::toggleScannedRowSelected,
+                                    onSetAllScannedRowsSelected = vm::setAllScannedRowsSelected,
+                                    onUpdateScannedRowField = vm::updateScannedRowField,
+                                    onAddBlankScannedRow = vm::addBlankScannedRow,
+                                    onRemoveScannedRow = vm::removeScannedRow,
+                                    onMarkAllScannedIssuesVerified = vm::markAllScannedIssuesVerified,
+                                    onDismissClassSheetPreview = vm::dismissClassSheetPreview,
+                                    onCommitClassSheet = vm::commitScannedClassSheet
                                 )
 
                                 NavSection.SETTINGS -> SettingsScreen(
@@ -784,6 +801,7 @@ private fun ResultMakerTopBar(
     onBackFromSettings: () -> Unit,
     onOpenSettings: () -> Unit,
     onCsvImport: () -> Unit,
+    onAiScan: () -> Unit,
     onAllPdf: () -> Unit,
     onOpenSchoolHub: () -> Unit,
     onRequestSignOut: () -> Unit
@@ -870,6 +888,12 @@ private fun ResultMakerTopBar(
                             DropdownMenuItem(
                                 text = { Text("স্মার্ট CSV ইমপোর্ট") },
                                 onClick = { menuOpen = false; onCsvImport() }
+                            )
+                        }
+                        if (permissions.canManageStudents || permissions.allSubjects || permissions.effectiveSubjects().isNotEmpty()) {
+                            DropdownMenuItem(
+                                text = { Text("AI নম্বরপত্র স্ক্যান") },
+                                onClick = { menuOpen = false; onAiScan() }
                             )
                         }
                         if (permissions.canExportPdf) {

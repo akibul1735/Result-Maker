@@ -1,9 +1,24 @@
 package com.kgps.result.ai
 
 import android.graphics.Bitmap
+import com.google.firebase.Firebase
+import com.google.firebase.ai.ai
+import com.google.firebase.ai.type.Content
+import com.google.firebase.ai.type.GenerativeBackend
+import com.google.firebase.ai.type.ImagePart
+import com.google.firebase.ai.type.TextPart
+import com.google.firebase.ai.type.generationConfig
 import com.kgps.result.CLSN
+import com.kgps.result.RELIGIONS
 import com.kgps.result.bn
+import com.kgps.result.fmtEn
+import com.kgps.result.fromBn
+import com.kgps.result.subjectsFor
 import kotlinx.coroutines.delay
+import org.json.JSONArray
+import org.json.JSONObject
+import java.util.UUID
+import kotlin.math.abs
 
 enum class AiModelMode {
     GENERAL,
@@ -51,18 +66,153 @@ data class ExtractedMarksheet(
     val term: Int,
     val marks: List<ExtractedMarkItem>,
     val attendanceAndTraits: ExtractedAttendanceAndTraits,
-    val isPlaceholder: Boolean = true
+    val uncertainNotes: List<String> = emptyList(),
+    val isPlaceholder: Boolean = false
 )
+
+/**
+ * শ্রেণিভিত্তিক বহু-শিক্ষার্থী নম্বরপত্র স্ক্যানের প্রতিটি সারির ডেটা (প্রিভিউ ও ম্যানুয়াল সংশোধনের জন্য)।
+ */
+data class ScannedStudentRow(
+    val id: String = UUID.randomUUID().toString(),
+    val selected: Boolean = true,
+    val rollText: String,
+    val name: String,
+    val marksText: Map<String, String>,      // Comp keys: "TB", "ACT", "LANG", "CT", "WR", "TOTAL"
+    val sheetContinuousTotal: String? = null,
+    val sheetGrandTotal: String? = null,
+    val rawNotes: String = "",
+    val aiIssues: Map<String, String> = emptyMap(), // field ("roll", "name", "TB"...) -> Bengali reason
+    val resolvedFields: Set<String> = emptySet()    // fields teacher edited or marked verified
+)
+
+data class ExtractedClassSheet(
+    val cls: Int,
+    val term: Int,
+    val subKey: String,
+    val summary: String,
+    val warnings: List<String> = emptyList(),
+    val rows: List<ScannedStudentRow>,
+    val isSample: Boolean = false
+)
+
+data class RowValidationReport(
+    val hardErrors: Map<String, String>,      // Blocks invalid save (e.g. > max, non-numeric, invalid roll)
+    val uncertainWarnings: Map<String, String>, // Unresolved AI uncertainties or blank/arithmetic check warnings
+    val arithmeticWarning: String? = null,
+    val calculatedContinuous: Double? = null,
+    val calculatedGrandTotal: Double? = null
+) {
+    val hasHardError: Boolean get() = hardErrors.isNotEmpty()
+    val hasAnyIssue: Boolean get() = hardErrors.isNotEmpty() || uncertainWarnings.isNotEmpty() || arithmeticWarning != null
+    val allFieldMessages: Map<String, String> get() = uncertainWarnings + hardErrors
+}
+
+fun validateScannedStudentRow(
+    row: ScannedStudentRow,
+    cls: Int,
+    subKey: String,
+    duplicateRolls: Set<Int>
+): RowValidationReport {
+    val hard = mutableMapOf<String, String>()
+    val warn = mutableMapOf<String, String>()
+
+    // 1. AI-flagged uncertain fields not yet resolved by user
+    row.aiIssues.forEach { (field, reason) ->
+        if (field !in row.resolvedFields) {
+            warn[field] = reason.ifBlank { "লেখা অস্পষ্ট — যাচাই করুন" }
+        }
+    }
+
+    // 2. Roll check
+    val rollClean = fromBn(row.rollText.trim())
+    val rollNum = rollClean.toIntOrNull()
+    if (rollClean.isBlank() || rollNum == null || rollNum <= 0) {
+        hard["roll"] = "সঠিক রোল লিখুন (১, ২, ৩...)"
+    } else if (rollNum in duplicateRolls) {
+        hard["roll"] = "রোল ${bn(rollNum.toString())} একাধিক সারিতে আছে"
+    }
+
+    // 3. Name check
+    if (row.name.isBlank() && "name" !in row.resolvedFields && "name" !in warn) {
+        warn["name"] = "নাম পড়া যায়নি — প্রয়োজনে লিখে দিন"
+    }
+
+    // 4. Subject components validation
+    val subDef = subjectsFor(cls, RELIGIONS.first()).find { it.key == subKey }
+    val expectedComps = buildList {
+        subDef?.comps?.forEach { add(it.key to it.max) }
+        if ((subDef?.written ?: 0) > 0) {
+            add("WR" to (subDef?.written ?: 70))
+        }
+    }
+
+    var contSum = 0.0
+    var hasAnyCont = false
+    expectedComps.forEach { (cKey, maxVal) ->
+        val raw = row.marksText[cKey]?.trim().orEmpty()
+        if (raw.isEmpty()) {
+            // Blank cell is allowed (e.g., student absent in written exam), no hard error
+            return@forEach
+        }
+        val normalized = fromBn(raw)
+        val num = normalized.toDoubleOrNull()
+        if (num == null) {
+            hard[cKey] = "\"$raw\" সঠিক সংখ্যা নয় (যেমন ${bn(maxVal.toString())} বা ফাঁকা)"
+        } else if (num < 0.0 || num > maxVal.toDouble()) {
+            hard[cKey] = "সর্বোচ্চ ${bn(maxVal.toString())}-এর মধ্যে হতে হবে"
+        } else {
+            if (cKey != "WR") {
+                contSum += num
+                hasAnyCont = true
+            }
+        }
+    }
+
+    val wrVal = row.marksText["WR"]?.trim()?.takeIf { it.isNotEmpty() }?.let { fromBn(it).toDoubleOrNull() }
+    val calcCont = if (hasAnyCont) contSum else null
+    val calcGrand = if (calcCont != null && wrVal != null && (subDef?.written ?: 0) > 0) {
+        calcCont + wrVal
+    } else if (calcCont != null && (subDef?.written ?: 0) == 0) {
+        calcCont
+    } else {
+        null
+    }
+
+    // 5. Cross-check against totals written on paper
+    var arithWarn: String? = null
+    if ("arithmetic" !in row.resolvedFields && hard.isEmpty()) {
+        val sheetCont = row.sheetContinuousTotal?.trim()?.takeIf { it.isNotEmpty() }?.let { fromBn(it).toDoubleOrNull() }
+        val sheetGrand = row.sheetGrandTotal?.trim()?.takeIf { it.isNotEmpty() }?.let { fromBn(it).toDoubleOrNull() }
+        val contMismatch = sheetCont != null && calcCont != null && abs(sheetCont - calcCont) > 0.01
+        val grandMismatch = sheetGrand != null && calcGrand != null && abs(sheetGrand - calcGrand) > 0.01
+        if (contMismatch && grandMismatch) {
+            arithWarn = "খাতার ধারাবাহিক (${fmtEn(sheetCont!!)}) ও সর্বমোট (${fmtEn(sheetGrand!!)}) এর সাথে যোগফল (${fmtEn(calcCont!!)} / ${fmtEn(calcGrand!!)}) মিলছে না"
+        } else if (contMismatch) {
+            arithWarn = "খাতায় ধারাবাহিক মোট ${bn(fmtEn(sheetCont!!))}, কিন্তু অংশগুলোর যোগফল ${bn(fmtEn(calcCont!!))}"
+        } else if (grandMismatch) {
+            arithWarn = "খাতায় সর্বমোট ${bn(fmtEn(sheetGrand!!))}, কিন্তু ধারাবাহিক+সামষ্টিক ${bn(fmtEn(calcGrand!!))}"
+        }
+    }
+
+    return RowValidationReport(
+        hardErrors = hard,
+        uncertainWarnings = warn,
+        arithmeticWarning = arithWarn,
+        calculatedContinuous = calcCont,
+        calculatedGrandTotal = calcGrand
+    )
+}
 
 data class AiChatReply(
     val text: String,
     val modelLabel: String,
-    val isPlaceholder: Boolean = true
+    val isPlaceholder: Boolean = false
 )
 
 data class AiDraftRemarkResult(
     val remark: String,
-    val isPlaceholder: Boolean = true
+    val isPlaceholder: Boolean = false
 )
 
 interface AiRepository {
@@ -79,6 +229,14 @@ interface AiRepository {
         teacherNote: String
     ): ExtractedMarksheet
 
+    suspend fun analyzeClassSheetImage(
+        bitmap: Bitmap,
+        clsHint: Int?,
+        termHint: Int?,
+        subKeyHint: String?,
+        teacherNote: String
+    ): ExtractedClassSheet
+
     suspend fun draftRemark(
         studentSummary: String,
         term: Int
@@ -86,8 +244,322 @@ interface AiRepository {
 }
 
 /**
- * Placeholder implementation used when Firebase AI Logic is not enabled.
- * All responses are clearly labeled sample outputs until Firebase is enabled.
+ * Firebase AI Logic (Gemini Developer API) ব্যবহার করে সরাসরি লাইভ AI ইমপ্লিমেন্টেশন।
+ * আলাদা কোনো API Key UI ছাড়া প্রজেক্টের Firebase কনফিগ ব্যবহার করে।
+ */
+class FirebaseAiRepository : AiRepository {
+    override val isPlaceholderBackend: Boolean = false
+
+    private fun modelFor(mode: AiModelMode, jsonMode: Boolean = false) = Firebase.ai(
+        backend = GenerativeBackend.googleAI()
+    ).generativeModel(
+        modelName = "gemini-2.5-flash",
+        generationConfig = generationConfig {
+            temperature = if (jsonMode) 0.1f else if (mode == AiModelMode.FAST) 0.3f else 0.5f
+            if (jsonMode) {
+                responseMimeType = "application/json"
+            }
+        }
+    )
+
+    override suspend fun chat(
+        history: List<AiChatMessage>,
+        latestUserMessage: String,
+        modelMode: AiModelMode,
+        studentContext: String?
+    ): AiChatReply {
+        val recentTurns = history.takeLast(6).joinToString("\n") { m ->
+            val who = if (m.isUser) "শিক্ষক" else "সহায়ক"
+            "$who: ${m.text.take(400)}"
+        }
+        val prompt = buildString {
+            appendLine("আপনি বাংলাদেশের সরকারি প্রাথমিক বিদ্যালয়ের (১ম–৫ম শ্রেণি) একজন অভিজ্ঞ শিক্ষামূলক AI সহায়ক।")
+            appendLine("সব উত্তর সহজ, প্রাঞ্জল ও প্রাতিষ্ঠানিক বাংলায় দিন।")
+            appendLine("NCTB প্রাথমিক মূল্যায়ন কাঠামো: ১ম–২য় শ্রেণি (বাংলা/ইংরেজি/গণিত = ধারাবাহিক ৫০ + সামষ্টিক ৫০), ৩য়–৫ম শ্রেণি (বাংলা/ইংরেজি/গণিত/বিজ্ঞান/বাওবি/ধর্ম = ধারাবাহিক ৩০ [পাঠ্যবই ১০ + সক্রিয়তা ৫ + ভাষা ৫ + ক্লাস টেস্ট ১০] + সামষ্টিক ৭০)।")
+            if (!studentContext.isNullOrBlank()) {
+                appendLine("নির্বাচিত শিক্ষার্থীর তথ্য: $studentContext")
+            }
+            if (recentTurns.isNotBlank()) {
+                appendLine("পূর্ববর্তী কথোপকথন:\n$recentTurns")
+            }
+            appendLine("শিক্ষকের বর্তমান প্রশ্ন: $latestUserMessage")
+        }
+        try {
+            val response = modelFor(modelMode, jsonMode = false).generateContent(prompt)
+            val replyText = response.text?.trim().orEmpty()
+                .ifBlank { "দুঃখিত, এই মুহূর্তে উত্তর পাওয়া যায়নি। আবার চেষ্টা করুন।" }
+            val label = if (modelMode == AiModelMode.FAST) "Gemini Flash · দ্রুত" else "Gemini AI · বিস্তারিত"
+            return AiChatReply(text = replyText, modelLabel = label, isPlaceholder = false)
+        } catch (e: Exception) {
+            throw IllegalStateException(friendlyAiError(e), e)
+        }
+    }
+
+    override suspend fun draftRemark(
+        studentSummary: String,
+        term: Int
+    ): AiDraftRemarkResult {
+        val prompt = """
+            বাংলাদেশের প্রাথমিক বিদ্যালয়ের ${bn(term.toString())} প্রান্তিক মূল্যায়নের জন্য নিচের শিক্ষার্থীর তথ্যের ভিত্তিতে ২–৩ বাক্যের একটি ইতিবাচক, গঠনমূলক ও প্রাতিষ্ঠানিক বাংলা মন্তব্য (Remark) লিখে দিন। শুধু মন্তব্যটি লিখুন, কোনো শিরোনাম বা অতিরিক্ত ভূমিকা দেবেন না।
+            তথ্য: $studentSummary
+        """.trimIndent()
+        try {
+            val res = modelFor(AiModelMode.FAST, jsonMode = false).generateContent(prompt)
+            val txt = res.text?.trim().orEmpty()
+                .ifBlank { "${bn(term.toString())} প্রান্তিকে শিক্ষার্থীর অগ্রগতি সন্তোষজনক; নিয়মিত অনুশীলন চালিয়ে গেলে আরও ভালো করবে।" }
+            return AiDraftRemarkResult(remark = txt, isPlaceholder = false)
+        } catch (e: Exception) {
+            throw IllegalStateException(friendlyAiError(e), e)
+        }
+    }
+
+    override suspend fun analyzeMarksheetImage(
+        bitmap: Bitmap,
+        teacherNote: String
+    ): ExtractedMarksheet {
+        val prompt = """
+            আপনি বাংলাদেশের প্রাথমিক বিদ্যালয়ের নম্বরপত্র OCR বিশেষজ্ঞ। ছবি থেকে একজন শিক্ষার্থীর তথ্য ও নম্বর JSON আকারে বের করুন।
+            অতিরিক্ত নির্দেশনা: ${teacherNote.ifBlank { "নেই" }}
+            বিষয় কোড: BAN (বাংলা), ENG (ইংরেজি), MATH (গণিত), SOC (সামাজিক ও বিজ্ঞান ১-২য়), SCI (বিজ্ঞান ৩-৫ম), BGW (বাওবি), REL (ধর্ম), PE (শারীরিক), ART (শিল্পকলা)।
+            অংশ কোড: TB (পাঠ্যবই), ACT (সক্রিয়তা), LANG (ভাষা), CT (ক্লাস টেস্ট), WR (সামষ্টিক লিখিত), TOTAL (শিল্পকলা মোট)।
+            কী ফরম্যাট: "<SUB>_<TERM>_<COMP>", যেমন "MATH_1_TB", "MATH_1_WR"।
+            যদি কোনো লেখা বুঝতে অসুবিধা হয় বা কাটাকাটি থাকে, uncertainNotes লিস্টে বাংলায় উল্লেখ করুন।
+            ঠিক এই JSON স্কিমায় উত্তর দিন:
+            {
+              "summary": "সংক্ষিপ্ত বাংলা বিবরণ",
+              "term": 1,
+              "student": { "name": "", "cls": 3, "roll": 1, "guardian": "", "religion": "ইসলাম" },
+              "marks": [ { "key": "MATH_1_TB", "value": 9.0, "subjectLabel": "গণিত (পাঠ্যবই)" } ],
+              "attendanceAndTraits": { "days": "", "present": "", "act": "", "disc": "", "cond": "", "remark": "" },
+              "uncertainNotes": ["যদি কোনো লেখা অস্পষ্ট থাকে তার বিবরণ"]
+            }
+        """.trimIndent()
+        try {
+            val input = Content(role = "user", parts = listOf(ImagePart(bitmap), TextPart(prompt)))
+            val raw = modelFor(AiModelMode.GENERAL, jsonMode = true).generateContent(input).text.orEmpty()
+            val json = JSONObject(stripJsonFences(raw))
+            val sObj = json.optJSONObject("student") ?: JSONObject()
+            val marksArr = json.optJSONArray("marks") ?: JSONArray()
+            val marks = (0 until marksArr.length()).mapNotNull { i ->
+                val m = marksArr.optJSONObject(i) ?: return@mapNotNull null
+                val k = m.optString("key").trim()
+                if (k.isBlank()) return@mapNotNull null
+                ExtractedMarkItem(
+                    key = k,
+                    value = m.optDouble("value", 0.0),
+                    subjectLabel = m.optString("subjectLabel", k)
+                )
+            }
+            val attObj = json.optJSONObject("attendanceAndTraits") ?: JSONObject()
+            val notesArr = json.optJSONArray("uncertainNotes") ?: JSONArray()
+            val notes = (0 until notesArr.length()).mapNotNull { i ->
+                notesArr.optString(i)?.takeIf { it.isNotBlank() }
+            }
+            return ExtractedMarksheet(
+                summary = json.optString("summary", "ছবি থেকে তথ্য শনাক্ত হয়েছে।").ifBlank { "ছবি থেকে তথ্য শনাক্ত হয়েছে।" },
+                student = ExtractedStudentInfo(
+                    name = sObj.optString("name").takeIf { it.isNotBlank() },
+                    cls = sObj.optInt("cls", 0).takeIf { it in 1..5 },
+                    roll = sObj.optInt("roll", 0).takeIf { it > 0 },
+                    guardian = sObj.optString("guardian").takeIf { it.isNotBlank() },
+                    village = sObj.optString("village").takeIf { it.isNotBlank() },
+                    upazila = sObj.optString("upazila").takeIf { it.isNotBlank() },
+                    district = sObj.optString("district").takeIf { it.isNotBlank() },
+                    mobile = sObj.optString("mobile").takeIf { it.isNotBlank() },
+                    religion = sObj.optString("religion").takeIf { it.isNotBlank() }
+                ),
+                term = json.optInt("term", 1).coerceIn(1, 3),
+                marks = marks,
+                attendanceAndTraits = ExtractedAttendanceAndTraits(
+                    days = attObj.optString("days").takeIf { it.isNotBlank() },
+                    present = attObj.optString("present").takeIf { it.isNotBlank() },
+                    act = attObj.optString("act").takeIf { it.isNotBlank() },
+                    disc = attObj.optString("disc").takeIf { it.isNotBlank() },
+                    cond = attObj.optString("cond").takeIf { it.isNotBlank() },
+                    remark = attObj.optString("remark").takeIf { it.isNotBlank() }
+                ),
+                uncertainNotes = notes,
+                isPlaceholder = false
+            )
+        } catch (e: Exception) {
+            throw IllegalStateException(friendlyAiError(e), e)
+        }
+    }
+
+    override suspend fun analyzeClassSheetImage(
+        bitmap: Bitmap,
+        clsHint: Int?,
+        termHint: Int?,
+        subKeyHint: String?,
+        teacherNote: String
+    ): ExtractedClassSheet {
+        val targetCls = clsHint ?: 3
+        val subsInfo = subjectsFor(targetCls, RELIGIONS.first()).joinToString("; ") { s ->
+            val compDesc = s.comps.joinToString(", ") { "${it.key}=${it.max}" }
+            val wrDesc = if (s.written > 0) ", WR=${s.written}" else ""
+            "${s.key}(${s.bn}): $compDesc$wrDesc"
+        }
+        val prompt = """
+            আপনি বাংলাদেশের প্রাথমিক বিদ্যালয়ের (১ম–৫ম শ্রেণি) হাতে লেখা শ্রেণি-নম্বরপত্র (Marksheet Register) OCR বিশেষজ্ঞ।
+            ছবিতে একাধিক শিক্ষার্থীর রোল, নাম ও একটি বিষয়ের অংশভিত্তিক নম্বর রয়েছে। সব সারি নিখুঁতভাবে পড়ে শুধু JSON দিন।
+
+            ব্যবহারকারীর নির্বাচন/ইঙ্গিত:
+            - শ্রেণি: ${clsHint?.let { "${CLSN[it - 1]} ($it)" } ?: "ছবি থেকে শনাক্ত করুন (1 থেকে 5)"}
+            - প্রান্তিক: ${termHint?.let { "${bn(it.toString())}ম ($it)" } ?: "ছবি থেকে শনাক্ত করুন (1, 2 বা 3)"}
+            - বিষয় কোড: ${subKeyHint ?: "ছবি থেকে শনাক্ত করুন (BAN, ENG, MATH, SCI, BGW, SOC, REL, PE, ART)"}
+            - অতিরিক্ত নোট: ${teacherNote.ifBlank { "নেই" }}
+
+            বিষয় ও সর্বোচ্চ নম্বরের কাঠামো (শ্রেণি ১–২: ধারাবাহিক ৫০ [TB=20, ACT=5, LANG=5, CT=20] + সামষ্টিক WR=50; শ্রেণি ৩–৫: ধারাবাহিক ৩০ [TB=10, ACT=5, LANG=5, CT=10] + সামষ্টিক WR=70):
+            $subsInfo
+
+            গুরুত্বপূর্ণ OCR ও যাচাইকরণ নিয়ম (খুব মনোযোগ দিয়ে অনুসরণ করুন):
+            1. বাংলা ও ইংরেজি সব সংখ্যা JSON-এ ইংরেজি অঙ্কে লিখুন (যেমন ০৭ -> "7", ২৫ -> "25")। শিক্ষার্থীর নাম বাংলাতেই পরিষ্কারভাবে লিখুন।
+            2. ক্লাস টেস্ট (CT) ঘরে যদি "০৬+০৭=১৩/২=০৭" বা "A+০৮=০৮/২=০৪" ধরনের হিসাব থাকে, তবে "=" চিহ্নের পরের চূড়ান্ত গড় মানটি ("7" বা "4") `CT` ফিল্ডে দিন এবং `rawNotes`-এ সংক্ষেপে লিখুন।
+            3. কোনো ঘরে `A` বা `অনু` লেখা থাকলে `0` বসান এবং `rawNotes`-এ "অনুপস্থিত (A)" লিখুন। কোনো ঘর সম্পূর্ণ ফাঁকা/খালি থাকলে খালি স্ট্রিং "" দিন — অনুমান করে সংখ্যা বসাবেন না।
+            4. যদি খাতায় "মোট নম্বর (ধারাবাহিক)" বা "প্রান্তিক সর্বমোট" কলাম থাকে, সেগুলোও `sheetContinuousTotal` ও `sheetGrandTotal` ফিল্ডে দিন যাতে অ্যাপ হিসাব যাচাই করতে পারে।
+            5. অত্যন্ত জরুরি — **যেসব লেখা বুঝতে অসুবিধা হচ্ছে**: কোনো শিক্ষার্থীর নাম, রোল বা কোনো নম্বর অস্পষ্ট, ঝাপসা, কাটা-ছেঁড়া, ওভাররাইটিং বা দুটি সংখ্যার মতো মনে হলে:
+               - আপনার সেরা অনুমানটি সেই ফিল্ডে দিন, এবং
+               - `uncertainFields` অবজেক্টে ঠিক সেই ফিল্ডের কী ("roll", "name", "TB", "ACT", "LANG", "CT", "WR", "TOTAL") দিয়ে বাংলায় সংক্ষিপ্ত কারণ লিখুন (যেমন `"TB": "কাটাকাটি বা ৭/৯ অস্পষ্ট"`, `"name": "হাতের লেখা অস্পষ্ট"`)।
+               - একেবারেই পড়া না গেলে মান "" দিন এবং `uncertainFields`-এ অবশ্যই উল্লেখ করুন!
+
+            ঠিক নিচের JSON ফরম্যাটে উত্তর দিন:
+            {
+              "cls": ${clsHint ?: 3},
+              "term": ${termHint ?: 1},
+              "subKey": "${subKeyHint ?: "MATH"}",
+              "summary": "ছবি থেকে শনাক্ত শ্রেণি, বিষয় ও মোট সারির সংক্ষিপ্ত বিবরণ",
+              "warnings": ["যদি ছবির অংশ কাটা পড়ে বা কোনো সাধারণ সমস্যা থাকে"],
+              "rows": [
+                {
+                  "roll": "1",
+                  "name": "শিক্ষার্থীর নাম",
+                  "marks": { "TB": "9", "ACT": "5", "LANG": "5", "CT": "7", "WR": "50" },
+                  "sheetContinuousTotal": "26",
+                  "sheetGrandTotal": "76",
+                  "rawNotes": "",
+                  "uncertainFields": {}
+                }
+              ]
+            }
+        """.trimIndent()
+
+        try {
+            val input = Content(role = "user", parts = listOf(ImagePart(bitmap), TextPart(prompt)))
+            val raw = modelFor(AiModelMode.GENERAL, jsonMode = true).generateContent(input).text.orEmpty()
+            val json = JSONObject(stripJsonFences(raw))
+
+            val detectedCls = (clsHint ?: json.optInt("cls", 3)).coerceIn(1, 5)
+            val detectedTerm = (termHint ?: json.optInt("term", 1)).coerceIn(1, 3)
+            val rawSub = json.optString("subKey").trim().uppercase()
+            val validSubs = subjectsFor(detectedCls, RELIGIONS.first()).map { it.key }.toSet()
+            val detectedSub = when {
+                !subKeyHint.isNullOrBlank() && subKeyHint in validSubs -> subKeyHint
+                rawSub in validSubs -> rawSub
+                else -> validSubs.first()
+            }
+
+            val warningsArr = json.optJSONArray("warnings") ?: JSONArray()
+            val warnings = (0 until warningsArr.length()).mapNotNull { i ->
+                warningsArr.optString(i)?.trim()?.takeIf { it.isNotBlank() }
+            }
+
+            val rowsArr = json.optJSONArray("rows") ?: JSONArray()
+            val parsedRows = (0 until rowsArr.length()).mapNotNull { idx ->
+                val obj = rowsArr.optJSONObject(idx) ?: return@mapNotNull null
+                val rollStr = fromBn(obj.optString("roll", "").trim())
+                val nameStr = obj.optString("name", "").trim()
+                val marksObj = obj.optJSONObject("marks") ?: JSONObject()
+                val marksMap = mutableMapOf<String, String>()
+                marksObj.keys().forEach { k ->
+                    val v = marksObj.optString(k, "").trim()
+                    if (v.isNotEmpty() && !v.equals("null", ignoreCase = true)) {
+                        marksMap[k.uppercase()] = fromBn(v)
+                    }
+                }
+                val uncObj = obj.optJSONObject("uncertainFields") ?: JSONObject()
+                val aiIssues = mutableMapOf<String, String>()
+                uncObj.keys().forEach { k ->
+                    val reason = uncObj.optString(k, "").trim()
+                    if (reason.isNotEmpty()) {
+                        val normKey = when (k.lowercase()) {
+                            "roll", "name" -> k.lowercase()
+                            else -> k.uppercase()
+                        }
+                        aiIssues[normKey] = reason
+                    }
+                }
+                val sheetCont = obj.optString("sheetContinuousTotal", "").trim()
+                    .takeIf { it.isNotEmpty() && !it.equals("null", ignoreCase = true) }
+                    ?.let { fromBn(it) }
+                val sheetGrand = obj.optString("sheetGrandTotal", "").trim()
+                    .takeIf { it.isNotEmpty() && !it.equals("null", ignoreCase = true) }
+                    ?.let { fromBn(it) }
+
+                ScannedStudentRow(
+                    id = UUID.randomUUID().toString(),
+                    selected = true,
+                    rollText = rollStr,
+                    name = nameStr,
+                    marksText = marksMap,
+                    sheetContinuousTotal = sheetCont,
+                    sheetGrandTotal = sheetGrand,
+                    rawNotes = obj.optString("rawNotes", "").trim(),
+                    aiIssues = aiIssues
+                )
+            }
+
+            return ExtractedClassSheet(
+                cls = detectedCls,
+                term = detectedTerm,
+                subKey = detectedSub,
+                summary = json.optString("summary", "").ifBlank {
+                    "${CLSN[detectedCls - 1]} শ্রেণি · ${bn(detectedTerm.toString())} প্রান্তিক — ${bn(parsedRows.size.toString())} জন শিক্ষার্থী শনাক্ত হয়েছে।"
+                },
+                warnings = warnings,
+                rows = parsedRows,
+                isSample = false
+            )
+        } catch (e: Exception) {
+            throw IllegalStateException(friendlyAiError(e), e)
+        }
+    }
+
+    private fun stripJsonFences(raw: String): String {
+        val trimmed = raw.trim()
+        if (!trimmed.startsWith("```")) return trimmed
+        return trimmed
+            .removePrefix("```json")
+            .removePrefix("```JSON")
+            .removePrefix("```")
+            .removeSuffix("```")
+            .trim()
+    }
+
+    private fun friendlyAiError(e: Exception): String {
+        val msg = (e.message ?: "") + " " + (e.cause?.message ?: "")
+        val lower = msg.lowercase()
+        return when {
+            lower.contains("api has not been used") ||
+                lower.contains("not enabled") ||
+                lower.contains("firebasevertexai") ||
+                lower.contains("generativeai") ||
+                lower.contains("403") ->
+                "এই প্রজেক্টে Firebase AI Logic (Gemini API) এখনো চালু করা হয়নি। Firebase Console-এ গিয়ে 'AI Logic' (Gemini Developer API) চালু করে পুনরায় চেষ্টা করুন অথবা নিচ থেকে 'নমুনা প্রিভিউ' দেখুন।"
+            lower.contains("unable to resolve host") ||
+                lower.contains("network") ||
+                lower.contains("timeout") ->
+                "ইন্টারনেট সংযোগ পাওয়া যায়নি। নেটওয়ার্ক যাচাই করে আবার চেষ্টা করুন।"
+            lower.contains("quota") || lower.contains("429") ->
+                "Gemini API-এর সাময়িক ব্যবহার সীমা পূর্ণ হয়েছে। কিছুক্ষণ পর আবার চেষ্টা করুন।"
+            lower.contains("json") ->
+                "ছবিটি থেকে কাঠামোবদ্ধ ডেটা পড়া যায়নি। আরও স্পষ্ট বা সোজা ছবি তুলে আবার চেষ্টা করুন।"
+            else -> "AI বিশ্লেষণ ব্যর্থ হয়েছে: ${e.localizedMessage ?: "অজানা ত্রুটি"}"
+        }
+    }
+}
+
+/**
+ * অফলাইন বা প্রিভিউ পরীক্ষার জন্য নমুনা ডেটা (ম্যানুয়াল সংশোধন ফ্লো প্রদর্শনের জন্য)।
  */
 class PlaceholderAiRepository : AiRepository {
     override val isPlaceholderBackend: Boolean = true
@@ -98,35 +570,10 @@ class PlaceholderAiRepository : AiRepository {
         modelMode: AiModelMode,
         studentContext: String?
     ): AiChatReply {
-        delay(450)
-        val q = latestUserMessage.lowercase()
-        val modeTag = if (modelMode == AiModelMode.FAST) "Sample · Fast Mode" else "Sample · Detailed Mode"
-        val body = when {
-            q.contains("মতামত") || q.contains("remark") -> {
-                "শিক্ষার্থী শ্রেণিকক্ষে নিয়মিত উপস্থিত থাকে এবং পাঠ্যবিষয়ে মনোযোগী। ধারাবাহিক ও সামষ্টিক মূল্যায়নে ভালো অগ্রগতি দেখা গেছে; ইংরেজি ও গণিতে নিয়মিত অনুশীলন করলে আরও উৎকর্ষ অর্জন করবে।"
-            }
-            q.contains("বিভাজন") || q.contains("নম্বর") || q.contains("grading") -> {
-                """
-                NCTB প্রাথমিক মূল্যায়ন নম্বর বিভাজন:
-                • ১ম–২য় শ্রেণি: বাংলা, ইংরেজি, গণিত (১০০ নম্বর) = ধারাবাহিক ৫০ (পাঠ্যবই ২০ + সক্রিয়তা ৫ + ভাষা ৫ + ক্লাস টেস্ট ২০) + সামষ্টিক ৫০।
-                • ১ম–২য় শ্রেণি: সামাজিক/বিজ্ঞান, ধর্ম, শারীরিক শিক্ষা (৫০ নম্বর) = ধারাবাহিক ৫০। শিল্পকলা = ৫০।
-                • ৩য়–৫ম শ্রেণি: বাংলা, ইংরেজি, গণিত, বিজ্ঞান, বাওবি, ধর্ম (১০০ নম্বর) = ধারাবাহিক ৩০ (পাঠ্যবই ১০ + সক্রিয়তা ৫ + ভাষা ৫ + ক্লাস টেস্ট ১০) + সামষ্টিক ৭০।
-                • গ্রেড স্কেল: ৮০%+=A (অতি উত্তম), ৬০-৭৯%=B (উত্তম), ৪০-৫৯%=C (সন্তোষজনক), ০-৩৯%=D (সহায়তা প্রয়োজন)।
-                """.trimIndent()
-            }
-            q.contains("অভিভাবক") || q.contains("সভা") || q.contains("summary") -> {
-                "অভিভাবক সভার সারসংক্ষেপ (নমুনা): শিক্ষার্থীর উপস্থিতি ও শ্রেণি সক্রিয়তা সন্তোষজনক। বাসায় প্রতিদিন ৩০ মিনিট বাংলা ও গণিত অনুশীলন এবং সময়মতো বিদ্যালয়ে উপস্থিতি নিশ্চিত করার জন্য অনুরোধ করা হলো।"
-            }
-            else -> {
-                val ctxNote = if (!studentContext.isNullOrBlank()) {
-                    "\n\nপ্রাসঙ্গিক তথ্য: $studentContext"
-                } else ""
-                "নমুনা উত্তর (Firebase AI Logic সংযুক্ত নয়): আপনার প্রশ্ন \"${latestUserMessage.take(80)}\" গৃহীত হয়েছে। লাইভ Gemini উত্তর পেতে Firebase সক্রিয় করুন।$ctxNote"
-            }
-        }
+        delay(350)
         return AiChatReply(
-            text = "[নমুনা উত্তর — লাইভ AI এর জন্য Firebase প্রয়োজন]\n\n$body",
-            modelLabel = modeTag,
+            text = "নমুনা উত্তর (অফলাইন মোড): \"${latestUserMessage.take(60)}\"",
+            modelLabel = "Sample Mode",
             isPlaceholder = true
         )
     }
@@ -135,70 +582,80 @@ class PlaceholderAiRepository : AiRepository {
         bitmap: Bitmap,
         teacherNote: String
     ): ExtractedMarksheet {
-        delay(650)
-        val detectedTerm = when {
-            teacherNote.contains("৩") || teacherNote.contains("3") -> 3
-            teacherNote.contains("২") || teacherNote.contains("2") -> 2
-            else -> 1
-        }
-        val detectedCls = when {
-            teacherNote.contains("৫") || teacherNote.contains("5") -> 5
-            teacherNote.contains("৪") || teacherNote.contains("4") -> 4
-            teacherNote.contains("৩") || teacherNote.contains("3") -> 3
-            teacherNote.contains("২") || teacherNote.contains("2") -> 2
-            else -> 1
-        }
-        val t = detectedTerm
-        val isUpper = detectedCls >= 3
-        val sampleMarks = if (isUpper) {
-            listOf(
-                ExtractedMarkItem("BAN_${t}_TB", 9.0, "বাংলা (পাঠ্যবই)"),
-                ExtractedMarkItem("BAN_${t}_WR", 61.0, "বাংলা (সামষ্টিক)"),
-                ExtractedMarkItem("ENG_${t}_TB", 8.0, "ইংরেজি (পাঠ্যবই)"),
-                ExtractedMarkItem("ENG_${t}_WR", 56.0, "ইংরেজি (সামষ্টিক)"),
-                ExtractedMarkItem("MATH_${t}_TB", 10.0, "গণিত (পাঠ্যবই)"),
-                ExtractedMarkItem("MATH_${t}_WR", 64.0, "গণিত (সামষ্টিক)")
-            )
-        } else {
-            listOf(
-                ExtractedMarkItem("BAN_${t}_TB", 18.0, "বাংলা (পাঠ্যবই)"),
-                ExtractedMarkItem("BAN_${t}_WR", 44.0, "বাংলা (সামষ্টিক)"),
-                ExtractedMarkItem("ENG_${t}_TB", 17.0, "ইংরেজি (পাঠ্যবই)"),
-                ExtractedMarkItem("ENG_${t}_WR", 41.0, "ইংরেজি (সামষ্টিক)"),
-                ExtractedMarkItem("MATH_${t}_TB", 19.0, "গণিত (পাঠ্যবই)"),
-                ExtractedMarkItem("MATH_${t}_WR", 46.0, "গণিত (সামষ্টিক)")
-            )
-        }
+        delay(450)
+        val t = 1
         return ExtractedMarksheet(
-            summary = "[নমুনা স্ক্যান ফলাফল — লাইভ ছবি বিশ্লেষণের জন্য Firebase AI Logic প্রয়োজন]\n${CLSN[detectedCls - 1]} শ্রেণির ${bn(t.toString())}ম প্রান্তিকের নমুনা নম্বরপত্র শনাক্ত দেখানো হয়েছে (${bitmap.width}×${bitmap.height}px)।",
-            student = ExtractedStudentInfo(
-                name = "রাফিউজ্জামান রাফি (নমুনা)",
-                cls = detectedCls,
-                roll = 10,
-                guardian = "মোঃ আবুল কালাম",
-                religion = "ইসলাম"
-            ),
+            summary = "নমুনা একক নম্বরপত্র প্রিভিউ (${bitmap.width}×${bitmap.height}px)",
+            student = ExtractedStudentInfo(name = "রাফিউজ্জামান রাফি (নমুনা)", cls = 3, roll = 10, religion = "ইসলাম"),
             term = t,
-            marks = sampleMarks,
-            attendanceAndTraits = ExtractedAttendanceAndTraits(
-                days = "64",
-                present = "60",
-                act = "ক",
-                disc = "ক",
-                cond = "ক",
-                remark = "পাঠ্যবিষয়ে মনোযোগী ও নিয়মিত (নমুনা খসড়া)।"
+            marks = listOf(
+                ExtractedMarkItem("MATH_1_TB", 9.0, "গণিত (পাঠ্যবই)"),
+                ExtractedMarkItem("MATH_1_WR", 61.0, "গণিত (সামষ্টিক)")
             ),
+            attendanceAndTraits = ExtractedAttendanceAndTraits(days = "64", present = "60", act = "ক", disc = "ক", cond = "ক"),
+            uncertainNotes = listOf("নমুনা মোড: বাস্তব স্ক্যানের জন্য লাইভ Gemini AI ব্যবহার করুন"),
             isPlaceholder = true
         )
     }
 
-    override suspend fun draftRemark(
-        studentSummary: String,
-        term: Int
-    ): AiDraftRemarkResult {
-        delay(450)
+    override suspend fun analyzeClassSheetImage(
+        bitmap: Bitmap,
+        clsHint: Int?,
+        termHint: Int?,
+        subKeyHint: String?,
+        teacherNote: String
+    ): ExtractedClassSheet {
+        delay(500)
+        val cls = (clsHint ?: 3).coerceIn(1, 5)
+        val term = (termHint ?: 1).coerceIn(1, 3)
+        val sub = subKeyHint ?: "MATH"
+        return ExtractedClassSheet(
+            cls = cls,
+            term = term,
+            subKey = sub,
+            summary = "[নমুনা প্রিভিউ] অস্পষ্ট ঘরগুলো কীভাবে হাইলাইট হয় ও ঠিক করতে হয় তা দেখার জন্য নমুনা তালিকা।",
+            warnings = listOf("এটি একটি নমুনা স্ক্যান — প্রকৃত ছবির জন্য 'AI দিয়ে স্ক্যান ও প্রিভিউ দেখুন' ব্যবহার করুন।"),
+            rows = listOf(
+                ScannedStudentRow(
+                    rollText = "1",
+                    name = "আরিয়ান ইসলাম খালিদ",
+                    marksText = mapOf("TB" to "9", "ACT" to "5", "LANG" to "5", "CT" to "7", "WR" to "50"),
+                    sheetContinuousTotal = "26",
+                    sheetGrandTotal = "76",
+                    rawNotes = "CT: ০৬+০৭=১৩/২=০৭"
+                ),
+                ScannedStudentRow(
+                    rollText = "2",
+                    name = "মোঃ ইয়ামিন মোল্যা",
+                    marksText = mapOf("TB" to "9", "ACT" to "5", "LANG" to "5", "CT" to "7", "WR" to "46"),
+                    sheetContinuousTotal = "26",
+                    sheetGrandTotal = "72",
+                    aiIssues = mapOf("TB" to "৭ না কি ৯ — লেখা কিছুটা অস্পষ্ট")
+                ),
+                ScannedStudentRow(
+                    rollText = "3",
+                    name = "খাদিজা তুল কুবরা",
+                    marksText = mapOf("TB" to "7", "ACT" to "5", "LANG" to "5", "CT" to "5", "WR" to "34"),
+                    sheetContinuousTotal = "25",
+                    sheetGrandTotal = "56",
+                    aiIssues = mapOf("name" to "বানান যাচাই করুন")
+                ),
+                ScannedStudentRow(
+                    rollText = "4",
+                    name = "মোঃ সোয়াইব মোল্যা",
+                    marksText = mapOf("TB" to "7", "ACT" to "4", "LANG" to "3", "CT" to "5", "WR" to ""),
+                    sheetContinuousTotal = "19",
+                    rawNotes = "সামষ্টিক ঘর খাতায় ফাঁকা"
+                )
+            ),
+            isSample = true
+        )
+    }
+
+    override suspend fun draftRemark(studentSummary: String, term: Int): AiDraftRemarkResult {
+        delay(350)
         return AiDraftRemarkResult(
-            remark = "${bn(term.toString())} প্রান্তিকের মূল্যায়নে শিক্ষার্থীর অংশগ্রহণ ও অগ্রগতি প্রশংসনীয়। নিয়মিত পাঠ অনুশীলন ও উপস্থিতি বজায় রাখলে আগামীতে আরও ভালো ফলাফল অর্জন করবে। [নমুনা খসড়া — Firebase প্রয়োজন]",
+            remark = "${bn(term.toString())} প্রান্তিকের মূল্যায়নে শিক্ষার্থীর অংশগ্রহণ ভালো।",
             isPlaceholder = true
         )
     }

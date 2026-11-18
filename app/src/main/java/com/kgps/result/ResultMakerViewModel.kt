@@ -14,8 +14,12 @@ import androidx.lifecycle.viewModelScope
 import com.kgps.result.ai.AiChatMessage
 import com.kgps.result.ai.AiModelMode
 import com.kgps.result.ai.AiRepository
+import com.kgps.result.ai.ExtractedClassSheet
 import com.kgps.result.ai.ExtractedMarksheet
+import com.kgps.result.ai.FirebaseAiRepository
 import com.kgps.result.ai.PlaceholderAiRepository
+import com.kgps.result.ai.ScannedStudentRow
+import com.kgps.result.ai.validateScannedStudentRow
 import com.kgps.result.backup.AutoBackupManager
 import com.kgps.result.backup.AutoBackupStatus
 import com.kgps.result.backup.DriveAuthOutcome
@@ -67,15 +71,16 @@ data class CsvImportModalState(
 )
 
 data class AiAssistantState(
+    val activeTab: Int = 0,
     val modelMode: AiModelMode = AiModelMode.GENERAL,
     val contextStudentId: String? = null,
     val chatMessages: List<AiChatMessage> = listOf(
         AiChatMessage(
             id = "welcome-msg",
             isUser = false,
-            text = "আসসালামু আলাইকুম! আমি আপনার শ্রেণিকক্ষ সহায়ক। নম্বর বিভাজন, অভিভাবক সভার সারসংক্ষেপ বা প্রান্তিক মতামতের খসড়া নিয়ে প্রশ্ন করতে পারেন।\n\nনোট: লাইভ Gemini AI ব্যবহারের জন্য Firebase AI Logic প্রয়োজন — বর্তমানে নমুনা (Placeholder) উত্তর প্রদর্শিত হচ্ছে।",
-            modelLabel = "Sample Mode",
-            isPlaceholder = true
+            text = "আসসালামু আলাইকুম! আমি আপনার শ্রেণিকক্ষ সহায়ক। নম্বর বিভাজন, অভিভাবক সভার সারসংক্ষেপ বা প্রান্তিক মতামতের খসড়া নিয়ে প্রশ্ন করতে পারেন।\n\nএছাড়া 'নম্বরপত্র ছবি স্ক্যান' ট্যাব থেকে পুরো শ্রেণির নম্বরপত্র ছবি তুলে সরাসরি প্রিভিউ দেখে ইমপোর্ট করতে পারবেন।",
+            modelLabel = "Gemini AI",
+            isPlaceholder = false
         )
     ),
     val chatLoading: Boolean = false,
@@ -83,7 +88,9 @@ data class AiAssistantState(
     val selectedImageBitmap: Bitmap? = null,
     val analyzingImage: Boolean = false,
     val analysisError: String? = null,
-    val analysisResult: ExtractedMarksheet? = null
+    val analysisResult: ExtractedMarksheet? = null,
+    val classSheetResult: ExtractedClassSheet? = null,
+    val savingClassSheet: Boolean = false
 )
 
 @OptIn(ExperimentalCoroutinesApi::class, kotlinx.coroutines.FlowPreview::class)
@@ -98,7 +105,8 @@ class ResultMakerViewModel(
     private val initialLocalSnapshot: Pair<List<Student>, Settings>? = null
 ) : ViewModel() {
 
-    private val aiRepository: AiRepository = PlaceholderAiRepository()
+    private val aiRepository: AiRepository = FirebaseAiRepository()
+    private val sampleAiRepository = PlaceholderAiRepository()
 
     val localSeedCount: Int get() = initialLocalSnapshot?.first?.size ?: 0
     val localSeedSettings: Settings? get() = initialLocalSnapshot?.second
@@ -1125,6 +1133,16 @@ class ResultMakerViewModel(
 
     // ---------- AI Assistant & Drafting ----------
 
+    fun setAiAssistantTab(tab: Int) {
+        _aiState.update { it.copy(activeTab = tab.coerceIn(0, 1)) }
+    }
+
+    fun openAiScanner() {
+        _editingStudent.value = null
+        _aiState.update { it.copy(activeTab = 1) }
+        _currentSection.value = NavSection.ASSISTANT
+    }
+
     fun setAiModelMode(mode: AiModelMode) {
         _aiState.update { it.copy(modelMode = mode) }
     }
@@ -1140,9 +1158,9 @@ class ResultMakerViewModel(
                     AiChatMessage(
                         id = UUID.randomUUID().toString(),
                         isUser = false,
-                        text = "নতুন কথোপকথন শুরু হয়েছে। শ্রেণিকক্ষ বা ফলাফল সংক্রান্ত যেকোনো প্রশ্ন করুন।\n\nনোট: লাইভ Gemini AI-এর জন্য Firebase AI Logic প্রয়োজন।",
-                        modelLabel = "Sample Mode",
-                        isPlaceholder = true
+                        text = "নতুন কথোপকথন শুরু হয়েছে। শ্রেণিকক্ষ বা ফলাফল সংক্রান্ত যেকোনো প্রশ্ন করুন।",
+                        modelLabel = "Gemini AI",
+                        isPlaceholder = false
                     )
                 ),
                 chatError = null
@@ -1216,15 +1234,17 @@ class ResultMakerViewModel(
     fun loadMarksheetImage(uri: Uri) {
         viewModelScope.launch {
             val bmp = withContext(Dispatchers.IO) {
-                decodeAndScaleBitmap(uri, 1600)
+                decodeAndScaleBitmap(uri, 2200)
             }
             if (bmp == null) {
                 showMessage("ছবি পড়া যায়নি")
             } else {
                 _aiState.update {
                     it.copy(
+                        activeTab = 1,
                         selectedImageBitmap = bmp,
                         analysisResult = null,
+                        classSheetResult = null,
                         analysisError = null
                     )
                 }
@@ -1237,6 +1257,7 @@ class ResultMakerViewModel(
             it.copy(
                 selectedImageBitmap = null,
                 analysisResult = null,
+                classSheetResult = null,
                 analysisError = null
             )
         }
@@ -1245,7 +1266,7 @@ class ResultMakerViewModel(
     fun analyzeSelectedMarksheet(teacherNote: String) {
         val bmp = _aiState.value.selectedImageBitmap ?: return
         if (_aiState.value.analyzingImage) return
-        _aiState.update { it.copy(analyzingImage = true, analysisError = null) }
+        _aiState.update { it.copy(analyzingImage = true, analysisError = null, classSheetResult = null) }
         viewModelScope.launch {
             try {
                 val result = aiRepository.analyzeMarksheetImage(bmp, teacherNote)
@@ -1260,6 +1281,268 @@ class ResultMakerViewModel(
                     )
                 }
             }
+        }
+    }
+
+    fun analyzeClassSheet(
+        clsHint: Int?,
+        termHint: Int?,
+        subKeyHint: String?,
+        teacherNote: String
+    ) {
+        val bmp = _aiState.value.selectedImageBitmap ?: return
+        if (_aiState.value.analyzingImage) return
+        _aiState.update { it.copy(analyzingImage = true, analysisError = null, analysisResult = null) }
+        viewModelScope.launch {
+            try {
+                val result = aiRepository.analyzeClassSheetImage(bmp, clsHint, termHint, subKeyHint, teacherNote)
+                _aiState.update { it.copy(analyzingImage = false, classSheetResult = result) }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                _aiState.update {
+                    it.copy(
+                        analyzingImage = false,
+                        analysisError = e.message ?: "নম্বরপত্র স্ক্যান করা যায়নি"
+                    )
+                }
+            }
+        }
+    }
+
+    fun loadSampleClassSheetPreview(clsHint: Int?, termHint: Int?, subKeyHint: String?) {
+        if (_aiState.value.analyzingImage) return
+        _aiState.update { it.copy(analyzingImage = true, analysisError = null, analysisResult = null) }
+        viewModelScope.launch {
+            try {
+                val bmp = _aiState.value.selectedImageBitmap ?: Bitmap.createBitmap(1, 1, Bitmap.Config.ARGB_8888)
+                val result = sampleAiRepository.analyzeClassSheetImage(bmp, clsHint, termHint, subKeyHint, "")
+                _aiState.update { it.copy(analyzingImage = false, classSheetResult = result) }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                _aiState.update {
+                    it.copy(analyzingImage = false, analysisError = e.message ?: "নমুনা প্রিভিউ লোড হয়নি")
+                }
+            }
+        }
+    }
+
+    fun updateClassSheetMeta(cls: Int, term: Int, subKey: String) {
+        _aiState.update { st ->
+            val current = st.classSheetResult ?: return@update st
+            st.copy(classSheetResult = current.copy(cls = cls.coerceIn(1, 5), term = term.coerceIn(1, 3), subKey = subKey))
+        }
+    }
+
+    fun toggleScannedRowSelected(rowId: String) {
+        _aiState.update { st ->
+            val current = st.classSheetResult ?: return@update st
+            st.copy(
+                classSheetResult = current.copy(
+                    rows = current.rows.map { r -> if (r.id == rowId) r.copy(selected = !r.selected) else r }
+                )
+            )
+        }
+    }
+
+    fun setAllScannedRowsSelected(selected: Boolean) {
+        _aiState.update { st ->
+            val current = st.classSheetResult ?: return@update st
+            st.copy(
+                classSheetResult = current.copy(
+                    rows = current.rows.map { r -> r.copy(selected = selected) }
+                )
+            )
+        }
+    }
+
+    fun updateScannedRowField(
+        rowId: String,
+        rollText: String? = null,
+        name: String? = null,
+        markEntry: Pair<String, String>? = null,
+        verifyField: String? = null
+    ) {
+        _aiState.update { st ->
+            val current = st.classSheetResult ?: return@update st
+            val nextRows = current.rows.map { r ->
+                if (r.id != rowId) r
+                else {
+                    val nextMarks = if (markEntry != null) {
+                        r.marksText.toMutableMap().apply {
+                            put(markEntry.first, markEntry.second)
+                        }
+                    } else r.marksText
+                    val nextResolved = r.resolvedFields.toMutableSet().apply {
+                        if (rollText != null) add("roll")
+                        if (name != null) add("name")
+                        if (markEntry != null) {
+                            add(markEntry.first)
+                            add("arithmetic")
+                        }
+                        if (verifyField != null) add(verifyField)
+                    }
+                    r.copy(
+                        rollText = rollText ?: r.rollText,
+                        name = name ?: r.name,
+                        marksText = nextMarks,
+                        resolvedFields = nextResolved
+                    )
+                }
+            }
+            st.copy(classSheetResult = current.copy(rows = nextRows))
+        }
+    }
+
+    fun addBlankScannedRow() {
+        _aiState.update { st ->
+            val current = st.classSheetResult ?: return@update st
+            val maxRoll = current.rows.mapNotNull { fromBn(it.rollText.trim()).toIntOrNull() }.maxOrNull() ?: 0
+            val newRow = ScannedStudentRow(
+                rollText = (maxRoll + 1).toString(),
+                name = "",
+                marksText = emptyMap()
+            )
+            st.copy(classSheetResult = current.copy(rows = current.rows + newRow))
+        }
+    }
+
+    fun removeScannedRow(rowId: String) {
+        _aiState.update { st ->
+            val current = st.classSheetResult ?: return@update st
+            st.copy(classSheetResult = current.copy(rows = current.rows.filterNot { it.id == rowId }))
+        }
+    }
+
+    fun markAllScannedIssuesVerified() {
+        _aiState.update { st ->
+            val current = st.classSheetResult ?: return@update st
+            val nextRows = current.rows.map { r ->
+                val allKeys = r.aiIssues.keys + setOf("name", "arithmetic")
+                r.copy(resolvedFields = r.resolvedFields + allKeys)
+            }
+            st.copy(classSheetResult = current.copy(rows = nextRows))
+        }
+    }
+
+    fun dismissClassSheetPreview() {
+        _aiState.update { it.copy(classSheetResult = null) }
+    }
+
+    fun commitScannedClassSheet() {
+        val sheet = _aiState.value.classSheetResult ?: return
+        val school = activeSchool.value ?: return
+        if (_aiState.value.savingClassSheet) return
+
+        val perm = school.permissionsFor(currentUserId)
+        val cls = sheet.cls.coerceIn(1, 5)
+        val term = sheet.term.coerceIn(1, 3)
+        val subKey = sheet.subKey
+
+        if (!perm.canAccessClass(cls)) {
+            showMessage("এই শ্রেণিতে (${CLSN[cls - 1]}) ডেটা সংরক্ষণের অনুমতি আপনার নেই")
+            return
+        }
+        if (!perm.canEditSubject(subKey)) {
+            showMessage("এই বিষয়ে নম্বর পরিবর্তনের অনুমতি আপনার নেই")
+            return
+        }
+
+        val selectedRows = sheet.rows.filter { it.selected }
+        if (selectedRows.isEmpty()) {
+            showMessage("সংরক্ষণের জন্য অন্তত একজন শিক্ষার্থী নির্বাচন করুন")
+            return
+        }
+
+        val rollCounts = selectedRows.mapNotNull { fromBn(it.rollText.trim()).toIntOrNull() }.groupingBy { it }.eachCount()
+        val duplicates = rollCounts.filterValues { it > 1 }.keys
+        val hasHardError = selectedRows.any { validateScannedStudentRow(it, cls, subKey, duplicates).hasHardError }
+        if (hasHardError) {
+            showMessage("লাল চিহ্নিত ত্রুটিপূর্ণ ঘরগুলো ঠিক করে আবার সংরক্ষণ করুন")
+            return
+        }
+
+        val prevList = students.value
+        val out = prevList.toMutableList()
+        var addedCount = 0
+        var updatedCount = 0
+        var skippedNoPerm = 0
+
+        selectedRows.forEach { row ->
+            val roll = fromBn(row.rollText.trim()).toIntOrNull() ?: return@forEach
+            val pos = out.indexOfFirst { it.cls == cls && it.roll == roll }
+            if (pos < 0 && !perm.canManageStudents) {
+                skippedNoPerm++
+                return@forEach
+            }
+            val base = if (pos >= 0) out[pos] else createEmptyStudent(cls, roll)
+            val nextM = base.m.toMutableMap()
+            val subDef = subjectsFor(cls, RELIGIONS.first()).find { it.key == subKey }
+            val allowedComps = buildSet {
+                subDef?.comps?.forEach { add(it.key) }
+                if ((subDef?.written ?: 0) > 0) add("WR")
+            }
+            allowedComps.forEach { compKey ->
+                val raw = row.marksText[compKey]?.trim().orEmpty()
+                val fullKey = mk(subKey, term, compKey)
+                if (raw.isEmpty()) {
+                    nextM.remove(fullKey)
+                } else {
+                    fromBn(raw).toDoubleOrNull()?.let { d -> nextM[fullKey] = d }
+                }
+            }
+            val cleanName = row.name.trim()
+            val candidate = if (perm.canManageStudents && cleanName.isNotBlank()) {
+                base.copy(name = cleanName, m = nextM)
+            } else {
+                base.copy(m = nextM)
+            }
+            val safe = if (school.isAdmin(currentUserId)) {
+                candidate
+            } else {
+                sanitizeStudentForPermissions(candidate, if (pos >= 0) base else null, perm)
+            }
+            if (safe != null) {
+                if (pos >= 0) {
+                    out[pos] = safe
+                    updatedCount++
+                } else {
+                    out.add(safe)
+                    addedCount++
+                }
+            }
+        }
+
+        val existingById = prevList.associateBy { it.id }
+        val changedList = out.filter { s -> existingById[s.id] != s }
+        if (changedList.isEmpty()) {
+            showMessage(
+                if (skippedNoPerm > 0) "নতুন শিক্ষার্থী যোগ করার অনুমতি নেই (শুধু তালিকার শিক্ষার্থীদের নম্বর আপডেট হবে)"
+                else "কোনো পরিবর্তিত ডেটা পাওয়া যায়নি"
+            )
+            return
+        }
+
+        _aiState.update { it.copy(savingClassSheet = true) }
+        viewModelScope.launch {
+            cloudRepo.syncBatchStudents(school.id, prevList, out, deleteRemoved = false)
+                .onSuccess {
+                    _selectedClass.value = cls
+                    _aiState.update { it.copy(savingClassSheet = false, classSheetResult = null) }
+                    val msg = buildString {
+                        append("স্ক্যান ডেটা সংরক্ষিত: ")
+                        if (addedCount > 0) append("নতুন ${bn(addedCount.toString())} জন")
+                        if (addedCount > 0 && updatedCount > 0) append(", ")
+                        if (updatedCount > 0) append("হালনাগাদ ${bn(updatedCount.toString())} জন")
+                        if (skippedNoPerm > 0) append(" (${bn(skippedNoPerm.toString())} জন নতুন বাদ পড়েছে)")
+                    }
+                    showMessage(msg)
+                }
+                .onFailure { e ->
+                    _aiState.update { it.copy(savingClassSheet = false) }
+                    showMessage(friendlyFirestoreErrorMessage(e))
+                }
         }
     }
 

@@ -2,6 +2,7 @@ package com.kgps.result.ui.screens
 
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -15,10 +16,12 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.Description
+import androidx.compose.material.icons.rounded.DocumentScanner
 import androidx.compose.material.icons.rounded.FolderOpen
 import androidx.compose.material.icons.rounded.GridOn
 import androidx.compose.material.icons.rounded.HourglassTop
@@ -94,6 +97,7 @@ fun RosterScreen(
     onNewStudentInClass: (Int) -> Unit,
     onOpenSheetInClass: (Int) -> Unit,
     onCsvImport: () -> Unit,
+    onAiScan: () -> Unit,
     onClassPdf: (Int) -> Unit,
     onAllPdf: () -> Unit
 ) {
@@ -220,9 +224,10 @@ fun RosterScreen(
                         }
                     }
 
-                    if (permissions.canManageStudents || permissions.canExportPdf) {
+                    val canScanSheet = permissions.canManageStudents || permissions.allSubjects || permissions.effectiveSubjects().isNotEmpty()
+                    if (permissions.canManageStudents || canScanSheet || permissions.canExportPdf) {
                         Row(
-                            modifier = Modifier.fillMaxWidth(),
+                            modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
                             horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
                             if (permissions.canManageStudents) {
@@ -231,6 +236,14 @@ fun RosterScreen(
                                     modifier = Modifier.testTag("roster_csv_import_btn"),
                                     leadingIcon = { Icon(Icons.Rounded.UploadFile, contentDescription = null, modifier = Modifier.size(16.dp)) },
                                     label = { Text("CSV ইমপোর্ট", fontSize = 11.5.sp) }
+                                )
+                            }
+                            if (canScanSheet) {
+                                AssistChip(
+                                    onClick = onAiScan,
+                                    modifier = Modifier.testTag("roster_ai_scan_btn"),
+                                    leadingIcon = { Icon(Icons.Rounded.DocumentScanner, contentDescription = null, modifier = Modifier.size(16.dp)) },
+                                    label = { Text("AI ছবি স্ক্যান", fontSize = 11.5.sp) }
                                 )
                             }
                             if (permissions.canExportPdf) {
