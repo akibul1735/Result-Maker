@@ -3,7 +3,10 @@ package com.kgps.result.cloud
 import android.annotation.SuppressLint
 import android.app.Activity
 import android.content.Context
+import android.content.pm.PackageManager
+import android.os.Build
 import android.util.Log
+import java.security.MessageDigest
 import androidx.credentials.ClearCredentialStateRequest
 import androidx.credentials.CredentialManager
 import androidx.credentials.CustomCredential
@@ -38,6 +41,33 @@ private fun resolveWebClientId(context: Context): String? {
     } catch (_: Exception) {
         null
     }
+}
+
+@Suppress("DEPRECATION")
+private fun getAppSigningSha1(context: Context): String? = try {
+    val pkgInfo = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+        context.packageManager.getPackageInfo(
+            context.packageName,
+            PackageManager.GET_SIGNING_CERTIFICATES
+        )
+    } else {
+        context.packageManager.getPackageInfo(
+            context.packageName,
+            PackageManager.GET_SIGNATURES
+        )
+    }
+    val certBytes = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+        pkgInfo.signingInfo?.apkContentsSigners?.firstOrNull()?.toByteArray()
+    } else {
+        pkgInfo.signatures?.firstOrNull()?.toByteArray()
+    }
+    certBytes?.let { bytes ->
+        MessageDigest.getInstance("SHA-1")
+            .digest(bytes)
+            .joinToString(":") { "%02X".format(it) }
+    }
+} catch (_: Exception) {
+    null
 }
 
 fun FirebaseAuth.authStateFlow(): Flow<FirebaseUser?> = callbackFlow {
@@ -126,7 +156,10 @@ fun onGoogleSignInClicked(
             onAuthCancelled()
         } catch (e: Exception) {
             Log.e(AUTH_TAG, "Google Sign-In failed", e)
-            onAuthError(e.localizedMessage ?: "সাইন-ইন ব্যর্থ হয়েছে")
+            val detail = e.localizedMessage?.takeIf { it.isNotBlank() } ?: e::class.java.simpleName
+            val sha1 = getAppSigningSha1(context)
+            val shaHint = if (sha1 != null) "\n\nAPK SHA-1: $sha1" else ""
+            onAuthError("সাইন-ইন ব্যর্থ হয়েছে: $detail$shaHint")
         }
     }
 }
