@@ -29,6 +29,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.ArrowDropDown
 import androidx.compose.material.icons.rounded.ContentPaste
 import androidx.compose.material.icons.rounded.Description
+import androidx.compose.material.icons.rounded.Lock
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.DropdownMenu
@@ -71,6 +72,7 @@ import com.kgps.result.Settings
 import com.kgps.result.Student
 import com.kgps.result.avg
 import com.kgps.result.bn
+import com.kgps.result.cloud.TeacherPermissions
 import com.kgps.result.cont
 import com.kgps.result.fmt
 import com.kgps.result.fmtEn
@@ -120,6 +122,7 @@ fun BulkSheetScreen(
     students: List<Student>,
     settings: Settings,
     cls: Int,
+    permissions: TeacherPermissions,
     onSelectClass: (Int) -> Unit,
     onUpsertStudent: (Student) -> Unit,
     onPatchStudentField: (studentId: String, fieldPath: String, value: Any?) -> Unit,
@@ -128,24 +131,63 @@ fun BulkSheetScreen(
     onShowMessage: (String) -> Unit
 ) {
     val clipboard = LocalClipboardManager.current
+    val allowedClasses = remember(permissions) { permissions.effectiveClasses() }
+    val activeCls = if (cls in allowedClasses) cls else (allowedClasses.firstOrNull() ?: cls)
+
+    val availableModes = remember(permissions) {
+        SHEET_MODES.filter { (id, _) ->
+            when (id) {
+                "subject" -> permissions.allSubjects || permissions.effectiveSubjects().isNotEmpty() || permissions.canViewOtherSubjects
+                "all" -> permissions.allSubjects || permissions.effectiveSubjects().isNotEmpty() || permissions.canViewOtherSubjects
+                "attendance" -> permissions.canEditAttendance
+                "info" -> permissions.canManageStudents
+                else -> true
+            }
+        }
+    }
+
     var term by remember { mutableStateOf(1) }
-    var mode by remember { mutableStateOf("subject") }
+    var mode by remember { mutableStateOf(availableModes.firstOrNull()?.first ?: "subject") }
     var navDir by remember { mutableStateOf("down") }
+
+    LaunchedEffect(availableModes) {
+        if (availableModes.isNotEmpty() && availableModes.none { it.first == mode }) {
+            mode = availableModes.first().first
+        }
+    }
 
     var classMenuOpen by remember { mutableStateOf(false) }
     var termMenuOpen by remember { mutableStateOf(false) }
     var modeMenuOpen by remember { mutableStateOf(false) }
     var subjectMenuOpen by remember { mutableStateOf(false) }
 
-    val subs = remember(cls) { subjectsFor(cls, RELIGIONS.first()) }
-    var subKey by remember(cls) { mutableStateOf(subs.first().key) }
-    val activeSub = subs.find { it.key == subKey } ?: subs.firstOrNull()
+    val allSubsForClass = remember(activeCls) { subjectsFor(activeCls, RELIGIONS.first()) }
+    val visibleSubs = remember(allSubsForClass, permissions) {
+        allSubsForClass.filter { permissions.canViewSubject(it.key) }
+    }
+    var subKey by remember(activeCls, visibleSubs) {
+        mutableStateOf(
+            visibleSubs.firstOrNull { permissions.canEditSubject(it.key) }?.key
+                ?: visibleSubs.firstOrNull()?.key
+                ?: allSubsForClass.first().key
+        )
+    }
+    val activeSub = visibleSubs.find { it.key == subKey } ?: visibleSubs.firstOrNull()
 
-    val classStudents = remember(students, cls) {
-        students.filter { it.cls == cls }.sortedBy { it.roll }
+    fun isColumnEditable(col: SheetColDef): Boolean {
+        return when {
+            col.isMark && col.markSubKey != null -> permissions.canEditSubject(col.markSubKey)
+            col.xKey != null && mode == "attendance" -> permissions.canEditAttendance
+            col.xKey != null || col.infoFieldKey != null -> permissions.canManageStudents
+            else -> false
+        }
     }
 
-    val cols: List<SheetColDef> = remember(mode, activeSub, term, subs, settings.customFields) {
+    val classStudents = remember(students, activeCls) {
+        students.filter { it.cls == activeCls }.sortedBy { it.roll }
+    }
+
+    val cols: List<SheetColDef> = remember(mode, activeSub, term, visibleSubs, settings.customFields) {
         when (mode) {
             "subject" -> if (activeSub == null) emptyList() else buildList {
                 activeSub.comps.forEach { c ->
@@ -184,7 +226,7 @@ fun BulkSheetScreen(
                     )
                 }
             }
-            "all" -> subs.map { sub ->
+            "all" -> visibleSubs.map { sub ->
                 val shortName = when (sub.key) {
                     "SOC" -> "সামাজিক/বিজ্ঞান"
                     "BGW" -> "বাওবি"
@@ -266,6 +308,7 @@ fun BulkSheetScreen(
 
             parts.forEachIndexed { cIdx, rawVal ->
                 val col = cols.getOrNull(cIdx) ?: return@forEachIndexed
+                if (!isColumnEditable(col)) return@forEachIndexed
                 val trimmed = rawVal.trim()
                 if (col.isMark && col.markSubKey != null && col.markCompKey != null) {
                     val d = fromBn(trimmed).toDoubleOrNull()
@@ -297,10 +340,40 @@ fun BulkSheetScreen(
             }
             onUpsertStudent(nextStudent.copy(m = nextM, x = nextX))
         }
-        onShowMessage("ক্লিপবোর্ড থেকে ${bn(updatedCells.toString())}টি ঘর আপডেট হয়েছে")
+        onShowMessage(
+            if (updatedCells > 0) "ক্লিপবোর্ড থেকে ${bn(updatedCells.toString())}টি অনুমোদিত ঘর আপডেট হয়েছে"
+            else "সম্পাদনার অনুমতিপ্রাপ্ত কোনো ঘর আপডেট হয়নি"
+        )
+    }
+
+    if (allowedClasses.isEmpty() || availableModes.isEmpty()) {
+        Column(
+            Modifier.fillMaxSize().padding(24.dp),
+            verticalArrangement = Arrangement.Center,
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Icon(Icons.Rounded.Lock, contentDescription = null, tint = AmberNotice, modifier = Modifier.size(34.dp))
+            Spacer(Modifier.height(8.dp))
+            Text(
+                "ব্যাচ এন্ট্রির জন্য কোনো শ্রেণি বা বিষয় নির্ধারিত নেই",
+                fontWeight = FontWeight.Bold,
+                fontSize = 14.5.sp,
+                color = SlateText,
+                textAlign = TextAlign.Center
+            )
+            Spacer(Modifier.height(4.dp))
+            Text(
+                "বিদ্যালয়ের অ্যাডমিন আপনার শ্রেণি ও বিষয়ের অ্যাক্সেস চালু করলে এখানে ব্যাচ এন্ট্রি করতে পারবেন।",
+                fontSize = 12.sp,
+                color = SlateMuted,
+                textAlign = TextAlign.Center
+            )
+        }
+        return
     }
 
     val hScroll = rememberScrollState()
+    val canPasteCurrentSheet = cols.any { isColumnEditable(it) }
 
     Column(
         Modifier
@@ -330,11 +403,11 @@ fun BulkSheetScreen(
                             contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp),
                             modifier = Modifier.testTag("sheet_class_dropdown")
                         ) {
-                            Text("${CLSN[cls - 1]} শ্রেণি", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                            Text("${CLSN[activeCls - 1]} শ্রেণি", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
                             Icon(Icons.Rounded.ArrowDropDown, contentDescription = null, modifier = Modifier.size(16.dp))
                         }
                         DropdownMenu(expanded = classMenuOpen, onDismissRequest = { classMenuOpen = false }) {
-                            (1..5).forEach { c ->
+                            allowedClasses.forEach { c ->
                                 val count = students.count { it.cls == c }
                                 DropdownMenuItem(
                                     text = { Text("${CLSN[c - 1]} শ্রেণি (${bn(count.toString())} জন)") },
@@ -369,17 +442,21 @@ fun BulkSheetScreen(
 
                     Spacer(Modifier.weight(1f))
 
-                    IconButton(
-                        onClick = { applyClipboardPaste() },
-                        modifier = Modifier.size(48.dp).testTag("sheet_paste_btn")
-                    ) {
-                        Icon(Icons.Rounded.ContentPaste, contentDescription = "ক্লিপবোর্ড পেস্ট", tint = TealPrimary)
+                    if (canPasteCurrentSheet) {
+                        IconButton(
+                            onClick = { applyClipboardPaste() },
+                            modifier = Modifier.size(48.dp).testTag("sheet_paste_btn")
+                        ) {
+                            Icon(Icons.Rounded.ContentPaste, contentDescription = "ক্লিপবোর্ড পেস্ট", tint = TealPrimary)
+                        }
                     }
-                    IconButton(
-                        onClick = onClassPdf,
-                        modifier = Modifier.size(48.dp).testTag("sheet_pdf_btn")
-                    ) {
-                        Icon(Icons.Rounded.Description, contentDescription = "শ্রেণির PDF", tint = TealPrimary)
+                    if (permissions.canExportPdf) {
+                        IconButton(
+                            onClick = onClassPdf,
+                            modifier = Modifier.size(48.dp).testTag("sheet_pdf_btn")
+                        ) {
+                            Icon(Icons.Rounded.Description, contentDescription = "শ্রেণির PDF", tint = TealPrimary)
+                        }
                     }
                 }
 
@@ -390,7 +467,7 @@ fun BulkSheetScreen(
                     horizontalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
                     Box(Modifier.weight(1f)) {
-                        val activeModeLabel = SHEET_MODES.find { it.first == mode }?.second ?: mode
+                        val activeModeLabel = availableModes.find { it.first == mode }?.second ?: mode
                         OutlinedButton(
                             onClick = { modeMenuOpen = true },
                             shape = RoundedCornerShape(8.dp),
@@ -408,7 +485,7 @@ fun BulkSheetScreen(
                             Icon(Icons.Rounded.ArrowDropDown, contentDescription = null, modifier = Modifier.size(16.dp))
                         }
                         DropdownMenu(expanded = modeMenuOpen, onDismissRequest = { modeMenuOpen = false }) {
-                            SHEET_MODES.forEach { (id, label) ->
+                            availableModes.forEach { (id, label) ->
                                 DropdownMenuItem(
                                     text = {
                                         Text(
@@ -433,7 +510,7 @@ fun BulkSheetScreen(
                                 modifier = Modifier.fillMaxWidth().testTag("sheet_subject_dropdown")
                             ) {
                                 Text(
-                                    activeSub.bn,
+                                    activeSub.bn + if (!permissions.canEditSubject(activeSub.key)) " (দেখা)" else "",
                                     fontSize = 12.sp,
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis,
@@ -442,13 +519,14 @@ fun BulkSheetScreen(
                                 Icon(Icons.Rounded.ArrowDropDown, contentDescription = null, modifier = Modifier.size(16.dp))
                             }
                             DropdownMenu(expanded = subjectMenuOpen, onDismissRequest = { subjectMenuOpen = false }) {
-                                subs.forEach { s ->
+                                visibleSubs.forEach { s ->
+                                    val editableSub = permissions.canEditSubject(s.key)
                                     DropdownMenuItem(
                                         text = {
                                             Text(
-                                                "${s.bn} (${bn(s.max.toString())})",
+                                                "${s.bn} (${bn(s.max.toString())})" + if (!editableSub) " · শুধু দেখা" else "",
                                                 fontWeight = if (subKey == s.key) FontWeight.Bold else FontWeight.Normal,
-                                                color = if (subKey == s.key) TealPrimary else SlateText
+                                                color = if (subKey == s.key) TealPrimary else if (editableSub) SlateText else SlateMuted
                                             )
                                         },
                                         onClick = { subKey = s.key; subjectMenuOpen = false }
@@ -464,6 +542,21 @@ fun BulkSheetScreen(
                         modifier = Modifier.testTag("sheet_nav_dir_chip"),
                         label = { Text(if (navDir == "down") "↓ নিচে" else "→ ডানে", fontSize = 11.5.sp) }
                     )
+                }
+
+                if (mode == "subject" && activeSub != null && !permissions.canEditSubject(activeSub.key)) {
+                    Surface(
+                        color = AmberBg,
+                        shape = RoundedCornerShape(8.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text(
+                            "\"${activeSub.bn}\" বিষয়ে আপনার শুধুমাত্র দেখার অনুমতি রয়েছে — নম্বর পরিবর্তন করা যাবে না।",
+                            fontSize = 11.sp,
+                            color = AmberNotice,
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp)
+                        )
+                    }
                 }
             }
         }
@@ -482,14 +575,15 @@ fun BulkSheetScreen(
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
                     Text(
-                        "${CLSN[cls - 1]} শ্রেণিতে এখনো কোনো শিক্ষার্থী নেই",
+                        "${CLSN[activeCls - 1]} শ্রেণিতে এখনো কোনো শিক্ষার্থী নেই",
                         color = SlateMuted,
                         fontSize = 14.sp,
                         fontWeight = FontWeight.SemiBold
                     )
                     Spacer(Modifier.height(6.dp))
                     Text(
-                        "শিক্ষার্থী ট্যাব থেকে নতুন শিক্ষার্থী যোগ করুন অথবা CSV ইমপোর্ট করুন",
+                        if (permissions.canManageStudents) "শিক্ষার্থী ট্যাব থেকে নতুন শিক্ষার্থী যোগ করুন অথবা CSV ইমপোর্ট করুন"
+                        else "অ্যাডমিন বা অনুমোদিত শিক্ষক শিক্ষার্থী যোগ করলে এখানে তালিকা দেখাবে",
                         color = SlateMuted,
                         fontSize = 12.sp,
                         textAlign = TextAlign.Center
@@ -508,14 +602,23 @@ fun BulkSheetScreen(
                         Box(Modifier.width(1.dp).height(46.dp).background(SlateOutline))
                         Row(Modifier.weight(1f).horizontalScroll(hScroll)) {
                             cols.forEach { col ->
+                                val colEditable = isColumnEditable(col)
                                 Column(
                                     Modifier.width(col.width).height(46.dp).padding(horizontal = 4.dp),
                                     horizontalAlignment = Alignment.CenterHorizontally,
                                     verticalArrangement = Arrangement.Center
                                 ) {
-                                    Text(col.label, fontWeight = FontWeight.Bold, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                    if (col.subLabel.isNotBlank()) {
-                                        Text(col.subLabel, fontSize = 10.sp, color = SlateMuted, maxLines = 1)
+                                    Text(
+                                        col.label,
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 11.sp,
+                                        color = if (colEditable) SlateText else SlateMuted,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                    val subLbl = if (!colEditable && col.subLabel.isNotBlank()) "দেখা" else col.subLabel
+                                    if (subLbl.isNotBlank()) {
+                                        Text(subLbl, fontSize = 10.sp, color = SlateMuted, maxLines = 1)
                                     }
                                 }
                                 Box(Modifier.width(1.dp).height(46.dp).background(SlateOutline))
@@ -526,7 +629,9 @@ fun BulkSheetScreen(
                                     SheetComputedHeader("মোট")
                                     SheetComputedHeader("গ্রেড")
                                 }
-                                "all" -> SheetComputedHeader("গড় %")
+                                "all" -> if (permissions.allSubjects || permissions.canViewOtherSubjects) {
+                                    SheetComputedHeader("গড় %")
+                                }
                                 "attendance" -> SheetComputedHeader("হার %")
                             }
                         }
@@ -565,6 +670,8 @@ fun BulkSheetScreen(
 
                                     Row(Modifier.weight(1f).fillMaxHeight().horizontalScroll(hScroll)) {
                                         cols.forEachIndexed { cIdx, col ->
+                                            val colEditable = isColumnEditable(col)
+
                                             if (col.isTraitCycle && col.xKey != null) {
                                                 val currentVal = s.x[col.xKey] ?: ""
                                                 val nextVal = when (currentVal) {
@@ -589,8 +696,8 @@ fun BulkSheetScreen(
                                                     Modifier
                                                         .width(col.width)
                                                         .fillMaxHeight()
-                                                        .background(badgeBg)
-                                                        .clickable {
+                                                        .background(if (colEditable) badgeBg else SlateBg)
+                                                        .clickable(enabled = colEditable) {
                                                             onPatchStudentField(
                                                                 s.id,
                                                                 "x.${col.xKey}",
@@ -640,6 +747,7 @@ fun BulkSheetScreen(
                                                 (parsedNum == null || parsedNum < 0 || parsedNum > col.max)
 
                                             fun commitDraft(text: String) {
+                                                if (!colEditable) return
                                                 val clean = fromBn(text.trim())
                                                 if (col.isMark && col.markSubKey != null && col.markCompKey != null) {
                                                     val k = mk(col.markSubKey, term, col.markCompKey)
@@ -689,6 +797,7 @@ fun BulkSheetScreen(
                                                     .fillMaxHeight()
                                                     .background(
                                                         when {
+                                                            !colEditable -> SlateBg
                                                             invalid -> RoseDanger.copy(alpha = 0.08f)
                                                             isFocused -> TealContainer.copy(alpha = 0.25f)
                                                             else -> MaterialTheme.colorScheme.surface
@@ -699,12 +808,18 @@ fun BulkSheetScreen(
                                             ) {
                                                 BasicTextField(
                                                     value = draft,
-                                                    onValueChange = { v -> draft = v },
+                                                    onValueChange = { v -> if (colEditable) draft = v },
+                                                    enabled = colEditable,
+                                                    readOnly = !colEditable,
                                                     singleLine = true,
                                                     textStyle = TextStyle(
                                                         fontSize = 13.sp,
                                                         fontWeight = FontWeight.Medium,
-                                                        color = if (invalid) RoseDanger else SlateText,
+                                                        color = when {
+                                                            !colEditable -> SlateMuted
+                                                            invalid -> RoseDanger
+                                                            else -> SlateText
+                                                        },
                                                         textAlign = if (col.isNumeric) TextAlign.Center else TextAlign.Start
                                                     ),
                                                     cursorBrush = SolidColor(TealPrimary),
@@ -741,9 +856,9 @@ fun BulkSheetScreen(
                                             SheetComputedCell(fmt(cScore), SlateBg, SlateMuted)
                                             SheetComputedCell(fmt(tScore), TealContainer.copy(alpha = 0.25f), TealPrimary, bold = true)
                                             SheetComputedCell(grade, SlateBg, TealPrimary, bold = true)
-                                        } else if (mode == "all") {
-                                            val maxSum = subs.sumOf { it.max }.coerceAtLeast(1)
-                                            val avgSum = subs.sumOf { s.avg(it) }
+                                        } else if (mode == "all" && (permissions.allSubjects || permissions.canViewOtherSubjects)) {
+                                            val maxSum = allSubsForClass.sumOf { it.max }.coerceAtLeast(1)
+                                            val avgSum = allSubsForClass.sumOf { s.avg(it) }
                                             val pct = avgSum / maxSum * 100.0
                                             SheetComputedCell("${fmt(pct)}%", TealContainer.copy(alpha = 0.25f), TealPrimary, bold = true)
                                         } else if (mode == "attendance") {

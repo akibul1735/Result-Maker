@@ -55,14 +55,20 @@ fun friendlyFirestoreErrorMessage(error: Throwable): String {
     val firestoreEx = generateSequence(error) { it.cause }
         .filterIsInstance<FirebaseFirestoreException>()
         .firstOrNull()
-    val msg = firestoreEx?.message ?: error.message ?: ""
+    val msg = (firestoreEx?.message ?: error.message ?: "").trim()
+    val code = firestoreEx?.code
     return when {
         msg.contains("Quota exceeded", ignoreCase = true) ->
             "দৈনিক ফ্রি কোটা শেষ হয়েছে। আগামীকাল কোটা পুনরায় চালু হবে।"
-        firestoreEx?.code == FirebaseFirestoreException.Code.PERMISSION_DENIED ->
-            "এই কাজের অনুমতি নেই বা সেশন মেয়াদ শেষ হয়েছে।"
-        firestoreEx?.code == FirebaseFirestoreException.Code.UNAVAILABLE ->
-            "নেটওয়ার্ক সংযোগ নেই — অনলাইন হলে স্বয়ংক্রিয়ভাবে সিঙ্ক হবে।"
+        code == FirebaseFirestoreException.Code.PERMISSION_DENIED ->
+            "এই কাজের অনুমতি নেই বা Firestore Rules অনুমোদিত নয়।"
+        code == FirebaseFirestoreException.Code.NOT_FOUND ||
+            code == FirebaseFirestoreException.Code.FAILED_PRECONDITION ->
+            "Firestore ডেটাবেজ প্রস্তুত নয় (${code.name}): ${msg.take(120)}"
+        code == FirebaseFirestoreException.Code.UNAVAILABLE -> {
+            val detail = msg.takeIf { it.isNotBlank() }?.let { " ($it)" }.orEmpty()
+            "Firestore সার্ভারে সংযোগ পাওয়া যায়নি$detail"
+        }
         else -> msg.ifBlank { "সার্ভারের সাথে সংযোগে সমস্যা হয়েছে" }
     }
 }

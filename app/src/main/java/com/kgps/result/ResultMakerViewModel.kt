@@ -1,6 +1,9 @@
 package com.kgps.result
 
 import android.content.ContentResolver
+import android.content.Context
+import android.content.Intent
+import android.content.IntentSender
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.ImageDecoder
@@ -13,6 +16,11 @@ import com.kgps.result.ai.AiModelMode
 import com.kgps.result.ai.AiRepository
 import com.kgps.result.ai.ExtractedMarksheet
 import com.kgps.result.ai.PlaceholderAiRepository
+import com.kgps.result.backup.AutoBackupManager
+import com.kgps.result.backup.AutoBackupStatus
+import com.kgps.result.backup.DriveAuthOutcome
+import com.kgps.result.backup.DriveBackupFile
+import com.kgps.result.backup.GoogleDriveBackupClient
 import com.kgps.result.cloud.CloudSessionState
 import com.kgps.result.cloud.JoinRequestItem
 import com.kgps.result.cloud.MemberRole
@@ -20,17 +28,21 @@ import com.kgps.result.cloud.SchoolCloudRepository
 import com.kgps.result.cloud.SchoolCodePreview
 import com.kgps.result.cloud.SchoolWorkspace
 import com.kgps.result.cloud.StudentSyncMeta
+import com.kgps.result.cloud.TeacherPermissions
 import com.kgps.result.cloud.UserCloudProfile
 import com.kgps.result.cloud.friendlyFirestoreErrorMessage
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
@@ -74,9 +86,11 @@ data class AiAssistantState(
     val analysisResult: ExtractedMarksheet? = null
 )
 
-@OptIn(ExperimentalCoroutinesApi::class)
+@OptIn(ExperimentalCoroutinesApi::class, kotlinx.coroutines.FlowPreview::class)
 class ResultMakerViewModel(
+    private val appContext: Context,
     private val cloudRepo: SchoolCloudRepository,
+    private val autoBackupManager: AutoBackupManager,
     private val contentResolver: ContentResolver,
     val currentUserId: String,
     val currentUserDisplayName: String,
@@ -111,7 +125,18 @@ class ResultMakerViewModel(
     val lookupError: StateFlow<String?> = _lookupError.asStateFlow()
 
     private val _pendingJoinSchoolName = MutableStateFlow<String?>(null)
-    val pendingJoinSchoolName: StateFlow<String?> = _pendingJoinSchoolName.asStateFlow()
+    private val _pendingJoinSchoolId = MutableStateFlow<String?>(null)
+
+    val backupStatus: StateFlow<AutoBackupStatus> = autoBackupManager.status
+
+    private val _pendingDriveConsent = MutableStateFlow<IntentSender?>(null)
+    val pendingDriveConsent: StateFlow<IntentSender?> = _pendingDriveConsent.asStateFlow()
+
+    private val _driveFiles = MutableStateFlow<List<DriveBackupFile>>(emptyList())
+    val driveFiles: StateFlow<List<DriveBackupFile>> = _driveFiles.asStateFlow()
+
+    private val _driveFilesLoading = MutableStateFlow(false)
+    val driveFilesLoading: StateFlow<Boolean> = _driveFilesLoading.asStateFlow()
 
     val userProfile: StateFlow<UserCloudProfile?> = cloudRepo.observeUserProfile()
         .catch { e ->
@@ -122,6 +147,22 @@ class ResultMakerViewModel(
             emit(null)
         }
         .stateIn(viewModelScope, SharingStarted.Eagerly, null)
+
+    val pendingJoinSchoolName: StateFlow<String?> = combine(
+        userProfile,
+        _pendingJoinSchoolName
+    ) { profile, localPending ->
+        localPending?.takeIf { it.isNotBlank() }
+            ?: profile?.pendingSchoolName?.takeIf { it.isNotBlank() }
+    }.stateIn(viewModelScope, SharingStarted.Eagerly, null)
+
+    val pendingJoinSchoolId: StateFlow<String?> = combine(
+        userProfile,
+        _pendingJoinSchoolId
+    ) { profile, localId ->
+        localId?.takeIf { it.isNotBlank() }
+            ?: profile?.pendingSchoolId?.takeIf { it.isNotBlank() }
+    }.stateIn(viewModelScope, SharingStarted.Eagerly, null)
 
     val mySchools: StateFlow<List<SchoolWorkspace>> = cloudRepo.observeMySchools()
         .map { list ->
@@ -241,6 +282,12 @@ class ResultMakerViewModel(
     private val _draftingRemarkTerm = MutableStateFlow<Int?>(null)
     val draftingRemarkTerm: StateFlow<Int?> = _draftingRemarkTerm.asStateFlow()
 
+    val activePermissions: StateFlow<TeacherPermissions> = activeSchool
+        .map { school ->
+            school?.permissionsFor(currentUserId) ?: TeacherPermissions.fullAccess()
+        }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, TeacherPermissions.fullAccess())
+
     val isPlaceholderAi: Boolean get() = aiRepository.isPlaceholderBackend
 
     init {
@@ -250,6 +297,61 @@ class ResultMakerViewModel(
                     _snackbarMessage.value = friendlyFirestoreErrorMessage(e)
                 }
             }
+        }
+
+        // Sync activeSchoolId into user profile whenever approved or joined (supports 1-school-per-user enforcement)
+        viewModelScope.launch {
+            combine(activeSchool, userProfile) { school, profile -> school to profile }
+                .collectLatest { (school, profile) ->
+                    if (school != null && profile != null && profile.activeSchoolId != school.id) {
+                        _pendingJoinSchoolName.value = null
+                        _pendingJoinSchoolId.value = null
+                        cloudRepo.setActiveSchoolId(school.id)
+                    }
+                    if (school != null) {
+                        autoBackupManager.refreshLocalSnapshots(school.id)
+                    }
+                }
+        }
+
+        // Ensure _selectedClass always lands on an allowed class for restricted teachers
+        viewModelScope.launch {
+            activePermissions.collectLatest { perm ->
+                val allowed = perm.effectiveClasses()
+                if (allowed.isNotEmpty() && _selectedClass.value !in allowed) {
+                    _selectedClass.value = allowed.first()
+                }
+            }
+        }
+
+        // Side-by-side Auto Backup to Local Storage & Google Drive whenever Firestore data updates
+        viewModelScope.launch {
+            combine(activeSchool, students, settings) { school, studentList, st ->
+                Triple(school, studentList, st)
+            }
+                .debounce(3_500L)
+                .collectLatest { (school, studentList, st) ->
+                    if (school == null) return@collectLatest
+                    if (studentList.isEmpty() && st == DEFAULT_SETTINGS) return@collectLatest
+
+                    autoBackupManager.runLocalBackupIfNeeded(
+                        schoolId = school.id,
+                        schoolCode = school.joinCode,
+                        students = studentList,
+                        settings = st,
+                        force = false
+                    )
+
+                    if (autoBackupManager.status.value.driveEnabled) {
+                        delay(4_000L)
+                        autoBackupManager.runDriveBackupIfNeeded(
+                            schoolCode = school.joinCode,
+                            students = studentList,
+                            settings = st,
+                            force = false
+                        )
+                    }
+                }
         }
     }
 
@@ -290,10 +392,13 @@ class ResultMakerViewModel(
         name: String,
         address: String,
         year: String,
-        approvalRequired: Boolean,
         importLocalData: Boolean
     ) {
         if (_hubBusy.value) return
+        if (mySchools.value.isNotEmpty()) {
+            showMessage("একজন ব্যবহারকারী শুধুমাত্র একটি বিদ্যালয়ে যুক্ত থাকতে পারবেন।")
+            return
+        }
         val cleanName = name.trim()
         if (cleanName.isEmpty()) {
             showMessage("বিদ্যালয়ের নাম লিখুন")
@@ -308,10 +413,11 @@ class ResultMakerViewModel(
                 schoolName = cleanName,
                 schoolAddress = address,
                 year = year,
-                approvalRequired = approvalRequired,
                 baseSettings = seedSettings,
                 initialStudents = seedStudents
             ).onSuccess { created ->
+                _pendingJoinSchoolName.value = null
+                _pendingJoinSchoolId.value = null
                 _selectedSchoolOverrideId.value = created.id
                 _inSchoolHub.value = false
                 _currentSection.value = NavSection.ROSTER
@@ -351,22 +457,19 @@ class ResultMakerViewModel(
 
     fun joinWithCodePreview(preview: SchoolCodePreview) {
         if (_hubBusy.value) return
+        if (mySchools.value.isNotEmpty()) {
+            showMessage("একজন ব্যবহারকারী শুধুমাত্র একটি বিদ্যালয়ে যুক্ত থাকতে পারবেন।")
+            return
+        }
         _hubBusy.value = true
         viewModelScope.launch {
             cloudRepo.joinSchoolWithCode(preview)
-                .onSuccess { joinedDirectly ->
+                .onSuccess {
                     _codePreview.value = null
                     _lookupError.value = null
-                    if (joinedDirectly) {
-                        _pendingJoinSchoolName.value = null
-                        _selectedSchoolOverrideId.value = preview.schoolId
-                        _inSchoolHub.value = false
-                        _currentSection.value = NavSection.ROSTER
-                        showMessage("\"${preview.schoolName}\"-এ যুক্ত হয়েছেন!")
-                    } else {
-                        _pendingJoinSchoolName.value = preview.schoolName
-                        showMessage("যোগদানের অনুরোধ পাঠানো হয়েছে — অ্যাডমিন অনুমোদনের অপেক্ষায়")
-                    }
+                    _pendingJoinSchoolId.value = preview.schoolId
+                    _pendingJoinSchoolName.value = preview.schoolName
+                    showMessage("যোগদানের অনুরোধ পাঠানো হয়েছে — অ্যাডমিন অনুমোদনের অপেক্ষায়")
                 }
                 .onFailure { e ->
                     showMessage(friendlyFirestoreErrorMessage(e))
@@ -375,14 +478,30 @@ class ResultMakerViewModel(
         }
     }
 
-    fun approveJoinRequest(req: JoinRequestItem) {
+    fun cancelPendingJoinRequest() {
+        val targetSchoolId = pendingJoinSchoolId.value.orEmpty()
+        viewModelScope.launch {
+            cloudRepo.cancelPendingJoinRequest(targetSchoolId)
+                .onSuccess {
+                    _pendingJoinSchoolId.value = null
+                    _pendingJoinSchoolName.value = null
+                    showMessage("যোগদানের অনুরোধ বাতিল করা হয়েছে")
+                }
+                .onFailure { e -> showMessage(friendlyFirestoreErrorMessage(e)) }
+        }
+    }
+
+    fun approveJoinRequest(
+        req: JoinRequestItem,
+        permissions: TeacherPermissions = TeacherPermissions.fullAccess()
+    ) {
         val school = activeSchool.value ?: return
         if (!school.isAdmin(currentUserId)) {
             showMessage("শুধুমাত্র অ্যাডমিন অনুমোদন করতে পারবেন")
             return
         }
         viewModelScope.launch {
-            cloudRepo.approveJoinRequest(school.id, req)
+            cloudRepo.approveJoinRequest(school.id, req, permissions)
                 .onSuccess { showMessage("${req.displayName.ifBlank { "শিক্ষক" }}-কে বিদ্যালয়ে যুক্ত করা হয়েছে") }
                 .onFailure { e -> showMessage(friendlyFirestoreErrorMessage(e)) }
         }
@@ -415,10 +534,23 @@ class ResultMakerViewModel(
         val school = activeSchool.value ?: return
         if (!school.isAdmin(currentUserId)) return
         viewModelScope.launch {
-            cloudRepo.setApprovalRequired(school, required)
+            cloudRepo.setApprovalRequired(school, true)
                 .onSuccess {
-                    showMessage(if (required) "অ্যাডমিন অনুমোদন চালু হয়েছে" else "সরাসরি যোগদান চালু হয়েছে")
+                    showMessage("যোগদানের আগে অ্যাডমিন অনুমোদন সর্বদা চালু থাকে")
                 }
+                .onFailure { e -> showMessage(friendlyFirestoreErrorMessage(e)) }
+        }
+    }
+
+    fun updateMemberPermissions(targetUid: String, permissions: TeacherPermissions) {
+        val school = activeSchool.value ?: return
+        if (!school.isAdmin(currentUserId)) {
+            showMessage("শুধুমাত্র অ্যাডমিন শিক্ষকের অ্যাক্সেস পরিবর্তন করতে পারবেন")
+            return
+        }
+        viewModelScope.launch {
+            cloudRepo.updateMemberPermissions(school, targetUid, permissions)
+                .onSuccess { showMessage("শিক্ষকের ডেটা অ্যাক্সেস অনুমতি হালনাগাদ হয়েছে") }
                 .onFailure { e -> showMessage(friendlyFirestoreErrorMessage(e)) }
         }
     }
@@ -492,7 +624,16 @@ class ResultMakerViewModel(
     }
 
     fun openNewStudentEditor(returnTo: NavSection = _currentSection.value) {
+        val perm = activePermissions.value
+        if (!perm.canManageStudents) {
+            showMessage("নতুন শিক্ষার্থী যোগ করার অনুমতি আপনার নেই")
+            return
+        }
         val cls = _selectedClass.value
+        if (!perm.canAccessClass(cls)) {
+            showMessage("এই শ্রেণিতে শিক্ষার্থী যোগ করার অনুমতি নেই")
+            return
+        }
         val nextRoll = (students.value.filter { it.cls == cls }.maxOfOrNull { it.roll } ?: 0) + 1
         _editReturnSection.value = returnTo
         _editingStudent.value = createEmptyStudent(cls, nextRoll)
@@ -505,6 +646,10 @@ class ResultMakerViewModel(
     }
 
     fun openStudio(studentId: String?) {
+        if (!activePermissions.value.canExportPdf) {
+            showMessage("রিপোর্ট কার্ড প্রিভিউ/PDF দেখার অনুমতি আপনার নেই")
+            return
+        }
         _editingStudent.value = null
         _studioStudentId.value = studentId
         _currentSection.value = NavSection.STUDIO
@@ -515,6 +660,10 @@ class ResultMakerViewModel(
     }
 
     fun openCsvImport(initialText: String = "") {
+        if (!activePermissions.value.canManageStudents) {
+            showMessage("CSV ইমপোর্টের অনুমতি শুধুমাত্র অনুমোদিত শিক্ষক বা অ্যাডমিনের")
+            return
+        }
         _csvImportState.value = CsvImportModalState(isOpen = true, initialText = initialText)
     }
 
@@ -530,33 +679,120 @@ class ResultMakerViewModel(
         _snackbarMessage.value = null
     }
 
+    private fun sanitizeStudentForPermissions(
+        student: Student,
+        existing: Student?,
+        perm: TeacherPermissions
+    ): Student? {
+        if (existing == null) {
+            if (!perm.canManageStudents || !perm.canAccessClass(student.cls)) return null
+            val filteredM = if (perm.allSubjects) student.m else student.m.filterKeys { k ->
+                val sub = k.substringBefore('_')
+                perm.canEditSubject(sub)
+            }
+            val filteredX = if (perm.canEditAttendance) student.x else emptyMap()
+            return student.copy(m = filteredM, x = filteredX)
+        }
+
+        if (!perm.canAccessClass(existing.cls)) return null
+
+        val nextM = if (perm.allSubjects) {
+            student.m
+        } else {
+            existing.m.toMutableMap().apply {
+                // Keep untouched keys from existing; only add/update/remove allowed subject keys
+                keys.toList().forEach { k ->
+                    val sub = k.substringBefore('_')
+                    if (perm.canEditSubject(sub) && !student.m.containsKey(k)) remove(k)
+                }
+                student.m.forEach { (k, v) ->
+                    val sub = k.substringBefore('_')
+                    if (perm.canEditSubject(sub)) put(k, v)
+                }
+            }
+        }
+
+        val attendancePrefixKeys = setOf("DAYS_", "PRES_", "ACT_", "DISC_", "COND_", "REM_")
+        fun isAttendanceKey(k: String): Boolean = attendancePrefixKeys.any { k.startsWith(it) }
+
+        val nextX = existing.x.toMutableMap().apply {
+            if (perm.canEditAttendance) {
+                keys.toList().forEach { k -> if (isAttendanceKey(k) && !student.x.containsKey(k)) remove(k) }
+                student.x.forEach { (k, v) -> if (isAttendanceKey(k)) put(k, v) }
+            }
+            if (perm.canManageStudents) {
+                keys.toList().forEach { k -> if (!isAttendanceKey(k) && !student.x.containsKey(k)) remove(k) }
+                student.x.forEach { (k, v) -> if (!isAttendanceKey(k)) put(k, v) }
+            }
+        }
+
+        return if (perm.canManageStudents && perm.canAccessClass(student.cls)) {
+            student.copy(m = nextM, x = nextX)
+        } else {
+            existing.copy(m = nextM, x = nextX)
+        }
+    }
+
     fun upsertStudent(student: Student) {
-        val schoolId = activeSchool.value?.id ?: return
+        val school = activeSchool.value ?: return
         val existing = students.value.find { it.id == student.id }
+        val perm = school.permissionsFor(currentUserId)
+        val safeStudent = sanitizeStudentForPermissions(student, existing, perm)
+        if (safeStudent == null) {
+            showMessage("এই শিক্ষার্থীর তথ্য পরিবর্তন করার অনুমতি আপনার নেই")
+            return
+        }
         viewModelScope.launch {
-            cloudRepo.upsertStudent(schoolId, student, existing).onFailure { e ->
+            cloudRepo.upsertStudent(school.id, safeStudent, existing).onFailure { e ->
                 showMessage(friendlyFirestoreErrorMessage(e))
             }
         }
     }
 
     fun patchStudentField(studentId: String, fieldPath: String, value: Any?) {
-        val schoolId = activeSchool.value?.id ?: return
+        val school = activeSchool.value ?: return
+        val perm = school.permissionsFor(currentUserId)
+        val target = students.value.find { it.id == studentId } ?: return
+        if (!perm.canAccessClass(target.cls)) {
+            showMessage("এই শ্রেণির তথ্য পরিবর্তনের অনুমতি নেই")
+            return
+        }
+        val allowed = when {
+            fieldPath.startsWith("m.") -> {
+                val subKey = fieldPath.removePrefix("m.").substringBefore('_')
+                perm.canEditSubject(subKey)
+            }
+            fieldPath.startsWith("x.") -> {
+                val xKey = fieldPath.removePrefix("x.")
+                val isAtt = listOf("DAYS_", "PRES_", "ACT_", "DISC_", "COND_", "REM_").any { xKey.startsWith(it) }
+                if (isAtt) perm.canEditAttendance else perm.canManageStudents
+            }
+            else -> perm.canManageStudents
+        }
+        if (!allowed) {
+            showMessage("এই ক্ষেত্রটি পরিবর্তনের অনুমতি আপনার নেই")
+            return
+        }
         viewModelScope.launch {
-            cloudRepo.patchStudentField(schoolId, studentId, fieldPath, value).onFailure { e ->
+            cloudRepo.patchStudentField(school.id, studentId, fieldPath, value).onFailure { e ->
                 showMessage(friendlyFirestoreErrorMessage(e))
             }
         }
     }
 
     fun deleteStudent(id: String) {
-        val schoolId = activeSchool.value?.id ?: return
-        val target = students.value.find { it.id == id }
+        val school = activeSchool.value ?: return
+        val target = students.value.find { it.id == id } ?: return
+        val perm = school.permissionsFor(currentUserId)
+        if (!perm.canManageStudents || !perm.canAccessClass(target.cls)) {
+            showMessage("শিক্ষার্থী মুছে ফেলার অনুমতি আপনার নেই")
+            return
+        }
         if (_studioStudentId.value == id) _studioStudentId.value = null
         viewModelScope.launch {
-            cloudRepo.deleteStudent(schoolId, id)
+            cloudRepo.deleteStudent(school.id, id)
                 .onSuccess {
-                    val label = target?.name?.ifBlank { "রোল ${bn(target.roll.toString())}" } ?: "শিক্ষার্থী"
+                    val label = target.name.ifBlank { "রোল ${bn(target.roll.toString())}" }
                     showMessage("$label মুছে ফেলা হয়েছে")
                 }
                 .onFailure { e ->
@@ -615,13 +851,27 @@ class ResultMakerViewModel(
 
     fun applyCsvImport(summary: Repo.CsvImportSummary) {
         val school = activeSchool.value ?: return
+        val perm = school.permissionsFor(currentUserId)
+        if (!perm.canManageStudents) {
+            showMessage("CSV ইমপোর্টের অনুমতি আপনার নেই")
+            closeCsvImport()
+            return
+        }
         val prevList = students.value
+        val existingById = prevList.associateBy { it.id }
+        val safeStudents = if (school.isAdmin(currentUserId)) {
+            summary.students
+        } else {
+            summary.students.mapNotNull { candidate ->
+                sanitizeStudentForPermissions(candidate, existingById[candidate.id], perm)
+            }
+        }
         closeCsvImport()
         viewModelScope.launch {
             if (summary.createdFields.isNotEmpty() && school.isAdmin(currentUserId)) {
                 cloudRepo.updateSchoolSettings(school, summary.settings)
             }
-            cloudRepo.syncBatchStudents(school.id, prevList, summary.students, deleteRemoved = false)
+            cloudRepo.syncBatchStudents(school.id, prevList, safeStudents, deleteRemoved = false)
                 .onSuccess {
                     val msg = buildString {
                         append("ইমপোর্ট সম্পন্ন: নতুন ${bn(summary.addedCount.toString())} জন, হালনাগাদ ${bn(summary.updatedCount.toString())} জন")
@@ -693,6 +943,183 @@ class ResultMakerViewModel(
             cloudRepo.deleteAllSchoolStudents(school.id, ids)
                 .onSuccess { showMessage("সকল শিক্ষার্থীর তথ্য মুছে ফেলা হয়েছে") }
                 .onFailure { e -> showMessage(friendlyFirestoreErrorMessage(e)) }
+        }
+    }
+
+    // ---------- Local + Google Drive Auto Backup ----------
+
+    fun toggleLocalAutoBackup(enabled: Boolean) {
+        autoBackupManager.setLocalAutoBackupEnabled(enabled)
+        if (enabled) {
+            val school = activeSchool.value ?: return
+            viewModelScope.launch {
+                autoBackupManager.runLocalBackupIfNeeded(
+                    schoolId = school.id,
+                    schoolCode = school.joinCode,
+                    students = students.value,
+                    settings = settings.value,
+                    force = true
+                )
+            }
+            showMessage("লোকাল অটো ব্যাকআপ চালু হয়েছে")
+        } else {
+            showMessage("লোকাল অটো ব্যাকআপ বন্ধ করা হয়েছে")
+        }
+    }
+
+    fun setLocalBackupFolder(uri: Uri?) {
+        autoBackupManager.setLocalFolderUri(uri)
+        val school = activeSchool.value ?: return
+        viewModelScope.launch {
+            autoBackupManager.runLocalBackupIfNeeded(
+                schoolId = school.id,
+                schoolCode = school.joinCode,
+                students = students.value,
+                settings = settings.value,
+                force = true
+            ).onSuccess {
+                showMessage("নির্বাচিত ফোল্ডারে ব্যাকআপ সংরক্ষিত হয়েছে")
+            }.onFailure { e ->
+                showMessage(e.localizedMessage ?: "ফোল্ডারে ব্যাকআপ লেখা যায়নি")
+            }
+        }
+    }
+
+    fun toggleDriveAutoBackup(enabled: Boolean) {
+        if (!enabled) {
+            autoBackupManager.setDriveAutoBackupEnabled(false)
+            showMessage("Google Drive অটো ব্যাকআপ বন্ধ হয়েছে")
+            return
+        }
+        val school = activeSchool.value ?: return
+        viewModelScope.launch {
+            when (val outcome = autoBackupManager.runDriveBackupIfNeeded(
+                schoolCode = school.joinCode,
+                students = students.value,
+                settings = settings.value,
+                force = true
+            )) {
+                is DriveAuthOutcome.Authorized -> {
+                    autoBackupManager.setDriveAutoBackupEnabled(true)
+                    showMessage("Google Drive অটো ব্যাকআপ চালু ও সম্পন্ন হয়েছে")
+                }
+                is DriveAuthOutcome.NeedsConsent -> {
+                    _pendingDriveConsent.value = outcome.intentSender
+                }
+                is DriveAuthOutcome.Failed -> {
+                    showMessage(outcome.message)
+                }
+            }
+        }
+    }
+
+    fun backupNowBoth() {
+        val school = activeSchool.value ?: return
+        viewModelScope.launch {
+            val localRes = autoBackupManager.runLocalBackupIfNeeded(
+                schoolId = school.id,
+                schoolCode = school.joinCode,
+                students = students.value,
+                settings = settings.value,
+                force = true
+            )
+            when (val driveRes = autoBackupManager.runDriveBackupIfNeeded(
+                schoolCode = school.joinCode,
+                students = students.value,
+                settings = settings.value,
+                force = true
+            )) {
+                is DriveAuthOutcome.Authorized -> {
+                    val localOk = localRes.isSuccess
+                    val msg = if (localOk) {
+                        "লোকাল ও Google Drive উভয় ব্যাকআপ সম্পন্ন হয়েছে"
+                    } else {
+                        "Google Drive ব্যাকআপ সম্পন্ন; লোকাল ত্রুটি: ${localRes.exceptionOrNull()?.localizedMessage}"
+                    }
+                    showMessage(msg)
+                }
+                is DriveAuthOutcome.NeedsConsent -> {
+                    _pendingDriveConsent.value = driveRes.intentSender
+                }
+                is DriveAuthOutcome.Failed -> {
+                    if (localRes.isSuccess) {
+                        showMessage("লোকাল ব্যাকআপ হয়েছে। Drive ত্রুটি: ${driveRes.message}")
+                    } else {
+                        showMessage(driveRes.message)
+                    }
+                }
+            }
+        }
+    }
+
+    fun clearPendingDriveConsent() {
+        _pendingDriveConsent.value = null
+    }
+
+    fun handleDriveConsentIntentResult(data: Intent?) {
+        _pendingDriveConsent.value = null
+        val school = activeSchool.value ?: return
+        viewModelScope.launch {
+            when (val outcome = GoogleDriveBackupClient.handleConsentResult(appContext, data)) {
+                is DriveAuthOutcome.Authorized -> {
+                    val json = Repo.toJson(students.value, settings.value)
+                    autoBackupManager.uploadWithToken(outcome.accessToken, school.joinCode, json)
+                        .onSuccess { uploaded ->
+                            showMessage("Google Drive-এ ব্যাকআপ হয়েছে: ${uploaded.name}")
+                        }
+                        .onFailure { err ->
+                            showMessage(err.localizedMessage ?: "Google Drive আপলোড ব্যর্থ")
+                        }
+                }
+                is DriveAuthOutcome.Failed -> showMessage(outcome.message)
+                is DriveAuthOutcome.NeedsConsent -> showMessage("Google Drive অনুমতি সম্পন্ন হয়নি")
+            }
+        }
+    }
+
+    fun restoreLocalSnapshot(path: String) {
+        viewModelScope.launch {
+            autoBackupManager.readLocalSnapshot(path)
+                .onSuccess { json -> restoreBackupJson(json) }
+                .onFailure { e -> showMessage("লোকাল ব্যাকআপ পড়া যায়নি: ${e.localizedMessage ?: "ত্রুটি"}") }
+        }
+    }
+
+    fun loadDriveBackupList() {
+        viewModelScope.launch {
+            _driveFilesLoading.value = true
+            when (val auth = GoogleDriveBackupClient.authorizeDrive(appContext)) {
+                is DriveAuthOutcome.Authorized -> {
+                    GoogleDriveBackupClient.listBackupFiles(auth.accessToken)
+                        .onSuccess { files -> _driveFiles.value = files }
+                        .onFailure { err -> showMessage(err.localizedMessage ?: "Drive তালিকা লোড হয়নি") }
+                }
+                is DriveAuthOutcome.NeedsConsent -> {
+                    _pendingDriveConsent.value = auth.intentSender
+                }
+                is DriveAuthOutcome.Failed -> {
+                    showMessage(auth.message)
+                }
+            }
+            _driveFilesLoading.value = false
+        }
+    }
+
+    fun restoreFromDriveFile(fileId: String) {
+        viewModelScope.launch {
+            _driveFilesLoading.value = true
+            when (val auth = GoogleDriveBackupClient.authorizeDrive(appContext)) {
+                is DriveAuthOutcome.Authorized -> {
+                    GoogleDriveBackupClient.downloadBackupJson(auth.accessToken, fileId)
+                        .onSuccess { json -> restoreBackupJson(json) }
+                        .onFailure { err -> showMessage(err.localizedMessage ?: "Drive ফাইল ডাউনলোড হয়নি") }
+                }
+                is DriveAuthOutcome.NeedsConsent -> {
+                    _pendingDriveConsent.value = auth.intentSender
+                }
+                is DriveAuthOutcome.Failed -> showMessage(auth.message)
+            }
+            _driveFilesLoading.value = false
         }
     }
 
@@ -837,41 +1264,59 @@ class ResultMakerViewModel(
     }
 
     fun applyExtractedMarksheet(ext: ExtractedMarksheet): Student {
+        val perm = activePermissions.value
         val cls = (ext.student.cls ?: _selectedClass.value).coerceIn(1, 5)
         val roll = ext.student.roll?.takeIf { it > 0 }
             ?: ((students.value.filter { it.cls == cls }.maxOfOrNull { it.roll } ?: 0) + 1)
 
         val existing = students.value.find { it.cls == cls && it.roll == roll }
+        if (!perm.canAccessClass(cls)) {
+            showMessage("এই শ্রেণিতে (${CLSN[cls - 1]}) নম্বর বা তথ্য সংরক্ষণের অনুমতি আপনার নেই")
+            return existing ?: createEmptyStudent(cls, roll)
+        }
+        if (existing == null && !perm.canManageStudents) {
+            showMessage("নতুন শিক্ষার্থী যোগ করার অনুমতি আপনার নেই")
+            return createEmptyStudent(cls, roll)
+        }
         val base = existing ?: createEmptyStudent(cls, roll)
 
         val nextM = base.m.toMutableMap()
         ext.marks.forEach { item ->
-            nextM[item.key] = item.value
+            val sub = item.key.substringBefore('_')
+            if (perm.canEditSubject(sub)) {
+                nextM[item.key] = item.value
+            }
         }
 
         val t = ext.term.coerceIn(1, 3)
         val nextX = base.x.toMutableMap()
-        ext.attendanceAndTraits.days?.takeIf { it.isNotBlank() }?.let { nextX["DAYS_$t"] = it }
-        ext.attendanceAndTraits.present?.takeIf { it.isNotBlank() }?.let { nextX["PRES_$t"] = it }
-        ext.attendanceAndTraits.act?.takeIf { it.isNotBlank() }?.let { nextX["ACT_$t"] = it }
-        ext.attendanceAndTraits.disc?.takeIf { it.isNotBlank() }?.let { nextX["DISC_$t"] = it }
-        ext.attendanceAndTraits.cond?.takeIf { it.isNotBlank() }?.let { nextX["COND_$t"] = it }
-        ext.attendanceAndTraits.remark?.takeIf { it.isNotBlank() }?.let { nextX["REM_$t"] = it }
+        if (perm.canEditAttendance) {
+            ext.attendanceAndTraits.days?.takeIf { it.isNotBlank() }?.let { nextX["DAYS_$t"] = it }
+            ext.attendanceAndTraits.present?.takeIf { it.isNotBlank() }?.let { nextX["PRES_$t"] = it }
+            ext.attendanceAndTraits.act?.takeIf { it.isNotBlank() }?.let { nextX["ACT_$t"] = it }
+            ext.attendanceAndTraits.disc?.takeIf { it.isNotBlank() }?.let { nextX["DISC_$t"] = it }
+            ext.attendanceAndTraits.cond?.takeIf { it.isNotBlank() }?.let { nextX["COND_$t"] = it }
+            ext.attendanceAndTraits.remark?.takeIf { it.isNotBlank() }?.let { nextX["REM_$t"] = it }
+        }
 
-        val updated = base.copy(
-            name = ext.student.name?.takeIf { it.isNotBlank() } ?: base.name,
-            guardian = ext.student.guardian?.takeIf { it.isNotBlank() } ?: base.guardian,
-            village = ext.student.village?.takeIf { it.isNotBlank() } ?: base.village,
-            upazila = ext.student.upazila?.takeIf { it.isNotBlank() } ?: base.upazila,
-            district = ext.student.district?.takeIf { it.isNotBlank() } ?: base.district,
-            mobile = ext.student.mobile?.takeIf { it.isNotBlank() } ?: base.mobile,
-            religion = ext.student.religion?.takeIf { it.isNotBlank() } ?: base.religion,
-            m = nextM,
-            x = nextX
-        )
+        val updated = if (perm.canManageStudents) {
+            base.copy(
+                name = ext.student.name?.takeIf { it.isNotBlank() } ?: base.name,
+                guardian = ext.student.guardian?.takeIf { it.isNotBlank() } ?: base.guardian,
+                village = ext.student.village?.takeIf { it.isNotBlank() } ?: base.village,
+                upazila = ext.student.upazila?.takeIf { it.isNotBlank() } ?: base.upazila,
+                district = ext.student.district?.takeIf { it.isNotBlank() } ?: base.district,
+                mobile = ext.student.mobile?.takeIf { it.isNotBlank() } ?: base.mobile,
+                religion = ext.student.religion?.takeIf { it.isNotBlank() } ?: base.religion,
+                m = nextM,
+                x = nextX
+            )
+        } else {
+            base.copy(m = nextM, x = nextX)
+        }
         upsertStudent(updated)
         _selectedClass.value = cls
-        showMessage("${updated.name.ifBlank { "রোল ${bn(roll.toString())}" }} শিক্ষার্থীর তথ্য সংরক্ষিত হয়েছে")
+        showMessage("${updated.name.ifBlank { "রোল ${bn(roll.toString())}" }} শিক্ষার্থীর অনুমোদিত তথ্য সংরক্ষিত হয়েছে")
         return updated
     }
 

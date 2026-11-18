@@ -24,7 +24,9 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.automirrored.rounded.Logout
 import androidx.compose.material.icons.rounded.AddBusiness
+import androidx.compose.material.icons.rounded.AdminPanelSettings
 import androidx.compose.material.icons.rounded.CheckCircle
+import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.HourglassTop
 import androidx.compose.material.icons.rounded.Key
 import androidx.compose.material.icons.rounded.Person
@@ -93,10 +95,11 @@ fun SchoolHubScreen(
     codePreview: SchoolCodePreview?,
     lookupError: String?,
     onSelectSchool: (String) -> Unit,
-    onCreateSchool: (name: String, address: String, year: String, approvalRequired: Boolean, importLocalData: Boolean) -> Unit,
+    onCreateSchool: (name: String, address: String, year: String, importLocalData: Boolean) -> Unit,
     onLookupCode: (String) -> Unit,
     onClearCodePreview: () -> Unit,
     onJoinWithPreview: (SchoolCodePreview) -> Unit,
+    onCancelPendingRequest: () -> Unit,
     onBackToApp: (() -> Unit)?,
     onSignOut: () -> Unit
 ) {
@@ -104,25 +107,27 @@ fun SchoolHubScreen(
         BackHandler { onBackToApp() }
     }
 
-    var expandedSection by remember(schools.isEmpty()) {
-        mutableStateOf(if (schools.isEmpty()) "join" else "create")
+    val hasJoinedSchool = schools.isNotEmpty()
+    val hasPendingRequest = !pendingJoinSchoolName.isNullOrBlank()
+
+    var expandedSection by remember(hasJoinedSchool) {
+        mutableStateOf(if (!hasJoinedSchool) "create" else "")
     }
     var schoolName by remember(localSeedSettings?.school) {
         mutableStateOf(
-            if (schools.isEmpty()) localSeedSettings?.school?.takeIf { it.isNotBlank() } ?: "" else ""
+            if (!hasJoinedSchool) localSeedSettings?.school?.takeIf { it.isNotBlank() } ?: "" else ""
         )
     }
     var schoolAddress by remember(localSeedSettings?.schoolAddress) {
         mutableStateOf(
-            if (schools.isEmpty()) localSeedSettings?.schoolAddress.orEmpty() else ""
+            if (!hasJoinedSchool) localSeedSettings?.schoolAddress.orEmpty() else ""
         )
     }
     var schoolYear by remember(localSeedSettings?.year) {
         mutableStateOf(localSeedSettings?.year?.ifBlank { "২০২৬" } ?: "২০২৬")
     }
-    var approvalRequired by remember { mutableStateOf(false) }
-    var importLocalData by remember(localSeedCount, schools.isEmpty()) {
-        mutableStateOf(localSeedCount > 0 && schools.isEmpty())
+    var importLocalData by remember(localSeedCount, hasJoinedSchool) {
+        mutableStateOf(localSeedCount > 0 && !hasJoinedSchool)
     }
 
     var joinCodeInput by remember { mutableStateOf("") }
@@ -213,34 +218,75 @@ fun SchoolHubScreen(
                     }
                 }
 
-                if (!pendingJoinSchoolName.isNullOrBlank()) {
+                // Onboarding Welcome / Single-School Notice
+                if (!hasJoinedSchool && !hasPendingRequest) {
+                    Surface(
+                        color = TealSoft,
+                        border = BorderStroke(1.dp, TealPrimary.copy(alpha = 0.35f)),
+                        shape = RoundedCornerShape(14.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Text(
+                                "শুরু করুন — একটি বিদ্যালয় নির্বাচন করুন",
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 14.sp,
+                                color = TealDark
+                            )
+                            Text(
+                                "নতুন বিদ্যালয় তৈরি করুন অথবা অ্যাডমিনের দেওয়া স্কুল কোড দিয়ে বিদ্যমান বিদ্যালয়ে যোগদানের অনুরোধ পাঠান। একজন ব্যবহারকারী একবারে কেবল একটি বিদ্যালয়ে যুক্ত থাকতে পারবেন।",
+                                fontSize = 12.sp,
+                                color = SlateText,
+                                lineHeight = 17.sp
+                            )
+                        }
+                    }
+                }
+
+                // Pending Join Request Banner with Cancel Option
+                if (hasPendingRequest) {
                     Surface(
                         color = AmberBg,
                         border = BorderStroke(1.dp, AmberBorder),
                         shape = RoundedCornerShape(14.dp),
                         modifier = Modifier.fillMaxWidth().testTag("hub_pending_banner")
                     ) {
-                        Row(
+                        Column(
                             modifier = Modifier.padding(12.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                            verticalArrangement = Arrangement.spacedBy(10.dp)
                         ) {
-                            Icon(Icons.Rounded.HourglassTop, contentDescription = null, tint = AmberNotice)
-                            Column(Modifier.weight(1f)) {
-                                Text("অনুমোদনের অপেক্ষায়", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = AmberNotice)
-                                Text(
-                                    "\"$pendingJoinSchoolName\" বিদ্যালয়ে যোগদানের অনুরোধ পাঠানো হয়েছে। অ্যাডমিন অনুমোদন করলেই তালিকা আপডেট হবে।",
-                                    fontSize = 12.sp,
-                                    color = SlateText,
-                                    lineHeight = 17.sp
-                                )
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(10.dp)
+                            ) {
+                                Icon(Icons.Rounded.HourglassTop, contentDescription = null, tint = AmberNotice)
+                                Column(Modifier.weight(1f)) {
+                                    Text("অ্যাডমিন অনুমোদনের অপেক্ষায়", fontWeight = FontWeight.Bold, fontSize = 13.5.sp, color = AmberNotice)
+                                    Text(
+                                        "\"$pendingJoinSchoolName\" বিদ্যালয়ে আপনার যোগদানের অনুরোধ পাঠানো হয়েছে। অ্যাডমিন আপনার শ্রেণি ও বিষয়ভিত্তিক অনুমতি নির্ধারণ করে অনুমোদন করলে স্বয়ংক্রিয়ভাবে প্রবেশ করতে পারবেন।",
+                                        fontSize = 12.sp,
+                                        color = SlateText,
+                                        lineHeight = 17.sp
+                                    )
+                                }
+                            }
+                            OutlinedButton(
+                                onClick = onCancelPendingRequest,
+                                enabled = !isBusy,
+                                shape = RoundedCornerShape(8.dp),
+                                border = BorderStroke(1.dp, RoseDanger.copy(alpha = 0.5f)),
+                                modifier = Modifier.fillMaxWidth().testTag("hub_cancel_pending_btn")
+                            ) {
+                                Icon(Icons.Rounded.Close, contentDescription = null, tint = RoseDanger, modifier = Modifier.size(16.dp))
+                                Spacer(Modifier.size(6.dp))
+                                Text("অনুরোধ বাতিল করুন", fontSize = 12.5.sp, color = RoseDanger)
                             }
                         }
                     }
                 }
 
-                // User's Joined Schools
-                if (schools.isNotEmpty()) {
+                // User's Joined School (Strictly 1 School per User)
+                if (hasJoinedSchool) {
                     Card(
                         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
                         border = BorderStroke(1.dp, SlateOutline),
@@ -256,16 +302,17 @@ fun SchoolHubScreen(
                             ) {
                                 Icon(Icons.Rounded.School, contentDescription = null, tint = TealPrimary, modifier = Modifier.size(20.dp))
                                 Text(
-                                    "আপনার বিদ্যালয়সমূহ (${bn(schools.size.toString())})",
+                                    "আপনার নির্ধারিত বিদ্যালয়",
                                     fontWeight = FontWeight.Bold,
                                     fontSize = 15.sp,
                                     color = SlateText
                                 )
                             }
 
-                            schools.forEach { school ->
+                            schools.take(1).forEach { school ->
                                 val isCurrent = school.id == activeSchoolId
                                 val role = school.roleOf(currentUserId)
+                                val perms = school.permissionsFor(currentUserId)
                                 Surface(
                                     modifier = Modifier
                                         .fillMaxWidth()
@@ -292,6 +339,13 @@ fun SchoolHubScreen(
                                                 fontSize = 11.5.sp,
                                                 color = SlateMuted
                                             )
+                                            if (role.code != "ADMIN") {
+                                                Text(
+                                                    text = "অনুমতি: ${perms.summaryBn()}",
+                                                    fontSize = 11.sp,
+                                                    color = TealDark
+                                                )
+                                            }
                                         }
                                         Surface(
                                             color = if (role.code == "ADMIN") TealContainer else MaterialTheme.colorScheme.surfaceVariant,
@@ -316,229 +370,231 @@ fun SchoolHubScreen(
                                     }
                                 }
                             }
+
+                            Surface(
+                                color = AmberBg,
+                                border = BorderStroke(1.dp, AmberBorder),
+                                shape = RoundedCornerShape(10.dp),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Text(
+                                    "একজন ব্যবহারকারী একটিমাত্র বিদ্যালয়ে যুক্ত থাকতে পারবেন। অন্য বিদ্যালয়ে যুক্ত হতে চাইলে সেটিংস থেকে বর্তমান বিদ্যালয় ত্যাগ করুন।",
+                                    fontSize = 11.5.sp,
+                                    color = SlateText,
+                                    lineHeight = 16.sp,
+                                    modifier = Modifier.padding(10.dp)
+                                )
+                            }
                         }
                     }
                 }
 
-                // Create New School Card
-                TreeGroupCard(
-                    title = "নতুন বিদ্যালয় তৈরি করুন",
-                    subtitle = "নিজে অ্যাডমিন হয়ে স্কুল কোড তৈরি ও শেয়ার করুন",
-                    badgeText = "নতুন",
-                    icon = Icons.Rounded.AddBusiness,
-                    expanded = expandedSection == "create",
-                    headerTestTag = "hub_create_group_header",
-                    onToggle = { expandedSection = if (expandedSection == "create") "" else "create" }
-                ) {
-                    TreeBranchItem(isLast = true) {
-                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                            OutlinedTextField(
-                                value = schoolName,
-                                onValueChange = { schoolName = it },
-                                label = { Text("বিদ্যালয়ের নাম *") },
-                                placeholder = { Text("যেমন: কামারখালী সরকারি প্রাথমিক বিদ্যালয়") },
-                                singleLine = true,
-                                modifier = Modifier.fillMaxWidth().testTag("hub_create_school_name")
-                            )
-                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                // Create & Join ONLY shown when user has no school and no active pending join request
+                if (!hasJoinedSchool && !hasPendingRequest) {
+                    // Create New School Card
+                    TreeGroupCard(
+                        title = "নতুন বিদ্যালয় তৈরি করুন",
+                        subtitle = "নিজে অ্যাডমিন হয়ে স্কুল কোড তৈরি ও শিক্ষক অনুমোদন করুন",
+                        badgeText = "নতুন",
+                        icon = Icons.Rounded.AddBusiness,
+                        expanded = expandedSection == "create",
+                        headerTestTag = "hub_create_group_header",
+                        onToggle = { expandedSection = if (expandedSection == "create") "" else "create" }
+                    ) {
+                        TreeBranchItem(isLast = true) {
+                            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                                 OutlinedTextField(
-                                    value = schoolAddress,
-                                    onValueChange = { schoolAddress = it },
-                                    label = { Text("ঠিকানা (ঐচ্ছিক)") },
+                                    value = schoolName,
+                                    onValueChange = { schoolName = it },
+                                    label = { Text("বিদ্যালয়ের নাম *") },
+                                    placeholder = { Text("যেমন: কামারখালী সরকারি প্রাথমিক বিদ্যালয়") },
                                     singleLine = true,
-                                    modifier = Modifier.weight(1.4f).testTag("hub_create_school_address")
+                                    modifier = Modifier.fillMaxWidth().testTag("hub_create_school_name")
                                 )
-                                OutlinedTextField(
-                                    value = schoolYear,
-                                    onValueChange = { schoolYear = it },
-                                    label = { Text("শিক্ষাবর্ষ") },
-                                    singleLine = true,
-                                    modifier = Modifier.weight(0.7f).testTag("hub_create_school_year")
-                                )
-                            }
-
-                            Surface(
-                                color = SlateBg,
-                                border = BorderStroke(1.dp, SlateOutline),
-                                shape = RoundedCornerShape(10.dp),
-                                modifier = Modifier.fillMaxWidth()
-                            ) {
-                                Row(
-                                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                                ) {
-                                    Column(Modifier.weight(1f)) {
-                                        Text("যোগদানের আগে অ্যাডমিন অনুমোদন", fontWeight = FontWeight.Medium, fontSize = 13.sp)
-                                        Text(
-                                            "চালু রাখলে কোড দেওয়ার পর অ্যাডমিন অনুমোদন করলে শিক্ষক যুক্ত হতে পারবেন।",
-                                            fontSize = 11.sp,
-                                            color = SlateMuted
-                                        )
-                                    }
-                                    Switch(
-                                        checked = approvalRequired,
-                                        onCheckedChange = { approvalRequired = it },
-                                        modifier = Modifier.testTag("hub_create_approval_switch")
+                                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                                    OutlinedTextField(
+                                        value = schoolAddress,
+                                        onValueChange = { schoolAddress = it },
+                                        label = { Text("ঠিকানা (ঐচ্ছিক)") },
+                                        singleLine = true,
+                                        modifier = Modifier.weight(1.4f).testTag("hub_create_school_address")
+                                    )
+                                    OutlinedTextField(
+                                        value = schoolYear,
+                                        onValueChange = { schoolYear = it },
+                                        label = { Text("শিক্ষাবর্ষ") },
+                                        singleLine = true,
+                                        modifier = Modifier.weight(0.7f).testTag("hub_create_school_year")
                                     )
                                 }
-                            }
 
-                            if (localSeedCount > 0) {
                                 Surface(
-                                    color = TealSoft,
-                                    border = BorderStroke(1.dp, TealPrimary.copy(alpha = 0.25f)),
+                                    color = SlateBg,
+                                    border = BorderStroke(1.dp, SlateOutline),
                                     shape = RoundedCornerShape(10.dp),
                                     modifier = Modifier.fillMaxWidth()
                                 ) {
                                     Row(
-                                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 9.dp),
                                         verticalAlignment = Alignment.CenterVertically,
                                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                                     ) {
+                                        Icon(Icons.Rounded.AdminPanelSettings, contentDescription = null, tint = TealPrimary, modifier = Modifier.size(18.dp))
                                         Column(Modifier.weight(1f)) {
+                                            Text("অ্যাডমিন অনুমোদন বাধ্যতামূলক", fontWeight = FontWeight.SemiBold, fontSize = 12.5.sp)
                                             Text(
-                                                "ডিভাইসের ${bn(localSeedCount.toString())} জন শিক্ষার্থী যুক্ত করুন",
-                                                fontWeight = FontWeight.SemiBold,
-                                                fontSize = 12.5.sp,
-                                                color = TealDark
-                                            )
-                                            Text(
-                                                "পূর্বের সংরক্ষিত শিক্ষার্থী ও কাস্টম ফিল্ড ক্লাউডে আপলোড হবে।",
+                                                "নতুন শিক্ষক যোগদানে সর্বদা অ্যাডমিন অনুমোদন প্রয়োজন হবে এবং আপনি প্রতি শিক্ষকের শ্রেণি ও বিষয়ের অ্যাক্সেস নির্ধারণ করতে পারবেন।",
                                                 fontSize = 11.sp,
-                                                color = SlateMuted
+                                                color = SlateMuted,
+                                                lineHeight = 15.sp
                                             )
                                         }
-                                        Switch(
-                                            checked = importLocalData,
-                                            onCheckedChange = { importLocalData = it },
-                                            modifier = Modifier.testTag("hub_create_import_local_switch")
-                                        )
                                     }
                                 }
-                            }
 
-                            Button(
-                                onClick = {
-                                    onCreateSchool(schoolName, schoolAddress, schoolYear, approvalRequired, importLocalData)
-                                },
-                                enabled = !isBusy && schoolName.isNotBlank(),
-                                shape = RoundedCornerShape(10.dp),
-                                modifier = Modifier.fillMaxWidth().height(48.dp).testTag("hub_create_submit_btn")
-                            ) {
-                                if (isBusy) {
-                                    CircularProgressIndicator(
-                                        color = MaterialTheme.colorScheme.onPrimary,
-                                        strokeWidth = 2.dp,
-                                        modifier = Modifier.size(18.dp)
-                                    )
-                                    Spacer(Modifier.size(8.dp))
+                                if (localSeedCount > 0) {
+                                    Surface(
+                                        color = TealSoft,
+                                        border = BorderStroke(1.dp, TealPrimary.copy(alpha = 0.25f)),
+                                        shape = RoundedCornerShape(10.dp),
+                                        modifier = Modifier.fillMaxWidth()
+                                    ) {
+                                        Row(
+                                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                        ) {
+                                            Column(Modifier.weight(1f)) {
+                                                Text(
+                                                    "ডিভাইসের ${bn(localSeedCount.toString())} জন শিক্ষার্থী যুক্ত করুন",
+                                                    fontWeight = FontWeight.SemiBold,
+                                                    fontSize = 12.5.sp,
+                                                    color = TealDark
+                                                )
+                                                Text(
+                                                    "পূর্বের সংরক্ষিত শিক্ষার্থী ও কাস্টম ফিল্ড ক্লাউডে আপলোড হবে।",
+                                                    fontSize = 11.sp,
+                                                    color = SlateMuted
+                                                )
+                                            }
+                                            Switch(
+                                                checked = importLocalData,
+                                                onCheckedChange = { importLocalData = it },
+                                                modifier = Modifier.testTag("hub_create_import_local_switch")
+                                            )
+                                        }
+                                    }
                                 }
-                                Text("বিদ্যালয় তৈরি করুন ও কোড পান", fontWeight = FontWeight.SemiBold)
-                            }
-                        }
-                    }
-                }
 
-                // Join Existing School Card
-                TreeGroupCard(
-                    title = "কোড দিয়ে বিদ্যমান বিদ্যালয়ে যুক্ত হোন",
-                    subtitle = "অ্যাডমিনের দেওয়া ৬ অক্ষরের স্কুল কোড দিন",
-                    badgeText = "যুক্ত হোন",
-                    icon = Icons.Rounded.Key,
-                    expanded = expandedSection == "join",
-                    headerTestTag = "hub_join_group_header",
-                    onToggle = { expandedSection = if (expandedSection == "join") "" else "join" }
-                ) {
-                    TreeBranchItem(isLast = true) {
-                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                modifier = Modifier.fillMaxWidth()
-                            ) {
-                                OutlinedTextField(
-                                    value = joinCodeInput,
-                                    onValueChange = { raw ->
-                                        val clean = raw.uppercase().replace(Regex("[^A-Z0-9]"), "").take(12)
-                                        joinCodeInput = clean
-                                        if (codePreview != null || lookupError != null) onClearCodePreview()
-                                    },
-                                    label = { Text("স্কুল কোড") },
-                                    placeholder = { Text("যেমন: KGP482") },
-                                    singleLine = true,
-                                    modifier = Modifier.weight(1f).testTag("hub_join_code_input")
-                                )
                                 Button(
-                                    onClick = { onLookupCode(joinCodeInput) },
-                                    enabled = !lookupBusy && !isBusy && joinCodeInput.length >= 6,
+                                    onClick = {
+                                        onCreateSchool(schoolName, schoolAddress, schoolYear, importLocalData)
+                                    },
+                                    enabled = !isBusy && schoolName.isNotBlank(),
                                     shape = RoundedCornerShape(10.dp),
-                                    modifier = Modifier.height(52.dp).testTag("hub_lookup_code_btn")
+                                    modifier = Modifier.fillMaxWidth().height(48.dp).testTag("hub_create_submit_btn")
                                 ) {
-                                    if (lookupBusy) {
+                                    if (isBusy) {
                                         CircularProgressIndicator(
                                             color = MaterialTheme.colorScheme.onPrimary,
                                             strokeWidth = 2.dp,
                                             modifier = Modifier.size(18.dp)
                                         )
-                                    } else {
-                                        Icon(Icons.Rounded.Search, contentDescription = null, modifier = Modifier.size(18.dp))
-                                        Spacer(Modifier.size(4.dp))
-                                        Text("খুঁজুন")
+                                        Spacer(Modifier.size(8.dp))
                                     }
+                                    Text("বিদ্যালয় তৈরি করুন ও কোড পান", fontWeight = FontWeight.SemiBold)
                                 }
                             }
+                        }
+                    }
 
-                            if (!lookupError.isNullOrBlank()) {
-                                Surface(
-                                    color = RoseBg,
-                                    border = BorderStroke(1.dp, RoseDanger.copy(alpha = 0.3f)),
-                                    shape = RoundedCornerShape(10.dp),
+                    // Join Existing School Card
+                    TreeGroupCard(
+                        title = "কোড দিয়ে বিদ্যমান বিদ্যালয়ে যুক্ত হোন",
+                        subtitle = "অ্যাডমিনের দেওয়া ৬ অক্ষরের স্কুল কোড দিন",
+                        badgeText = "যুক্ত হোন",
+                        icon = Icons.Rounded.Key,
+                        expanded = expandedSection == "join",
+                        headerTestTag = "hub_join_group_header",
+                        onToggle = { expandedSection = if (expandedSection == "join") "" else "join" }
+                    ) {
+                        TreeBranchItem(isLast = true) {
+                            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
                                     modifier = Modifier.fillMaxWidth()
                                 ) {
-                                    Text(
-                                        text = lookupError,
-                                        color = RoseDanger,
-                                        fontSize = 12.sp,
-                                        modifier = Modifier.padding(10.dp)
+                                    OutlinedTextField(
+                                        value = joinCodeInput,
+                                        onValueChange = { raw ->
+                                            val clean = raw.uppercase().replace(Regex("[^A-Z0-9]"), "").take(12)
+                                            joinCodeInput = clean
+                                            if (codePreview != null || lookupError != null) onClearCodePreview()
+                                        },
+                                        label = { Text("স্কুল কোড") },
+                                        placeholder = { Text("যেমন: KGP482") },
+                                        singleLine = true,
+                                        modifier = Modifier.weight(1f).testTag("hub_join_code_input")
                                     )
+                                    Button(
+                                        onClick = { onLookupCode(joinCodeInput) },
+                                        enabled = !lookupBusy && !isBusy && joinCodeInput.length >= 6,
+                                        shape = RoundedCornerShape(10.dp),
+                                        modifier = Modifier.height(52.dp).testTag("hub_lookup_code_btn")
+                                    ) {
+                                        if (lookupBusy) {
+                                            CircularProgressIndicator(
+                                                color = MaterialTheme.colorScheme.onPrimary,
+                                                strokeWidth = 2.dp,
+                                                modifier = Modifier.size(18.dp)
+                                            )
+                                        } else {
+                                            Icon(Icons.Rounded.Search, contentDescription = null, modifier = Modifier.size(18.dp))
+                                            Spacer(Modifier.size(4.dp))
+                                            Text("খুঁজুন")
+                                        }
+                                    }
                                 }
-                            }
 
-                            if (codePreview != null) {
-                                val alreadyMember = schools.any { it.id == codePreview.schoolId }
-                                Surface(
-                                    color = TealSoft,
-                                    border = BorderStroke(1.dp, TealPrimary.copy(alpha = 0.35f)),
-                                    shape = RoundedCornerShape(12.dp),
-                                    modifier = Modifier.fillMaxWidth().testTag("hub_code_preview_card")
-                                ) {
-                                    Column(
-                                        modifier = Modifier.padding(12.dp),
-                                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                                if (!lookupError.isNullOrBlank()) {
+                                    Surface(
+                                        color = RoseBg,
+                                        border = BorderStroke(1.dp, RoseDanger.copy(alpha = 0.3f)),
+                                        shape = RoundedCornerShape(10.dp),
+                                        modifier = Modifier.fillMaxWidth()
                                     ) {
                                         Text(
-                                            text = codePreview.schoolName,
-                                            fontWeight = FontWeight.Bold,
-                                            fontSize = 14.5.sp,
-                                            color = SlateText
-                                        )
-                                        Text(
-                                            text = if (codePreview.approvalRequired)
-                                                "অনুমোদন প্রয়োজন: অনুরোধ পাঠালে অ্যাডমিন অনুমোদন করবেন।"
-                                            else
-                                                "সরাসরি যোগদান চালু আছে: সাথে সাথেই বিদ্যালয়ে যুক্ত হবেন।",
+                                            text = lookupError,
+                                            color = RoseDanger,
                                             fontSize = 12.sp,
-                                            color = SlateMuted
+                                            modifier = Modifier.padding(10.dp)
                                         )
-                                        if (alreadyMember) {
-                                            OutlinedButton(
-                                                onClick = { onSelectSchool(codePreview.schoolId) },
-                                                modifier = Modifier.fillMaxWidth()
-                                            ) {
-                                                Text("আপনি ইতিমধ্যে সদস্য — প্রবেশ করুন")
-                                            }
-                                        } else {
+                                    }
+                                }
+
+                                if (codePreview != null) {
+                                    Surface(
+                                        color = TealSoft,
+                                        border = BorderStroke(1.dp, TealPrimary.copy(alpha = 0.35f)),
+                                        shape = RoundedCornerShape(12.dp),
+                                        modifier = Modifier.fillMaxWidth().testTag("hub_code_preview_card")
+                                    ) {
+                                        Column(
+                                            modifier = Modifier.padding(12.dp),
+                                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                                        ) {
+                                            Text(
+                                                text = codePreview.schoolName,
+                                                fontWeight = FontWeight.Bold,
+                                                fontSize = 14.5.sp,
+                                                color = SlateText
+                                            )
+                                            Text(
+                                                text = "যোগদানের অনুরোধ পাঠালে বিদ্যালয়ের অ্যাডমিন আপনার অনুমতি নির্ধারণ করে অনুমোদন করবেন।",
+                                                fontSize = 12.sp,
+                                                color = SlateMuted
+                                            )
                                             Button(
                                                 onClick = { onJoinWithPreview(codePreview) },
                                                 enabled = !isBusy,
@@ -546,7 +602,7 @@ fun SchoolHubScreen(
                                                 modifier = Modifier.fillMaxWidth().height(48.dp).testTag("hub_join_confirm_btn")
                                             ) {
                                                 Text(
-                                                    if (codePreview.approvalRequired) "যোগদানের অনুরোধ পাঠান" else "বিদ্যালয়ে যুক্ত হোন",
+                                                    "যোগদানের অনুরোধ পাঠান",
                                                     fontWeight = FontWeight.SemiBold
                                                 )
                                             }

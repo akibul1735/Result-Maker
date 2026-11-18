@@ -39,12 +39,123 @@ service cloud.firestore {
       return isSignedIn() && request.auth.uid in schoolData(schoolId).adminUids;
     }
 
+    function hasNoSchool(uid) {
+      return !exists(/databases/$(database)/documents/users/$(uid)) ||
+             !('activeSchoolId' in get(/databases/$(database)/documents/users/$(uid)).data) ||
+             get(/databases/$(database)/documents/users/$(uid)).data.activeSchoolId == '';
+    }
+
+    function memberProfile(schoolId) {
+      return schoolData(schoolId).memberProfiles[request.auth.uid];
+    }
+
+    function isStudentClassAllowed(schoolId, cls) {
+      return isSchoolAdmin(schoolId) ||
+             !(request.auth.uid in schoolData(schoolId).memberProfiles) ||
+             !('allClasses' in memberProfile(schoolId)) ||
+             memberProfile(schoolId).allClasses == true ||
+             ('allowedClasses' in memberProfile(schoolId) && memberProfile(schoolId).allowedClasses is list && cls in memberProfile(schoolId).allowedClasses);
+    }
+
+    function canTeacherManageStudents(schoolId) {
+      return isSchoolAdmin(schoolId) ||
+             !(request.auth.uid in schoolData(schoolId).memberProfiles) ||
+             !('canManageStudents' in memberProfile(schoolId)) ||
+             memberProfile(schoolId).canManageStudents == true;
+    }
+
+    function canTeacherEditAttendance(schoolId) {
+      return isSchoolAdmin(schoolId) ||
+             !(request.auth.uid in schoolData(schoolId).memberProfiles) ||
+             !('canEditAttendance' in memberProfile(schoolId)) ||
+             memberProfile(schoolId).canEditAttendance == true;
+    }
+
+    function hasAllSubjectsAccess(schoolId) {
+      return isSchoolAdmin(schoolId) ||
+             !(request.auth.uid in schoolData(schoolId).memberProfiles) ||
+             !('allSubjects' in memberProfile(schoolId)) ||
+             memberProfile(schoolId).allSubjects == true;
+    }
+
+    function allowedTeacherSubjects(schoolId) {
+      return ('allowedSubjects' in memberProfile(schoolId) && memberProfile(schoolId).allowedSubjects is list)
+        ? memberProfile(schoolId).allowedSubjects
+        : [];
+    }
+
+    function subjectMarkKeys(sub) {
+      return sub == 'ART'
+        ? ['ART_1_TOTAL', 'ART_2_TOTAL', 'ART_3_TOTAL']
+        : [
+            sub + '_1_TB', sub + '_1_ACT', sub + '_1_LANG', sub + '_1_CT', sub + '_1_WR',
+            sub + '_2_TB', sub + '_2_ACT', sub + '_2_LANG', sub + '_2_CT', sub + '_2_WR',
+            sub + '_3_TB', sub + '_3_ACT', sub + '_3_LANG', sub + '_3_CT', sub + '_3_WR'
+          ];
+    }
+
+    function allowedSubjectKeysFor(allowedSubs) {
+      return ('BAN' in allowedSubs ? subjectMarkKeys('BAN') : [])
+        .concat('ENG' in allowedSubs ? subjectMarkKeys('ENG') : [])
+        .concat('MATH' in allowedSubs ? subjectMarkKeys('MATH') : [])
+        .concat('SOC' in allowedSubs ? subjectMarkKeys('SOC') : [])
+        .concat('SCI' in allowedSubs ? subjectMarkKeys('SCI') : [])
+        .concat('BGW' in allowedSubs ? subjectMarkKeys('BGW') : [])
+        .concat('REL' in allowedSubs ? subjectMarkKeys('REL') : [])
+        .concat('PE' in allowedSubs ? subjectMarkKeys('PE') : [])
+        .concat('ART' in allowedSubs ? subjectMarkKeys('ART') : []);
+    }
+
+    function attendanceXKeys() {
+      return [
+        'DAYS_1', 'DAYS_2', 'DAYS_3',
+        'PRES_1', 'PRES_2', 'PRES_3',
+        'ACT_1', 'ACT_2', 'ACT_3',
+        'DISC_1', 'DISC_2', 'DISC_3',
+        'COND_1', 'COND_2', 'COND_3',
+        'REM_1', 'REM_2', 'REM_3'
+      ];
+    }
+
+    function areMarksAllowedOnCreate(schoolId, newM) {
+      return hasAllSubjectsAccess(schoolId) ||
+             newM.keys().hasOnly(allowedSubjectKeysFor(allowedTeacherSubjects(schoolId)));
+    }
+
+    function areMarksAllowedOnUpdate(schoolId, newM, oldM) {
+      return hasAllSubjectsAccess(schoolId) ||
+             newM.diff(oldM).affectedKeys().hasOnly(allowedSubjectKeysFor(allowedTeacherSubjects(schoolId)));
+    }
+
+    function areXAllowedOnCreate(schoolId, newX) {
+      return (canTeacherEditAttendance(schoolId) && canTeacherManageStudents(schoolId)) ||
+             (canTeacherEditAttendance(schoolId) && newX.keys().hasOnly(attendanceXKeys())) ||
+             (!canTeacherEditAttendance(schoolId) && canTeacherManageStudents(schoolId) && !newX.keys().hasAny(attendanceXKeys())) ||
+             newX.size() == 0;
+    }
+
+    function areXAllowedOnUpdate(schoolId, newX, oldX) {
+      return (canTeacherEditAttendance(schoolId) && canTeacherManageStudents(schoolId)) ||
+             (canTeacherEditAttendance(schoolId) && newX.diff(oldX).affectedKeys().hasOnly(attendanceXKeys())) ||
+             (!canTeacherEditAttendance(schoolId) && canTeacherManageStudents(schoolId) && !newX.diff(oldX).affectedKeys().hasAny(attendanceXKeys())) ||
+             newX == oldX;
+    }
+
+    function areProfileFieldsAllowedOnUpdate(schoolId, newDoc, oldDoc) {
+      return canTeacherManageStudents(schoolId) ||
+             !newDoc.diff(oldDoc).affectedKeys().hasAny([
+               'cls', 'roll', 'name', 'guardian', 'village', 'post', 'upazila', 'district', 'mobile', 'religion'
+             ]);
+    }
+
     // 3. Entity Validation Blueprints
     function isValidUserProfile(data) {
       return data.uid is string && data.uid.size() >= 1 && data.uid.size() <= 128 &&
              data.displayName is string && data.displayName.size() <= 100 &&
              data.email is string && data.email.size() <= 150 &&
              (!('activeSchoolId' in data) || (data.activeSchoolId is string && data.activeSchoolId.size() <= 128)) &&
+             (!('pendingSchoolId' in data) || (data.pendingSchoolId is string && data.pendingSchoolId.size() <= 128)) &&
+             (!('pendingSchoolName' in data) || (data.pendingSchoolName is string && data.pendingSchoolName.size() <= 160)) &&
              data.createdAt is timestamp && data.createdAt <= request.time &&
              data.updatedAt is timestamp && data.updatedAt <= request.time;
     }
@@ -124,7 +235,7 @@ service cloud.firestore {
                        request.auth.uid == userId &&
                        incoming().uid == request.auth.uid &&
                        incoming().keys().hasAll(['uid', 'displayName', 'email', 'createdAt', 'updatedAt']) &&
-                       incoming().keys().hasOnly(['uid', 'displayName', 'email', 'activeSchoolId', 'createdAt', 'updatedAt']) &&
+                       incoming().keys().hasOnly(['uid', 'displayName', 'email', 'activeSchoolId', 'pendingSchoolId', 'pendingSchoolName', 'createdAt', 'updatedAt']) &&
                        isValidUserProfile(incoming());
 
       allow update: if isSignedIn() &&
@@ -133,7 +244,7 @@ service cloud.firestore {
                        isValidUserProfile(incoming()) &&
                        incoming().uid == existing().uid &&
                        incoming().createdAt == existing().createdAt &&
-                       incoming().diff(existing()).affectedKeys().hasOnly(['displayName', 'email', 'activeSchoolId', 'updatedAt']);
+                       incoming().diff(existing()).affectedKeys().hasOnly(['displayName', 'email', 'activeSchoolId', 'pendingSchoolId', 'pendingSchoolName', 'updatedAt']);
 
       allow delete: if isSignedIn() && isValidId(userId) && request.auth.uid == userId;
     }
@@ -147,6 +258,7 @@ service cloud.firestore {
                        isValidCode(code) &&
                        incoming().ownerUid == request.auth.uid &&
                        request.auth.uid in incoming().adminUids &&
+                       incoming().approvalRequired == true &&
                        incoming().keys().hasAll(['schoolId', 'schoolName', 'ownerUid', 'adminUids', 'approvalRequired', 'active', 'createdAt', 'updatedAt']) &&
                        incoming().keys().hasOnly(['schoolId', 'schoolName', 'ownerUid', 'adminUids', 'approvalRequired', 'active', 'createdAt', 'updatedAt']) &&
                        isValidSchoolCode(incoming()) &&
@@ -166,7 +278,7 @@ service cloud.firestore {
                        (request.auth.uid == existing().ownerUid || request.auth.uid in existing().adminUids);
     }
 
-    // 6. Collaborative School Workspaces
+    // 6. Collaborative School Workspaces (One school per user + Admin approval required)
     match /schools/{schoolId} {
       allow get: if isSignedIn() &&
                     isValidId(schoolId) &&
@@ -176,7 +288,9 @@ service cloud.firestore {
 
       allow create: if isSignedIn() &&
                        isValidId(schoolId) &&
+                       hasNoSchool(request.auth.uid) &&
                        incoming().ownerUid == request.auth.uid &&
+                       incoming().approvalRequired == true &&
                        request.auth.uid in incoming().adminUids &&
                        request.auth.uid in incoming().memberUids &&
                        request.auth.uid in incoming().memberProfiles &&
@@ -192,7 +306,7 @@ service cloud.firestore {
                        isValidSchool(incoming()) &&
                        incoming().ownerUid == existing().ownerUid &&
                        incoming().createdAt == existing().createdAt && (
-                         // Action 1: Admin updates school settings, code, or member list
+                         // Action 1: Admin updates school settings, code, member list, approvals, or teacher permissions
                          (
                            request.auth.uid in existing().adminUids &&
                            existing().ownerUid in incoming().adminUids &&
@@ -203,21 +317,7 @@ service cloud.firestore {
                              'pdfFont', 'dpeLogo', 'customFields', 'updatedAt'
                            ])
                          ) ||
-                         // Action 2: Self-join directly when approval is disabled
-                         (
-                           !existing().approvalRequired &&
-                           !(request.auth.uid in existing().memberUids) &&
-                           incoming().diff(existing()).affectedKeys().hasOnly(['memberUids', 'memberProfiles', 'updatedAt']) &&
-                           incoming().memberUids.size() == existing().memberUids.size() + 1 &&
-                           request.auth.uid in incoming().memberUids &&
-                           incoming().memberUids.hasAll(existing().memberUids) &&
-                           incoming().memberProfiles.diff(existing().memberProfiles).affectedKeys().hasOnly([request.auth.uid]) &&
-                           request.auth.uid in incoming().memberProfiles &&
-                           incoming().memberProfiles[request.auth.uid].uid == request.auth.uid &&
-                           incoming().memberProfiles[request.auth.uid].role == 'TEACHER' &&
-                           exists(/databases/$(database)/documents/schoolCodes/$(existing().joinCode))
-                         ) ||
-                         // Action 3: Non-owner member leaves school
+                         // Action 2: Non-owner member leaves school
                          (
                            request.auth.uid in existing().memberUids &&
                            request.auth.uid != existing().ownerUid &&
@@ -234,7 +334,7 @@ service cloud.firestore {
 
       allow delete: if isSignedIn() && isValidId(schoolId) && request.auth.uid == existing().ownerUid;
 
-      // 7. Pending Join Requests Subcollection
+      // 7. Pending Join Requests Subcollection (Always required for joining)
       match /joinRequests/{requestUid} {
         allow get: if isSignedIn() &&
                       isValidId(schoolId) &&
@@ -247,6 +347,7 @@ service cloud.firestore {
         allow create: if isSignedIn() &&
                          isValidId(schoolId) &&
                          isValidId(requestUid) &&
+                         hasNoSchool(request.auth.uid) &&
                          request.auth.uid == requestUid &&
                          incoming().uid == request.auth.uid &&
                          incoming().schoolId == schoolId &&
@@ -264,7 +365,7 @@ service cloud.firestore {
                          (request.auth.uid == requestUid || isSchoolAdmin(schoolId));
       }
 
-      // 8. School Students Subcollection (Real-time concurrent field-level entry)
+      // 8. School Students Subcollection (Granular teacher permissions enforced on writes)
       match /students/{studentId} {
         allow get: if isValidId(schoolId) && isValidId(studentId) && isSchoolMember(schoolId);
         allow list: if isValidId(schoolId) && isSchoolMember(schoolId);
@@ -272,10 +373,14 @@ service cloud.firestore {
         allow create: if isValidId(schoolId) &&
                          isValidId(studentId) &&
                          isSchoolMember(schoolId) &&
+                         canTeacherManageStudents(schoolId) &&
+                         isStudentClassAllowed(schoolId, incoming().cls) &&
                          incoming().updatedByUid == request.auth.uid &&
                          incoming().keys().hasAll(['cls', 'roll', 'name', 'guardian', 'village', 'post', 'upazila', 'district', 'mobile', 'religion', 'm', 'x', 'updatedByUid', 'updatedByName', 'createdAt', 'updatedAt']) &&
                          incoming().keys().hasOnly(['cls', 'roll', 'name', 'guardian', 'village', 'post', 'upazila', 'district', 'mobile', 'religion', 'm', 'x', 'updatedByUid', 'updatedByName', 'createdAt', 'updatedAt']) &&
-                         isValidStudent(incoming());
+                         isValidStudent(incoming()) &&
+                         areMarksAllowedOnCreate(schoolId, incoming().m) &&
+                         areXAllowedOnCreate(schoolId, incoming().x);
 
         allow update: if isValidId(schoolId) &&
                          isValidId(studentId) &&
@@ -283,12 +388,21 @@ service cloud.firestore {
                          isValidStudent(incoming()) &&
                          incoming().updatedByUid == request.auth.uid &&
                          incoming().createdAt == existing().createdAt &&
+                         isStudentClassAllowed(schoolId, existing().cls) &&
+                         isStudentClassAllowed(schoolId, incoming().cls) &&
+                         areProfileFieldsAllowedOnUpdate(schoolId, incoming(), existing()) &&
+                         areMarksAllowedOnUpdate(schoolId, incoming().m, existing().m) &&
+                         areXAllowedOnUpdate(schoolId, incoming().x, existing().x) &&
                          incoming().diff(existing()).affectedKeys().hasOnly([
                            'cls', 'roll', 'name', 'guardian', 'village', 'post', 'upazila', 'district',
                            'mobile', 'religion', 'm', 'x', 'updatedByUid', 'updatedByName', 'updatedAt'
                          ]);
 
-        allow delete: if isValidId(schoolId) && isValidId(studentId) && isSchoolMember(schoolId);
+        allow delete: if isValidId(schoolId) &&
+                         isValidId(studentId) &&
+                         isSchoolMember(schoolId) &&
+                         canTeacherManageStudents(schoolId) &&
+                         isStudentClassAllowed(schoolId, existing().cls);
       }
     }
   }

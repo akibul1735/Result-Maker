@@ -74,6 +74,8 @@ class SchoolCloudRepository(
                     "displayName" to name,
                     "email" to email,
                     "activeSchoolId" to "",
+                    "pendingSchoolId" to "",
+                    "pendingSchoolName" to "",
                     "createdAt" to FieldValue.serverTimestamp(),
                     "updatedAt" to FieldValue.serverTimestamp()
                 )
@@ -93,7 +95,9 @@ class SchoolCloudRepository(
                         uid = uid,
                         displayName = name,
                         email = email,
-                        activeSchoolId = existing.getString("activeSchoolId").orEmpty()
+                        activeSchoolId = existing.getString("activeSchoolId").orEmpty(),
+                        pendingSchoolId = existing.getString("pendingSchoolId").orEmpty(),
+                        pendingSchoolName = existing.getString("pendingSchoolName").orEmpty()
                     )
                 )
             }
@@ -118,7 +122,9 @@ class SchoolCloudRepository(
                         uid = doc.getString("uid").orEmpty(),
                         displayName = doc.getString("displayName").orEmpty(),
                         email = doc.getString("email").orEmpty(),
-                        activeSchoolId = doc.getString("activeSchoolId").orEmpty()
+                        activeSchoolId = doc.getString("activeSchoolId").orEmpty(),
+                        pendingSchoolId = doc.getString("pendingSchoolId").orEmpty(),
+                        pendingSchoolName = doc.getString("pendingSchoolName").orEmpty()
                     )
                 }
                 .catch { error ->
@@ -140,6 +146,37 @@ class SchoolCloudRepository(
                 .update(
                     mapOf(
                         "activeSchoolId" to schoolId.take(128),
+                        "pendingSchoolId" to "",
+                        "pendingSchoolName" to "",
+                        "updatedAt" to FieldValue.serverTimestamp()
+                    )
+                ).await()
+            Result.success(Unit)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.UPDATE, path)
+            Result.failure(e)
+        }
+    }
+
+    suspend fun cancelPendingJoinRequest(schoolId: String): Result<Unit> {
+        val uid = auth.currentUser?.uid ?: return Result.failure(IllegalStateException("Not signed in"))
+        val path = "users/$uid"
+        return try {
+            if (schoolId.isNotBlank()) {
+                runCatching {
+                    db.collection("schools").document(schoolId)
+                        .collection("joinRequests").document(uid)
+                        .delete()
+                        .await()
+                }
+            }
+            db.collection("users").document(uid)
+                .update(
+                    mapOf(
+                        "pendingSchoolId" to "",
+                        "pendingSchoolName" to "",
                         "updatedAt" to FieldValue.serverTimestamp()
                     )
                 ).await()
@@ -211,7 +248,6 @@ class SchoolCloudRepository(
         schoolName: String,
         schoolAddress: String,
         year: String,
-        approvalRequired: Boolean,
         baseSettings: Settings,
         initialStudents: List<Student>
     ): Result<SchoolWorkspace> {
@@ -220,6 +256,17 @@ class SchoolCloudRepository(
             val uid = requireUserId()
             val cleanName = schoolName.trim().take(160)
             require(cleanName.isNotEmpty()) { "বিদ্যালয়ের নাম লিখুন" }
+
+            // Enforce 1 school per user
+            val existingMemberships = db.collection("schools")
+                .whereArrayContains("memberUids", uid)
+                .limit(1)
+                .get()
+                .await()
+            if (!existingMemberships.isEmpty) {
+                return Result.failure(IllegalStateException("একজন ব্যবহারকারী শুধুমাত্র একটি বিদ্যালয়ে যুক্ত থাকতে পারবেন।"))
+            }
+
             val cleanAddr = schoolAddress.trim().take(240)
             val cleanYear = year.trim().ifBlank { "২০২৬" }.take(40)
 
@@ -236,17 +283,18 @@ class SchoolCloudRepository(
                 year = cleanYear
             )
 
+            val adminPerms = TeacherPermissions.fullAccess()
             val memberProfileMap = mapOf(
                 "uid" to uid,
                 "name" to creatorName,
                 "email" to creatorEmail,
                 "role" to MemberRole.ADMIN.code
-            )
+            ) + adminPerms.toFirestoreMap()
 
             val schoolPayload = mapOf(
                 "ownerUid" to uid,
                 "joinCode" to joinCode,
-                "approvalRequired" to approvalRequired,
+                "approvalRequired" to true,
                 "memberUids" to listOf(uid),
                 "adminUids" to listOf(uid),
                 "memberProfiles" to mapOf(uid to memberProfileMap),
@@ -267,7 +315,7 @@ class SchoolCloudRepository(
                 "schoolName" to cleanName,
                 "ownerUid" to uid,
                 "adminUids" to listOf(uid),
-                "approvalRequired" to approvalRequired,
+                "approvalRequired" to true,
                 "active" to true,
                 "createdAt" to FieldValue.serverTimestamp(),
                 "updatedAt" to FieldValue.serverTimestamp()
@@ -287,6 +335,8 @@ class SchoolCloudRepository(
                         "displayName" to creatorName,
                         "email" to creatorEmail,
                         "activeSchoolId" to schoolId,
+                        "pendingSchoolId" to "",
+                        "pendingSchoolName" to "",
                         "createdAt" to FieldValue.serverTimestamp(),
                         "updatedAt" to FieldValue.serverTimestamp()
                     )
@@ -294,7 +344,12 @@ class SchoolCloudRepository(
             } else {
                 batch.update(
                     userRef,
-                    mapOf("activeSchoolId" to schoolId, "updatedAt" to FieldValue.serverTimestamp())
+                    mapOf(
+                        "activeSchoolId" to schoolId,
+                        "pendingSchoolId" to "",
+                        "pendingSchoolName" to "",
+                        "updatedAt" to FieldValue.serverTimestamp()
+                    )
                 )
             }
             batch.commit().await()
@@ -308,10 +363,10 @@ class SchoolCloudRepository(
                     id = schoolId,
                     ownerUid = uid,
                     joinCode = joinCode,
-                    approvalRequired = approvalRequired,
+                    approvalRequired = true,
                     memberUids = listOf(uid),
                     adminUids = listOf(uid),
-                    members = listOf(SchoolMemberProfile(uid, creatorName, creatorEmail, MemberRole.ADMIN)),
+                    members = listOf(SchoolMemberProfile(uid, creatorName, creatorEmail, MemberRole.ADMIN, adminPerms)),
                     settings = settings
                 )
             )
@@ -356,62 +411,33 @@ class SchoolCloudRepository(
     }
 
     suspend fun joinSchoolWithCode(preview: SchoolCodePreview): Result<Boolean> {
-        // Returns true if joined immediately as active member, false if pending admin approval
-        var path = "schools/${preview.schoolId}"
+        // Always requires Admin approval; returns false indicating pending request sent.
+        var path = "schools/${preview.schoolId}/joinRequests"
         return try {
             val uid = requireUserId()
             val name = currentUserName().take(100)
             val email = currentUserEmail().take(150)
 
-            if (!preview.approvalRequired) {
-                val userRef = db.collection("users").document(uid)
-                val userSnap = userRef.get().await()
+            // Enforce 1 school per user
+            val existingMemberships = db.collection("schools")
+                .whereArrayContains("memberUids", uid)
+                .limit(1)
+                .get()
+                .await()
+            if (!existingMemberships.isEmpty) {
+                return Result.failure(IllegalStateException("একজন ব্যবহারকারী শুধুমাত্র একটি বিদ্যালয়ে যুক্ত থাকতে পারবেন।"))
+            }
 
-                val batch = db.batch()
-                batch.update(
-                    db.collection("schools").document(preview.schoolId),
-                    mapOf(
-                        "memberUids" to FieldValue.arrayUnion(uid),
-                        "memberProfiles.$uid" to mapOf(
-                            "uid" to uid,
-                            "name" to name,
-                            "email" to email,
-                            "role" to MemberRole.TEACHER.code
-                        ),
-                        "updatedAt" to FieldValue.serverTimestamp()
-                    )
-                )
-                if (!userSnap.exists()) {
-                    batch.set(
-                        userRef,
-                        mapOf(
-                            "uid" to uid,
-                            "displayName" to name,
-                            "email" to email,
-                            "activeSchoolId" to preview.schoolId,
-                            "createdAt" to FieldValue.serverTimestamp(),
-                            "updatedAt" to FieldValue.serverTimestamp()
-                        )
-                    )
-                } else {
-                    batch.update(
-                        userRef,
-                        mapOf(
-                            "activeSchoolId" to preview.schoolId,
-                            "updatedAt" to FieldValue.serverTimestamp()
-                        )
-                    )
-                }
-                batch.commit().await()
-                Result.success(true)
-            } else {
-                path = "schools/${preview.schoolId}/joinRequests/$uid"
-                val reqRef = db.collection("schools").document(preview.schoolId)
-                    .collection("joinRequests").document(uid)
-                val existingReq = runCatching { reqRef.get().await() }.getOrNull()
-                if (existingReq != null && existingReq.exists()) {
-                    return Result.success(false)
-                }
+            val reqPath = "schools/${preview.schoolId}/joinRequests/$uid"
+            path = reqPath
+            val reqRef = db.collection("schools").document(preview.schoolId)
+                .collection("joinRequests").document(uid)
+            val userRef = db.collection("users").document(uid)
+            val existingReq = runCatching { reqRef.get().await() }.getOrNull()
+            val userSnap = userRef.get().await()
+
+            val batch = db.batch()
+            if (existingReq == null || !existingReq.exists()) {
                 val reqPayload = mapOf(
                     "uid" to uid,
                     "displayName" to name,
@@ -423,9 +449,34 @@ class SchoolCloudRepository(
                     "createdAt" to FieldValue.serverTimestamp(),
                     "updatedAt" to FieldValue.serverTimestamp()
                 )
-                reqRef.set(reqPayload).await()
-                Result.success(false)
+                batch.set(reqRef, reqPayload)
             }
+            if (!userSnap.exists()) {
+                batch.set(
+                    userRef,
+                    mapOf(
+                        "uid" to uid,
+                        "displayName" to name,
+                        "email" to email,
+                        "activeSchoolId" to "",
+                        "pendingSchoolId" to preview.schoolId,
+                        "pendingSchoolName" to preview.schoolName.take(160),
+                        "createdAt" to FieldValue.serverTimestamp(),
+                        "updatedAt" to FieldValue.serverTimestamp()
+                    )
+                )
+            } else {
+                batch.update(
+                    userRef,
+                    mapOf(
+                        "pendingSchoolId" to preview.schoolId,
+                        "pendingSchoolName" to preview.schoolName.take(160),
+                        "updatedAt" to FieldValue.serverTimestamp()
+                    )
+                )
+            }
+            batch.commit().await()
+            Result.success(false)
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
@@ -434,21 +485,27 @@ class SchoolCloudRepository(
         }
     }
 
-    suspend fun approveJoinRequest(schoolId: String, req: JoinRequestItem): Result<Unit> {
+    suspend fun approveJoinRequest(
+        schoolId: String,
+        req: JoinRequestItem,
+        permissions: TeacherPermissions = TeacherPermissions.fullAccess()
+    ): Result<Unit> {
         val path = "schools/$schoolId"
         return try {
             requireUserId()
+            val memberProfileMap = mapOf(
+                "uid" to req.uid,
+                "name" to req.displayName.take(100),
+                "email" to req.email.take(150),
+                "role" to MemberRole.TEACHER.code
+            ) + permissions.toFirestoreMap()
+
             val batch = db.batch()
             batch.update(
                 db.collection("schools").document(schoolId),
                 mapOf(
                     "memberUids" to FieldValue.arrayUnion(req.uid),
-                    "memberProfiles.${req.uid}" to mapOf(
-                        "uid" to req.uid,
-                        "name" to req.displayName.take(100),
-                        "email" to req.email.take(150),
-                        "role" to MemberRole.TEACHER.code
-                    ),
+                    "memberProfiles.${req.uid}" to memberProfileMap,
                     "updatedAt" to FieldValue.serverTimestamp()
                 )
             )
@@ -547,6 +604,39 @@ class SchoolCloudRepository(
         }
     }
 
+    suspend fun updateMemberPermissions(
+        school: SchoolWorkspace,
+        targetUid: String,
+        permissions: TeacherPermissions
+    ): Result<Unit> {
+        val path = "schools/${school.id}"
+        return try {
+            requireUserId()
+            val existingMember = school.members.find { it.uid == targetUid }
+                ?: return Result.failure(IllegalArgumentException("সদস্য পাওয়া যায়নি"))
+            val updatedProfile = mapOf(
+                "uid" to existingMember.uid,
+                "name" to existingMember.name,
+                "email" to existingMember.email,
+                "role" to existingMember.role.code
+            ) + permissions.toFirestoreMap()
+            db.collection("schools").document(school.id)
+                .update(
+                    mapOf(
+                        "memberProfiles.$targetUid" to updatedProfile,
+                        "updatedAt" to FieldValue.serverTimestamp()
+                    )
+                )
+                .await()
+            Result.success(Unit)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.UPDATE, path)
+            Result.failure(e)
+        }
+    }
+
     suspend fun updateMemberRole(school: SchoolWorkspace, targetUid: String, role: MemberRole): Result<Unit> {
         val path = "schools/${school.id}"
         return try {
@@ -557,15 +647,24 @@ class SchoolCloudRepository(
             } else {
                 school.adminUids.filter { it != targetUid }
             }
-            val batch = db.batch()
-            batch.update(
-                db.collection("schools").document(school.id),
-                mapOf(
-                    "adminUids" to nextAdmins,
-                    "memberProfiles.$targetUid.role" to role.code,
-                    "updatedAt" to FieldValue.serverTimestamp()
-                )
+            val updates = mutableMapOf<String, Any>(
+                "adminUids" to nextAdmins,
+                "memberProfiles.$targetUid.role" to role.code,
+                "updatedAt" to FieldValue.serverTimestamp()
             )
+            if (role == MemberRole.ADMIN) {
+                val existingMember = school.members.find { it.uid == targetUid }
+                if (existingMember != null) {
+                    updates["memberProfiles.$targetUid"] = mapOf(
+                        "uid" to existingMember.uid,
+                        "name" to existingMember.name,
+                        "email" to existingMember.email,
+                        "role" to role.code
+                    ) + TeacherPermissions.fullAccess().toFirestoreMap()
+                }
+            }
+            val batch = db.batch()
+            batch.update(db.collection("schools").document(school.id), updates)
             if (school.joinCode.isNotBlank()) {
                 batch.update(
                     db.collection("schoolCodes").document(school.joinCode),
@@ -631,7 +730,12 @@ class SchoolCloudRepository(
             )
             batch.update(
                 db.collection("users").document(uid),
-                mapOf("activeSchoolId" to "", "updatedAt" to FieldValue.serverTimestamp())
+                mapOf(
+                    "activeSchoolId" to "",
+                    "pendingSchoolId" to "",
+                    "pendingSchoolName" to "",
+                    "updatedAt" to FieldValue.serverTimestamp()
+                )
             )
             batch.commit().await()
             Result.success(Unit)
@@ -964,11 +1068,18 @@ class SchoolCloudRepository(
         val members = profilesMap.entries.mapNotNull { (k, v) ->
             val mUid = k as? String ?: return@mapNotNull null
             val m = v as? Map<*, *> ?: return@mapNotNull null
+            val role = MemberRole.fromCode(m["role"] as? String)
+            val perms = if (role == MemberRole.ADMIN) {
+                TeacherPermissions.fullAccess()
+            } else {
+                TeacherPermissions.fromMap(m)
+            }
             SchoolMemberProfile(
                 uid = (m["uid"] as? String) ?: mUid,
                 name = (m["name"] as? String).orEmpty(),
                 email = (m["email"] as? String).orEmpty(),
-                role = MemberRole.fromCode(m["role"] as? String)
+                role = role,
+                permissions = perms
             )
         }.sortedWith(compareBy({ it.role != MemberRole.ADMIN }, { it.name }))
 

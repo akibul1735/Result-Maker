@@ -9,6 +9,8 @@
         "displayName": { "type": "string", "description": "Teacher display name" },
         "email": { "type": "string", "description": "Google account email" },
         "activeSchoolId": { "type": "string", "description": "Currently selected school document ID" },
+        "pendingSchoolId": { "type": "string", "description": "Pending school ID awaiting admin approval" },
+        "pendingSchoolName": { "type": "string", "description": "Pending school name awaiting admin approval" },
         "createdAt": { "type": "string", "format": "date-time", "description": "Server timestamp" },
         "updatedAt": { "type": "string", "format": "date-time", "description": "Server timestamp" }
       },

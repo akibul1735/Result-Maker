@@ -11,7 +11,6 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -32,6 +31,7 @@ import androidx.compose.material.icons.rounded.Description
 import androidx.compose.material.icons.rounded.EventAvailable
 import androidx.compose.material.icons.rounded.FolderOpen
 import androidx.compose.material.icons.rounded.Home
+import androidx.compose.material.icons.rounded.Lock
 import androidx.compose.material.icons.rounded.Tune
 import androidx.compose.material.icons.rounded.Visibility
 import androidx.compose.material3.AlertDialog
@@ -70,6 +70,7 @@ import com.kgps.result.Settings
 import com.kgps.result.Student
 import com.kgps.result.bn
 import com.kgps.result.cloud.StudentSyncMeta
+import com.kgps.result.cloud.TeacherPermissions
 import com.kgps.result.fmt
 import com.kgps.result.fmtEn
 import com.kgps.result.fromBn
@@ -84,6 +85,7 @@ import com.kgps.result.total
 import com.kgps.result.ui.components.TreeBranchItem
 import com.kgps.result.ui.components.TreeGroupCard
 import com.kgps.result.ui.theme.AmberBg
+import com.kgps.result.ui.theme.AmberBorder
 import com.kgps.result.ui.theme.AmberNotice
 import com.kgps.result.ui.theme.EmeraldGrade
 import com.kgps.result.ui.theme.RoseDanger
@@ -96,6 +98,7 @@ import com.kgps.result.ui.theme.TealSoft
 fun StudentEditorScreen(
     initialStudent: Student,
     settings: Settings,
+    permissions: TeacherPermissions,
     syncMeta: StudentSyncMeta? = null,
     draftingRemarkTerm: Int?,
     isPlaceholderAi: Boolean,
@@ -111,8 +114,21 @@ fun StudentEditorScreen(
     var s by remember(initialStudent.id) { mutableStateOf(initialStudent) }
     val cur by rememberUpdatedState(s)
     val deleted = remember { booleanArrayOf(false) }
-    var tab by remember { mutableStateOf(0) }
+    val defaultTab = remember(permissions) {
+        when {
+            permissions.canManageStudents -> 0
+            permissions.allSubjects || permissions.effectiveSubjects().isNotEmpty() || permissions.canViewOtherSubjects -> 1
+            permissions.canEditAttendance -> 2
+            else -> 0
+        }
+    }
+    var tab by remember(initialStudent.id) { mutableStateOf(defaultTab) }
     var askDelete by remember { mutableStateOf(false) }
+
+    val canEditAnything = permissions.canManageStudents ||
+        permissions.canEditAttendance ||
+        permissions.allSubjects ||
+        permissions.effectiveSubjects().isNotEmpty()
 
     // Tree expansion states
     var infoExpandedGroup by remember { mutableStateOf("identity") }
@@ -122,7 +138,7 @@ fun StudentEditorScreen(
 
     DisposableEffect(initialStudent.id) {
         onDispose {
-            if (!deleted[0] && cur.name.isNotBlank()) {
+            if (!deleted[0] && canEditAnything && cur.name.isNotBlank() && cur != initialStudent) {
                 onUpsertStudent(cur)
             }
         }
@@ -171,44 +187,50 @@ fun StudentEditorScreen(
                         overflow = TextOverflow.Ellipsis
                     )
                 }
-                IconButton(
-                    onClick = {
-                        if (s.name.isNotBlank()) {
-                            onUpsertStudent(s)
-                            onShowMessage("${s.name} সংরক্ষিত হয়েছে")
-                            onBack()
-                        } else {
-                            onShowMessage("প্রথমে শিক্ষার্থীর নাম লিখুন")
-                        }
-                    },
-                    modifier = Modifier.size(48.dp).testTag("editor_save_btn")
-                ) {
-                    Icon(Icons.Rounded.Check, contentDescription = "সংরক্ষণ করুন", tint = EmeraldGrade)
+                if (canEditAnything) {
+                    IconButton(
+                        onClick = {
+                            if (s.name.isNotBlank()) {
+                                onUpsertStudent(s)
+                                onShowMessage("${s.name} সংরক্ষিত হয়েছে")
+                                onBack()
+                            } else {
+                                onShowMessage("প্রথমে শিক্ষার্থীর নাম লিখুন")
+                            }
+                        },
+                        modifier = Modifier.size(48.dp).testTag("editor_save_btn")
+                    ) {
+                        Icon(Icons.Rounded.Check, contentDescription = "সংরক্ষণ করুন", tint = EmeraldGrade)
+                    }
                 }
-                IconButton(
-                    onClick = {
-                        if (s.name.isNotBlank()) {
-                            onUpsertStudent(s)
-                            onPreview(s)
-                        } else {
-                            onShowMessage("প্রথমে শিক্ষার্থীর নাম লিখুন")
-                        }
-                    },
-                    modifier = Modifier.size(48.dp).testTag("editor_preview_btn")
-                ) {
-                    Icon(Icons.Rounded.Visibility, contentDescription = "প্রিভিউ দেখুন", tint = TealPrimary)
+                if (permissions.canExportPdf) {
+                    IconButton(
+                        onClick = {
+                            if (s.name.isNotBlank()) {
+                                if (canEditAnything && s != initialStudent) onUpsertStudent(s)
+                                onPreview(s)
+                            } else {
+                                onShowMessage("প্রথমে শিক্ষার্থীর নাম লিখুন")
+                            }
+                        },
+                        modifier = Modifier.size(48.dp).testTag("editor_preview_btn")
+                    ) {
+                        Icon(Icons.Rounded.Visibility, contentDescription = "প্রিভিউ দেখুন", tint = TealPrimary)
+                    }
+                    IconButton(
+                        onClick = { onPdf(s) },
+                        modifier = Modifier.size(48.dp).testTag("editor_pdf_btn")
+                    ) {
+                        Icon(Icons.Rounded.Description, contentDescription = "PDF তৈরি করুন", tint = TealPrimary)
+                    }
                 }
-                IconButton(
-                    onClick = { onPdf(s) },
-                    modifier = Modifier.size(48.dp).testTag("editor_pdf_btn")
-                ) {
-                    Icon(Icons.Rounded.Description, contentDescription = "PDF তৈরি করুন", tint = TealPrimary)
-                }
-                IconButton(
-                    onClick = { askDelete = true },
-                    modifier = Modifier.size(48.dp).testTag("editor_delete_btn")
-                ) {
-                    Icon(Icons.Rounded.Delete, contentDescription = "শিক্ষার্থী মুছুন", tint = RoseDanger)
+                if (permissions.canManageStudents) {
+                    IconButton(
+                        onClick = { askDelete = true },
+                        modifier = Modifier.size(48.dp).testTag("editor_delete_btn")
+                    ) {
+                        Icon(Icons.Rounded.Delete, contentDescription = "শিক্ষার্থী মুছুন", tint = RoseDanger)
+                    }
                 }
             }
         }
@@ -237,6 +259,10 @@ fun StudentEditorScreen(
             ) {
                 when (tab) {
                     0 -> {
+                        val canEditProfile = permissions.canManageStudents
+                        if (!canEditProfile) {
+                            ReadOnlyPermissionBanner("শিক্ষার্থীর ব্যক্তিগত তথ্য ও ঠিকানা সম্পাদনার অনুমতি আপনার নেই (শুধুমাত্র দেখার জন্য)।")
+                        }
                         // Tab 0: Tree-Grouped Personal Info
                         TreeGroupCard(
                             title = "পরিচিতি ও শ্রেণি",
@@ -251,13 +277,16 @@ fun StudentEditorScreen(
                                 Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                         Box(Modifier.weight(1.7f)) {
-                                            EditorTextField("শিক্ষার্থীর নাম", s.name) { s = s.copy(name = it) }
+                                            EditorTextField("শিক্ষার্থীর নাম", s.name, enabled = canEditProfile) {
+                                                s = s.copy(name = it)
+                                            }
                                         }
                                         Box(Modifier.weight(0.8f)) {
                                             EditorTextField(
                                                 "রোল",
                                                 if (s.roll == 0) "" else s.roll.toString(),
-                                                number = true
+                                                number = true,
+                                                enabled = canEditProfile
                                             ) { s = s.copy(roll = fromBn(it).toIntOrNull() ?: 0) }
                                         }
                                     }
@@ -266,10 +295,11 @@ fun StudentEditorScreen(
                                         horizontalArrangement = Arrangement.spacedBy(6.dp),
                                         modifier = Modifier.horizontalScroll(rememberScrollState())
                                     ) {
-                                        (1..5).forEach { c ->
+                                        permissions.effectiveClasses().forEach { c ->
                                             FilterChip(
                                                 selected = s.cls == c,
-                                                onClick = { s = s.copy(cls = c) },
+                                                enabled = canEditProfile,
+                                                onClick = { if (canEditProfile) s = s.copy(cls = c) },
                                                 label = { Text(bn(c.toString())) }
                                             )
                                         }
@@ -282,7 +312,8 @@ fun StudentEditorScreen(
                                         RELIGIONS.forEach { r ->
                                             FilterChip(
                                                 selected = s.religion == r,
-                                                onClick = { s = s.copy(religion = r) },
+                                                enabled = canEditProfile,
+                                                onClick = { if (canEditProfile) s = s.copy(religion = r) },
                                                 label = { Text(r) }
                                             )
                                         }
@@ -302,12 +333,12 @@ fun StudentEditorScreen(
                             TreeBranchItem(isLast = true) {
                                 Column {
                                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                        Box(Modifier.weight(1f)) { EditorTextField("গ্রাম / মহল্লা", s.village) { s = s.copy(village = it) } }
-                                        Box(Modifier.weight(1f)) { EditorTextField("পোস্ট অফিস", s.post) { s = s.copy(post = it) } }
+                                        Box(Modifier.weight(1f)) { EditorTextField("গ্রাম / মহল্লা", s.village, enabled = canEditProfile) { s = s.copy(village = it) } }
+                                        Box(Modifier.weight(1f)) { EditorTextField("পোস্ট অফিস", s.post, enabled = canEditProfile) { s = s.copy(post = it) } }
                                     }
                                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                        Box(Modifier.weight(1f)) { EditorTextField("উপজেলা / থানা", s.upazila) { s = s.copy(upazila = it) } }
-                                        Box(Modifier.weight(1f)) { EditorTextField("জেলা", s.district) { s = s.copy(district = it) } }
+                                        Box(Modifier.weight(1f)) { EditorTextField("উপজেলা / থানা", s.upazila, enabled = canEditProfile) { s = s.copy(upazila = it) } }
+                                        Box(Modifier.weight(1f)) { EditorTextField("জেলা", s.district, enabled = canEditProfile) { s = s.copy(district = it) } }
                                     }
                                 }
                             }
@@ -324,8 +355,8 @@ fun StudentEditorScreen(
                         ) {
                             TreeBranchItem(isLast = true) {
                                 Column {
-                                    EditorTextField("পিতা / অভিভাবকের নাম", s.guardian) { s = s.copy(guardian = it) }
-                                    EditorTextField("মোবাইল নম্বর", s.mobile, number = true) { s = s.copy(mobile = it) }
+                                    EditorTextField("পিতা / অভিভাবকের নাম", s.guardian, enabled = canEditProfile) { s = s.copy(guardian = it) }
+                                    EditorTextField("মোবাইল নম্বর", s.mobile, number = true, enabled = canEditProfile) { s = s.copy(mobile = it) }
                                 }
                             }
                         }
@@ -340,32 +371,34 @@ fun StudentEditorScreen(
                         ) {
                             TreeBranchItem(isLast = true) {
                                 Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                                    var newFieldLabel by remember { mutableStateOf("") }
-                                    Row(
-                                        Modifier.fillMaxWidth().padding(vertical = 4.dp),
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(6.dp)
-                                    ) {
-                                        OutlinedTextField(
-                                            value = newFieldLabel,
-                                            onValueChange = { newFieldLabel = it },
-                                            placeholder = { Text("নতুন ফিল্ড (যেমন: মাতার নাম)", fontSize = 12.sp) },
-                                            singleLine = true,
-                                            modifier = Modifier.weight(1f).testTag("editor_new_custom_field_input")
-                                        )
-                                        Button(
-                                            onClick = {
-                                                if (onAddCustomField(newFieldLabel)) newFieldLabel = ""
-                                            },
-                                            enabled = newFieldLabel.isNotBlank(),
-                                            shape = RoundedCornerShape(8.dp),
-                                            modifier = Modifier.testTag("editor_add_custom_field_btn")
+                                    if (canEditProfile) {
+                                        var newFieldLabel by remember { mutableStateOf("") }
+                                        Row(
+                                            Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(6.dp)
                                         ) {
-                                            Text("+ ফিল্ড", fontSize = 12.sp)
+                                            OutlinedTextField(
+                                                value = newFieldLabel,
+                                                onValueChange = { newFieldLabel = it },
+                                                placeholder = { Text("নতুন ফিল্ড (যেমন: মাতার নাম)", fontSize = 12.sp) },
+                                                singleLine = true,
+                                                modifier = Modifier.weight(1f).testTag("editor_new_custom_field_input")
+                                            )
+                                            Button(
+                                                onClick = {
+                                                    if (onAddCustomField(newFieldLabel)) newFieldLabel = ""
+                                                },
+                                                enabled = newFieldLabel.isNotBlank(),
+                                                shape = RoundedCornerShape(8.dp),
+                                                modifier = Modifier.testTag("editor_add_custom_field_btn")
+                                            ) {
+                                                Text("+ ফিল্ড", fontSize = 12.sp)
+                                            }
                                         }
                                     }
                                     settings.customFields.forEach { cf ->
-                                        EditorTextField(cf.label, s.x[cf.key] ?: "") { setX(cf.key, it) }
+                                        EditorTextField(cf.label, s.x[cf.key] ?: "", enabled = canEditProfile) { setX(cf.key, it) }
                                     }
                                 }
                             }
@@ -373,52 +406,61 @@ fun StudentEditorScreen(
                     }
 
                     1 -> {
-                        // Tab 1: Term -> Subject -> 2-Column Marks Tree
-                        val overall = s.overallPct()
-                        val overallGrade = gradeOf(overall)
-                        Card(
-                            Modifier.fillMaxWidth(),
-                            colors = CardDefaults.cardColors(containerColor = TealSoft),
-                            border = BorderStroke(1.dp, TealPrimary.copy(alpha = 0.35f))
-                        ) {
-                            Row(
-                                Modifier.fillMaxWidth().padding(12.dp),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Column {
-                                    Text("সমন্বিত চূড়ান্ত ফলাফল", fontSize = 11.5.sp, color = SlateMuted)
-                                    Text(
-                                        "${fmt(overall)}% — ${gradeLabelBn(overallGrade)}",
-                                        fontWeight = FontWeight.Bold,
-                                        fontSize = 15.sp,
-                                        color = TealPrimary
-                                    )
-                                }
-                                Surface(color = TealPrimary, shape = RoundedCornerShape(8.dp)) {
-                                    Text(
-                                        "গ্রেড $overallGrade",
-                                        color = MaterialTheme.colorScheme.onPrimary,
-                                        fontWeight = FontWeight.Bold,
-                                        fontSize = 13.sp,
-                                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
-                                    )
-                                }
-                            }
+                        val visibleSubs = s.subs().filter { permissions.canViewSubject(it.key) }
+                        if (visibleSubs.isEmpty()) {
+                            ReadOnlyPermissionBanner("কোনো বিষয়ের নম্বর দেখা বা সম্পাদনার অনুমতি আপনার নেই।")
+                            return@Column
                         }
 
-                        val subsList = s.subs()
-                        val maxAll = subsList.sumOf { it.max }.coerceAtLeast(1)
+                        // Show full overall grade card only when all subjects are viewable
+                        if (permissions.allSubjects || permissions.canViewOtherSubjects) {
+                            val overall = s.overallPct()
+                            val overallGrade = gradeOf(overall)
+                            Card(
+                                Modifier.fillMaxWidth(),
+                                colors = CardDefaults.cardColors(containerColor = TealSoft),
+                                border = BorderStroke(1.dp, TealPrimary.copy(alpha = 0.35f))
+                            ) {
+                                Row(
+                                    Modifier.fillMaxWidth().padding(12.dp),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Column {
+                                        Text("সমন্বিত চূড়ান্ত ফলাফল", fontSize = 11.5.sp, color = SlateMuted)
+                                        Text(
+                                            "${fmt(overall)}% — ${gradeLabelBn(overallGrade)}",
+                                            fontWeight = FontWeight.Bold,
+                                            fontSize = 15.sp,
+                                            color = TealPrimary
+                                        )
+                                    }
+                                    Surface(color = TealPrimary, shape = RoundedCornerShape(8.dp)) {
+                                        Text(
+                                            "গ্রেড $overallGrade",
+                                            color = MaterialTheme.colorScheme.onPrimary,
+                                            fontWeight = FontWeight.Bold,
+                                            fontSize = 13.sp,
+                                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
+                                        )
+                                    }
+                                }
+                            }
+                        } else {
+                            ReadOnlyPermissionBanner("শুধুমাত্র আপনার নির্ধারিত বিষয়গুলো (${visibleSubs.joinToString(", ") { it.bn }}) প্রদর্শিত হচ্ছে।")
+                        }
+
+                        val maxAll = visibleSubs.sumOf { it.max }.coerceAtLeast(1)
 
                         (1..3).forEach { t ->
-                            val hasT = s.hasTerm(t)
-                            val termSum = subsList.sumOf { s.total(it, t) }
+                            val hasT = visibleSubs.any { s.hasSub(it, t) }
+                            val termSum = visibleSubs.sumOf { s.total(it, t) }
                             val termPct = termSum / maxAll * 100.0
                             val termGrade = gradeOf(termPct)
 
                             TreeGroupCard(
                                 title = "${bn(t.toString())} প্রান্তিক মূল্যায়ন",
-                                subtitle = if (hasT) "মোট ${fmt(termSum)} / ${bn(maxAll.toString())}" else "এখনো নম্বর এন্ট্রি হয়নি",
+                                subtitle = if (hasT) "নির্ধারিত বিষয়ে মোট ${fmt(termSum)} / ${bn(maxAll.toString())}" else "এখনো নম্বর এন্ট্রি হয়নি",
                                 badgeText = if (hasT) "$termGrade · ${fmt(termPct)}%" else "খালি",
                                 badgeColor = if (hasT) EmeraldGrade else SlateMuted,
                                 icon = Icons.Rounded.FolderOpen,
@@ -428,16 +470,17 @@ fun StudentEditorScreen(
                                     expandedTerm = if (expandedTerm == t) null else t
                                 }
                             ) {
-                                subsList.forEachIndexed { sIdx, sub ->
-                                    val isLastSub = sIdx == subsList.lastIndex
+                                visibleSubs.forEachIndexed { sIdx, sub ->
+                                    val isLastSub = sIdx == visibleSubs.lastIndex
                                     val subKeyForTerm = "${t}_${sub.key}"
                                     val subTot = s.total(sub, t)
                                     val subHas = s.hasSub(sub, t)
                                     val subGrade = gradeOf(subTot / sub.max.toDouble() * 100.0)
+                                    val canEditSub = permissions.canEditSubject(sub.key)
 
                                     TreeBranchItem(isLast = isLastSub) {
                                         TreeGroupCard(
-                                            title = sub.bn,
+                                            title = sub.bn + if (!canEditSub) " (শুধু দেখা)" else "",
                                             subtitle = "পূর্ণমান ${bn(sub.max.toString())}",
                                             badgeText = if (subHas) "${fmt(subTot)} ($subGrade)" else "—",
                                             badgeColor = if (subHas) TealPrimary else SlateMuted,
@@ -448,7 +491,6 @@ fun StudentEditorScreen(
                                                 expandedSubKey = if (expandedSubKey == subKeyForTerm) null else subKeyForTerm
                                             }
                                         ) {
-                                            // Pair component inputs cleanly in 2-column rows
                                             val chunked = sub.comps.chunked(2)
                                             chunked.forEach { pair ->
                                                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -466,7 +508,8 @@ fun StudentEditorScreen(
                                                                 label = shortLabel,
                                                                 max = c.max.toDouble(),
                                                                 value = s.m[k],
-                                                                k = k
+                                                                k = k,
+                                                                enabled = canEditSub
                                                             ) { v ->
                                                                 s = s.copy(m = if (v == null) s.m - k else s.m + (k to v))
                                                             }
@@ -481,7 +524,8 @@ fun StudentEditorScreen(
                                                     label = "সামষ্টিক / লিখিত (সর্বোচ্চ ${bn(sub.written.toString())})",
                                                     max = sub.written.toDouble(),
                                                     value = s.m[wk],
-                                                    k = wk
+                                                    k = wk,
+                                                    enabled = canEditSub
                                                 ) { v ->
                                                     s = s.copy(m = if (v == null) s.m - wk else s.m + (wk to v))
                                                 }
@@ -494,8 +538,10 @@ fun StudentEditorScreen(
                     }
 
                     else -> {
-                        // Tab 2: Term-Grouped Attendance, Traits & Remarks Tree
-                        if (isPlaceholderAi) {
+                        val canEditAtt = permissions.canEditAttendance
+                        if (!canEditAtt) {
+                            ReadOnlyPermissionBanner("উপস্থিতি, গুণাবলি ও মন্তব্য সম্পাদনার অনুমতি আপনার নেই (শুধুমাত্র দেখার জন্য)।")
+                        } else if (isPlaceholderAi) {
                             Surface(
                                 color = AmberBg,
                                 shape = RoundedCornerShape(8.dp),
@@ -535,10 +581,14 @@ fun StudentEditorScreen(
                                     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                             Box(Modifier.weight(1f)) {
-                                                EditorTextField("মোট কার্যদিবস", s.x["DAYS_$t"] ?: "", number = true) { setX("DAYS_$t", it) }
+                                                EditorTextField("মোট কার্যদিবস", s.x["DAYS_$t"] ?: "", number = true, enabled = canEditAtt) {
+                                                    setX("DAYS_$t", it)
+                                                }
                                             }
                                             Box(Modifier.weight(1f)) {
-                                                EditorTextField("উপস্থিতি", s.x["PRES_$t"] ?: "", number = true) { setX("PRES_$t", it) }
+                                                EditorTextField("উপস্থিতি", s.x["PRES_$t"] ?: "", number = true, enabled = canEditAtt) {
+                                                    setX("PRES_$t", it)
+                                                }
                                             }
                                         }
 
@@ -555,26 +605,31 @@ fun StudentEditorScreen(
                                                 listOf("ক", "খ", "গ").forEach { opt ->
                                                     FilterChip(
                                                         selected = s.x[k] == opt,
-                                                        onClick = { setX(k, if (s.x[k] == opt) "" else opt) },
+                                                        enabled = canEditAtt,
+                                                        onClick = { if (canEditAtt) setX(k, if (s.x[k] == opt) "" else opt) },
                                                         label = { Text(opt) }
                                                     )
                                                 }
                                             }
                                         }
 
-                                        EditorTextField("শ্রেণি শিক্ষকের মতামত", remarkText, lines = 3) { setX(remKey, it) }
+                                        EditorTextField("শ্রেণি শিক্ষকের মতামত", remarkText, lines = 3, enabled = canEditAtt) {
+                                            setX(remKey, it)
+                                        }
 
-                                        OutlinedButton(
-                                            onClick = {
-                                                onDraftRemark(s, t) { drafted -> setX(remKey, drafted) }
-                                            },
-                                            enabled = draftingRemarkTerm == null,
-                                            shape = RoundedCornerShape(8.dp),
-                                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp),
-                                            modifier = Modifier.fillMaxWidth().testTag("editor_ai_draft_$t")
-                                        ) {
-                                            Icon(Icons.Rounded.AutoAwesome, contentDescription = null, modifier = Modifier.size(15.dp))
-                                            Text(if (draftingRemarkTerm == t) " তৈরি হচ্ছে..." else " AI খসড়া তৈরি করুন", fontSize = 12.sp)
+                                        if (canEditAtt) {
+                                            OutlinedButton(
+                                                onClick = {
+                                                    onDraftRemark(s, t) { drafted -> setX(remKey, drafted) }
+                                                },
+                                                enabled = draftingRemarkTerm == null,
+                                                shape = RoundedCornerShape(8.dp),
+                                                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp),
+                                                modifier = Modifier.fillMaxWidth().testTag("editor_ai_draft_$t")
+                                            ) {
+                                                Icon(Icons.Rounded.AutoAwesome, contentDescription = null, modifier = Modifier.size(15.dp))
+                                                Text(if (draftingRemarkTerm == t) " তৈরি হচ্ছে..." else " AI খসড়া তৈরি করুন", fontSize = 12.sp)
+                                            }
                                         }
                                     }
                                 }
@@ -611,16 +666,37 @@ fun StudentEditorScreen(
 }
 
 @Composable
+private fun ReadOnlyPermissionBanner(text: String) {
+    Surface(
+        color = AmberBg,
+        border = BorderStroke(1.dp, AmberBorder),
+        shape = RoundedCornerShape(10.dp),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Row(
+            modifier = Modifier.padding(10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Icon(Icons.Rounded.Lock, contentDescription = null, tint = AmberNotice, modifier = Modifier.size(18.dp))
+            Text(text, fontSize = 11.5.sp, color = AmberNotice, lineHeight = 16.sp)
+        }
+    }
+}
+
+@Composable
 private fun EditorTextField(
     label: String,
     value: String,
     number: Boolean = false,
     lines: Int = 1,
+    enabled: Boolean = true,
     onChange: (String) -> Unit
 ) {
     OutlinedTextField(
         value = value,
-        onValueChange = onChange,
+        onValueChange = { if (enabled) onChange(it) },
+        enabled = enabled,
         label = { Text(label, fontSize = 12.sp) },
         singleLine = lines == 1,
         minLines = lines,
@@ -635,6 +711,7 @@ private fun MarkField(
     max: Double,
     value: Double?,
     k: String,
+    enabled: Boolean = true,
     onValue: (Double?) -> Unit
 ) {
     var t by remember(k, value) { mutableStateOf(value?.let { fmtEn(it) } ?: "") }
@@ -643,10 +720,12 @@ private fun MarkField(
     OutlinedTextField(
         value = t,
         onValueChange = {
+            if (!enabled) return@OutlinedTextField
             t = it
             if (it.isBlank()) onValue(null)
             else fromBn(it).toDoubleOrNull()?.let { d -> if (d in 0.0..max) onValue(d) }
         },
+        enabled = enabled,
         label = { Text(label, fontSize = 11.5.sp, maxLines = 1, overflow = TextOverflow.Ellipsis) },
         isError = err,
         singleLine = true,

@@ -9,6 +9,7 @@ import androidx.activity.SystemBarStyle
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.activity.result.IntentSenderRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.border
@@ -31,6 +32,7 @@ import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.AutoAwesome
 import androidx.compose.material.icons.rounded.Description
 import androidx.compose.material.icons.rounded.GridOn
+import androidx.compose.material.icons.rounded.Lock
 import androidx.compose.material.icons.rounded.MoreVert
 import androidx.compose.material.icons.rounded.People
 import androidx.compose.material.icons.rounded.Settings
@@ -84,9 +86,11 @@ import androidx.lifecycle.viewmodel.viewModelFactory
 import com.google.firebase.Firebase
 import com.google.firebase.auth.auth
 import com.google.firebase.firestore.FirebaseFirestore
+import com.kgps.result.backup.AutoBackupManager
 import com.kgps.result.cloud.CloudSessionState
 import com.kgps.result.cloud.SchoolCloudRepository
 import com.kgps.result.cloud.SchoolWorkspace
+import com.kgps.result.cloud.TeacherPermissions
 import com.kgps.result.cloud.attemptAutoSignIn
 import com.kgps.result.cloud.authStateFlow
 import com.kgps.result.cloud.onGoogleSignInClicked
@@ -100,6 +104,7 @@ import com.kgps.result.ui.screens.SchoolHubScreen
 import com.kgps.result.ui.screens.SettingsScreen
 import com.kgps.result.ui.screens.SmartCsvImportDialog
 import com.kgps.result.ui.screens.StudentEditorScreen
+import com.kgps.result.ui.theme.AmberNotice
 import com.kgps.result.ui.theme.EmeraldGrade
 import com.kgps.result.ui.theme.ResultMakerTheme
 import com.kgps.result.ui.theme.RoseDanger
@@ -225,11 +230,19 @@ private fun AppRoot() {
             key = user.uid,
             factory = viewModelFactory {
                 initializer {
-                    val db = FirebaseFirestore.getInstance(appContext.getString(R.string.firestore_database_id))
+                    val dbId = appContext.getString(R.string.firestore_database_id).trim()
+                    val db = if (dbId.isBlank() || dbId == "(default)") {
+                        FirebaseFirestore.getInstance()
+                    } else {
+                        FirebaseFirestore.getInstance(dbId)
+                    }
                     val cloudRepo = SchoolCloudRepository(db)
+                    val autoBackupManager = AutoBackupManager(appContext, user.uid)
                     val localSeed = Repo.load(appContext)
                     ResultMakerViewModel(
+                        appContext = appContext,
                         cloudRepo = cloudRepo,
+                        autoBackupManager = autoBackupManager,
                         contentResolver = appContext.contentResolver,
                         currentUserId = user.uid,
                         currentUserDisplayName = user.displayName.orEmpty(),
@@ -259,6 +272,17 @@ private fun AppRoot() {
         val codePreview by vm.codePreview.collectAsStateWithLifecycle()
         val lookupError by vm.lookupError.collectAsStateWithLifecycle()
         val pendingJoinSchoolName by vm.pendingJoinSchoolName.collectAsStateWithLifecycle()
+
+        val pendingDriveConsent by vm.pendingDriveConsent.collectAsStateWithLifecycle()
+        val driveConsentLauncher = rememberLauncherForActivityResult(
+            ActivityResultContracts.StartIntentSenderForResult()
+        ) { result ->
+            vm.handleDriveConsentIntentResult(result.data)
+        }
+        LaunchedEffect(pendingDriveConsent) {
+            val sender = pendingDriveConsent ?: return@LaunchedEffect
+            driveConsentLauncher.launch(IntentSenderRequest.Builder(sender).build())
+        }
 
         val performSignOut: () -> Unit = {
             signOutFromGoogle(
@@ -303,6 +327,7 @@ private fun AppRoot() {
                         onLookupCode = vm::lookupSchoolCode,
                         onClearCodePreview = vm::clearCodePreview,
                         onJoinWithPreview = vm::joinWithCodePreview,
+                        onCancelPendingRequest = vm::cancelPendingJoinRequest,
                         onBackToApp = null,
                         onSignOut = performSignOut
                     )
@@ -329,6 +354,7 @@ private fun AppRoot() {
                             onLookupCode = vm::lookupSchoolCode,
                             onClearCodePreview = vm::clearCodePreview,
                             onJoinWithPreview = vm::joinWithCodePreview,
+                            onCancelPendingRequest = vm::cancelPendingJoinRequest,
                             onBackToApp = if (currentActive != null) ({ vm.closeSchoolHub() }) else null,
                             onSignOut = performSignOut
                         )
@@ -394,6 +420,10 @@ fun ResultMakerWorkspace(
     val syncMeta by vm.studentSyncMeta.collectAsStateWithLifecycle()
     val settings by vm.settings.collectAsStateWithLifecycle()
     val joinRequests by vm.joinRequests.collectAsStateWithLifecycle()
+    val permissions by vm.activePermissions.collectAsStateWithLifecycle()
+    val backupStatus by vm.backupStatus.collectAsStateWithLifecycle()
+    val driveFiles by vm.driveFiles.collectAsStateWithLifecycle()
+    val driveFilesLoading by vm.driveFilesLoading.collectAsStateWithLifecycle()
     val cls by vm.selectedClass.collectAsStateWithLifecycle()
     val section by vm.currentSection.collectAsStateWithLifecycle()
     val editingStudent by vm.editingStudent.collectAsStateWithLifecycle()
@@ -419,7 +449,9 @@ fun ResultMakerWorkspace(
     }
 
     val makePdf: (List<Student>, String) -> Unit = { list, fileName ->
-        if (list.isEmpty()) {
+        if (!permissions.canExportPdf) {
+            vm.showMessage("PDF তৈরি করার অনুমতি আপনার নেই")
+        } else if (list.isEmpty()) {
             vm.showMessage("PDF তৈরির জন্য কোনো শিক্ষার্থী নেই")
         } else {
             pendingPdfStudents = list
@@ -427,6 +459,7 @@ fun ResultMakerWorkspace(
         }
     }
 
+    val isAdmin = activeSchool.isAdmin(vm.currentUserId)
     val isEditing = editingStudent != null
     val isSettings = section == NavSection.SETTINGS
     val showPrimaryChrome = !isEditing && !isSettings
@@ -443,14 +476,16 @@ fun ResultMakerWorkspace(
                         settings = settings,
                         activeSchool = activeSchool,
                         currentUserId = vm.currentUserId,
+                        permissions = permissions,
                         pendingRequestCount = joinRequests.size,
                         isSettings = isSettings,
                         onBackFromSettings = { vm.navigate(NavSection.ROSTER) },
                         onOpenSettings = { vm.navigate(NavSection.SETTINGS) },
                         onCsvImport = { vm.openCsvImport("") },
                         onAllPdf = {
+                            val allowedCls = permissions.effectiveClasses().toSet()
                             makePdf(
-                                students.sortedWith(compareBy({ it.cls }, { it.roll })),
+                                students.filter { it.cls in allowedCls }.sortedWith(compareBy({ it.cls }, { it.roll })),
                                 "সব-শ্রেণির-প্রতিবেদন.pdf"
                             )
                         },
@@ -460,7 +495,7 @@ fun ResultMakerWorkspace(
                 }
             },
             floatingActionButton = {
-                if (!isEditing && section == NavSection.ROSTER) {
+                if (!isEditing && section == NavSection.ROSTER && permissions.canManageStudents && permissions.effectiveClasses().isNotEmpty()) {
                     ExtendedFloatingActionButton(
                         onClick = { vm.openNewStudentEditor(NavSection.ROSTER) },
                         containerColor = TealPrimary,
@@ -529,6 +564,7 @@ fun ResultMakerWorkspace(
                             StudentEditorScreen(
                                 initialStudent = activeEdit,
                                 settings = settings,
+                                permissions = permissions,
                                 syncMeta = syncMeta[activeEdit.id],
                                 draftingRemarkTerm = draftingTerm,
                                 isPlaceholderAi = vm.isPlaceholderAi,
@@ -547,6 +583,10 @@ fun ResultMakerWorkspace(
                                     students = students,
                                     settings = settings,
                                     cls = cls,
+                                    permissions = permissions,
+                                    isAdmin = isAdmin,
+                                    pendingRequestCount = joinRequests.size,
+                                    onOpenApprovals = { vm.navigate(NavSection.SETTINGS) },
                                     onSelectClass = vm::selectClass,
                                     onOpenStudent = { vm.openEditor(it, NavSection.ROSTER) },
                                     onPreviewStudent = { vm.openStudio(it.id) },
@@ -563,8 +603,9 @@ fun ResultMakerWorkspace(
                                         )
                                     },
                                     onAllPdf = {
+                                        val allowedCls = permissions.effectiveClasses().toSet()
                                         makePdf(
-                                            students.sortedWith(compareBy({ it.cls }, { it.roll })),
+                                            students.filter { it.cls in allowedCls }.sortedWith(compareBy({ it.cls }, { it.roll })),
                                             "সব-শ্রেণির-প্রতিবেদন.pdf"
                                         )
                                     }
@@ -574,6 +615,7 @@ fun ResultMakerWorkspace(
                                     students = students,
                                     settings = settings,
                                     cls = cls,
+                                    permissions = permissions,
                                     onSelectClass = vm::selectClass,
                                     onUpsertStudent = vm::upsertStudent,
                                     onPatchStudentField = vm::patchStudentField,
@@ -587,23 +629,51 @@ fun ResultMakerWorkspace(
                                     onShowMessage = vm::showMessage
                                 )
 
-                                NavSection.STUDIO -> ReportStudioScreen(
-                                    students = students,
-                                    settings = settings,
-                                    selectedId = studioStudentId,
-                                    onSelectId = vm::selectStudioStudent,
-                                    onUpdateSettings = vm::updateSettings,
-                                    onPrintStudent = { s ->
-                                        PdfGen.printStudents(
-                                            ctx,
-                                            listOf(s),
-                                            settings,
-                                            "${s.name.ifBlank { "Report" }}_${s.roll}"
+                                NavSection.STUDIO -> if (!permissions.canExportPdf) {
+                                    Column(
+                                        Modifier.fillMaxSize().padding(24.dp),
+                                        verticalArrangement = Arrangement.Center,
+                                        horizontalAlignment = Alignment.CenterHorizontally
+                                    ) {
+                                        Icon(Icons.Rounded.Lock, contentDescription = null, tint = AmberNotice, modifier = Modifier.size(36.dp))
+                                        Text(
+                                            "রিপোর্ট কার্ড প্রিভিউ ও PDF তৈরির অনুমতি আপনার নেই",
+                                            fontWeight = FontWeight.Bold,
+                                            fontSize = 15.sp,
+                                            color = SlateText,
+                                            modifier = Modifier.padding(top = 10.dp)
                                         )
-                                    },
-                                    onExportPdf = { s -> makePdf(listOf(s), "${s.name.ifBlank { "student" }}-report.pdf") },
-                                    onBack = { vm.navigate(NavSection.ROSTER) }
-                                )
+                                        Text(
+                                            "অ্যাডমিন আপনার জন্য PDF ও রিপোর্ট কার্ড অনুমতি চালু করলে এখানে প্রিভিউ ও প্রিন্ট করতে পারবেন।",
+                                            fontSize = 12.sp,
+                                            color = SlateMuted,
+                                            modifier = Modifier.padding(top = 4.dp, bottom = 12.dp)
+                                        )
+                                        Button(onClick = { vm.navigate(NavSection.ROSTER) }) {
+                                            Text("শিক্ষার্থী তালিকায় ফিরুন")
+                                        }
+                                    }
+                                } else {
+                                    val allowedCls = permissions.effectiveClasses().toSet()
+                                    val allowedStudents = students.filter { it.cls in allowedCls }
+                                    ReportStudioScreen(
+                                        students = allowedStudents,
+                                        settings = settings,
+                                        selectedId = studioStudentId,
+                                        onSelectId = vm::selectStudioStudent,
+                                        onUpdateSettings = vm::updateSettings,
+                                        onPrintStudent = { s ->
+                                            PdfGen.printStudents(
+                                                ctx,
+                                                listOf(s),
+                                                settings,
+                                                "${s.name.ifBlank { "Report" }}_${s.roll}"
+                                            )
+                                        },
+                                        onExportPdf = { s -> makePdf(listOf(s), "${s.name.ifBlank { "student" }}-report.pdf") },
+                                        onBack = { vm.navigate(NavSection.ROSTER) }
+                                    )
+                                }
 
                                 NavSection.ASSISTANT -> AiAssistantScreen(
                                     state = aiState,
@@ -624,28 +694,39 @@ fun ResultMakerWorkspace(
                                     settings = settings,
                                     currentUserId = vm.currentUserId,
                                     activeSchool = activeSchool,
+                                    permissions = permissions,
                                     joinRequests = joinRequests,
+                                    backupStatus = backupStatus,
+                                    driveFiles = driveFiles,
+                                    driveFilesLoading = driveFilesLoading,
                                     onUpdateSettings = vm::updateSettings,
                                     onAddCustomField = vm::addCustomField,
                                     onRemoveCustomField = vm::removeCustomField,
                                     onOpenCsvImport = { txt -> vm.openCsvImport(txt) },
                                     onRestoreBackupJson = vm::restoreBackupJson,
                                     onExportAllPdf = {
+                                        val allowedCls = permissions.effectiveClasses().toSet()
                                         makePdf(
-                                            students.sortedWith(compareBy({ it.cls }, { it.roll })),
+                                            students.filter { it.cls in allowedCls }.sortedWith(compareBy({ it.cls }, { it.roll })),
                                             "সব-শ্রেণির-প্রতিবেদন.pdf"
                                         )
                                     },
                                     onResetSampleData = vm::resetSampleData,
                                     onClearAllStudents = vm::clearAllStudents,
                                     onRegenerateJoinCode = vm::regenerateJoinCode,
-                                    onSetApprovalRequired = vm::setApprovalRequired,
                                     onApproveJoinRequest = vm::approveJoinRequest,
                                     onRejectJoinRequest = vm::rejectJoinRequest,
+                                    onUpdateMemberPermissions = vm::updateMemberPermissions,
                                     onUpdateMemberRole = vm::updateMemberRole,
                                     onRemoveMember = vm::removeMember,
                                     onLeaveSchool = vm::leaveActiveSchool,
-                                    onOpenSchoolHub = onOpenSchoolHub,
+                                    onToggleLocalAutoBackup = vm::toggleLocalAutoBackup,
+                                    onSetLocalBackupFolder = vm::setLocalBackupFolder,
+                                    onToggleDriveAutoBackup = vm::toggleDriveAutoBackup,
+                                    onBackupNowBoth = vm::backupNowBoth,
+                                    onRestoreLocalSnapshot = vm::restoreLocalSnapshot,
+                                    onLoadDriveBackups = vm::loadDriveBackupList,
+                                    onRestoreFromDriveFile = vm::restoreFromDriveFile,
                                     onSignOut = onSignOut,
                                     onShowMessage = vm::showMessage,
                                     onBack = { vm.navigate(NavSection.ROSTER) }
@@ -697,6 +778,7 @@ private fun ResultMakerTopBar(
     settings: Settings,
     activeSchool: SchoolWorkspace,
     currentUserId: String,
+    permissions: TeacherPermissions,
     pendingRequestCount: Int,
     isSettings: Boolean,
     onBackFromSettings: () -> Unit,
@@ -731,7 +813,7 @@ private fun ResultMakerTopBar(
                     horizontalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
                     Text(
-                        if (isSettings) "সেটিংস ও সদস্য" else "Result Maker",
+                        if (isSettings) "সেটিংস, সদস্য ও ব্যাকআপ" else "Result Maker",
                         fontWeight = FontWeight.Bold,
                         fontSize = 18.sp,
                         maxLines = 1,
@@ -784,17 +866,23 @@ private fun ResultMakerTopBar(
                         Icon(Icons.Rounded.MoreVert, contentDescription = "অতিরিক্ত অপশন")
                     }
                     DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                        if (permissions.canManageStudents) {
+                            DropdownMenuItem(
+                                text = { Text("স্মার্ট CSV ইমপোর্ট") },
+                                onClick = { menuOpen = false; onCsvImport() }
+                            )
+                        }
+                        if (permissions.canExportPdf) {
+                            DropdownMenuItem(
+                                text = { Text("সব শ্রেণির সব শিক্ষার্থীর PDF") },
+                                onClick = { menuOpen = false; onAllPdf() }
+                            )
+                        }
+                        if (permissions.canManageStudents || permissions.canExportPdf) {
+                            HorizontalDivider()
+                        }
                         DropdownMenuItem(
-                            text = { Text("স্মার্ট CSV ইমপোর্ট") },
-                            onClick = { menuOpen = false; onCsvImport() }
-                        )
-                        DropdownMenuItem(
-                            text = { Text("সব শ্রেণির সব শিক্ষার্থীর PDF") },
-                            onClick = { menuOpen = false; onAllPdf() }
-                        )
-                        HorizontalDivider()
-                        DropdownMenuItem(
-                            text = { Text("বিদ্যালয় পরিবর্তন / যোগ") },
+                            text = { Text("বিদ্যালয় পরিচিতি") },
                             onClick = { menuOpen = false; onOpenSchoolHub() },
                             modifier = Modifier.testTag("menu_switch_school")
                         )
