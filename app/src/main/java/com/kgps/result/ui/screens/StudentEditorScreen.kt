@@ -101,7 +101,7 @@ fun StudentEditorScreen(
     permissions: TeacherPermissions,
     syncMeta: StudentSyncMeta? = null,
     draftingRemarkTerm: Int?,
-    isPlaceholderAi: Boolean,
+    isGeminiConfigured: Boolean,
     onAddCustomField: (String) -> Boolean,
     onUpsertStudent: (Student) -> Unit,
     onDeleteStudent: (String) -> Unit,
@@ -541,14 +541,14 @@ fun StudentEditorScreen(
                         val canEditAtt = permissions.canEditAttendance
                         if (!canEditAtt) {
                             ReadOnlyPermissionBanner("উপস্থিতি, গুণাবলি ও মন্তব্য সম্পাদনার অনুমতি আপনার নেই (শুধুমাত্র দেখার জন্য)।")
-                        } else if (isPlaceholderAi) {
+                        } else if (!isGeminiConfigured) {
                             Surface(
                                 color = AmberBg,
                                 shape = RoundedCornerShape(8.dp),
                                 modifier = Modifier.fillMaxWidth()
                             ) {
                                 Text(
-                                    "Sample Mode: 'AI খসড়া' নমুনা টেক্সট দেয় (লাইভ AI-এর জন্য Firebase প্রয়োজন)।",
+                                    "AI মতামত খসড়া ব্যবহার করতে সেটিংস → Gemini AI ও মডেল থেকে আপনার Gemini API Key যুক্ত করুন।",
                                     fontSize = 11.5.sp,
                                     color = AmberNotice,
                                     modifier = Modifier.padding(horizontal = 10.dp, vertical = 7.dp)

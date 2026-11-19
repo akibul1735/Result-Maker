@@ -30,19 +30,25 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ExitToApp
 import androidx.compose.material.icons.automirrored.rounded.Logout
 import androidx.compose.material.icons.rounded.AdminPanelSettings
+import androidx.compose.material.icons.rounded.AutoAwesome
 import androidx.compose.material.icons.rounded.Backup
+import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.CloudDone
 import androidx.compose.material.icons.rounded.ContentCopy
 import androidx.compose.material.icons.rounded.Folder
 import androidx.compose.material.icons.rounded.FontDownload
 import androidx.compose.material.icons.rounded.Group
+import androidx.compose.material.icons.rounded.Key
 import androidx.compose.material.icons.rounded.PersonRemove
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.Restore
 import androidx.compose.material.icons.rounded.School
 import androidx.compose.material.icons.rounded.SdStorage
+import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.Tune
+import androidx.compose.material.icons.rounded.Visibility
+import androidx.compose.material.icons.rounded.VisibilityOff
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
@@ -50,6 +56,7 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -62,6 +69,7 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -77,6 +85,8 @@ import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -88,6 +98,8 @@ import com.kgps.result.PdfGen
 import com.kgps.result.Repo
 import com.kgps.result.Settings
 import com.kgps.result.Student
+import com.kgps.result.ai.DiscoveredGeminiModel
+import com.kgps.result.ai.GeminiApiConfig
 import com.kgps.result.backup.AutoBackupStatus
 import com.kgps.result.backup.DriveBackupFile
 import com.kgps.result.backup.LocalBackupEntry
@@ -130,9 +142,16 @@ fun SettingsScreen(
     backupStatus: AutoBackupStatus,
     driveFiles: List<DriveBackupFile>,
     driveFilesLoading: Boolean,
-    cloudRunUrl: String,
-    cloudRunTesting: Boolean,
-    cloudRunTestStatus: String?,
+    geminiApiKey: String,
+    geminiModel: String,
+    geminiAvailableModels: List<DiscoveredGeminiModel>,
+    geminiCustomModels: List<String>,
+    geminiNewModelIds: Set<String>,
+    geminiRefreshingModels: Boolean,
+    geminiModelsError: String?,
+    geminiTesting: Boolean,
+    geminiTestStatus: String?,
+    geminiTestSuccess: Boolean?,
     onUpdateSettings: (Settings) -> Unit,
     onAddCustomField: (String) -> Boolean,
     onRemoveCustomField: (String) -> Unit,
@@ -155,8 +174,11 @@ fun SettingsScreen(
     onRestoreLocalSnapshot: (String) -> Unit,
     onLoadDriveBackups: () -> Unit,
     onRestoreFromDriveFile: (String) -> Unit,
-    onSaveCloudRunUrl: (String) -> Unit,
-    onTestCloudRunUrl: (String) -> Unit,
+    onSaveGeminiConfig: (String, String) -> Unit,
+    onTestGeminiConnection: (String, String) -> Unit,
+    onRefreshGeminiModels: (String) -> Unit,
+    onRemoveCustomGeminiModel: (String) -> Unit,
+    onClearGeminiApiKey: () -> Unit,
     onSignOut: () -> Unit,
     onShowMessage: (String) -> Unit,
     onBack: () -> Unit
@@ -171,7 +193,17 @@ fun SettingsScreen(
     var s by remember(settings) { mutableStateOf(settings) }
     var expandedGroup by remember { mutableStateOf("collab") } // collab, school, font, teachers, backup, aiproxy
     var newFieldLabel by remember { mutableStateOf("") }
-    var cloudRunInput by remember(cloudRunUrl) { mutableStateOf(cloudRunUrl) }
+    var apiKeyInput by remember(geminiApiKey) { mutableStateOf(geminiApiKey) }
+    var showApiKey by remember { mutableStateOf(false) }
+    var modelInput by remember(geminiModel) { mutableStateOf(geminiModel) }
+    var modelSearchQuery by remember { mutableStateOf("") }
+    var showAllLiveModels by remember { mutableStateOf(false) }
+
+    LaunchedEffect(expandedGroup, geminiApiKey) {
+        if (expandedGroup == "aiproxy" && geminiApiKey.isNotBlank()) {
+            onRefreshGeminiModels(geminiApiKey)
+        }
+    }
 
     var askReset by remember { mutableStateOf(false) }
     var askClear by remember { mutableStateOf(false) }
@@ -1031,18 +1063,18 @@ fun SettingsScreen(
                 }
             }
 
-            // Group 6: Cloud Run + Firebase Auth ID Token AI Proxy
+            // Group 6: Manual Gemini API Key & Latest Model Suggestions
             TreeGroupCard(
-                title = "AI সার্ভার (Cloud Run + Auth)",
-                subtitle = if (cloudRunUrl.isNotBlank()) {
-                    "সক্রিয়: Cloud Run প্রক্সি ($cloudRunUrl)"
+                title = "Gemini AI ও মডেল",
+                subtitle = if (geminiApiKey.isNotBlank()) {
+                    "সক্রিয় মডেল: $geminiModel · API Key সংরক্ষিত"
                 } else {
-                    "ডিফল্ট: Firebase AI Logic · Play Store ছাড়া APK-তে Cloud Run ব্যবহার করুন"
+                    "Google AI Studio থেকে নিজস্ব Gemini API Key যুক্ত করুন"
                 },
-                badgeText = if (cloudRunUrl.isNotBlank()) "Cloud Run" else "ডিফল্ট",
-                badgeColor = if (cloudRunUrl.isNotBlank()) EmeraldGrade else SlateMuted,
-                badgeContainerColor = if (cloudRunUrl.isNotBlank()) TealSoft else SlateBg,
-                icon = Icons.Rounded.CloudDone,
+                badgeText = if (geminiApiKey.isNotBlank()) "সংযুক্ত" else "সেটআপ বাকি",
+                badgeColor = if (geminiApiKey.isNotBlank()) EmeraldGrade else AmberNotice,
+                badgeContainerColor = if (geminiApiKey.isNotBlank()) TealSoft else AmberBg,
+                icon = Icons.Rounded.AutoAwesome,
                 expanded = expandedGroup == "aiproxy",
                 headerTestTag = "settings_group_aiproxy",
                 onToggle = { expandedGroup = if (expandedGroup == "aiproxy") "" else "aiproxy" }
@@ -1050,50 +1082,420 @@ fun SettingsScreen(
                 TreeBranchItem(isLast = false) {
                     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         Text(
-                            text = "Play Store-এ অ্যাপ প্রকাশ না করলে Play Integrity App Check ছাড়াই আপনার সাইন-ইন করা Firebase Auth ID Token ব্যবহার করে Cloud Run প্রক্সির মাধ্যমে Gemini AI ও নম্বরপত্র স্ক্যান নিরাপদভাবে চালানো যায়।",
+                            text = "Google AI Studio (aistudio.google.com/apikey) থেকে আপনার Gemini API Key এখানে দিন। কী শুধুমাত্র এই ডিভাইসে সংরক্ষিত থাকে এবং ছবি স্ক্যান, বাংলা OCR ও শিক্ষক চ্যাট সরাসরি Gemini API দিয়ে চলে।",
                             fontSize = 12.sp,
                             color = SlateMuted,
                             lineHeight = 17.sp
                         )
                         OutlinedTextField(
-                            value = cloudRunInput,
-                            onValueChange = { cloudRunInput = it },
-                            label = { Text("Cloud Run সার্ভার URL") },
-                            placeholder = { Text("https://result-maker-ai-proxy-xxxx.run.app") },
+                            value = apiKeyInput,
+                            onValueChange = { apiKeyInput = it },
+                            label = { Text("Gemini API Key") },
+                            placeholder = { Text("AIza...") },
                             singleLine = true,
-                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
+                            leadingIcon = { Icon(Icons.Rounded.Key, contentDescription = null) },
+                            trailingIcon = {
+                                IconButton(
+                                    onClick = { showApiKey = !showApiKey },
+                                    modifier = Modifier.testTag("settings_gemini_key_toggle_btn")
+                                ) {
+                                    Icon(
+                                        imageVector = if (showApiKey) Icons.Rounded.VisibilityOff else Icons.Rounded.Visibility,
+                                        contentDescription = if (showApiKey) "কী লুকান" else "কী দেখুন"
+                                    )
+                                }
+                            },
+                            visualTransformation = if (showApiKey) VisualTransformation.None else PasswordVisualTransformation(),
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Ascii),
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .testTag("settings_cloud_run_url_input")
+                                .testTag("settings_gemini_api_key_input")
                         )
-                        Row(
-                            horizontalArrangement = Arrangement.spacedBy(6.dp),
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Button(
-                                onClick = { onSaveCloudRunUrl(cloudRunInput) },
+                    }
+                }
+
+                TreeBranchItem(isLast = false) {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text(
+                            text = "প্রস্তাবিত সর্বশেষ Gemini মডেল",
+                            fontWeight = FontWeight.SemiBold,
+                            fontSize = 12.5.sp,
+                            color = SlateText
+                        )
+                        GeminiApiConfig.SUGGESTED_MODELS.forEach { preset ->
+                            val isSelected = GeminiApiConfig.normalizeModelId(modelInput) == preset.id
+                            Surface(
+                                color = if (isSelected) TealSoft else SlateBg,
+                                border = BorderStroke(
+                                    1.dp,
+                                    if (isSelected) TealPrimary else SlateOutline
+                                ),
+                                shape = RoundedCornerShape(10.dp),
                                 modifier = Modifier
-                                    .weight(1f)
-                                    .testTag("settings_cloud_run_save_btn"),
-                                shape = RoundedCornerShape(8.dp)
+                                    .fillMaxWidth()
+                                    .clickable { modelInput = preset.id }
+                                    .testTag("settings_model_preset_${preset.id}")
                             ) {
-                                Text("সংরক্ষণ", fontSize = 12.sp)
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    RadioButton(
+                                        selected = isSelected,
+                                        onClick = { modelInput = preset.id }
+                                    )
+                                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                        ) {
+                                            Text(
+                                                text = preset.title,
+                                                fontWeight = FontWeight.SemiBold,
+                                                fontSize = 12.5.sp,
+                                                color = SlateText
+                                            )
+                                            Surface(
+                                                color = if (isSelected) TealContainer else MaterialTheme.colorScheme.surface,
+                                                shape = RoundedCornerShape(6.dp)
+                                            ) {
+                                                Text(
+                                                    text = preset.badge,
+                                                    fontSize = 10.sp,
+                                                    fontWeight = FontWeight.SemiBold,
+                                                    color = if (isSelected) TealDark else SlateMuted,
+                                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                                )
+                                            }
+                                        }
+                                        Text(
+                                            text = "${preset.id} · ${preset.description}",
+                                            fontSize = 11.sp,
+                                            color = SlateMuted,
+                                            lineHeight = 15.sp
+                                        )
+                                    }
+                                }
                             }
-                            OutlinedButton(
-                                onClick = { onTestCloudRunUrl(cloudRunInput) },
-                                enabled = !cloudRunTesting,
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .testTag("settings_cloud_run_test_btn"),
-                                shape = RoundedCornerShape(8.dp)
+                        }
+
+                        val suggestedIds = remember { GeminiApiConfig.SUGGESTED_MODEL_IDS }
+                        val normalizedTypedModel = remember(modelInput) {
+                            modelInput.trim().removePrefix("models/").trim()
+                        }
+                        val extraLiveModels = remember(geminiAvailableModels, geminiNewModelIds) {
+                            geminiAvailableModels
+                                .filter { it.id !in suggestedIds }
+                                .sortedWith(
+                                    compareByDescending<DiscoveredGeminiModel> { it.id in geminiNewModelIds }
+                                )
+                        }
+                        val filteredLiveModels = remember(extraLiveModels, modelSearchQuery) {
+                            val q = modelSearchQuery.trim().lowercase()
+                            if (q.isBlank()) extraLiveModels
+                            else extraLiveModels.filter {
+                                it.id.lowercase().contains(q) || it.displayName.lowercase().contains(q)
+                            }
+                        }
+
+                        HorizontalDivider(color = SlateOutline, modifier = Modifier.padding(vertical = 2.dp))
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
+                                    Text(
+                                        text = "API থেকে পাওয়া নতুন ও অন্যান্য মডেল",
+                                        fontWeight = FontWeight.SemiBold,
+                                        fontSize = 12.5.sp,
+                                        color = SlateText
+                                    )
+                                    if (extraLiveModels.isNotEmpty()) {
+                                        Surface(
+                                            color = TealSoft,
+                                            shape = RoundedCornerShape(6.dp)
+                                        ) {
+                                            Text(
+                                                text = "${bn(extraLiveModels.size.toString())}টি",
+                                                fontSize = 10.sp,
+                                                fontWeight = FontWeight.SemiBold,
+                                                color = TealDark,
+                                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                            )
+                                        }
+                                    }
+                                }
+                                Text(
+                                    text = "Google নতুন কোনো মডেল চালু করলে নির্বাচিত মডেলের বাইরেও এখানে স্বয়ংক্রিয়ভাবে দেখাবে",
+                                    fontSize = 11.sp,
+                                    color = SlateMuted,
+                                    lineHeight = 15.sp
+                                )
+                            }
+                            TextButton(
+                                onClick = {
+                                    onRefreshGeminiModels(apiKeyInput.ifBlank { geminiApiKey })
+                                },
+                                enabled = !geminiRefreshingModels,
+                                modifier = Modifier.testTag("settings_refresh_models_btn"),
+                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)
                             ) {
-                                if (cloudRunTesting) {
+                                if (geminiRefreshingModels) {
                                     CircularProgressIndicator(
                                         modifier = Modifier.size(14.dp),
                                         strokeWidth = 2.dp
                                     )
                                 } else {
-                                    Text("সংযোগ পরীক্ষা", fontSize = 12.sp)
+                                    Icon(
+                                        Icons.Rounded.Refresh,
+                                        contentDescription = "নতুন মডেল খুঁজুন",
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                    Spacer(Modifier.size(4.dp))
+                                    Text("রিফ্রেশ", fontSize = 11.5.sp)
+                                }
+                            }
+                        }
+
+                        if (!geminiModelsError.isNullOrBlank()) {
+                            Text(
+                                text = geminiModelsError,
+                                fontSize = 11.sp,
+                                color = RoseDanger,
+                                lineHeight = 15.sp
+                            )
+                        }
+
+                        if (geminiNewModelIds.isNotEmpty()) {
+                            Surface(
+                                color = TealSoft,
+                                border = BorderStroke(1.dp, TealPrimary.copy(alpha = 0.35f)),
+                                shape = RoundedCornerShape(8.dp),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Text(
+                                    text = "নতুন মডেল শনাক্ত হয়েছে: ${geminiNewModelIds.joinToString(", ")}",
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Medium,
+                                    color = TealDark,
+                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
+                                )
+                            }
+                        }
+
+                        if (extraLiveModels.isNotEmpty()) {
+                            if (extraLiveModels.size > 6) {
+                                OutlinedTextField(
+                                    value = modelSearchQuery,
+                                    onValueChange = { modelSearchQuery = it },
+                                    placeholder = { Text("নতুন মডেল খুঁজুন (যেমন: 4.5, pro, flash)...", fontSize = 12.sp) },
+                                    leadingIcon = {
+                                        Icon(Icons.Rounded.Search, contentDescription = null, modifier = Modifier.size(18.dp))
+                                    },
+                                    trailingIcon = {
+                                        if (modelSearchQuery.isNotEmpty()) {
+                                            IconButton(onClick = { modelSearchQuery = "" }) {
+                                                Icon(Icons.Rounded.Close, contentDescription = "খোঁজ মুছুন", modifier = Modifier.size(16.dp))
+                                            }
+                                        }
+                                    },
+                                    singleLine = true,
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .testTag("settings_live_model_search_input")
+                                )
+                            }
+
+                            val visibleLiveModels = if (showAllLiveModels || modelSearchQuery.isNotBlank()) {
+                                filteredLiveModels
+                            } else {
+                                filteredLiveModels.take(10)
+                            }
+
+                            if (visibleLiveModels.isEmpty()) {
+                                Text(
+                                    text = "\"$modelSearchQuery\"-এর সাথে মিল পাওয়া যায়নি। নিচে সরাসরি কাস্টম নাম লিখে ব্যবহার করতে পারেন।",
+                                    fontSize = 11.5.sp,
+                                    color = SlateMuted
+                                )
+                            } else {
+                                FlowRow(
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
+                                    visibleLiveModels.forEach { item ->
+                                        val selected = GeminiApiConfig.normalizeModelId(modelInput) == item.id
+                                        val isNew = item.id in geminiNewModelIds
+                                        FilterChip(
+                                            selected = selected,
+                                            onClick = { modelInput = item.id },
+                                            label = {
+                                                Text(
+                                                    text = if (isNew) "নতুন · ${item.id}" else item.id,
+                                                    fontSize = 11.sp,
+                                                    fontWeight = if (isNew || selected) FontWeight.SemiBold else FontWeight.Normal
+                                                )
+                                            }
+                                        )
+                                    }
+                                }
+
+                                val selectedDiscovered = extraLiveModels.find {
+                                    it.id == GeminiApiConfig.normalizeModelId(modelInput)
+                                }
+                                if (selectedDiscovered != null && (selectedDiscovered.displayName.isNotBlank() || selectedDiscovered.description.isNotBlank())) {
+                                    Surface(
+                                        color = TealSoft,
+                                        shape = RoundedCornerShape(8.dp),
+                                        modifier = Modifier.fillMaxWidth()
+                                    ) {
+                                        Column(Modifier.padding(8.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                            if (selectedDiscovered.displayName.isNotBlank()) {
+                                                Text(
+                                                    text = "${selectedDiscovered.displayName} (${selectedDiscovered.id})",
+                                                    fontSize = 11.5.sp,
+                                                    fontWeight = FontWeight.SemiBold,
+                                                    color = TealDark
+                                                )
+                                            }
+                                            if (selectedDiscovered.description.isNotBlank()) {
+                                                Text(
+                                                    text = selectedDiscovered.description,
+                                                    fontSize = 11.sp,
+                                                    color = SlateMuted,
+                                                    maxLines = 2,
+                                                    overflow = TextOverflow.Ellipsis
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+
+                                if (modelSearchQuery.isBlank() && filteredLiveModels.size > 10) {
+                                    TextButton(
+                                        onClick = { showAllLiveModels = !showAllLiveModels },
+                                        contentPadding = PaddingValues(horizontal = 4.dp, vertical = 2.dp),
+                                        modifier = Modifier.testTag("settings_toggle_all_live_models_btn")
+                                    ) {
+                                        Text(
+                                            text = if (showAllLiveModels) "কম দেখুন" else "আরও ${bn((filteredLiveModels.size - 10).toString())}টি নতুন/অন্যান্য মডেল দেখুন",
+                                            fontSize = 11.5.sp
+                                        )
+                                    }
+                                }
+                            }
+                        } else {
+                            Text(
+                                text = if (apiKeyInput.isNotBlank() || geminiApiKey.isNotBlank()) {
+                                    "রিফ্রেশ বা 'পরীক্ষা ও মডেল লোড' চাপলে আপনার API Key-এ চালু থাকা সব নতুন ও অন্যান্য মডেল এখানে তালিকায় দেখাবে।"
+                                } else {
+                                    "উপরে API Key দিলে Google-এ নতুন চালু হওয়া সব মডেল স্বয়ংক্রিয়ভাবে এখানে লোড হবে।"
+                                },
+                                fontSize = 11.sp,
+                                color = SlateMuted,
+                                lineHeight = 15.sp
+                            )
+                        }
+
+                        HorizontalDivider(color = SlateOutline, modifier = Modifier.padding(vertical = 2.dp))
+
+                        if (geminiCustomModels.isNotEmpty()) {
+                            Text(
+                                text = "পূর্বে ব্যবহৃত কাস্টম মডেল:",
+                                fontWeight = FontWeight.SemiBold,
+                                fontSize = 12.sp,
+                                color = SlateText
+                            )
+                            FlowRow(
+                                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                verticalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                geminiCustomModels.forEach { customId ->
+                                    val selected = GeminiApiConfig.normalizeModelId(modelInput) == customId
+                                    FilterChip(
+                                        selected = selected,
+                                        onClick = { modelInput = customId },
+                                        label = { Text(customId, fontSize = 11.sp) },
+                                        trailingIcon = {
+                                            Icon(
+                                                imageVector = Icons.Rounded.Close,
+                                                contentDescription = "$customId সরান",
+                                                modifier = Modifier
+                                                    .size(14.dp)
+                                                    .clickable { onRemoveCustomGeminiModel(customId) }
+                                            )
+                                        }
+                                    )
+                                }
+                            }
+                        }
+
+                        OutlinedTextField(
+                            value = modelInput,
+                            onValueChange = { modelInput = it },
+                            label = { Text("কাস্টম বা নতুন মডেলের নাম / আইডি লিখুন") },
+                            placeholder = { Text("যেমন: ${GeminiApiConfig.DEFAULT_MODEL} বা gemini-4.5-pro") },
+                            supportingText = {
+                                Text(
+                                    text = "তালিকার বাইরে যেকোনো কাস্টম মডেলের নাম সরাসরি এখানে লিখে সংরক্ষণ ও ব্যবহার করতে পারবেন।",
+                                    fontSize = 11.sp
+                                )
+                            },
+                            trailingIcon = {
+                                if (modelInput.isNotBlank() && normalizedTypedModel != GeminiApiConfig.DEFAULT_MODEL) {
+                                    IconButton(
+                                        onClick = { modelInput = GeminiApiConfig.DEFAULT_MODEL },
+                                        modifier = Modifier.testTag("settings_reset_default_model_btn")
+                                    ) {
+                                        Icon(
+                                            Icons.Rounded.Close,
+                                            contentDescription = "ডিফল্ট মডেলে ফিরুন",
+                                            modifier = Modifier.size(18.dp)
+                                        )
+                                    }
+                                }
+                            },
+                            singleLine = true,
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Ascii),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .testTag("settings_gemini_model_input")
+                        )
+
+                        if (normalizedTypedModel.isNotBlank() && normalizedTypedModel !in suggestedIds) {
+                            val isSavedActive = normalizedTypedModel == geminiModel
+                            Surface(
+                                color = if (isSavedActive) TealSoft else AmberBg,
+                                border = BorderStroke(
+                                    1.dp,
+                                    if (isSavedActive) TealPrimary.copy(alpha = 0.4f) else AmberBorder
+                                ),
+                                shape = RoundedCornerShape(8.dp),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 7.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Text(
+                                        text = if (isSavedActive) {
+                                            "কাস্টম / নির্বাচিত মডেল সক্রিয়: $normalizedTypedModel"
+                                        } else {
+                                            "প্রস্তুত কাস্টম মডেল: $normalizedTypedModel (চালু করতে 'সংরক্ষণ' চাপুন)"
+                                        },
+                                        fontSize = 11.5.sp,
+                                        fontWeight = FontWeight.Medium,
+                                        color = if (isSavedActive) TealDark else AmberNotice,
+                                        modifier = Modifier.weight(1f)
+                                    )
                                 }
                             }
                         }
@@ -1101,38 +1503,85 @@ fun SettingsScreen(
                 }
 
                 TreeBranchItem(isLast = true) {
-                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                        if (!cloudRunTestStatus.isNullOrBlank()) {
-                            val isSuccess = cloudRunTestStatus.startsWith("সংযোগ সফল")
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Button(
+                                onClick = { onSaveGeminiConfig(apiKeyInput, modelInput) },
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .testTag("settings_gemini_save_btn"),
+                                shape = RoundedCornerShape(8.dp)
+                            ) {
+                                Text("সংরক্ষণ", fontSize = 12.sp)
+                            }
+                            OutlinedButton(
+                                onClick = { onTestGeminiConnection(apiKeyInput, modelInput) },
+                                enabled = !geminiTesting,
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .testTag("settings_gemini_test_btn"),
+                                shape = RoundedCornerShape(8.dp)
+                            ) {
+                                if (geminiTesting) {
+                                    CircularProgressIndicator(
+                                        modifier = Modifier.size(14.dp),
+                                        strokeWidth = 2.dp
+                                    )
+                                } else {
+                                    Text("পরীক্ষা ও মডেল লোড", fontSize = 12.sp)
+                                }
+                            }
+                        }
+
+                        if (!geminiTestStatus.isNullOrBlank()) {
+                            val isSuccess = geminiTestSuccess == true
                             Surface(
-                                color = if (isSuccess) TealSoft else AmberBg,
+                                color = if (isSuccess) TealSoft else RoseBg,
                                 border = BorderStroke(
                                     1.dp,
-                                    if (isSuccess) TealPrimary.copy(alpha = 0.4f) else AmberBorder
+                                    if (isSuccess) TealPrimary.copy(alpha = 0.4f) else RoseDanger.copy(alpha = 0.35f)
                                 ),
                                 shape = RoundedCornerShape(8.dp),
                                 modifier = Modifier.fillMaxWidth()
                             ) {
-                                Text(
-                                    text = cloudRunTestStatus,
-                                    fontSize = 12.sp,
-                                    color = if (isSuccess) TealDark else AmberNotice,
-                                    modifier = Modifier.padding(10.dp)
-                                )
+                                Row(
+                                    modifier = Modifier.padding(10.dp),
+                                    verticalAlignment = Alignment.Top,
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    if (isSuccess) {
+                                        Icon(
+                                            Icons.Rounded.CheckCircle,
+                                            contentDescription = null,
+                                            tint = TealDark,
+                                            modifier = Modifier.size(16.dp)
+                                        )
+                                    }
+                                    Text(
+                                        text = geminiTestStatus,
+                                        fontSize = 12.sp,
+                                        color = if (isSuccess) TealDark else RoseDanger,
+                                        lineHeight = 17.sp
+                                    )
+                                }
                             }
                         }
-                        if (cloudRunUrl.isNotBlank() || cloudRunInput.isNotBlank()) {
+
+                        if (geminiApiKey.isNotBlank() || apiKeyInput.isNotBlank()) {
                             OutlinedButton(
                                 onClick = {
-                                    cloudRunInput = ""
-                                    onSaveCloudRunUrl("")
+                                    apiKeyInput = ""
+                                    onClearGeminiApiKey()
                                 },
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .testTag("settings_cloud_run_clear_btn"),
+                                    .testTag("settings_gemini_clear_btn"),
                                 shape = RoundedCornerShape(8.dp)
                             ) {
-                                Text("URL মুছে ডিফল্ট মোডে ফিরুন", fontSize = 12.sp, color = RoseDanger)
+                                Text("API Key মুছে ফেলুন", fontSize = 12.sp, color = RoseDanger)
                             }
                         }
                     }

@@ -13,12 +13,12 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.kgps.result.ai.AiChatMessage
 import com.kgps.result.ai.AiModelMode
-import com.kgps.result.ai.AiProxyConfig
 import com.kgps.result.ai.AiRepository
-import com.kgps.result.ai.CloudRunAiRepository
+import com.kgps.result.ai.DirectGeminiAiRepository
+import com.kgps.result.ai.DiscoveredGeminiModel
 import com.kgps.result.ai.ExtractedClassSheet
 import com.kgps.result.ai.ExtractedMarksheet
-import com.kgps.result.ai.HybridAiRepository
+import com.kgps.result.ai.GeminiApiConfig
 import com.kgps.result.ai.PlaceholderAiRepository
 import com.kgps.result.ai.ScannedStudentRow
 import com.kgps.result.ai.validateScannedStudentRow
@@ -107,8 +107,8 @@ class ResultMakerViewModel(
     private val initialLocalSnapshot: Pair<List<Student>, Settings>? = null
 ) : ViewModel() {
 
-    private val hybridAiRepository = HybridAiRepository(appContext)
-    private val aiRepository: AiRepository get() = hybridAiRepository
+    private val directAiRepository = DirectGeminiAiRepository(appContext)
+    private val aiRepository: AiRepository get() = directAiRepository
     private val sampleAiRepository = PlaceholderAiRepository()
 
     val localSeedCount: Int get() = initialLocalSnapshot?.first?.size ?: 0
@@ -293,23 +293,45 @@ class ResultMakerViewModel(
     private val _draftingRemarkTerm = MutableStateFlow<Int?>(null)
     val draftingRemarkTerm: StateFlow<Int?> = _draftingRemarkTerm.asStateFlow()
 
-    private val _cloudRunUrl = MutableStateFlow(AiProxyConfig.getEffectiveUrl(appContext))
-    val cloudRunUrl: StateFlow<String> = _cloudRunUrl.asStateFlow()
+    private val _geminiApiKey = MutableStateFlow(GeminiApiConfig.getApiKey(appContext))
+    val geminiApiKey: StateFlow<String> = _geminiApiKey.asStateFlow()
 
-    private val _cloudRunTesting = MutableStateFlow(false)
-    val cloudRunTesting: StateFlow<Boolean> = _cloudRunTesting.asStateFlow()
+    private val _geminiModel = MutableStateFlow(GeminiApiConfig.getSelectedModel(appContext))
+    val geminiModel: StateFlow<String> = _geminiModel.asStateFlow()
 
-    private val _cloudRunTestStatus = MutableStateFlow<String?>(null)
-    val cloudRunTestStatus: StateFlow<String?> = _cloudRunTestStatus.asStateFlow()
+    private val _geminiAvailableModels = MutableStateFlow(GeminiApiConfig.getCachedModels(appContext))
+    val geminiAvailableModels: StateFlow<List<DiscoveredGeminiModel>> = _geminiAvailableModels.asStateFlow()
+
+    private val _geminiCustomModels = MutableStateFlow(GeminiApiConfig.getCustomModels(appContext))
+    val geminiCustomModels: StateFlow<List<String>> = _geminiCustomModels.asStateFlow()
+
+    private val _geminiNewModelIds = MutableStateFlow<Set<String>>(emptySet())
+    val geminiNewModelIds: StateFlow<Set<String>> = _geminiNewModelIds.asStateFlow()
+
+    private val _geminiRefreshingModels = MutableStateFlow(false)
+    val geminiRefreshingModels: StateFlow<Boolean> = _geminiRefreshingModels.asStateFlow()
+
+    private val _geminiModelsError = MutableStateFlow<String?>(null)
+    val geminiModelsError: StateFlow<String?> = _geminiModelsError.asStateFlow()
+
+    private val _geminiTesting = MutableStateFlow(false)
+    val geminiTesting: StateFlow<Boolean> = _geminiTesting.asStateFlow()
+
+    private val _geminiTestStatus = MutableStateFlow<String?>(null)
+    val geminiTestStatus: StateFlow<String?> = _geminiTestStatus.asStateFlow()
+
+    private val _geminiTestSuccess = MutableStateFlow<Boolean?>(null)
+    val geminiTestSuccess: StateFlow<Boolean?> = _geminiTestSuccess.asStateFlow()
+
+    val isGeminiConfigured: StateFlow<Boolean> = _geminiApiKey
+        .map { it.isNotBlank() }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, GeminiApiConfig.isConfigured(appContext))
 
     val activePermissions: StateFlow<TeacherPermissions> = activeSchool
         .map { school ->
             school?.permissionsFor(currentUserId) ?: TeacherPermissions.fullAccess()
         }
         .stateIn(viewModelScope, SharingStarted.Eagerly, TeacherPermissions.fullAccess())
-
-    val isPlaceholderAi: Boolean get() = aiRepository.isPlaceholderBackend
-    val isUsingCloudRun: Boolean get() = hybridAiRepository.isUsingCloudRun()
 
     init {
         viewModelScope.launch {
@@ -373,6 +395,10 @@ class ResultMakerViewModel(
                         )
                     }
                 }
+        }
+
+        if (GeminiApiConfig.isConfigured(appContext)) {
+            refreshGeminiModels(silent = true)
         }
     }
 
@@ -1616,35 +1642,107 @@ class ResultMakerViewModel(
         return updated
     }
 
-    fun saveCloudRunUrl(rawUrl: String) {
-        AiProxyConfig.saveUrl(appContext, rawUrl)
-        val effective = AiProxyConfig.getEffectiveUrl(appContext)
-        _cloudRunUrl.value = effective
-        _cloudRunTestStatus.value = null
+    private fun applyDiscoveredModels(fetched: List<DiscoveredGeminiModel>) {
+        if (fetched.isEmpty()) return
+        val prevIds = _geminiAvailableModels.value.map { it.id }.toSet()
+        val newlyDetected = if (prevIds.isNotEmpty()) {
+            fetched.map { it.id }.filter { it !in prevIds && it !in GeminiApiConfig.SUGGESTED_MODEL_IDS }.toSet()
+        } else {
+            emptySet()
+        }
+        if (newlyDetected.isNotEmpty()) {
+            _geminiNewModelIds.value = _geminiNewModelIds.value + newlyDetected
+        }
+        _geminiAvailableModels.value = fetched
+        GeminiApiConfig.saveCachedModels(appContext, fetched)
+    }
+
+    fun refreshGeminiModels(rawApiKey: String? = null, silent: Boolean = false) {
+        if (_geminiRefreshingModels.value) return
+        val keyToUse = GeminiApiConfig.normalizeApiKey(rawApiKey ?: _geminiApiKey.value)
+        if (keyToUse.isBlank()) {
+            if (!silent) {
+                _geminiModelsError.value = "নতুন মডেল লোড করতে আগে Gemini API Key লিখুন।"
+            }
+            return
+        }
+        _geminiRefreshingModels.value = true
+        if (!silent) _geminiModelsError.value = null
+        viewModelScope.launch {
+            DirectGeminiAiRepository.fetchModelsOnly(keyToUse)
+                .onSuccess { fetched ->
+                    _geminiModelsError.value = null
+                    applyDiscoveredModels(fetched)
+                }
+                .onFailure { e ->
+                    if (!silent) {
+                        _geminiModelsError.value = e.message ?: "লাইভ মডেল তালিকা লোড করা যায়নি।"
+                    }
+                }
+            _geminiRefreshingModels.value = false
+        }
+    }
+
+    fun removeCustomGeminiModel(modelId: String) {
+        _geminiCustomModels.value = GeminiApiConfig.removeCustomModel(appContext, modelId)
+    }
+
+    fun saveGeminiConfig(rawApiKey: String, rawModel: String) {
+        GeminiApiConfig.saveConfig(appContext, rawApiKey, rawModel)
+        val savedKey = GeminiApiConfig.getApiKey(appContext)
+        val savedModel = GeminiApiConfig.getSelectedModel(appContext)
+        _geminiApiKey.value = savedKey
+        _geminiModel.value = savedModel
+        _geminiCustomModels.value = GeminiApiConfig.getCustomModels(appContext)
+        _geminiTestStatus.value = null
+        _geminiTestSuccess.value = null
+        if (savedKey.isNotBlank()) {
+            refreshGeminiModels(savedKey, silent = true)
+        }
         showMessage(
-            if (effective.isNotBlank()) "Cloud Run AI প্রক্সি URL সংরক্ষিত হয়েছে"
-            else "Cloud Run URL মুছে ফেলা হয়েছে (Firebase AI Logic ব্যবহার হবে)"
+            if (savedKey.isNotBlank()) "Gemini API Key এবং মডেল ($savedModel) সংরক্ষিত হয়েছে"
+            else "মডেল ($savedModel) সংরক্ষিত হয়েছে; AI চালাতে API Key দিন"
         )
     }
 
-    fun testCloudRunUrl(rawUrl: String) {
-        if (_cloudRunTesting.value) return
-        val normalized = AiProxyConfig.normalizeUrl(rawUrl)
-        if (normalized.isBlank()) {
-            _cloudRunTestStatus.value = "পরীক্ষার জন্য একটি বৈধ Cloud Run URL লিখুন।"
+    fun clearGeminiApiKey() {
+        GeminiApiConfig.clearApiKey(appContext)
+        _geminiApiKey.value = ""
+        _geminiAvailableModels.value = emptyList()
+        _geminiNewModelIds.value = emptySet()
+        _geminiModelsError.value = null
+        _geminiTestStatus.value = null
+        _geminiTestSuccess.value = null
+        showMessage("Gemini API Key মুছে ফেলা হয়েছে")
+    }
+
+    fun testGeminiConnection(rawApiKey: String, rawModel: String) {
+        if (_geminiTesting.value) return
+        val cleanKey = GeminiApiConfig.normalizeApiKey(rawApiKey)
+        val cleanModel = GeminiApiConfig.normalizeModelId(rawModel)
+        if (cleanKey.isBlank()) {
+            _geminiTestSuccess.value = false
+            _geminiTestStatus.value = "পরীক্ষার জন্য আপনার Gemini API Key লিখুন।"
             return
         }
-        _cloudRunTesting.value = true
-        _cloudRunTestStatus.value = null
+        _geminiTesting.value = true
+        _geminiTestStatus.value = null
+        _geminiTestSuccess.value = null
+        _geminiModelsError.value = null
         viewModelScope.launch {
-            CloudRunAiRepository.testHealth(normalized)
-                .onSuccess { statusText ->
-                    _cloudRunTestStatus.value = statusText
-                }
-                .onFailure { e ->
-                    _cloudRunTestStatus.value = "ব্যর্থ: ${e.message ?: "সার্ভারের সাথে সংযোগ হয়নি"}"
-                }
-            _cloudRunTesting.value = false
+            val result = DirectGeminiAiRepository.testConnectionAndListModels(cleanKey, cleanModel)
+            _geminiTestSuccess.value = result.ok
+            _geminiTestStatus.value = result.message
+            if (result.availableModels.isNotEmpty()) {
+                applyDiscoveredModels(result.availableModels)
+            }
+            if (result.ok) {
+                GeminiApiConfig.saveConfig(appContext, cleanKey, cleanModel)
+                _geminiApiKey.value = cleanKey
+                _geminiModel.value = cleanModel
+                _geminiCustomModels.value = GeminiApiConfig.getCustomModels(appContext)
+            }
+            _geminiTesting.value = false
         }
     }
 
@@ -1655,9 +1753,6 @@ class ResultMakerViewModel(
             try {
                 val res = aiRepository.draftRemark(buildStudentAiContext(student), term)
                 onResult(res.remark)
-                if (res.isPlaceholder) {
-                    showMessage("নমুনা মতামত খসড়া যুক্ত হয়েছে (লাইভ AI-এর জন্য সার্ভার বা Firebase প্রয়োজন)")
-                }
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {

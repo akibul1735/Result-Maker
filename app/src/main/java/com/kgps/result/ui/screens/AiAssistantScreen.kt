@@ -144,7 +144,9 @@ fun AiAssistantScreen(
     students: List<Student>,
     selectedClass: Int,
     permissions: TeacherPermissions,
-    isPlaceholderAi: Boolean,
+    isGeminiConfigured: Boolean,
+    activeModelName: String,
+    onOpenAiSettings: () -> Unit,
     onSetActiveTab: (Int) -> Unit,
     onSetModelMode: (AiModelMode) -> Unit,
     onSetContextStudent: (String?) -> Unit,
@@ -212,7 +214,7 @@ fun AiAssistantScreen(
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         Column(Modifier.widthIn(max = 920.dp).fillMaxSize()) {
-            if (isPlaceholderAi) {
+            if (!isGeminiConfigured) {
                 Surface(
                     color = AmberBg,
                     border = BorderStroke(1.dp, AmberBorder),
@@ -224,7 +226,7 @@ fun AiAssistantScreen(
                     Row(
                         Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
                         Icon(
                             Icons.Rounded.Info,
@@ -233,13 +235,59 @@ fun AiAssistantScreen(
                             modifier = Modifier.size(16.dp)
                         )
                         Text(
-                            "Sample Mode · লাইভ Gemini AI-এর জন্য Firebase প্রয়োজন",
+                            "Gemini API Key সেট করা নেই · সেটিংস থেকে আপনার কী যুক্ত করুন",
                             fontSize = 11.5.sp,
                             fontWeight = FontWeight.Medium,
                             color = AmberNotice,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f)
                         )
+                        TextButton(
+                            onClick = onOpenAiSettings,
+                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                            modifier = Modifier.testTag("ai_open_settings_btn")
+                        ) {
+                            Text("সেটিংস", fontSize = 11.5.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
+            } else {
+                Surface(
+                    color = TealSoft,
+                    border = BorderStroke(1.dp, TealPrimary.copy(alpha = 0.25f)),
+                    shape = RoundedCornerShape(8.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 12.dp, vertical = 4.dp)
+                ) {
+                    Row(
+                        Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Icon(
+                            Icons.Rounded.AutoAwesome,
+                            contentDescription = null,
+                            tint = TealPrimary,
+                            modifier = Modifier.size(15.dp)
+                        )
+                        Text(
+                            "সক্রিয় Gemini মডেল: $activeModelName",
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Medium,
+                            color = TealDark,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f)
+                        )
+                        TextButton(
+                            onClick = onOpenAiSettings,
+                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
+                            modifier = Modifier.testTag("ai_change_model_btn")
+                        ) {
+                            Text("পরিবর্তন", fontSize = 11.sp)
+                        }
                     }
                 }
             }

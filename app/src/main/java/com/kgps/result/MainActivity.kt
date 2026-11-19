@@ -431,9 +431,17 @@ fun ResultMakerWorkspace(
     val csvImportState by vm.csvImportState.collectAsStateWithLifecycle()
     val aiState by vm.aiState.collectAsStateWithLifecycle()
     val draftingTerm by vm.draftingRemarkTerm.collectAsStateWithLifecycle()
-    val cloudRunUrl by vm.cloudRunUrl.collectAsStateWithLifecycle()
-    val cloudRunTesting by vm.cloudRunTesting.collectAsStateWithLifecycle()
-    val cloudRunTestStatus by vm.cloudRunTestStatus.collectAsStateWithLifecycle()
+    val geminiApiKey by vm.geminiApiKey.collectAsStateWithLifecycle()
+    val geminiModel by vm.geminiModel.collectAsStateWithLifecycle()
+    val geminiAvailableModels by vm.geminiAvailableModels.collectAsStateWithLifecycle()
+    val geminiCustomModels by vm.geminiCustomModels.collectAsStateWithLifecycle()
+    val geminiNewModelIds by vm.geminiNewModelIds.collectAsStateWithLifecycle()
+    val geminiRefreshingModels by vm.geminiRefreshingModels.collectAsStateWithLifecycle()
+    val geminiModelsError by vm.geminiModelsError.collectAsStateWithLifecycle()
+    val geminiTesting by vm.geminiTesting.collectAsStateWithLifecycle()
+    val geminiTestStatus by vm.geminiTestStatus.collectAsStateWithLifecycle()
+    val geminiTestSuccess by vm.geminiTestSuccess.collectAsStateWithLifecycle()
+    val isGeminiConfigured by vm.isGeminiConfigured.collectAsStateWithLifecycle()
 
     var askSignOut by remember { mutableStateOf(false) }
 
@@ -571,7 +579,7 @@ fun ResultMakerWorkspace(
                                 permissions = permissions,
                                 syncMeta = syncMeta[activeEdit.id],
                                 draftingRemarkTerm = draftingTerm,
-                                isPlaceholderAi = vm.isPlaceholderAi,
+                                isGeminiConfigured = isGeminiConfigured,
                                 onAddCustomField = vm::addCustomField,
                                 onUpsertStudent = vm::upsertStudent,
                                 onDeleteStudent = vm::deleteStudent,
@@ -685,7 +693,9 @@ fun ResultMakerWorkspace(
                                     students = students,
                                     selectedClass = cls,
                                     permissions = permissions,
-                                    isPlaceholderAi = vm.isPlaceholderAi,
+                                    isGeminiConfigured = isGeminiConfigured,
+                                    activeModelName = geminiModel,
+                                    onOpenAiSettings = { vm.navigate(NavSection.SETTINGS) },
                                     onSetActiveTab = vm::setAiAssistantTab,
                                     onSetModelMode = vm::setAiModelMode,
                                     onSetContextStudent = vm::setAiContextStudent,
@@ -719,9 +729,16 @@ fun ResultMakerWorkspace(
                                     backupStatus = backupStatus,
                                     driveFiles = driveFiles,
                                     driveFilesLoading = driveFilesLoading,
-                                    cloudRunUrl = cloudRunUrl,
-                                    cloudRunTesting = cloudRunTesting,
-                                    cloudRunTestStatus = cloudRunTestStatus,
+                                    geminiApiKey = geminiApiKey,
+                                    geminiModel = geminiModel,
+                                    geminiAvailableModels = geminiAvailableModels,
+                                    geminiCustomModels = geminiCustomModels,
+                                    geminiNewModelIds = geminiNewModelIds,
+                                    geminiRefreshingModels = geminiRefreshingModels,
+                                    geminiModelsError = geminiModelsError,
+                                    geminiTesting = geminiTesting,
+                                    geminiTestStatus = geminiTestStatus,
+                                    geminiTestSuccess = geminiTestSuccess,
                                     onUpdateSettings = vm::updateSettings,
                                     onAddCustomField = vm::addCustomField,
                                     onRemoveCustomField = vm::removeCustomField,
@@ -750,8 +767,11 @@ fun ResultMakerWorkspace(
                                     onRestoreLocalSnapshot = vm::restoreLocalSnapshot,
                                     onLoadDriveBackups = vm::loadDriveBackupList,
                                     onRestoreFromDriveFile = vm::restoreFromDriveFile,
-                                    onSaveCloudRunUrl = vm::saveCloudRunUrl,
-                                    onTestCloudRunUrl = vm::testCloudRunUrl,
+                                    onSaveGeminiConfig = vm::saveGeminiConfig,
+                                    onTestGeminiConnection = vm::testGeminiConnection,
+                                    onRefreshGeminiModels = { rawKey -> vm.refreshGeminiModels(rawKey, silent = false) },
+                                    onRemoveCustomGeminiModel = vm::removeCustomGeminiModel,
+                                    onClearGeminiApiKey = vm::clearGeminiApiKey,
                                     onSignOut = onSignOut,
                                     onShowMessage = vm::showMessage,
                                     onBack = { vm.navigate(NavSection.ROSTER) }

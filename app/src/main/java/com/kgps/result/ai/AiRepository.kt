@@ -3,14 +3,6 @@ package com.kgps.result.ai
 import android.content.Context
 import android.graphics.Bitmap
 import android.util.Base64
-import com.google.firebase.Firebase
-import com.google.firebase.ai.ai
-import com.google.firebase.ai.type.Content
-import com.google.firebase.ai.type.GenerativeBackend
-import com.google.firebase.ai.type.ImagePart
-import com.google.firebase.ai.type.TextPart
-import com.google.firebase.ai.type.generationConfig
-import com.google.firebase.auth.auth
 import com.kgps.result.CLSN
 import com.kgps.result.RELIGIONS
 import com.kgps.result.bn
@@ -19,7 +11,6 @@ import com.kgps.result.fromBn
 import com.kgps.result.subjectsFor
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.tasks.await
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
@@ -27,41 +18,189 @@ import java.io.ByteArrayOutputStream
 import java.io.OutputStreamWriter
 import java.net.HttpURLConnection
 import java.net.URL
+import java.net.URLEncoder
 import java.util.UUID
 import kotlin.math.abs
 
+data class GeminiModelSuggestion(
+    val id: String,
+    val title: String,
+    val badge: String,
+    val description: String
+)
+
+data class DiscoveredGeminiModel(
+    val id: String,
+    val displayName: String = "",
+    val description: String = ""
+)
+
+data class GeminiConnectionCheckResult(
+    val ok: Boolean,
+    val message: String,
+    val availableModels: List<DiscoveredGeminiModel> = emptyList()
+)
+
 /**
- * Cloud Run প্রক্সি কনফিগারেশন।
- * চাইলে ডিপ্লয় করার পর DEFAULT_CLOUD_RUN_URL-এ URL বসিয়ে APK বিল্ড করতে পারেন,
- * অথবা অ্যাপের সেটিংস থেকে প্রতিটি ডিভাইসে Cloud Run URL সংরক্ষণ করা যাবে।
+ * ডিভাইস-লোকাল ম্যানুয়াল Gemini API Key এবং মডেল কনফিগারেশন।
+ * ব্যবহারকারীর নিজস্ব Google AI Studio API Key শুধুমাত্র এই ডিভাইসেই সংরক্ষিত থাকে।
  */
-object AiProxyConfig {
-    const val DEFAULT_CLOUD_RUN_URL: String = ""
-    private const val PREF_NAME = "ai_proxy_prefs"
-    private const val KEY_CLOUD_RUN_URL = "cloud_run_url"
+object GeminiApiConfig {
+    const val DEFAULT_MODEL = "gemini-3.8-flash"
+    const val FAST_FALLBACK_MODEL = "gemini-3.5-flash-lite"
 
-    fun normalizeUrl(raw: String): String {
-        val trimmed = raw.trim().trimEnd('/')
-        if (trimmed.isEmpty()) return ""
-        return if (trimmed.startsWith("http://") || trimmed.startsWith("https://")) trimmed else "https://$trimmed"
+    private const val PREF_NAME = "gemini_api_prefs"
+    private const val KEY_API_KEY = "gemini_api_key"
+    private const val KEY_MODEL = "gemini_model"
+    private const val KEY_CACHED_MODELS = "gemini_cached_models_json"
+    private const val KEY_CUSTOM_MODELS = "gemini_custom_models_json"
+
+    val SUGGESTED_MODELS: List<GeminiModelSuggestion> = listOf(
+        GeminiModelSuggestion(
+            id = "gemini-3.8-flash",
+            title = "Gemini 3.8 Flash",
+            badge = "প্রস্তাবিত (ডিফল্ট)",
+            description = "নম্বরপত্র ছবি OCR, বাংলা চ্যাট ও দ্রুত কাজের জন্য সবচেয়ে ভারসাম্যপূর্ণ"
+        ),
+        GeminiModelSuggestion(
+            id = "gemini-3.5-flash-lite",
+            title = "Gemini 3.5 Flash-Lite",
+            badge = "অতি দ্রুত",
+            description = "কম টোকেন খরচে দ্রুত চ্যাট, মন্তব্য খসড়া ও হালকা স্ক্যানের জন্য"
+        ),
+        GeminiModelSuggestion(
+            id = "gemini-4-argon",
+            title = "Gemini 4 Argon",
+            badge = "উন্নত বিশ্লেষণ",
+            description = "জটিল বা অস্পষ্ট হাতের লেখার নম্বরপত্র নিখুঁতভাবে বিশ্লেষণের জন্য"
+        ),
+        GeminiModelSuggestion(
+            id = "gemini-4-hydrogen",
+            title = "Gemini 4 Hydrogen",
+            badge = "সর্বশেষ",
+            description = "সর্বশেষ প্রজন্মের উচ্চক্ষমতাসম্পন্ন মাল্টিমোডাল মডেল"
+        )
+    )
+
+    val SUGGESTED_MODEL_IDS: Set<String> = SUGGESTED_MODELS.map { it.id }.toSet()
+
+    fun normalizeApiKey(raw: String): String = raw.trim()
+
+    fun normalizeModelId(raw: String): String {
+        val cleaned = raw.trim()
+            .removePrefix("models/")
+            .trim()
+        return cleaned.ifBlank { DEFAULT_MODEL }
     }
 
-    fun getSavedUrl(context: Context): String {
+    fun getApiKey(context: Context): String {
         val sp = context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
-        return normalizeUrl(sp.getString(KEY_CLOUD_RUN_URL, "").orEmpty())
+        return normalizeApiKey(sp.getString(KEY_API_KEY, "").orEmpty())
     }
 
-    fun getEffectiveUrl(context: Context): String {
-        val local = getSavedUrl(context)
-        if (local.isNotBlank()) return local
-        return normalizeUrl(DEFAULT_CLOUD_RUN_URL)
+    fun getSelectedModel(context: Context): String {
+        val sp = context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
+        return normalizeModelId(sp.getString(KEY_MODEL, DEFAULT_MODEL).orEmpty())
     }
 
-    fun saveUrl(context: Context, rawUrl: String) {
-        val norm = normalizeUrl(rawUrl)
+    fun isConfigured(context: Context): Boolean = getApiKey(context).isNotBlank()
+
+    fun getCachedModels(context: Context): List<DiscoveredGeminiModel> {
+        val sp = context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
+        val raw = sp.getString(KEY_CACHED_MODELS, null).orEmpty()
+        if (raw.isBlank()) return emptyList()
+        return runCatching {
+            val arr = JSONArray(raw)
+            buildList {
+                for (i in 0 until arr.length()) {
+                    val obj = arr.optJSONObject(i) ?: continue
+                    val id = normalizeModelId(obj.optString("id", ""))
+                    if (id.isNotBlank()) {
+                        add(
+                            DiscoveredGeminiModel(
+                                id = id,
+                                displayName = obj.optString("displayName", ""),
+                                description = obj.optString("description", "")
+                            )
+                        )
+                    }
+                }
+            }
+        }.getOrDefault(emptyList())
+    }
+
+    fun saveCachedModels(context: Context, models: List<DiscoveredGeminiModel>) {
+        val arr = JSONArray()
+        models.forEach { m ->
+            arr.put(JSONObject().apply {
+                put("id", m.id)
+                put("displayName", m.displayName)
+                put("description", m.description)
+            })
+        }
         context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
             .edit()
-            .putString(KEY_CLOUD_RUN_URL, norm)
+            .putString(KEY_CACHED_MODELS, arr.toString())
+            .apply()
+    }
+
+    fun getCustomModels(context: Context): List<String> {
+        val sp = context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
+        val raw = sp.getString(KEY_CUSTOM_MODELS, null).orEmpty()
+        if (raw.isBlank()) return emptyList()
+        return runCatching {
+            val arr = JSONArray(raw)
+            buildList {
+                for (i in 0 until arr.length()) {
+                    val id = arr.optString(i, "").trim().removePrefix("models/").trim()
+                    if (id.isNotBlank() && id !in SUGGESTED_MODEL_IDS) add(id)
+                }
+            }.distinct()
+        }.getOrDefault(emptyList())
+    }
+
+    fun rememberCustomModel(context: Context, rawModel: String): List<String> {
+        val cleaned = rawModel.trim().removePrefix("models/").trim()
+        val existing = getCustomModels(context)
+        if (cleaned.isBlank() || cleaned in SUGGESTED_MODEL_IDS) return existing
+        val updated = (listOf(cleaned) + existing.filter { it != cleaned }).take(10)
+        val arr = JSONArray()
+        updated.forEach { arr.put(it) }
+        context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
+            .edit()
+            .putString(KEY_CUSTOM_MODELS, arr.toString())
+            .apply()
+        return updated
+    }
+
+    fun removeCustomModel(context: Context, modelId: String): List<String> {
+        val cleaned = modelId.trim().removePrefix("models/").trim()
+        val updated = getCustomModels(context).filter { it != cleaned }
+        val arr = JSONArray()
+        updated.forEach { arr.put(it) }
+        context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
+            .edit()
+            .putString(KEY_CUSTOM_MODELS, arr.toString())
+            .apply()
+        return updated
+    }
+
+    fun saveConfig(context: Context, rawApiKey: String, rawModel: String) {
+        val key = normalizeApiKey(rawApiKey)
+        val model = normalizeModelId(rawModel)
+        context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
+            .edit()
+            .putString(KEY_API_KEY, key)
+            .putString(KEY_MODEL, model)
+            .apply()
+        rememberCustomModel(context, model)
+    }
+
+    fun clearApiKey(context: Context) {
+        context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
+            .edit()
+            .remove(KEY_API_KEY)
+            .remove(KEY_CACHED_MODELS)
             .apply()
     }
 }
@@ -417,28 +556,28 @@ internal fun parseExtractedClassSheetJson(
 }
 
 /**
- * Firebase Auth ID Token-ভিত্তিক Cloud Run Gemini প্রক্সি ক্লায়েন্ট।
- * Play Store বা App Check ছাড়াই সরাসরি APK-তে নিরাপদভাবে কাজ করে।
+ * ব্যবহারকারীর নিজস্ব Gemini API Key-ভিত্তিক সরাসরি Gemini Developer API ক্লায়েন্ট।
+ * Firebase AI Logic / App Check বা কোনো ব্যাকএন্ড প্রক্সি ছাড়াই সরাসরি কাজ করে।
  */
-class CloudRunAiRepository(
-    private val baseUrlProvider: () -> String
+class DirectGeminiAiRepository(
+    private val appContext: Context
 ) : AiRepository {
-    override val isPlaceholderBackend: Boolean = false
+    override val isPlaceholderBackend: Boolean
+        get() = !GeminiApiConfig.isConfigured(appContext)
 
-    private fun requireBaseUrl(): String {
-        val url = AiProxyConfig.normalizeUrl(baseUrlProvider())
-        if (url.isBlank()) {
-            throw IllegalStateException("Cloud Run সার্ভার URL সেট করা নেই।")
+    private fun requireApiKey(): String =
+        GeminiApiConfig.getApiKey(appContext).takeIf { it.isNotBlank() }
+            ?: throw IllegalStateException(
+                "Gemini API Key সেট করা নেই। সেটিংস → Gemini AI ও মডেল অংশে গিয়ে আপনার API Key সংরক্ষণ করুন।"
+            )
+
+    private fun resolveModelId(mode: AiModelMode? = null): String {
+        val selected = GeminiApiConfig.getSelectedModel(appContext)
+        return if (mode == AiModelMode.FAST && selected == GeminiApiConfig.DEFAULT_MODEL) {
+            GeminiApiConfig.FAST_FALLBACK_MODEL
+        } else {
+            selected
         }
-        return url
-    }
-
-    private suspend fun fetchFirebaseIdToken(forceRefresh: Boolean): String {
-        val user = Firebase.auth.currentUser
-            ?: throw IllegalStateException("AI ব্যবহার করতে অনুগ্রহ করে Google দিয়ে সাইন-ইন করুন।")
-        val res = user.getIdToken(forceRefresh).await()
-        return res.token?.takeIf { it.isNotBlank() }
-            ?: throw IllegalStateException("Firebase Auth ID টোকেন পাওয়া যায়নি। আবার সাইন-ইন করুন।")
     }
 
     private fun encodeBitmapJpegBase64(bitmap: Bitmap): String {
@@ -447,232 +586,14 @@ class CloudRunAiRepository(
         return Base64.encodeToString(out.toByteArray(), Base64.NO_WRAP)
     }
 
-    private suspend fun postAuthorizedJson(path: String, body: JSONObject): JSONObject {
-        val baseUrl = requireBaseUrl()
-        var token = fetchFirebaseIdToken(forceRefresh = false)
-        var attempt = 0
-        while (true) {
-            val (code, respText) = withContext(Dispatchers.IO) {
-                val conn = (URL("$baseUrl$path").openConnection() as HttpURLConnection).apply {
-                    requestMethod = "POST"
-                    connectTimeout = 20_000
-                    readTimeout = 70_000
-                    doOutput = true
-                    setRequestProperty("Authorization", "Bearer $token")
-                    setRequestProperty("Content-Type", "application/json; charset=UTF-8")
-                    setRequestProperty("Accept", "application/json")
-                }
-                try {
-                    OutputStreamWriter(conn.outputStream, Charsets.UTF_8).use { writer ->
-                        writer.write(body.toString())
-                    }
-                    val statusCode = conn.responseCode
-                    val stream = if (statusCode in 200..299) conn.inputStream else conn.errorStream
-                    val txt = stream?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }.orEmpty()
-                    statusCode to txt
-                } finally {
-                    conn.disconnect()
-                }
-            }
-
-            if (code == 401 && attempt == 0) {
-                attempt++
-                token = fetchFirebaseIdToken(forceRefresh = true)
-                continue
-            }
-
-            val parsed = runCatching { JSONObject(respText) }.getOrNull()
-            if (code !in 200..299) {
-                val errMsg = parsed?.optString("error")?.takeIf { it.isNotBlank() }
-                    ?: "Cloud Run সার্ভার ত্রুটি (HTTP $code)"
-                throw IllegalStateException(errMsg)
-            }
-            return parsed ?: throw IllegalStateException("সার্ভার থেকে অবৈধ JSON উত্তর এসেছে।")
-        }
-    }
-
     override suspend fun chat(
         history: List<AiChatMessage>,
         latestUserMessage: String,
         modelMode: AiModelMode,
         studentContext: String?
     ): AiChatReply {
-        val histArr = JSONArray().apply {
-            history.takeLast(6).forEach { m ->
-                put(JSONObject().apply {
-                    put("isUser", m.isUser)
-                    put("text", m.text)
-                })
-            }
-        }
-        val payload = JSONObject().apply {
-            put("history", histArr)
-            put("message", latestUserMessage)
-            put("mode", modelMode.name)
-            put("studentContext", studentContext ?: "")
-        }
-        val res = postAuthorizedJson("/api/ai/chat", payload)
-        return AiChatReply(
-            text = res.optString("text", "").ifBlank { "উত্তর পাওয়া যায়নি।" },
-            modelLabel = res.optString("modelLabel", "Cloud Run · Gemini AI"),
-            isPlaceholder = false
-        )
-    }
-
-    override suspend fun draftRemark(studentSummary: String, term: Int): AiDraftRemarkResult {
-        val payload = JSONObject().apply {
-            put("studentSummary", studentSummary)
-            put("term", term)
-        }
-        val res = postAuthorizedJson("/api/ai/draft-remark", payload)
-        return AiDraftRemarkResult(
-            remark = res.optString("remark", "").ifBlank {
-                "${bn(term.toString())} প্রান্তিকে শিক্ষার্থীর অগ্রগতি সন্তোষজনক।"
-            },
-            isPlaceholder = false
-        )
-    }
-
-    override suspend fun analyzeMarksheetImage(bitmap: Bitmap, teacherNote: String): ExtractedMarksheet {
-        val b64 = withContext(Dispatchers.Default) { encodeBitmapJpegBase64(bitmap) }
-        val payload = JSONObject().apply {
-            put("imageBase64", b64)
-            put("mimeType", "image/jpeg")
-            put("teacherNote", teacherNote)
-        }
-        val res = postAuthorizedJson("/api/ai/analyze-marksheet", payload)
-        val dataObj = res.optJSONObject("data") ?: res
-        return parseExtractedMarksheetJson(dataObj)
-    }
-
-    override suspend fun analyzeClassSheetImage(
-        bitmap: Bitmap,
-        clsHint: Int?,
-        termHint: Int?,
-        subKeyHint: String?,
-        teacherNote: String
-    ): ExtractedClassSheet {
-        val targetCls = clsHint ?: 3
-        val subsInfo = subjectsFor(targetCls, RELIGIONS.first()).joinToString("; ") { s ->
-            val compDesc = s.comps.joinToString(", ") { "${it.key}=${it.max}" }
-            val wrDesc = if (s.written > 0) ", WR=${s.written}" else ""
-            "${s.key}(${s.bn}): $compDesc$wrDesc"
-        }
-        val b64 = withContext(Dispatchers.Default) { encodeBitmapJpegBase64(bitmap) }
-        val payload = JSONObject().apply {
-            put("imageBase64", b64)
-            put("mimeType", "image/jpeg")
-            if (clsHint != null) put("clsHint", clsHint)
-            if (termHint != null) put("termHint", termHint)
-            if (!subKeyHint.isNullOrBlank()) put("subKeyHint", subKeyHint)
-            put("subsInfo", subsInfo)
-            put("teacherNote", teacherNote)
-        }
-        val res = postAuthorizedJson("/api/ai/analyze-class-sheet", payload)
-        val dataObj = res.optJSONObject("data") ?: res
-        return parseExtractedClassSheetJson(dataObj, clsHint, termHint, subKeyHint)
-    }
-
-    companion object {
-        suspend fun testHealth(rawUrl: String): Result<String> = withContext(Dispatchers.IO) {
-            runCatching {
-                val base = AiProxyConfig.normalizeUrl(rawUrl)
-                require(base.isNotBlank()) { "Cloud Run URL খালি রাখা যাবে না।" }
-                val conn = (URL("$base/health").openConnection() as HttpURLConnection).apply {
-                    requestMethod = "GET"
-                    connectTimeout = 15_000
-                    readTimeout = 15_000
-                }
-                try {
-                    val code = conn.responseCode
-                    val body = (if (code in 200..299) conn.inputStream else conn.errorStream)
-                        ?.bufferedReader(Charsets.UTF_8)
-                        ?.use { it.readText() }
-                        .orEmpty()
-                    if (code !in 200..299) {
-                        error("সার্ভার সাড়া দেয়নি (HTTP $code)")
-                    }
-                    val json = JSONObject(body)
-                    val projectId = json.optString("projectId", "")
-                    val geminiOk = json.optBoolean("geminiConfigured", false)
-                    val model = json.optString("model", "")
-                    if (!geminiOk) {
-                        "সার্ভার সংযুক্ত হয়েছে ($projectId), তবে Cloud Run-এ GEMINI_API_KEY সেট করা নেই।"
-                    } else {
-                        "সংযোগ সফল! প্রজেক্ট: $projectId · মডেল: $model"
-                    }
-                } finally {
-                    conn.disconnect()
-                }
-            }
-        }
-    }
-}
-
-/**
- * Cloud Run URL কনফিগার করা থাকলে CloudRunAiRepository (Firebase Auth ID Token) ব্যবহার করে,
- * নতুবা Firebase AI Logic (FirebaseAiRepository)-এ চলে।
- */
-class HybridAiRepository(private val appContext: Context) : AiRepository {
-    private val cloudRunRepo = CloudRunAiRepository { AiProxyConfig.getEffectiveUrl(appContext) }
-    private val firebaseAiRepo = FirebaseAiRepository()
-
-    fun isUsingCloudRun(): Boolean = AiProxyConfig.getEffectiveUrl(appContext).isNotBlank()
-
-    private fun activeRepo(): AiRepository = if (isUsingCloudRun()) cloudRunRepo else firebaseAiRepo
-
-    override val isPlaceholderBackend: Boolean = false
-
-    override suspend fun chat(
-        history: List<AiChatMessage>,
-        latestUserMessage: String,
-        modelMode: AiModelMode,
-        studentContext: String?
-    ): AiChatReply = activeRepo().chat(history, latestUserMessage, modelMode, studentContext)
-
-    override suspend fun analyzeMarksheetImage(
-        bitmap: Bitmap,
-        teacherNote: String
-    ): ExtractedMarksheet = activeRepo().analyzeMarksheetImage(bitmap, teacherNote)
-
-    override suspend fun analyzeClassSheetImage(
-        bitmap: Bitmap,
-        clsHint: Int?,
-        termHint: Int?,
-        subKeyHint: String?,
-        teacherNote: String
-    ): ExtractedClassSheet = activeRepo().analyzeClassSheetImage(bitmap, clsHint, termHint, subKeyHint, teacherNote)
-
-    override suspend fun draftRemark(
-        studentSummary: String,
-        term: Int
-    ): AiDraftRemarkResult = activeRepo().draftRemark(studentSummary, term)
-}
-
-/**
- * Firebase AI Logic (Gemini Developer API) ব্যবহার করে সরাসরি লাইভ AI ইমপ্লিমেন্টেশন।
- */
-class FirebaseAiRepository : AiRepository {
-    override val isPlaceholderBackend: Boolean = false
-
-    private fun modelFor(mode: AiModelMode, jsonMode: Boolean = false) = Firebase.ai(
-        backend = GenerativeBackend.googleAI()
-    ).generativeModel(
-        modelName = "gemini-2.5-flash",
-        generationConfig = generationConfig {
-            temperature = if (jsonMode) 0.1f else if (mode == AiModelMode.FAST) 0.3f else 0.5f
-            if (jsonMode) {
-                responseMimeType = "application/json"
-            }
-        }
-    )
-
-    override suspend fun chat(
-        history: List<AiChatMessage>,
-        latestUserMessage: String,
-        modelMode: AiModelMode,
-        studentContext: String?
-    ): AiChatReply {
+        val apiKey = requireApiKey()
+        val modelId = resolveModelId(modelMode)
         val recentTurns = history.takeLast(6).joinToString("\n") { m ->
             val who = if (m.isUser) "শিক্ষক" else "সহায়ক"
             "$who: ${m.text.take(400)}"
@@ -689,39 +610,68 @@ class FirebaseAiRepository : AiRepository {
             }
             appendLine("শিক্ষকের বর্তমান প্রশ্ন: $latestUserMessage")
         }
-        try {
-            val response = modelFor(modelMode, jsonMode = false).generateContent(prompt)
-            val replyText = response.text?.trim().orEmpty()
-                .ifBlank { "দুঃখিত, এই মুহূর্তে উত্তর পাওয়া যায়নি। আবার চেষ্টা করুন।" }
-            val label = if (modelMode == AiModelMode.FAST) "Gemini Flash · দ্রুত" else "Gemini AI · বিস্তারিত"
-            return AiChatReply(text = replyText, modelLabel = label, isPlaceholder = false)
-        } catch (e: Exception) {
-            throw IllegalStateException(friendlyAiError(e), e)
+
+        val payload = JSONObject().apply {
+            put("contents", JSONArray().apply {
+                put(JSONObject().apply {
+                    put("role", "user")
+                    put("parts", JSONArray().apply {
+                        put(JSONObject().put("text", prompt))
+                    })
+                })
+            })
+            put("generationConfig", JSONObject().apply {
+                put("temperature", if (modelMode == AiModelMode.FAST) 0.3 else 0.5)
+            })
         }
+
+        val replyText = callGenerateContent(apiKey, modelId, payload)
+            .ifBlank { "দুঃখিত, এই মুহূর্তে উত্তর পাওয়া যায়নি। আবার চেষ্টা করুন।" }
+        val modeTag = if (modelMode == AiModelMode.FAST) "দ্রুত" else "বিস্তারিত"
+        return AiChatReply(
+            text = replyText,
+            modelLabel = "$modelId · $modeTag",
+            isPlaceholder = false
+        )
     }
 
     override suspend fun draftRemark(
         studentSummary: String,
         term: Int
     ): AiDraftRemarkResult {
+        val apiKey = requireApiKey()
+        val modelId = resolveModelId(AiModelMode.FAST)
         val prompt = """
             বাংলাদেশের প্রাথমিক বিদ্যালয়ের ${bn(term.toString())} প্রান্তিক মূল্যায়নের জন্য নিচের শিক্ষার্থীর তথ্যের ভিত্তিতে ২–৩ বাক্যের একটি ইতিবাচক, গঠনমূলক ও প্রাতিষ্ঠানিক বাংলা মন্তব্য (Remark) লিখে দিন। শুধু মন্তব্যটি লিখুন, কোনো শিরোনাম বা অতিরিক্ত ভূমিকা দেবেন না।
             তথ্য: $studentSummary
         """.trimIndent()
-        try {
-            val res = modelFor(AiModelMode.FAST, jsonMode = false).generateContent(prompt)
-            val txt = res.text?.trim().orEmpty()
-                .ifBlank { "${bn(term.toString())} প্রান্তিকে শিক্ষার্থীর অগ্রগতি সন্তোষজনক; নিয়মিত অনুশীলন চালিয়ে গেলে আরও ভালো করবে।" }
-            return AiDraftRemarkResult(remark = txt, isPlaceholder = false)
-        } catch (e: Exception) {
-            throw IllegalStateException(friendlyAiError(e), e)
+
+        val payload = JSONObject().apply {
+            put("contents", JSONArray().apply {
+                put(JSONObject().apply {
+                    put("role", "user")
+                    put("parts", JSONArray().apply {
+                        put(JSONObject().put("text", prompt))
+                    })
+                })
+            })
+            put("generationConfig", JSONObject().apply {
+                put("temperature", 0.35)
+            })
         }
+
+        val txt = callGenerateContent(apiKey, modelId, payload)
+            .ifBlank { "${bn(term.toString())} প্রান্তিকে শিক্ষার্থীর অগ্রগতি সন্তোষজনক; নিয়মিত অনুশীলন চালিয়ে গেলে আরও ভালো করবে।" }
+        return AiDraftRemarkResult(remark = txt, isPlaceholder = false)
     }
 
     override suspend fun analyzeMarksheetImage(
         bitmap: Bitmap,
         teacherNote: String
     ): ExtractedMarksheet {
+        val apiKey = requireApiKey()
+        val modelId = resolveModelId(null)
+        val b64 = withContext(Dispatchers.Default) { encodeBitmapJpegBase64(bitmap) }
         val prompt = """
             আপনি বাংলাদেশের প্রাথমিক বিদ্যালয়ের নম্বরপত্র OCR বিশেষজ্ঞ। ছবি থেকে একজন শিক্ষার্থীর তথ্য ও নম্বর JSON আকারে বের করুন।
             অতিরিক্ত নির্দেশনা: ${teacherNote.ifBlank { "নেই" }}
@@ -739,12 +689,13 @@ class FirebaseAiRepository : AiRepository {
               "uncertainNotes": ["যদি কোনো লেখা অস্পষ্ট থাকে তার বিবরণ"]
             }
         """.trimIndent()
-        try {
-            val input = Content(role = "user", parts = listOf(ImagePart(bitmap), TextPart(prompt)))
-            val raw = modelFor(AiModelMode.GENERAL, jsonMode = true).generateContent(input).text.orEmpty()
-            return parseExtractedMarksheetJson(JSONObject(stripJsonFences(raw)))
+
+        val payload = buildVisionJsonPayload(b64, prompt)
+        val raw = callGenerateContent(apiKey, modelId, payload)
+        return try {
+            parseExtractedMarksheetJson(JSONObject(stripJsonFences(raw)))
         } catch (e: Exception) {
-            throw IllegalStateException(friendlyAiError(e), e)
+            throw IllegalStateException("ছবিটি থেকে কাঠামোবদ্ধ ডেটা পড়া যায়নি। আরও স্পষ্ট ছবি তুলে আবার চেষ্টা করুন।", e)
         }
     }
 
@@ -755,12 +706,15 @@ class FirebaseAiRepository : AiRepository {
         subKeyHint: String?,
         teacherNote: String
     ): ExtractedClassSheet {
+        val apiKey = requireApiKey()
+        val modelId = resolveModelId(null)
         val targetCls = clsHint ?: 3
         val subsInfo = subjectsFor(targetCls, RELIGIONS.first()).joinToString("; ") { s ->
             val compDesc = s.comps.joinToString(", ") { "${it.key}=${it.max}" }
             val wrDesc = if (s.written > 0) ", WR=${s.written}" else ""
             "${s.key}(${s.bn}): $compDesc$wrDesc"
         }
+        val b64 = withContext(Dispatchers.Default) { encodeBitmapJpegBase64(bitmap) }
         val prompt = """
             আপনি বাংলাদেশের প্রাথমিক বিদ্যালয়ের (১ম–৫ম শ্রেণি) হাতে লেখা শ্রেণি-নম্বরপত্র (Marksheet Register) OCR বিশেষজ্ঞ।
             ছবিতে একাধিক শিক্ষার্থীর রোল, নাম ও একটি বিষয়ের অংশভিত্তিক নম্বর রয়েছে। সব সারি নিখুঁতভাবে পড়ে শুধু JSON দিন।
@@ -802,36 +756,267 @@ class FirebaseAiRepository : AiRepository {
             }
         """.trimIndent()
 
-        try {
-            val input = Content(role = "user", parts = listOf(ImagePart(bitmap), TextPart(prompt)))
-            val raw = modelFor(AiModelMode.GENERAL, jsonMode = true).generateContent(input).text.orEmpty()
-            return parseExtractedClassSheetJson(JSONObject(stripJsonFences(raw)), clsHint, termHint, subKeyHint)
+        val payload = buildVisionJsonPayload(b64, prompt)
+        val raw = callGenerateContent(apiKey, modelId, payload)
+        return try {
+            parseExtractedClassSheetJson(JSONObject(stripJsonFences(raw)), clsHint, termHint, subKeyHint)
         } catch (e: Exception) {
-            throw IllegalStateException(friendlyAiError(e), e)
+            throw IllegalStateException("ছবিটি থেকে শ্রেণি-নম্বরপত্র পড়া যায়নি। আরও স্পষ্ট ও সোজা ছবি তুলে আবার চেষ্টা করুন।", e)
         }
     }
 
-    private fun friendlyAiError(e: Exception): String {
-        val msg = (e.message ?: "") + " " + (e.cause?.message ?: "")
-        val lower = msg.lowercase()
-        return when {
-            lower.contains("appcheck") || lower.contains("app check") ->
-                "Firebase Console-এ App Check চালু (Enforced) থাকার কারণে অনুরোধটি আটকে গেছে। সেটিংস থেকে আপনার Cloud Run প্রক্সি URL যোগ করুন অথবা Firebase Console-এ App Check → Firebase AI Logic অংশে 'Unenforce' করুন।"
-            lower.contains("api has not been used") ||
-                lower.contains("not enabled") ||
-                lower.contains("firebasevertexai") ||
-                lower.contains("generativeai") ||
-                lower.contains("403") ->
-                "Firebase AI Logic চালু করা নেই অথবা Cloud Run প্রক্সি URL সেট করা নেই। সেটিংসে Cloud Run URL দিন অথবা Firebase Console-এ AI Logic চালু করুন।"
-            lower.contains("unable to resolve host") ||
-                lower.contains("network") ||
-                lower.contains("timeout") ->
-                "ইন্টারনেট সংযোগ পাওয়া যায়নি। নেটওয়ার্ক যাচাই করে আবার চেষ্টা করুন।"
-            lower.contains("quota") || lower.contains("429") ->
-                "Gemini API-এর সাময়িক ব্যবহার সীমা পূর্ণ হয়েছে। কিছুক্ষণ পর আবার চেষ্টা করুন।"
-            lower.contains("json") ->
-                "ছবিটি থেকে কাঠামোবদ্ধ ডেটা পড়া যায়নি। আরও স্পষ্ট বা সোজা ছবি তুলে আবার চেষ্টা করুন।"
-            else -> "AI বিশ্লেষণ ব্যর্থ হয়েছে: ${e.localizedMessage ?: "অজানা ত্রুটি"}"
+    private fun buildVisionJsonPayload(imageBase64: String, prompt: String): JSONObject =
+        JSONObject().apply {
+            put("contents", JSONArray().apply {
+                put(JSONObject().apply {
+                    put("role", "user")
+                    put("parts", JSONArray().apply {
+                        put(JSONObject().apply {
+                            put("inline_data", JSONObject().apply {
+                                put("mime_type", "image/jpeg")
+                                put("data", imageBase64)
+                            })
+                        })
+                        put(JSONObject().put("text", prompt))
+                    })
+                })
+            })
+            put("generationConfig", JSONObject().apply {
+                put("temperature", 0.1)
+                put("responseMimeType", "application/json")
+            })
+        }
+
+    companion object {
+        private const val BASE_URL = "https://generativelanguage.googleapis.com/v1beta"
+
+        internal suspend fun callGenerateContent(
+            apiKey: String,
+            modelId: String,
+            body: JSONObject
+        ): String = withContext(Dispatchers.IO) {
+            val cleanModel = GeminiApiConfig.normalizeModelId(modelId)
+            val encodedModel = URLEncoder.encode(cleanModel, "UTF-8")
+            val endpoint = "$BASE_URL/models/$encodedModel:generateContent"
+            val conn = (URL(endpoint).openConnection() as HttpURLConnection).apply {
+                requestMethod = "POST"
+                connectTimeout = 20_000
+                readTimeout = 70_000
+                doOutput = true
+                setRequestProperty("x-goog-api-key", apiKey)
+                setRequestProperty("Content-Type", "application/json; charset=UTF-8")
+                setRequestProperty("Accept", "application/json")
+            }
+            try {
+                OutputStreamWriter(conn.outputStream, Charsets.UTF_8).use { writer ->
+                    writer.write(body.toString())
+                }
+                val code = conn.responseCode
+                val stream = if (code in 200..299) conn.inputStream else conn.errorStream
+                val respText = stream?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }.orEmpty()
+                if (code !in 200..299) {
+                    throw IllegalStateException(friendlyHttpError(code, respText, cleanModel))
+                }
+                extractCandidateText(JSONObject(respText))
+            } catch (e: IllegalStateException) {
+                throw e
+            } catch (e: Exception) {
+                throw IllegalStateException(friendlyNetworkError(e), e)
+            } finally {
+                conn.disconnect()
+            }
+        }
+
+        private fun extractCandidateText(json: JSONObject): String {
+            val candidates = json.optJSONArray("candidates") ?: return ""
+            if (candidates.length() == 0) return ""
+            val content = candidates.optJSONObject(0)?.optJSONObject("content") ?: return ""
+            val parts = content.optJSONArray("parts") ?: return ""
+            return buildString {
+                for (i in 0 until parts.length()) {
+                    val t = parts.optJSONObject(i)?.optString("text", "").orEmpty()
+                    if (t.isNotEmpty()) append(t)
+                }
+            }.trim()
+        }
+
+        suspend fun fetchModelsOnly(rawApiKey: String): Result<List<DiscoveredGeminiModel>> = withContext(Dispatchers.IO) {
+            val apiKey = GeminiApiConfig.normalizeApiKey(rawApiKey)
+            if (apiKey.isBlank()) {
+                return@withContext Result.failure(IllegalArgumentException("API Key দেওয়া হয়নি"))
+            }
+            runCatching { fetchAvailableModels(apiKey) }
+        }
+
+        suspend fun testConnectionAndListModels(
+            rawApiKey: String,
+            rawModel: String
+        ): GeminiConnectionCheckResult = withContext(Dispatchers.IO) {
+            val apiKey = GeminiApiConfig.normalizeApiKey(rawApiKey)
+            val modelId = GeminiApiConfig.normalizeModelId(rawModel)
+            if (apiKey.isBlank()) {
+                return@withContext GeminiConnectionCheckResult(
+                    ok = false,
+                    message = "পরীক্ষা করার আগে আপনার Gemini API Key লিখুন।"
+                )
+            }
+
+            // 1. Fetch all available generateContent models for this API key
+            val fetchedModels = try {
+                fetchAvailableModels(apiKey)
+            } catch (e: Exception) {
+                return@withContext GeminiConnectionCheckResult(
+                    ok = false,
+                    message = e.message ?: "API Key যাচাই করা যায়নি।"
+                )
+            }
+
+            // 2. Ping the selected model with a minimal generateContent call
+            try {
+                val pingPayload = JSONObject().apply {
+                    put("contents", JSONArray().apply {
+                        put(JSONObject().apply {
+                            put("role", "user")
+                            put("parts", JSONArray().apply {
+                                put(JSONObject().put("text", "OK"))
+                            })
+                        })
+                    })
+                    put("generationConfig", JSONObject().apply {
+                        put("maxOutputTokens", 8)
+                        put("temperature", 0.0)
+                    })
+                }
+                callGenerateContent(apiKey, modelId, pingPayload)
+                GeminiConnectionCheckResult(
+                    ok = true,
+                    message = "সংযোগ সফল! সক্রিয় মডেল: $modelId · মোট ${bn(fetchedModels.size.toString())}টি মডেল পাওয়া গেছে।",
+                    availableModels = fetchedModels
+                )
+            } catch (e: Exception) {
+                val hint = if (fetchedModels.isNotEmpty()) {
+                    "\nউপলব্ধ মডেল তালিকা থেকে অন্য একটি মডেল বেছে নিন অথবা কাস্টম মডেল আইডি যাচাই করুন।"
+                } else ""
+                GeminiConnectionCheckResult(
+                    ok = false,
+                    message = "${e.message ?: "মডেল পরীক্ষা ব্যর্থ হয়েছে"}$hint",
+                    availableModels = fetchedModels
+                )
+            }
+        }
+
+        private fun fetchAvailableModels(apiKey: String): List<DiscoveredGeminiModel> {
+            val collected = linkedMapOf<String, DiscoveredGeminiModel>()
+            var pageToken: String? = null
+            var pages = 0
+
+            while (pages < 5) {
+                pages++
+                val urlStr = buildString {
+                    append("$BASE_URL/models?pageSize=100")
+                    if (!pageToken.isNullOrBlank()) {
+                        append("&pageToken=")
+                        append(URLEncoder.encode(pageToken, "UTF-8"))
+                    }
+                }
+                val conn = (URL(urlStr).openConnection() as HttpURLConnection).apply {
+                    requestMethod = "GET"
+                    connectTimeout = 15_000
+                    readTimeout = 20_000
+                    setRequestProperty("x-goog-api-key", apiKey)
+                    setRequestProperty("Accept", "application/json")
+                }
+                try {
+                    val code = conn.responseCode
+                    val stream = if (code in 200..299) conn.inputStream else conn.errorStream
+                    val respText = stream?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }.orEmpty()
+                    if (code !in 200..299) {
+                        throw IllegalStateException(friendlyHttpError(code, respText, ""))
+                    }
+                    val json = JSONObject(respText)
+                    val arr = json.optJSONArray("models") ?: JSONArray()
+                    for (i in 0 until arr.length()) {
+                        val m = arr.optJSONObject(i) ?: continue
+                        val methods = m.optJSONArray("supportedGenerationMethods") ?: continue
+                        var supportsGenerate = false
+                        for (j in 0 until methods.length()) {
+                            if (methods.optString(j) == "generateContent") {
+                                supportsGenerate = true
+                                break
+                            }
+                        }
+                        if (!supportsGenerate) continue
+                        val id = m.optString("name", "").removePrefix("models/").trim()
+                        if (id.isBlank()) continue
+                        val lower = id.lowercase()
+                        if (lower.contains("embedding") || lower.contains("aqa") || lower.contains("attribution")) {
+                            continue
+                        }
+                        if (lower.startsWith("gemini-") || lower.startsWith("gemma-")) {
+                            collected[id] = DiscoveredGeminiModel(
+                                id = id,
+                                displayName = m.optString("displayName", "").trim(),
+                                description = m.optString("description", "").trim()
+                            )
+                        }
+                    }
+                    pageToken = json.optString("nextPageToken", "").takeIf { it.isNotBlank() }
+                    if (pageToken == null) break
+                } catch (e: IllegalStateException) {
+                    throw e
+                } catch (e: Exception) {
+                    throw IllegalStateException(friendlyNetworkError(e), e)
+                } finally {
+                    conn.disconnect()
+                }
+            }
+
+            return collected.values.sortedWith(
+                compareByDescending<DiscoveredGeminiModel> { it.id.startsWith("gemini-", ignoreCase = true) }
+                    .thenByDescending { parseModelMajorMinorScore(it.id) }
+                    .thenBy { hasDatedSuffix(it.id) }
+                    .thenBy { it.id }
+            )
+        }
+
+        private fun parseModelMajorMinorScore(id: String): Double {
+            val match = Regex("(?:gemini|gemma)-(\\d+)(?:\\.(\\d+))?").find(id.lowercase())
+                ?: return 0.0
+            val major = match.groupValues.getOrNull(1)?.toIntOrNull() ?: 0
+            val minor = match.groupValues.getOrNull(2)?.toIntOrNull() ?: 0
+            return major * 100.0 + minor
+        }
+
+        private fun hasDatedSuffix(id: String): Boolean {
+            return Regex("-(?:\\d{3}|\\d{2}-\\d{2}|\\d{4}|preview-\\d+)").containsMatchIn(id.lowercase())
+        }
+
+        private fun friendlyHttpError(code: Int, respText: String, modelId: String): String {
+            val apiMsg = runCatching {
+                JSONObject(respText).optJSONObject("error")?.optString("message").orEmpty()
+            }.getOrDefault("")
+            val lower = (apiMsg + " " + respText).lowercase()
+            return when {
+                lower.contains("api_key_invalid") || lower.contains("api key not valid") || code == 401 ->
+                    "আপনার Gemini API Key সঠিক নয়। Google AI Studio থেকে বৈধ কী কপি করে আবার চেষ্টা করুন।"
+                code == 403 || lower.contains("permission_denied") ->
+                    "এই Gemini API Key-এর অনুমতি নেই বা প্রজেক্টে Generative Language API চালু করা নেই।"
+                code == 404 || lower.contains("not found") || lower.contains("not supported for generatecontent") ->
+                    "নির্বাচিত মডেল ($modelId) এই API Key-এর জন্য উপলব্ধ নয়। সেটিংস থেকে প্রস্তাবিত বা লোড করা অন্য একটি মডেল বেছে নিন।"
+                code == 429 || lower.contains("quota") || lower.contains("resource_exhausted") ->
+                    "Gemini API-এর ব্যবহার সীমা (Quota) পূর্ণ হয়েছে। কিছুক্ষণ পর আবার চেষ্টা করুন বা অন্য মডেল বেছে নিন।"
+                else ->
+                    "Gemini API ত্রুটি (HTTP $code): ${apiMsg.ifBlank { "অনুরোধ সম্পন্ন হয়নি" }}"
+            }
+        }
+
+        private fun friendlyNetworkError(e: Exception): String {
+            val msg = (e.message ?: "").lowercase()
+            return if (msg.contains("unable to resolve host") || msg.contains("timeout") || msg.contains("connect")) {
+                "ইন্টারনেট সংযোগ পাওয়া যায়নি বা সময় শেষ হয়েছে। নেটওয়ার্ক যাচাই করে আবার চেষ্টা করুন।"
+            } else {
+                "AI সংযোগ ব্যর্থ হয়েছে: ${e.localizedMessage ?: "অজানা ত্রুটি"}"
+            }
         }
     }
 }
@@ -871,7 +1056,7 @@ class PlaceholderAiRepository : AiRepository {
                 ExtractedMarkItem("MATH_1_WR", 61.0, "গণিত (সামষ্টিক)")
             ),
             attendanceAndTraits = ExtractedAttendanceAndTraits(days = "64", present = "60", act = "ক", disc = "ক", cond = "ক"),
-            uncertainNotes = listOf("নমুনা মোড: বাস্তব স্ক্যানের জন্য লাইভ Gemini AI ব্যবহার করুন"),
+            uncertainNotes = listOf("নমুনা মোড: বাস্তব স্ক্যানের জন্য সেটিংসে Gemini API Key যুক্ত করুন"),
             isPlaceholder = true
         )
     }
