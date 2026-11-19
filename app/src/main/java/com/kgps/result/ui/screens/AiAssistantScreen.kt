@@ -12,9 +12,12 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -30,7 +33,9 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -61,6 +66,7 @@ import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -85,14 +91,18 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.VisualTransformation
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -107,6 +117,7 @@ import com.kgps.result.Student
 import com.kgps.result.ai.AiModelMode
 import com.kgps.result.ai.ExtractedClassSheet
 import com.kgps.result.ai.ExtractedMarksheet
+import com.kgps.result.ai.FieldConfidence
 import com.kgps.result.ai.RowValidationReport
 import com.kgps.result.ai.ScannedStudentRow
 import com.kgps.result.ai.validateScannedStudentRow
@@ -1221,8 +1232,8 @@ private fun ClassSheetPreviewSection(
 
             // Issue & Filter Summary Bar
             Surface(
-                color = if (issueRows.isNotEmpty()) AmberBg else TealSoft,
-                border = BorderStroke(1.dp, if (issueRows.isNotEmpty()) AmberBorder else TealContainer),
+                color = if (issueRows.isNotEmpty()) RoseBg else Color(0xFFECFDF5),
+                border = BorderStroke(1.dp, if (issueRows.isNotEmpty()) RoseDanger.copy(alpha = 0.4f) else EmeraldGrade.copy(alpha = 0.45f)),
                 shape = RoundedCornerShape(10.dp),
                 modifier = Modifier.fillMaxWidth()
             ) {
@@ -1234,19 +1245,33 @@ private fun ClassSheetPreviewSection(
                         Icon(
                             if (issueRows.isNotEmpty()) Icons.Rounded.WarningAmber else Icons.Rounded.CheckCircle,
                             contentDescription = null,
-                            tint = if (issueRows.isNotEmpty()) AmberNotice else EmeraldGrade,
+                            tint = if (issueRows.isNotEmpty()) RoseDanger else EmeraldGrade,
                             modifier = Modifier.size(18.dp)
                         )
                         Text(
                             if (issueRows.isNotEmpty()) {
-                                "মোট ${bn(sheet.rows.size.toString())} জনের মধ্যে ${bn(issueRows.size.toString())}টি সারিতে অস্পষ্ট বা যাচাইযোগ্য লেখা রয়েছে — নিচে ঠিক করুন"
+                                "মোট ${bn(sheet.rows.size.toString())} জনের মধ্যে ${bn(issueRows.size.toString())}টি সারিতে সন্দেহযুক্ত/অমিল ঘর রয়েছে — লাল ঘরগুলো যাচাই করুন"
                             } else {
-                                "সব ${bn(sheet.rows.size.toString())}টি সারি পরিষ্কার ও যাচাইকৃত"
+                                "সব ${bn(sheet.rows.size.toString())}টি সারির তথ্য ও হিসাব সম্পূর্ণ নিশ্চিত"
                             },
                             fontSize = 12.sp,
                             fontWeight = FontWeight.SemiBold,
-                            color = if (issueRows.isNotEmpty()) AmberNotice else TealDark
+                            color = if (issueRows.isNotEmpty()) RoseDanger else EmeraldGrade
                         )
+                    }
+
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Box(Modifier.size(8.dp).clip(CircleShape).background(EmeraldGrade))
+                            Text("সবুজ = শিউর (নিশ্চিত)", fontSize = 11.sp, fontWeight = FontWeight.Medium, color = EmeraldGrade)
+                        }
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Box(Modifier.size(8.dp).clip(CircleShape).background(RoseDanger))
+                            Text("লাল = সন্দেহযুক্ত / অমিল", fontSize = 11.sp, fontWeight = FontWeight.Medium, color = RoseDanger)
+                        }
                     }
 
                     Row(
@@ -1364,6 +1389,7 @@ private fun ClassSheetPreviewSection(
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun ScannedStudentPreviewCard(
     row: ScannedStudentRow,
@@ -1379,23 +1405,22 @@ private fun ScannedStudentPreviewCard(
     onVerifyField: (String) -> Unit,
     onRemoveRow: () -> Unit
 ) {
+    val hasSuspect = report.hasAnyIssue || report.fieldConfidences.values.any { it == FieldConfidence.SUSPECT }
     val borderColor = when {
         !row.selected -> SlateOutline
-        report.hasHardError -> RoseDanger
-        report.hasAnyIssue -> AmberBorder
-        else -> SlateOutline
+        hasSuspect -> RoseDanger
+        else -> EmeraldGrade.copy(alpha = 0.55f)
     }
     val cardBg = when {
         !row.selected -> SlateBg
-        report.hasHardError -> RoseBg
-        report.hasAnyIssue -> AmberBg
-        else -> MaterialTheme.colorScheme.surface
+        hasSuspect -> RoseBg.copy(alpha = 0.45f)
+        else -> Color(0xFFF6FEF9)
     }
 
     Card(
         modifier = Modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(containerColor = cardBg),
-        border = BorderStroke(if (report.hasAnyIssue && row.selected) 1.5.dp else 1.dp, borderColor),
+        border = BorderStroke(if (row.selected) 1.5.dp else 1.dp, borderColor),
         shape = RoundedCornerShape(10.dp)
     ) {
         Column(Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -1435,8 +1460,10 @@ private fun ScannedStudentPreviewCard(
                 Spacer(Modifier.weight(1f))
                 if (report.hasHardError) {
                     Text("ত্রুটি", fontSize = 10.5.sp, fontWeight = FontWeight.Bold, color = RoseDanger)
-                } else if (report.hasAnyIssue) {
-                    Text("অস্পষ্ট/যাচাই", fontSize = 10.5.sp, fontWeight = FontWeight.Bold, color = AmberNotice)
+                } else if (hasSuspect) {
+                    Text("সন্দেহযুক্ত", fontSize = 10.5.sp, fontWeight = FontWeight.Bold, color = RoseDanger)
+                } else {
+                    Text("সব নিশ্চিত", fontSize = 10.5.sp, fontWeight = FontWeight.Bold, color = EmeraldGrade)
                 }
                 IconButton(onClick = onRemoveRow, modifier = Modifier.size(26.dp)) {
                     Icon(Icons.Rounded.DeleteOutline, contentDescription = "সারি মুছুন", tint = SlateMuted, modifier = Modifier.size(16.dp))
@@ -1449,60 +1476,126 @@ private fun ScannedStudentPreviewCard(
                     value = row.rollText,
                     onValueChange = onUpdateRoll,
                     label = "রোল",
+                    confidence = report.fieldConfidences["roll"] ?: FieldConfidence.SURE,
                     hardError = report.hardErrors["roll"],
                     uncertainWarning = report.uncertainWarnings["roll"],
+                    deducedHint = row.deducedFields["roll"],
                     onVerify = { onVerifyField("roll") },
                     isNumeric = true,
-                    modifier = Modifier.width(84.dp)
+                    modifier = Modifier.width(80.dp)
                 )
                 EditableCellField(
                     value = row.name,
                     onValueChange = onUpdateName,
                     label = "শিক্ষার্থীর নাম",
+                    confidence = report.fieldConfidences["name"] ?: FieldConfidence.SURE,
                     hardError = report.hardErrors["name"],
                     uncertainWarning = report.uncertainWarnings["name"],
+                    deducedHint = row.deducedFields["name"],
                     onVerify = { onVerifyField("name") },
                     isNumeric = false,
+                    centered = false,
                     modifier = Modifier.weight(1f)
                 )
             }
 
-            // Subject Components Grid (wrapped nicely in rows of 3)
-            val compFields = remember(activeSub) {
-                buildList {
+            val isArt = activeSub.comps.size == 1 && activeSub.comps.first().key == "TOTAL" && activeSub.written == 0
+            val maxCont = activeSub.comps.sumOf { it.max }
+
+            if (isArt) {
+                // শিল্পকলা: TOTAL এবং সর্বমোট এক সারিতে
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    EditableCellField(
+                        value = row.marksText["TOTAL"] ?: "",
+                        onValueChange = { onUpdateMark("TOTAL", it) },
+                        label = "শিল্পকলা (${bn(activeSub.max.toString())})",
+                        confidence = report.fieldConfidences["TOTAL"] ?: FieldConfidence.SURE,
+                        hardError = report.hardErrors["TOTAL"],
+                        uncertainWarning = report.uncertainWarnings["TOTAL"],
+                        deducedHint = row.deducedFields["TOTAL"],
+                        onVerify = { onVerifyField("TOTAL") },
+                        isNumeric = true,
+                        modifier = Modifier.weight(1f)
+                    )
+                    EditableCellField(
+                        value = row.sheetGrandTotal ?: "",
+                        onValueChange = { onUpdateMark("GRAND", it) },
+                        label = "মোট (${bn(activeSub.max.toString())})",
+                        confidence = report.fieldConfidences["GRAND"] ?: FieldConfidence.SURE,
+                        hardError = report.hardErrors["GRAND"],
+                        uncertainWarning = report.uncertainWarnings["GRAND"],
+                        deducedHint = row.deducedFields["GRAND"],
+                        onVerify = { onVerifyField("GRAND") },
+                        isNumeric = true,
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+            } else {
+                // ১ম সারি: পাঠ্যবই, সক্রিয়তা, ভাষা, ক্লাস টেস্ট (এক সারিতে ৪টি)
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(5.dp)) {
                     activeSub.comps.forEach { c ->
-                        val short = when (c.key) {
+                        val shortLabel = when (c.key) {
                             "TB" -> "পাঠ্যবই"
                             "ACT" -> "সক্রিয়তা"
                             "LANG" -> "ভাষা"
                             "CT" -> "ক্লাস টেস্ট"
                             else -> "মোট"
                         }
-                        add(Triple(c.key, short, c.max))
-                    }
-                    if (activeSub.written > 0) {
-                        add(Triple("WR", "সামষ্টিক", activeSub.written))
-                    }
-                }
-            }
-
-            compFields.chunked(3).forEach { chunk ->
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    chunk.forEach { (cKey, shortLabel, maxVal) ->
                         EditableCellField(
-                            value = row.marksText[cKey] ?: "",
-                            onValueChange = { onUpdateMark(cKey, it) },
-                            label = "$shortLabel (${bn(maxVal.toString())})",
-                            hardError = report.hardErrors[cKey],
-                            uncertainWarning = report.uncertainWarnings[cKey],
-                            onVerify = { onVerifyField(cKey) },
+                            value = row.marksText[c.key] ?: "",
+                            onValueChange = { onUpdateMark(c.key, it) },
+                            label = "$shortLabel (${bn(c.max.toString())})",
+                            confidence = report.fieldConfidences[c.key] ?: FieldConfidence.SURE,
+                            hardError = report.hardErrors[c.key],
+                            uncertainWarning = report.uncertainWarnings[c.key],
+                            deducedHint = row.deducedFields[c.key],
+                            onVerify = { onVerifyField(c.key) },
                             isNumeric = true,
                             modifier = Modifier.weight(1f)
                         )
                     }
-                    repeat(3 - chunk.size) {
-                        Spacer(Modifier.weight(1f))
+                }
+
+                // ২য় সারি: ধারাবাহিক মোট, সামষ্টিক (থাকলে), এবং মোট
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    EditableCellField(
+                        value = row.sheetContinuousTotal ?: "",
+                        onValueChange = { onUpdateMark("CONT", it) },
+                        label = "ধারাবাহিক মোট (${bn(maxCont.toString())})",
+                        confidence = report.fieldConfidences["CONT"] ?: FieldConfidence.SURE,
+                        hardError = report.hardErrors["CONT"],
+                        uncertainWarning = report.uncertainWarnings["CONT"],
+                        deducedHint = row.deducedFields["CONT"],
+                        onVerify = { onVerifyField("CONT") },
+                        isNumeric = true,
+                        modifier = Modifier.weight(1f)
+                    )
+                    if (activeSub.written > 0) {
+                        EditableCellField(
+                            value = row.marksText["WR"] ?: "",
+                            onValueChange = { onUpdateMark("WR", it) },
+                            label = "সামষ্টিক (${bn(activeSub.written.toString())})",
+                            confidence = report.fieldConfidences["WR"] ?: FieldConfidence.SURE,
+                            hardError = report.hardErrors["WR"],
+                            uncertainWarning = report.uncertainWarnings["WR"],
+                            deducedHint = row.deducedFields["WR"],
+                            onVerify = { onVerifyField("WR") },
+                            isNumeric = true,
+                            modifier = Modifier.weight(1f)
+                        )
                     }
+                    EditableCellField(
+                        value = row.sheetGrandTotal ?: "",
+                        onValueChange = { onUpdateMark("GRAND", it) },
+                        label = "মোট (${bn(activeSub.max.toString())})",
+                        confidence = report.fieldConfidences["GRAND"] ?: FieldConfidence.SURE,
+                        hardError = report.hardErrors["GRAND"],
+                        uncertainWarning = report.uncertainWarnings["GRAND"],
+                        deducedHint = row.deducedFields["GRAND"],
+                        onVerify = { onVerifyField("GRAND") },
+                        isNumeric = true,
+                        modifier = Modifier.weight(1f)
+                    )
                 }
             }
 
@@ -1535,23 +1628,49 @@ private fun ScannedStudentPreviewCard(
 
             report.arithmeticWarning?.let { arithMsg ->
                 Surface(
-                    color = Color.White,
-                    border = BorderStroke(1.dp, AmberBorder),
-                    shape = RoundedCornerShape(6.dp),
+                    color = RoseBg,
+                    border = BorderStroke(1.dp, RoseDanger.copy(alpha = 0.55f)),
+                    shape = RoundedCornerShape(8.dp),
                     modifier = Modifier.fillMaxWidth()
                 ) {
-                    Row(
-                        Modifier.padding(horizontal = 8.dp, vertical = 5.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
-                        Icon(Icons.Rounded.WarningAmber, contentDescription = null, tint = AmberNotice, modifier = Modifier.size(15.dp))
-                        Text(arithMsg, fontSize = 11.sp, color = AmberNotice, modifier = Modifier.weight(1f))
-                        TextButton(
-                            onClick = { onVerifyField("arithmetic") },
-                            contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp)
+                    Column(Modifier.padding(8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
                         ) {
-                            Text("ঠিক আছে", fontSize = 10.5.sp)
+                            Icon(Icons.Rounded.WarningAmber, contentDescription = null, tint = RoseDanger, modifier = Modifier.size(15.dp))
+                            Text(arithMsg, fontSize = 11.sp, fontWeight = FontWeight.Medium, color = RoseDanger, modifier = Modifier.weight(1f))
+                            TextButton(
+                                onClick = { onVerifyField("arithmetic") },
+                                contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp)
+                            ) {
+                                Text("ঠিক আছে", fontSize = 10.5.sp, color = RoseDanger)
+                            }
+                        }
+                        if (report.quickFixes.isNotEmpty()) {
+                            FlowRow(
+                                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                verticalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                report.quickFixes.forEach { fix ->
+                                    Surface(
+                                        color = Color.White,
+                                        border = BorderStroke(1.dp, EmeraldGrade.copy(alpha = 0.6f)),
+                                        shape = RoundedCornerShape(6.dp),
+                                        modifier = Modifier.clickable {
+                                            onUpdateMark(fix.targetField, fix.newValue)
+                                        }
+                                    ) {
+                                        Text(
+                                            "✓ ${fix.labelBn}",
+                                            fontSize = 10.5.sp,
+                                            fontWeight = FontWeight.SemiBold,
+                                            color = EmeraldGrade,
+                                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                                        )
+                                    }
+                                }
+                            }
                         }
                     }
                 }
@@ -1560,51 +1679,103 @@ private fun ScannedStudentPreviewCard(
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun EditableCellField(
     value: String,
     onValueChange: (String) -> Unit,
     label: String,
+    confidence: FieldConfidence,
     hardError: String?,
     uncertainWarning: String?,
+    deducedHint: String?,
     onVerify: () -> Unit,
     isNumeric: Boolean,
+    centered: Boolean = true,
     modifier: Modifier = Modifier
 ) {
-    val hasError = hardError != null
-    val hasWarn = !hasError && uncertainWarning != null
+    val isSuspect = hardError != null || uncertainWarning != null || confidence == FieldConfidence.SUSPECT
+    val isSure = !isSuspect && value.isNotBlank()
     val msg = hardError ?: uncertainWarning
+    val sureGreenBg = Color(0xFFECFDF5)
+    val containerBg = when {
+        isSuspect -> RoseBg
+        isSure -> sureGreenBg
+        else -> Color.White
+    }
+    val borderColor = when {
+        isSuspect -> RoseDanger
+        isSure -> EmeraldGrade
+        else -> SlateOutline
+    }
+    val labelColor = when {
+        isSuspect -> RoseDanger
+        isSure -> EmeraldGrade
+        else -> SlateMuted
+    }
+    val interactionSource = remember { MutableInteractionSource() }
+    val fieldColors = OutlinedTextFieldDefaults.colors(
+        focusedContainerColor = containerBg,
+        unfocusedContainerColor = containerBg,
+        focusedBorderColor = borderColor,
+        unfocusedBorderColor = borderColor,
+        errorContainerColor = RoseBg,
+        errorBorderColor = RoseDanger,
+        focusedLabelColor = labelColor,
+        unfocusedLabelColor = labelColor,
+        cursorColor = borderColor
+    )
 
     Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(2.dp)) {
-        OutlinedTextField(
+        BasicTextField(
             value = value,
             onValueChange = onValueChange,
-            label = { Text(label, fontSize = 10.5.sp, maxLines = 1, overflow = TextOverflow.Ellipsis) },
             singleLine = true,
-            isError = hasError,
+            textStyle = TextStyle(
+                fontSize = 14.sp,
+                fontWeight = if (isSure || isSuspect) FontWeight.SemiBold else FontWeight.Normal,
+                color = if (isSuspect) RoseDanger else SlateText,
+                textAlign = if (centered) TextAlign.Center else TextAlign.Start
+            ),
             keyboardOptions = KeyboardOptions(
                 keyboardType = if (isNumeric) KeyboardType.Decimal else KeyboardType.Text
             ),
-            colors = OutlinedTextFieldDefaults.colors(
-                focusedContainerColor = Color.White,
-                unfocusedContainerColor = when {
-                    hasError -> RoseBg
-                    hasWarn -> Color(0xFFFFFBEB)
-                    else -> Color.White
-                },
-                focusedBorderColor = when {
-                    hasError -> RoseDanger
-                    hasWarn -> AmberNotice
-                    else -> TealPrimary
-                },
-                unfocusedBorderColor = when {
-                    hasError -> RoseDanger
-                    hasWarn -> AmberNotice
-                    else -> SlateOutline
-                }
-            ),
+            cursorBrush = SolidColor(borderColor),
+            interactionSource = interactionSource,
             modifier = Modifier.fillMaxWidth()
-        )
+        ) { innerTextField ->
+            OutlinedTextFieldDefaults.DecorationBox(
+                value = value,
+                innerTextField = innerTextField,
+                enabled = true,
+                singleLine = true,
+                visualTransformation = VisualTransformation.None,
+                interactionSource = interactionSource,
+                isError = isSuspect,
+                label = {
+                    Text(
+                        label,
+                        fontSize = 9.5.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        color = labelColor
+                    )
+                },
+                colors = fieldColors,
+                contentPadding = PaddingValues(horizontal = 6.dp, vertical = 10.dp),
+                container = {
+                    OutlinedTextFieldDefaults.Container(
+                        enabled = true,
+                        isError = isSuspect,
+                        interactionSource = interactionSource,
+                        colors = fieldColors,
+                        shape = RoundedCornerShape(8.dp),
+                        focusedBorderThickness = 1.6.dp,
+                        unfocusedBorderThickness = if (isSuspect || isSure) 1.3.dp else 1.dp
+                    )
+                }
+            )
+        }
         if (msg != null) {
             Row(
                 verticalAlignment = Alignment.CenterVertically,
@@ -1612,27 +1783,36 @@ private fun EditableCellField(
             ) {
                 Text(
                     "⚠ $msg",
-                    fontSize = 10.sp,
-                    color = if (hasError) RoseDanger else AmberNotice,
+                    fontSize = 9.5.sp,
+                    color = RoseDanger,
                     modifier = Modifier.weight(1f),
-                    lineHeight = 13.sp
+                    lineHeight = 12.sp
                 )
-                if (hasWarn) {
+                if (hardError == null) {
                     Surface(
-                        color = AmberNotice.copy(alpha = 0.12f),
+                        color = RoseDanger.copy(alpha = 0.12f),
                         shape = RoundedCornerShape(4.dp),
                         modifier = Modifier.clickable { onVerify() }
                     ) {
                         Text(
                             "✓ ঠিক",
-                            fontSize = 9.5.sp,
+                            fontSize = 9.sp,
                             fontWeight = FontWeight.Bold,
-                            color = AmberNotice,
-                            modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp)
+                            color = RoseDanger,
+                            modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
                         )
                     }
                 }
             }
+        } else if (!isSuspect && !deducedHint.isNullOrBlank()) {
+            Text(
+                "✓ $deducedHint",
+                fontSize = 9.sp,
+                color = EmeraldGrade,
+                lineHeight = 11.5.sp,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis
+            )
         }
     }
 }

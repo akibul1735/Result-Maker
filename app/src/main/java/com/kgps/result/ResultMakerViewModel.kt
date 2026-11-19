@@ -21,6 +21,7 @@ import com.kgps.result.ai.ExtractedClassSheet
 import com.kgps.result.ai.ExtractedMarksheet
 import com.kgps.result.ai.GeminiApiConfig
 import com.kgps.result.ai.PlaceholderAiRepository
+import com.kgps.result.ai.ScanConstraintSolver
 import com.kgps.result.ai.ScannedStudentRow
 import com.kgps.result.ai.validateScannedStudentRow
 import com.kgps.result.backup.AutoBackupManager
@@ -1439,26 +1440,70 @@ class ResultMakerViewModel(
             val nextRows = current.rows.map { r ->
                 if (r.id != rowId) r
                 else {
-                    val nextMarks = if (markEntry != null) {
-                        r.marksText.toMutableMap().apply {
-                            put(markEntry.first, markEntry.second)
+                    val editedKey = markEntry?.first
+                    val editedVal = markEntry?.second
+
+                    var nextMarks = r.marksText
+                    var nextCont = r.sheetContinuousTotal
+                    var nextGrand = r.sheetGrandTotal
+                    val nextDeduced = r.deducedFields.toMutableMap()
+                    val nextResolved = r.resolvedFields.toMutableSet()
+
+                    if (rollText != null) nextResolved.add("roll")
+                    if (name != null) nextResolved.add("name")
+
+                    if (editedKey != null && editedVal != null) {
+                        when (editedKey) {
+                            "CONT" -> nextCont = editedVal.ifBlank { null }
+                            "GRAND" -> nextGrand = editedVal.ifBlank { null }
+                            else -> {
+                                nextMarks = r.marksText.toMutableMap().apply {
+                                    put(editedKey, editedVal)
+                                }
+                            }
                         }
-                    } else r.marksText
-                    val nextResolved = r.resolvedFields.toMutableSet().apply {
-                        if (rollText != null) add("roll")
-                        if (name != null) add("name")
-                        if (markEntry != null) {
-                            add(markEntry.first)
-                            add("arithmetic")
+                        // ব্যবহারকারী নিজে এডিট করলে আগের অনুমান মুছে নতুন হিসাব চালু হবে
+                        nextDeduced.remove(editedKey)
+                        nextResolved.add(editedKey)
+                        nextResolved.remove("arithmetic")
+
+                        // আগে থেকে স্বয়ংক্রিয় হিসাবকৃত CONT/GRAND থাকলে সেগুলো পুনরায় হিসাবের সুযোগ দিন
+                        if (editedKey != "CONT" && "CONT" in nextDeduced) {
+                            nextCont = null
+                            nextDeduced.remove("CONT")
+                            nextResolved.remove("CONT")
                         }
-                        if (verifyField != null) add(verifyField)
+                        if (editedKey != "GRAND" && "GRAND" in nextDeduced) {
+                            nextGrand = null
+                            nextDeduced.remove("GRAND")
+                            nextResolved.remove("GRAND")
+                        }
+                        // যদি user CONT বা GRAND এডিট করেন এবং WR স্বয়ংক্রিয় অনুমান ছিল, তবে পুনরায় অনুমান করুন
+                        if ((editedKey == "CONT" || editedKey == "GRAND") && "WR" in nextDeduced) {
+                            nextMarks = nextMarks.toMutableMap().apply { remove("WR") }
+                            nextDeduced.remove("WR")
+                            nextResolved.remove("WR")
+                        }
                     }
-                    r.copy(
+
+                    if (verifyField != null) {
+                        nextResolved.add(verifyField)
+                    }
+
+                    val updatedRow = r.copy(
                         rollText = rollText ?: r.rollText,
                         name = name ?: r.name,
                         marksText = nextMarks,
-                        resolvedFields = nextResolved
+                        sheetContinuousTotal = nextCont,
+                        sheetGrandTotal = nextGrand,
+                        resolvedFields = nextResolved,
+                        deducedFields = nextDeduced
                     )
+                    if (editedKey != null) {
+                        ScanConstraintSolver.reconcileInterdependencies(updatedRow, current.cls, current.subKey)
+                    } else {
+                        updatedRow
+                    }
                 }
             }
             st.copy(classSheetResult = current.copy(rows = nextRows))
@@ -1489,7 +1534,9 @@ class ResultMakerViewModel(
         _aiState.update { st ->
             val current = st.classSheetResult ?: return@update st
             val nextRows = current.rows.map { r ->
-                val allKeys = r.aiIssues.keys + setOf("name", "arithmetic")
+                val allKeys = r.aiIssues.keys + setOf(
+                    "roll", "name", "TB", "ACT", "LANG", "CT", "WR", "TOTAL", "CONT", "GRAND", "arithmetic"
+                )
                 r.copy(resolvedFields = r.resolvedFields + allKeys)
             }
             st.copy(classSheetResult = current.copy(rows = nextRows))

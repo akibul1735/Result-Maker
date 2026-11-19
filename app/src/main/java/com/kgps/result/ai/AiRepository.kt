@@ -278,7 +278,8 @@ data class ScannedStudentRow(
     val sheetGrandTotal: String? = null,
     val rawNotes: String = "",
     val aiIssues: Map<String, String> = emptyMap(),
-    val resolvedFields: Set<String> = emptySet()
+    val resolvedFields: Set<String> = emptySet(),
+    val deducedFields: Map<String, String> = emptyMap()
 )
 
 data class ExtractedClassSheet(
@@ -296,7 +297,10 @@ data class RowValidationReport(
     val uncertainWarnings: Map<String, String>,
     val arithmeticWarning: String? = null,
     val calculatedContinuous: Double? = null,
-    val calculatedGrandTotal: Double? = null
+    val calculatedGrandTotal: Double? = null,
+    val fieldConfidences: Map<String, FieldConfidence> = emptyMap(),
+    val mismatchFields: Set<String> = emptySet(),
+    val quickFixes: List<ArithFixSuggestion> = emptyList()
 ) {
     val hasHardError: Boolean get() = hardErrors.isNotEmpty()
     val hasAnyIssue: Boolean get() = hardErrors.isNotEmpty() || uncertainWarnings.isNotEmpty() || arithmeticWarning != null
@@ -307,88 +311,7 @@ fun validateScannedStudentRow(
     cls: Int,
     subKey: String,
     duplicateRolls: Set<Int>
-): RowValidationReport {
-    val hard = mutableMapOf<String, String>()
-    val warn = mutableMapOf<String, String>()
-
-    row.aiIssues.forEach { (field, reason) ->
-        if (field !in row.resolvedFields) {
-            warn[field] = reason.ifBlank { "লেখা অস্পষ্ট — যাচাই করুন" }
-        }
-    }
-
-    val rollClean = fromBn(row.rollText.trim())
-    val rollNum = rollClean.toIntOrNull()
-    if (rollClean.isBlank() || rollNum == null || rollNum <= 0) {
-        hard["roll"] = "সঠিক রোল লিখুন (১, ২, ৩...)"
-    } else if (rollNum in duplicateRolls) {
-        hard["roll"] = "রোল ${bn(rollNum.toString())} একাধিক সারিতে আছে"
-    }
-
-    if (row.name.isBlank() && "name" !in row.resolvedFields && "name" !in warn) {
-        warn["name"] = "নাম পড়া যায়নি — প্রয়োজনে লিখে দিন"
-    }
-
-    val subDef = subjectsFor(cls, RELIGIONS.first()).find { it.key == subKey }
-    val expectedComps = buildList {
-        subDef?.comps?.forEach { add(it.key to it.max) }
-        if ((subDef?.written ?: 0) > 0) {
-            add("WR" to (subDef?.written ?: 70))
-        }
-    }
-
-    var contSum = 0.0
-    var hasAnyCont = false
-    expectedComps.forEach { (cKey, maxVal) ->
-        val raw = row.marksText[cKey]?.trim().orEmpty()
-        if (raw.isEmpty()) return@forEach
-        val normalized = fromBn(raw)
-        val num = normalized.toDoubleOrNull()
-        if (num == null) {
-            hard[cKey] = "\"$raw\" সঠিক সংখ্যা নয় (যেমন ${bn(maxVal.toString())} বা ফাঁকা)"
-        } else if (num < 0.0 || num > maxVal.toDouble()) {
-            hard[cKey] = "সর্বোচ্চ ${bn(maxVal.toString())}-এর মধ্যে হতে হবে"
-        } else {
-            if (cKey != "WR") {
-                contSum += num
-                hasAnyCont = true
-            }
-        }
-    }
-
-    val wrVal = row.marksText["WR"]?.trim()?.takeIf { it.isNotEmpty() }?.let { fromBn(it).toDoubleOrNull() }
-    val calcCont = if (hasAnyCont) contSum else null
-    val calcGrand = if (calcCont != null && wrVal != null && (subDef?.written ?: 0) > 0) {
-        calcCont + wrVal
-    } else if (calcCont != null && (subDef?.written ?: 0) == 0) {
-        calcCont
-    } else {
-        null
-    }
-
-    var arithWarn: String? = null
-    if ("arithmetic" !in row.resolvedFields && hard.isEmpty()) {
-        val sheetCont = row.sheetContinuousTotal?.trim()?.takeIf { it.isNotEmpty() }?.let { fromBn(it).toDoubleOrNull() }
-        val sheetGrand = row.sheetGrandTotal?.trim()?.takeIf { it.isNotEmpty() }?.let { fromBn(it).toDoubleOrNull() }
-        val contMismatch = sheetCont != null && calcCont != null && abs(sheetCont - calcCont) > 0.01
-        val grandMismatch = sheetGrand != null && calcGrand != null && abs(sheetGrand - calcGrand) > 0.01
-        if (contMismatch && grandMismatch) {
-            arithWarn = "খাতার ধারাবাহিক (${fmtEn(sheetCont!!)}) ও সর্বমোট (${fmtEn(sheetGrand!!)}) এর সাথে যোগফল (${fmtEn(calcCont!!)} / ${fmtEn(calcGrand!!)}) মিলছে না"
-        } else if (contMismatch) {
-            arithWarn = "খাতায় ধারাবাহিক মোট ${bn(fmtEn(sheetCont!!))}, কিন্তু অংশগুলোর যোগফল ${bn(fmtEn(calcCont!!))}"
-        } else if (grandMismatch) {
-            arithWarn = "খাতায় সর্বমোট ${bn(fmtEn(sheetGrand!!))}, কিন্তু ধারাবাহিক+সামষ্টিক ${bn(fmtEn(calcGrand!!))}"
-        }
-    }
-
-    return RowValidationReport(
-        hardErrors = hard,
-        uncertainWarnings = warn,
-        arithmeticWarning = arithWarn,
-        calculatedContinuous = calcCont,
-        calculatedGrandTotal = calcGrand
-    )
-}
+): RowValidationReport = ScanConstraintSolver.validateRow(row, cls, subKey, duplicateRolls)
 
 data class AiChatReply(
     val text: String,
@@ -525,9 +448,11 @@ internal fun parseExtractedClassSheetJson(
         uncObj.keys().forEach { k ->
             val reason = uncObj.optString(k, "").trim()
             if (reason.isNotEmpty()) {
-                val normKey = when (k.lowercase()) {
-                    "roll", "name" -> k.lowercase()
-                    else -> k.uppercase()
+                val normKey = when (k.trim().lowercase()) {
+                    "roll", "name" -> k.trim().lowercase()
+                    "cont", "continuous", "sheetcontinuoustotal" -> "CONT"
+                    "grand", "grandtotal", "sheetgrandtotal" -> "GRAND"
+                    else -> k.trim().uppercase()
                 }
                 aiIssues[normKey] = reason
             }
@@ -539,7 +464,7 @@ internal fun parseExtractedClassSheetJson(
             .takeIf { it.isNotEmpty() && !it.equals("null", ignoreCase = true) }
             ?.let { fromBn(it) }
 
-        ScannedStudentRow(
+        val rawRow = ScannedStudentRow(
             id = UUID.randomUUID().toString(),
             selected = true,
             rollText = rollStr,
@@ -550,6 +475,7 @@ internal fun parseExtractedClassSheetJson(
             rawNotes = obj.optString("rawNotes", "").trim(),
             aiIssues = aiIssues
         )
+        ScanConstraintSolver.reconcileInterdependencies(rawRow, detectedCls, detectedSub)
     }
 
     return ExtractedClassSheet(
@@ -939,8 +865,8 @@ class DirectGeminiAiRepository(
             1. সব সংখ্যা ইংরেজি অঙ্কে (০৭->"7"); নাম বাংলায়।
             2. CT ঘরে "০৬+০৭=১৩/২=০৭" থাকলে "=" পরের গড় মানটি ("7") `CT`-তে এবং `rawNotes`-এ সংক্ষেপে লিখুন।
             3. `A`/`অনু` থাকলে "0" ও `rawNotes`-এ "অনুপস্থিত (A)"; ফাঁকা ঘর ""।
-            4. "মোট (ধারাবাহিক)" -> `sheetContinuousTotal`, "সর্বমোট" -> `sheetGrandTotal`।
-            5. অস্পষ্ট/কাটা-ছেঁড়া হলে সেরা অনুমান দিন এবং `uncertainFields`-এ ফিল্ড কী ("roll","name","TB","ACT","LANG","CT","WR","TOTAL") দিয়ে বাংলায় কারণ লিখুন; পড়া না গেলে "" দিন।
+            4. "ধারাবাহিক মোট" -> `sheetContinuousTotal`, "সামষ্টিক" -> `WR`, "সর্বমোট/মোট" -> `sheetGrandTotal` (এগুলো সবসময় খাতা থেকে পড়ুন)।
+            5. কেবল স্পষ্ট ও নিশ্চিত মানগুলো স্বাভাবিক রাখুন; অস্পষ্ট/কাটা-ছেঁড়া বা অনুমান করা মান হলে `uncertainFields`-এ কী ("roll","name","TB","ACT","LANG","CT","WR","TOTAL","CONT","GRAND") দিয়ে বাংলায় কারণ লিখুন; পড়া না গেলে "" দিন।
             JSON: {"cls":${clsHint ?: 3},"term":${termHint ?: 1},"subKey":"${subKeyHint ?: "MATH"}","summary":"","warnings":[],"rows":[{"roll":"1","name":"","marks":{"TB":"","ACT":"","LANG":"","CT":"","WR":""},"sheetContinuousTotal":"","sheetGrandTotal":"","rawNotes":"","uncertainFields":{}}]}
         """.trimIndent()
 
@@ -1400,10 +1326,10 @@ class PlaceholderAiRepository : AiRepository {
                 ScannedStudentRow(
                     rollText = "2",
                     name = "মোঃ ইয়ামিন মোল্যা",
-                    marksText = mapOf("TB" to "9", "ACT" to "5", "LANG" to "5", "CT" to "7", "WR" to "46"),
+                    marksText = mapOf("TB" to "", "ACT" to "5", "LANG" to "5", "CT" to "7", "WR" to ""),
                     sheetContinuousTotal = "26",
                     sheetGrandTotal = "72",
-                    aiIssues = mapOf("TB" to "৭ না কি ৯ — লেখা কিছুটা অস্পষ্ট")
+                    aiIssues = mapOf("TB" to "লেখা কিছুটা অস্পষ্ট", "WR" to "অস্পষ্ট")
                 ),
                 ScannedStudentRow(
                     rollText = "3",
@@ -1420,7 +1346,7 @@ class PlaceholderAiRepository : AiRepository {
                     sheetContinuousTotal = "19",
                     rawNotes = "সামষ্টিক ঘর খাতায় ফাঁকা"
                 )
-            ),
+            ).map { ScanConstraintSolver.reconcileInterdependencies(it, cls, sub) },
             isSample = true
         )
     }
