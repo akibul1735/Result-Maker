@@ -280,6 +280,9 @@ fun BulkSheetScreen(
                 add(SheetColDef("info_guardian", "অভিভাবকের নাম", "তথ্য", width = 132.dp, infoFieldKey = "guardian", isNumeric = false))
                 add(SheetColDef("info_mobile", "মোবাইল", "নম্বর", width = 108.dp, infoFieldKey = "mobile", isNumeric = true))
                 add(SheetColDef("info_village", "গ্রাম", "ঠিকানা", width = 104.dp, infoFieldKey = "village", isNumeric = false))
+                add(SheetColDef("info_union", "ইউনিয়ন", "ঐচ্ছিক", width = 100.dp, infoFieldKey = "union", isNumeric = false))
+                add(SheetColDef("info_upazila", "উপজেলা", "ডিফল্ট আলফাডাঙ্গা", width = 104.dp, infoFieldKey = "upazila", isNumeric = false))
+                add(SheetColDef("info_district", "জেলা", "ডিফল্ট ফরিদপুর", width = 96.dp, infoFieldKey = "district", isNumeric = false))
                 add(SheetColDef("info_religion", "ধর্ম", "ইসলাম/হিন্দু...", width = 84.dp, infoFieldKey = "religion", isNumeric = false))
                 settings.customFields.forEach { cf ->
                     add(SheetColDef("cf_${cf.key}", cf.label, "কাস্টম", width = 110.dp, xKey = cf.key, isNumeric = false))
@@ -355,6 +358,9 @@ fun BulkSheetScreen(
                         "guardian" -> nextStudent.copy(guardian = trimmed)
                         "mobile" -> nextStudent.copy(mobile = trimmed)
                         "village" -> nextStudent.copy(village = trimmed)
+                        "union" -> nextStudent.copy(union = trimmed)
+                        "upazila" -> nextStudent.copy(upazila = trimmed)
+                        "district" -> nextStudent.copy(district = trimmed)
                         "religion" -> nextStudent.copy(religion = trimmed)
                         else -> nextStudent
                     }
@@ -945,7 +951,7 @@ fun BulkSheetScreen(
                                                 return@forEachIndexed
                                             }
 
-                                            val initialVal = remember(s.id, s.m, s.x, s.guardian, s.mobile, s.village, s.religion, col.key, term) {
+                                            val initialVal = remember(s.id, s.m, s.x, s.guardian, s.mobile, s.village, s.union, s.upazila, s.district, s.religion, col.key, term) {
                                                 when {
                                                     col.isMark && col.markSubKey != null && col.markCompKey != null -> {
                                                         s.m[mk(col.markSubKey, term, col.markCompKey)]?.let { fmtEn(it) } ?: ""
@@ -955,6 +961,9 @@ fun BulkSheetScreen(
                                                         "guardian" -> s.guardian
                                                         "mobile" -> s.mobile
                                                         "village" -> s.village
+                                                        "union" -> s.union
+                                                        "upazila" -> s.upazila.ifBlank { com.kgps.result.DEFAULT_UPAZILA }
+                                                        "district" -> s.district.ifBlank { com.kgps.result.DEFAULT_DISTRICT }
                                                         "religion" -> s.religion
                                                         else -> ""
                                                     }
@@ -1011,6 +1020,15 @@ fun BulkSheetScreen(
                                                         "guardian" -> if (v != s.guardian) onPatchStudentField(s.id, "guardian", v)
                                                         "mobile" -> if (v != s.mobile) onPatchStudentField(s.id, "mobile", v)
                                                         "village" -> if (v != s.village) onPatchStudentField(s.id, "village", v)
+                                                        "union" -> if (v != s.union) onPatchStudentField(s.id, "union", v)
+                                                        "upazila" -> {
+                                                            val safeUp = v.ifBlank { com.kgps.result.DEFAULT_UPAZILA }
+                                                            if (safeUp != s.upazila) onPatchStudentField(s.id, "upazila", safeUp)
+                                                        }
+                                                        "district" -> {
+                                                            val safeDist = v.ifBlank { com.kgps.result.DEFAULT_DISTRICT }
+                                                            if (safeDist != s.district) onPatchStudentField(s.id, "district", safeDist)
+                                                        }
                                                         "religion" -> {
                                                             val safeRel = v.ifBlank { s.religion }
                                                             if (safeRel != s.religion) onPatchStudentField(s.id, "religion", safeRel)

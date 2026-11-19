@@ -446,8 +446,10 @@ object PdfGen {
         val backCx = 18f + 391f / 2f
         c.drawLine(48f, 468f, 379f, 468f, stroke)
 
+        val effectiveUpazila = s.upazila.ifBlank { DEFAULT_UPAZILA }
+        val effectiveDistrict = s.district.ifBlank { DEFAULT_DISTRICT }
         val schoolName = st.school.ifBlank { "বিদ্যালয়ের নাম" }
-        val fallbackAddr = listOf(s.upazila, s.district).filter { it.isNotBlank() }.joinToString(", ")
+        val fallbackAddr = listOf(effectiveUpazila, effectiveDistrict).filter { it.isNotBlank() }.joinToString(", ")
         val schoolAddr = st.schoolAddress.ifBlank { fallbackAddr }
 
         center(ctx, c, schoolName, backCx, 496f, 12.5f, true, 350f, f, 0xFF0F172A.toInt())
@@ -497,11 +499,16 @@ object PdfGen {
         dottedField(ctx, c, "শ্রেণি:", CLSN[s.cls - 1], 456f, formY0 + formDy, 622f, 10.5f, f)
         dottedField(ctx, c, "রোল/আইডি:", bn(s.roll.toString()), 632f, formY0 + formDy, 801f, 10.5f, f)
 
-        dottedField(ctx, c, "গ্রাম:", s.village, 456f, formY0 + formDy * 2, 622f, 10.5f, f)
-        dottedField(ctx, c, "পোস্ট:", s.post, 632f, formY0 + formDy * 2, 801f, 10.5f, f)
+        val unionText = s.union.trim()
+        if (unionText.isNotBlank()) {
+            dottedField(ctx, c, "গ্রাম:", s.village, 456f, formY0 + formDy * 2, 622f, 10.5f, f)
+            dottedField(ctx, c, "ইউনিয়ন:", unionText, 632f, formY0 + formDy * 2, 801f, 10.5f, f)
+        } else {
+            dottedField(ctx, c, "গ্রাম:", s.village, 456f, formY0 + formDy * 2, 801f, 10.5f, f)
+        }
 
-        dottedField(ctx, c, "উপজেলা/থানা:", s.upazila, 456f, formY0 + formDy * 3, 636f, 10.5f, f)
-        dottedField(ctx, c, "জেলা:", s.district, 646f, formY0 + formDy * 3, 801f, 10.5f, f)
+        dottedField(ctx, c, "উপজেলা/থানা:", effectiveUpazila, 456f, formY0 + formDy * 3, 636f, 10.5f, f)
+        dottedField(ctx, c, "জেলা:", effectiveDistrict, 646f, formY0 + formDy * 3, 801f, 10.5f, f)
 
         dottedField(ctx, c, "অভিভাবকের নাম:", s.guardian, 456f, formY0 + formDy * 4, 656f, 10.5f, f)
         dottedField(ctx, c, "মোবাইল:", bn(s.mobile), 664f, formY0 + formDy * 4, 801f, 10.5f, f)

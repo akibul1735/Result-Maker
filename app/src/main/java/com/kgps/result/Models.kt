@@ -1,5 +1,8 @@
 package com.kgps.result
 
+const val DEFAULT_UPAZILA = "আলফাডাঙ্গা"
+const val DEFAULT_DISTRICT = "ফরিদপুর"
+
 data class Student(
     val id: String,
     val cls: Int,
@@ -7,9 +10,10 @@ data class Student(
     val name: String,
     val guardian: String = "",
     val village: String = "",
+    val union: String = "",
     val post: String = "",
-    val upazila: String = "",
-    val district: String = "",
+    val upazila: String = DEFAULT_UPAZILA,
+    val district: String = DEFAULT_DISTRICT,
     val mobile: String = "",
     val religion: String = "ইসলাম",
     val m: Map<String, Double> = emptyMap(),   // নম্বর: BAN_1_TB, BAN_1_WR, ART_2_TOTAL ...
@@ -128,7 +132,7 @@ fun createEmptyStudent(cls: Int, roll: Int, religion: String = "ইসলাম"
 
 val DEFAULT_SETTINGS = Settings(
     school = "কামারখালী সরকারি প্রাথমিক বিদ্যালয়",
-    schoolAddress = "কামারখালী, মধুখালী, ফরিদপুর",
+    schoolAddress = "আলফাডাঙ্গা, ফরিদপুর",
     year = "২০২৬",
     teachers = mapOf(
         1 to "মোসাঃ তাসলিমা খাতুন",
@@ -155,9 +159,9 @@ val SAMPLE_STUDENTS = listOf(
         name = "তানভীর আহমেদ",
         guardian = "মোঃ করিম উদ্দিন",
         village = "কামারখালী",
-        post = "কামারখালী",
-        upazila = "মধুখালী",
-        district = "ফরিদপুর",
+        post = "",
+        upazila = DEFAULT_UPAZILA,
+        district = DEFAULT_DISTRICT,
         mobile = "01711223344",
         religion = "ইসলাম",
         m = mapOf(
@@ -199,9 +203,9 @@ val SAMPLE_STUDENTS = listOf(
         name = "নুসরাত জাহান মিম",
         guardian = "মোঃ শফিকুল ইসলাম",
         village = "গোয়ালপাড়া",
-        post = "কামারখালী",
-        upazila = "মধুখালী",
-        district = "ফরিদপুর",
+        post = "",
+        upazila = DEFAULT_UPAZILA,
+        district = DEFAULT_DISTRICT,
         mobile = "01819445566",
         religion = "ইসলাম",
         m = mapOf(
@@ -246,9 +250,9 @@ val SAMPLE_STUDENTS = listOf(
         name = "অনিক চক্রবর্তী",
         guardian = "সুমন চক্রবর্তী",
         village = "বাগাট",
-        post = "বাগাট",
-        upazila = "মধুখালী",
-        district = "ফরিদপুর",
+        post = "",
+        upazila = DEFAULT_UPAZILA,
+        district = DEFAULT_DISTRICT,
         mobile = "01915667788",
         religion = "হিন্দু",
         m = mapOf(

@@ -65,6 +65,8 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.kgps.result.DEFAULT_DISTRICT
+import com.kgps.result.DEFAULT_UPAZILA
 import com.kgps.result.RELIGIONS
 import com.kgps.result.Settings
 import com.kgps.result.Student
@@ -111,7 +113,14 @@ fun StudentEditorScreen(
     onDraftRemark: (Student, Int, (String) -> Unit) -> Unit,
     onShowMessage: (String) -> Unit
 ) {
-    var s by remember(initialStudent.id) { mutableStateOf(initialStudent) }
+    var s by remember(initialStudent.id) {
+        mutableStateOf(
+            initialStudent.copy(
+                upazila = initialStudent.upazila.ifBlank { DEFAULT_UPAZILA },
+                district = initialStudent.district.ifBlank { DEFAULT_DISTRICT }
+            )
+        )
+    }
     val cur by rememberUpdatedState(s)
     val deleted = remember { booleanArrayOf(false) }
     val defaultTab = remember(permissions) {
@@ -324,7 +333,12 @@ fun StudentEditorScreen(
 
                         TreeGroupCard(
                             title = "ঠিকানা",
-                            subtitle = listOf(s.village, s.upazila, s.district).filter { it.isNotBlank() }.joinToString(", ").ifBlank { "গ্রাম, পোস্ট, উপজেলা, জেলা" },
+                            subtitle = listOf(
+                                s.village,
+                                s.union,
+                                s.upazila.ifBlank { DEFAULT_UPAZILA },
+                                s.district.ifBlank { DEFAULT_DISTRICT }
+                            ).filter { it.isNotBlank() }.joinToString(", "),
                             icon = Icons.Rounded.Home,
                             expanded = infoExpandedGroup == "address",
                             headerTestTag = "editor_group_address",
@@ -334,7 +348,7 @@ fun StudentEditorScreen(
                                 Column {
                                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                         Box(Modifier.weight(1f)) { EditorTextField("গ্রাম / মহল্লা", s.village, enabled = canEditProfile) { s = s.copy(village = it) } }
-                                        Box(Modifier.weight(1f)) { EditorTextField("পোস্ট অফিস", s.post, enabled = canEditProfile) { s = s.copy(post = it) } }
+                                        Box(Modifier.weight(1f)) { EditorTextField("ইউনিয়ন (ঐচ্ছিক)", s.union, enabled = canEditProfile) { s = s.copy(union = it) } }
                                     }
                                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                         Box(Modifier.weight(1f)) { EditorTextField("উপজেলা / থানা", s.upazila, enabled = canEditProfile) { s = s.copy(upazila = it) } }

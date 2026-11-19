@@ -839,8 +839,10 @@ class SchoolCloudRepository(
                 if (existing.guardian != student.guardian) updates["guardian"] = student.guardian.take(120)
                 if (existing.village != student.village) updates["village"] = student.village.take(120)
                 if (existing.post != student.post) updates["post"] = student.post.take(120)
-                if (existing.upazila != student.upazila) updates["upazila"] = student.upazila.take(120)
-                if (existing.district != student.district) updates["district"] = student.district.take(120)
+                val nextUpazila = student.upazila.ifBlank { com.kgps.result.DEFAULT_UPAZILA }
+                val nextDistrict = student.district.ifBlank { com.kgps.result.DEFAULT_DISTRICT }
+                if (existing.upazila != nextUpazila) updates["upazila"] = nextUpazila.take(120)
+                if (existing.district != nextDistrict) updates["district"] = nextDistrict.take(120)
                 if (existing.mobile != student.mobile) updates["mobile"] = student.mobile.take(30)
                 if (existing.religion != student.religion) updates["religion"] = student.religion.ifBlank { "ইসলাম" }.take(40)
 
@@ -852,11 +854,21 @@ class SchoolCloudRepository(
                     if (!student.m.containsKey(k)) updates["m.$k"] = FieldValue.delete()
                 }
                 // Field-level diff on attributes/remarks `x`
-                for ((k, v) in student.x) {
-                    if (existing.x[k] != v) updates["x.$k"] = v
+                val nextX = if (student.union.isNotBlank()) {
+                    student.x + ("UNION" to student.union.trim().take(120))
+                } else {
+                    student.x - "UNION"
                 }
-                for (k in existing.x.keys) {
-                    if (!student.x.containsKey(k)) updates["x.$k"] = FieldValue.delete()
+                val prevX = if (existing.union.isNotBlank()) {
+                    existing.x + ("UNION" to existing.union.trim().take(120))
+                } else {
+                    existing.x - "UNION"
+                }
+                for ((k, v) in nextX) {
+                    if (prevX[k] != v) updates["x.$k"] = v
+                }
+                for (k in prevX.keys) {
+                    if (!nextX.containsKey(k)) updates["x.$k"] = FieldValue.delete()
                 }
 
                 if (updates.size > 3) {
@@ -883,15 +895,19 @@ class SchoolCloudRepository(
         return try {
             val uid = requireUserId()
             val name = currentUserName().take(100)
+            val actualFieldPath = if (fieldPath == "union") "x.UNION" else fieldPath
             val safeValue: Any = when {
+                fieldPath == "union" && (value as? String).isNullOrBlank() -> FieldValue.delete()
                 value == null -> FieldValue.delete()
                 fieldPath == "mobile" && value is String -> value.take(30)
                 fieldPath == "religion" && value is String -> value.ifBlank { "ইসলাম" }.take(40)
+                fieldPath == "upazila" && value is String -> value.ifBlank { com.kgps.result.DEFAULT_UPAZILA }.take(120)
+                fieldPath == "district" && value is String -> value.ifBlank { com.kgps.result.DEFAULT_DISTRICT }.take(120)
                 value is String -> value.take(240)
                 else -> value
             }
             val updates = mapOf<String, Any>(
-                fieldPath to safeValue,
+                actualFieldPath to safeValue,
                 "updatedByUid" to uid,
                 "updatedByName" to name,
                 "updatedAt" to FieldValue.serverTimestamp()
@@ -974,12 +990,12 @@ class SchoolCloudRepository(
                             "guardian" to st.guardian.take(120),
                             "village" to st.village.take(120),
                             "post" to st.post.take(120),
-                            "upazila" to st.upazila.take(120),
-                            "district" to st.district.take(120),
+                            "upazila" to st.upazila.ifBlank { com.kgps.result.DEFAULT_UPAZILA }.take(120),
+                            "district" to st.district.ifBlank { com.kgps.result.DEFAULT_DISTRICT }.take(120),
                             "mobile" to st.mobile.take(30),
                             "religion" to st.religion.ifBlank { "ইসলাম" }.take(40),
                             "m" to st.m,
-                            "x" to st.x,
+                            "x" to (if (st.union.isNotBlank()) st.x + ("UNION" to st.union.trim().take(120)) else st.x - "UNION"),
                             "updatedByUid" to uid,
                             "updatedByName" to name,
                             "updatedAt" to FieldValue.serverTimestamp()
@@ -1046,12 +1062,12 @@ class SchoolCloudRepository(
             "guardian" to s.guardian.take(120),
             "village" to s.village.take(120),
             "post" to s.post.take(120),
-            "upazila" to s.upazila.take(120),
-            "district" to s.district.take(120),
+            "upazila" to s.upazila.ifBlank { com.kgps.result.DEFAULT_UPAZILA }.take(120),
+            "district" to s.district.ifBlank { com.kgps.result.DEFAULT_DISTRICT }.take(120),
             "mobile" to s.mobile.take(30),
             "religion" to s.religion.ifBlank { "ইসলাম" }.take(40),
             "m" to s.m,
-            "x" to s.x,
+            "x" to (if (s.union.isNotBlank()) s.x + ("UNION" to s.union.trim().take(120)) else s.x - "UNION"),
             "updatedByUid" to uid,
             "updatedByName" to userName.take(100),
             "createdAt" to FieldValue.serverTimestamp(),
@@ -1139,11 +1155,13 @@ class SchoolCloudRepository(
         }.toMap()
 
         val xRaw = doc.get("x") as? Map<*, *> ?: emptyMap<Any, Any>()
-        val x = xRaw.entries.mapNotNull { (k, v) ->
+        val xAll = xRaw.entries.mapNotNull { (k, v) ->
             val key = k as? String ?: return@mapNotNull null
             val valStr = v as? String ?: return@mapNotNull null
             key to valStr
         }.toMap()
+        val unionVal = xAll["UNION"].orEmpty().trim()
+        val x = xAll - "UNION"
 
         val st = Student(
             id = doc.id,
@@ -1152,9 +1170,10 @@ class SchoolCloudRepository(
             name = doc.getString("name").orEmpty(),
             guardian = doc.getString("guardian").orEmpty(),
             village = doc.getString("village").orEmpty(),
-            post = doc.getString("post").orEmpty(),
-            upazila = doc.getString("upazila").orEmpty(),
-            district = doc.getString("district").orEmpty(),
+            union = unionVal,
+            post = "",
+            upazila = doc.getString("upazila").orEmpty().ifBlank { com.kgps.result.DEFAULT_UPAZILA },
+            district = doc.getString("district").orEmpty().ifBlank { com.kgps.result.DEFAULT_DISTRICT },
             mobile = doc.getString("mobile").orEmpty(),
             religion = doc.getString("religion")?.ifBlank { "ইসলাম" } ?: "ইসলাম",
             m = m,

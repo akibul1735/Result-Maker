@@ -126,7 +126,7 @@ fun defaultSelectedColumnKeys(
         )
 
         CsvImportModule.FULL_RECORD -> linkedSetOf(
-            "cls", "roll", "name", "guardian", "mobile", "village", "post", "upazila", "district", "religion"
+            "cls", "roll", "name", "guardian", "mobile", "village", "union", "upazila", "district", "religion"
         ).apply {
             addAll(customFields.map { it.label })
             subs.forEach { s ->
@@ -151,10 +151,10 @@ object CsvImportAssistant {
         CsvColumnOption("name", "শিক্ষার্থীর নাম (name)", "প্রোফাইল", required = true, sampleEn = "নুসরাত জাহান মিম", ruleHint = "শিক্ষার্থীর পূর্ণ নাম"),
         CsvColumnOption("guardian", "পিতা / অভিভাবক (guardian)", "প্রোফাইল", required = false, sampleEn = "মোঃ শফিকুল ইসলাম", ruleHint = "পিতা বা অভিভাবকের নাম"),
         CsvColumnOption("mobile", "মোবাইল (mobile)", "প্রোফাইল", required = false, sampleEn = "01712345678", ruleHint = "১১ ডিজিটের মোবাইল নম্বর"),
-        CsvColumnOption("village", "গ্রাম (village)", "প্রোফাইল", required = false, sampleEn = "কামারখালী", ruleHint = "গ্রামের নাম"),
-        CsvColumnOption("post", "পোস্ট অফিস (post)", "প্রোফাইল", required = false, sampleEn = "কামারখালী", ruleHint = "ডাকঘরের নাম"),
-        CsvColumnOption("upazila", "উপজেলা (upazila)", "প্রোফাইল", required = false, sampleEn = "মধুখালী", ruleHint = "উপজেলার নাম"),
-        CsvColumnOption("district", "জেলা (district)", "প্রোফাইল", required = false, sampleEn = "ফরিদপুর", ruleHint = "জেলার নাম"),
+        CsvColumnOption("village", "গ্রাম (village)", "প্রোফাইল", required = false, sampleEn = "বানা", ruleHint = "গ্রামের নাম"),
+        CsvColumnOption("union", "ইউনিয়ন (union)", "প্রোফাইল", required = false, sampleEn = "বানা", ruleHint = "ইউনিয়নের নাম (ঐচ্ছিক)"),
+        CsvColumnOption("upazila", "উপজেলা (upazila)", "প্রোফাইল", required = false, sampleEn = DEFAULT_UPAZILA, ruleHint = "উপজেলার নাম (ফাঁকা থাকলে $DEFAULT_UPAZILA)"),
+        CsvColumnOption("district", "জেলা (district)", "প্রোফাইল", required = false, sampleEn = DEFAULT_DISTRICT, ruleHint = "জেলার নাম (ফাঁকা থাকলে $DEFAULT_DISTRICT)"),
         CsvColumnOption("religion", "ধর্ম (religion)", "প্রোফাইল", required = false, sampleEn = "ইসলাম", ruleHint = "ইসলাম / হিন্দু / বৌদ্ধ / খ্রীষ্ট")
     )
 
@@ -574,6 +574,7 @@ object CsvImportAssistant {
             }
 
             stdMap["guardian"]?.let { if (previewItems.size < 3) previewItems.add("অভিভাবক: $it") }
+            stdMap["union"]?.let { if (previewItems.size < 3) previewItems.add("ইউনিয়ন: $it") }
             stdMap["mobile"]?.let { if (previewItems.size < 3) previewItems.add("মোবাইল: $it") }
 
             val status = when {

@@ -7,7 +7,7 @@ import java.io.File
 import java.util.UUID
 
 object Repo {
-    private val BASE = listOf("cls", "roll", "name", "guardian", "village", "post", "upazila", "district", "mobile", "religion")
+    private val BASE = listOf("cls", "roll", "name", "guardian", "village", "union", "upazila", "district", "mobile", "religion")
     val MARK_KEYS: List<String> = listOf("BAN", "ENG", "MATH", "SOC", "SCI", "BGW", "REL", "PE", "ART").flatMap { s ->
         (1..3).flatMap { t -> listOf("TB", "ACT", "LANG", "CT", "WR", "CONT", "TOTAL").map { c -> mk(s, t, c) } }
     }
@@ -33,8 +33,9 @@ object Repo {
         list.forEach { s ->
             a.put(JSONObject().apply {
                 put("id", s.id); put("cls", s.cls); put("roll", s.roll); put("name", s.name)
-                put("guardian", s.guardian); put("village", s.village); put("post", s.post); put("upazila", s.upazila)
-                put("district", s.district); put("mobile", s.mobile); put("religion", s.religion)
+                put("guardian", s.guardian); put("village", s.village); put("union", s.union)
+                put("upazila", s.upazila.ifBlank { DEFAULT_UPAZILA })
+                put("district", s.district.ifBlank { DEFAULT_DISTRICT }); put("mobile", s.mobile); put("religion", s.religion)
                 put("m", JSONObject().also { j -> s.m.forEach { (k, v) -> j.put(k, v) } })
                 put("x", JSONObject().also { j -> s.x.forEach { (k, v) -> j.put(k, v) } })
             })
@@ -71,13 +72,19 @@ object Repo {
         val list = (0 until a.length()).map { i ->
             val j = a.getJSONObject(i)
             val mj = j.optJSONObject("m"); val xj = j.optJSONObject("x")
+            val xMap = xj?.keys()?.asSequence()?.associateWith { xj.getString(it) } ?: emptyMap()
+            val unionVal = j.optString("union").ifBlank { xMap["UNION"].orEmpty() }
             Student(
                 id = j.optString("id", UUID.randomUUID().toString()), cls = j.optInt("cls", 1), roll = j.optInt("roll"),
                 name = j.optString("name"), guardian = j.optString("guardian"), village = j.optString("village"),
-                post = j.optString("post"), upazila = j.optString("upazila"), district = j.optString("district"), mobile = j.optString("mobile"),
+                union = unionVal,
+                post = "",
+                upazila = j.optString("upazila").ifBlank { DEFAULT_UPAZILA },
+                district = j.optString("district").ifBlank { DEFAULT_DISTRICT },
+                mobile = j.optString("mobile"),
                 religion = j.optString("religion", "ইসলাম"),
                 m = mj?.keys()?.asSequence()?.associateWith { mj.getDouble(it) } ?: emptyMap(),
-                x = xj?.keys()?.asSequence()?.associateWith { xj.getString(it) } ?: emptyMap()
+                x = xMap - "UNION"
             )
         }
         return list to st
@@ -99,7 +106,18 @@ object Repo {
         val sb = StringBuilder("\uFEFF")
         sb.append(header(customFields).joinToString(",") { q(it) }).append("\n")
         list.sortedWith(compareBy({ it.cls }, { it.roll })).forEach { s ->
-            val row = listOf(s.cls.toString(), s.roll.toString(), s.name, s.guardian, s.village, s.post, s.upazila, s.district, s.mobile, s.religion) +
+            val row = listOf(
+                s.cls.toString(),
+                s.roll.toString(),
+                s.name,
+                s.guardian,
+                s.village,
+                s.union,
+                s.upazila.ifBlank { DEFAULT_UPAZILA },
+                s.district.ifBlank { DEFAULT_DISTRICT },
+                s.mobile,
+                s.religion
+            ) +
                 customFields.map { cf -> s.x[cf.key] ?: "" } +
                 MARK_KEYS.map { k -> s.m[k]?.let { fmtEn(it) } ?: "" } +
                 TEXT_KEYS.map { k -> s.x[k] ?: "" }
@@ -182,7 +200,7 @@ object Repo {
         "guardian" to "পিতা / অভিভাবকের নাম (guardian)",
         "mobile" to "মোবাইল নম্বর (mobile)",
         "village" to "গ্রাম (village)",
-        "post" to "পোস্ট অফিস (post)",
+        "union" to "ইউনিয়ন (union)",
         "upazila" to "উপজেলা (upazila)",
         "district" to "জেলা (district)",
         "religion" to "ধর্ম (religion)"
@@ -200,7 +218,7 @@ object Repo {
         "guardian" to listOf("guardian", "guardian name", "father", "father name", "fathers name", "father's name", "অভিভাবক", "অভিভাবকের নাম", "পিতার নাম", "পিতা অভিভাবক"),
         "mobile" to listOf("mobile", "mobile no", "mobile number", "phone", "phone number", "contact", "মোবাইল", "মোবাইল নম্বর", "মোবাইল নং", "ফোন", "অভিভাবকের মোবাইল"),
         "village" to listOf("village", "গ্রাম", "গ্রাম মহল্লা", "মহল্লা"),
-        "post" to listOf("post", "post office", "পোস্ট", "পোস্ট অফিস", "ডাকঘর"),
+        "union" to listOf("union", "union parishad", "up", "ইউনিয়ন", "ইউনিয়ন", "ইউপি"),
         "upazila" to listOf("upazila", "thana", "উপজেলা", "থানা"),
         "district" to listOf("district", "zilla", "জেলা"),
         "religion" to listOf("religion", "ধর্ম")
@@ -345,9 +363,10 @@ object Repo {
                 name = stdMap["name"]?.ifBlank { base.name } ?: base.name,
                 guardian = stdMap["guardian"]?.ifBlank { base.guardian } ?: base.guardian,
                 village = stdMap["village"]?.ifBlank { base.village } ?: base.village,
-                post = stdMap["post"]?.ifBlank { base.post } ?: base.post,
-                upazila = stdMap["upazila"]?.ifBlank { base.upazila } ?: base.upazila,
-                district = stdMap["district"]?.ifBlank { base.district } ?: base.district,
+                union = stdMap["union"]?.ifBlank { base.union } ?: base.union,
+                post = "",
+                upazila = (stdMap["upazila"]?.ifBlank { base.upazila } ?: base.upazila).ifBlank { DEFAULT_UPAZILA },
+                district = (stdMap["district"]?.ifBlank { base.district } ?: base.district).ifBlank { DEFAULT_DISTRICT },
                 mobile = stdMap["mobile"]?.ifBlank { base.mobile } ?: base.mobile,
                 religion = stdMap["religion"]?.ifBlank { base.religion } ?: base.religion,
                 m = base.m + m,
