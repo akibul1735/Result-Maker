@@ -11,6 +11,7 @@ import android.net.Uri
 import android.os.Build
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.google.firebase.firestore.FirebaseFirestoreException
 import com.kgps.result.ai.AiChatMessage
 import com.kgps.result.ai.AiModelMode
 import com.kgps.result.ai.AiRepository
@@ -119,6 +120,7 @@ class ResultMakerViewModel(
     private val _selectedSchoolOverrideId = MutableStateFlow<String?>(null)
     private val _schoolsLoaded = MutableStateFlow(false)
     private val _cloudInitError = MutableStateFlow<String?>(null)
+    private val _cloudRetryTrigger = MutableStateFlow(0)
 
     private val _inSchoolHub = MutableStateFlow(false)
     val inSchoolHub: StateFlow<Boolean> = _inSchoolHub.asStateFlow()
@@ -149,13 +151,22 @@ class ResultMakerViewModel(
     private val _driveFilesLoading = MutableStateFlow(false)
     val driveFilesLoading: StateFlow<Boolean> = _driveFilesLoading.asStateFlow()
 
-    val userProfile: StateFlow<UserCloudProfile?> = cloudRepo.observeUserProfile()
-        .catch { e ->
-            if (e is CancellationException) throw e
-            if (!_isSigningOut.value) {
-                _snackbarMessage.value = friendlyFirestoreErrorMessage(e)
-            }
-            emit(null)
+    private fun unwrapFirestoreError(error: Throwable): FirebaseFirestoreException? =
+        generateSequence(error) { it.cause }
+            .filterIsInstance<FirebaseFirestoreException>()
+            .firstOrNull()
+
+    val userProfile: StateFlow<UserCloudProfile?> = _cloudRetryTrigger
+        .flatMapLatest {
+            cloudRepo.observeUserProfile()
+                .catch { e ->
+                    val fsErr = unwrapFirestoreError(e)
+                    if (fsErr == null && e is CancellationException) throw e
+                    if (!_isSigningOut.value) {
+                        _snackbarMessage.value = friendlyFirestoreErrorMessage(fsErr ?: e)
+                    }
+                    emit(null)
+                }
         }
         .stateIn(viewModelScope, SharingStarted.Eagerly, null)
 
@@ -175,19 +186,23 @@ class ResultMakerViewModel(
             ?: profile?.pendingSchoolId?.takeIf { it.isNotBlank() }
     }.stateIn(viewModelScope, SharingStarted.Eagerly, null)
 
-    val mySchools: StateFlow<List<SchoolWorkspace>> = cloudRepo.observeMySchools()
-        .map { list ->
-            _schoolsLoaded.value = true
-            _cloudInitError.value = null
-            list.sortedBy { it.settings.school }
-        }
-        .catch { e ->
-            if (e is CancellationException) throw e
-            _schoolsLoaded.value = true
-            if (!_isSigningOut.value) {
-                _cloudInitError.value = friendlyFirestoreErrorMessage(e)
-            }
-            emit(emptyList())
+    val mySchools: StateFlow<List<SchoolWorkspace>> = _cloudRetryTrigger
+        .flatMapLatest {
+            cloudRepo.observeMySchools()
+                .map { list ->
+                    _schoolsLoaded.value = true
+                    _cloudInitError.value = null
+                    list.sortedBy { it.settings.school }
+                }
+                .catch { e ->
+                    val fsErr = unwrapFirestoreError(e)
+                    if (fsErr == null && e is CancellationException) throw e
+                    _schoolsLoaded.value = true
+                    if (!_isSigningOut.value) {
+                        _cloudInitError.value = friendlyFirestoreErrorMessage(fsErr ?: e)
+                    }
+                    emit(emptyList())
+                }
         }
         .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
@@ -216,18 +231,20 @@ class ResultMakerViewModel(
     }.stateIn(viewModelScope, SharingStarted.Eagerly, CloudSessionState.Loading)
 
     private val studentsAndMetaFlow: StateFlow<Pair<List<Student>, Map<String, StudentSyncMeta>>> =
-        activeSchool
-            .map { it?.id }
-            .distinctUntilChanged()
+        combine(
+            activeSchool.map { it?.id }.distinctUntilChanged(),
+            _cloudRetryTrigger
+        ) { schoolId, _ -> schoolId }
             .flatMapLatest { schoolId ->
                 if (schoolId.isNullOrBlank()) {
                     flowOf(emptyList<Student>() to emptyMap())
                 } else {
                     cloudRepo.observeSchoolStudents(schoolId)
                         .catch { e ->
-                            if (e is CancellationException) throw e
+                            val fsErr = unwrapFirestoreError(e)
+                            if (fsErr == null && e is CancellationException) throw e
                             if (!_isSigningOut.value && _suppressedSchoolId.value != schoolId) {
-                                _snackbarMessage.value = friendlyFirestoreErrorMessage(e)
+                                _snackbarMessage.value = friendlyFirestoreErrorMessage(fsErr ?: e)
                             }
                             emit(emptyList<Student>() to emptyMap())
                         }
@@ -259,7 +276,8 @@ class ResultMakerViewModel(
                 } else {
                     cloudRepo.observeJoinRequests(adminSchoolId, currentUserId)
                         .catch { e ->
-                            if (e is CancellationException) throw e
+                            val fsErr = unwrapFirestoreError(e)
+                            if (fsErr == null && e is CancellationException) throw e
                             emit(emptyList())
                         }
                 }
@@ -405,6 +423,19 @@ class ResultMakerViewModel(
     fun prepareForSignOut() {
         _isSigningOut.value = true
         _suppressedSchoolId.value = activeSchool.value?.id
+    }
+
+    fun retryCloudConnection() {
+        _cloudInitError.value = null
+        _schoolsLoaded.value = false
+        _cloudRetryTrigger.update { it + 1 }
+        viewModelScope.launch {
+            cloudRepo.ensureUserProfile().onFailure { e ->
+                if (!_isSigningOut.value) {
+                    _snackbarMessage.value = friendlyFirestoreErrorMessage(e)
+                }
+            }
+        }
     }
 
     // ---------- School Hub & Collaborative Admin ----------

@@ -94,6 +94,8 @@ fun SchoolHubScreen(
     lookupBusy: Boolean,
     codePreview: SchoolCodePreview?,
     lookupError: String?,
+    cloudError: String? = null,
+    onRetryCloud: (() -> Unit)? = null,
     onSelectSchool: (String) -> Unit,
     onCreateSchool: (name: String, address: String, year: String, importLocalData: Boolean) -> Unit,
     onLookupCode: (String) -> Unit,
@@ -214,6 +216,42 @@ fun SchoolHubScreen(
                             Icon(Icons.AutoMirrored.Rounded.Logout, contentDescription = null, modifier = Modifier.size(16.dp), tint = RoseDanger)
                             Spacer(Modifier.size(6.dp))
                             Text("সাইন আউট", fontSize = 12.sp, color = RoseDanger)
+                        }
+                    }
+                }
+
+                if (!cloudError.isNullOrBlank()) {
+                    Surface(
+                        color = RoseBg,
+                        border = BorderStroke(1.dp, RoseDanger.copy(alpha = 0.35f)),
+                        shape = RoundedCornerShape(14.dp),
+                        modifier = Modifier.fillMaxWidth().testTag("hub_cloud_error_banner")
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(12.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Text(
+                                text = "সার্ভার সংযোগে সমস্যা হয়েছে",
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 13.5.sp,
+                                color = RoseDanger
+                            )
+                            Text(
+                                text = cloudError,
+                                fontSize = 12.sp,
+                                color = SlateText,
+                                lineHeight = 17.sp
+                            )
+                            if (onRetryCloud != null) {
+                                OutlinedButton(
+                                    onClick = onRetryCloud,
+                                    shape = RoundedCornerShape(10.dp),
+                                    modifier = Modifier.testTag("hub_retry_cloud_btn")
+                                ) {
+                                    Text("পুনরায় সংযোগের চেষ্টা করুন", fontSize = 12.sp)
+                                }
+                            }
                         }
                     }
                 }
