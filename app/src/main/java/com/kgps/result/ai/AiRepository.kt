@@ -2,6 +2,8 @@ package com.kgps.result.ai
 
 import android.content.Context
 import android.graphics.Bitmap
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
 import android.util.Base64
 import com.kgps.result.CLSN
 import com.kgps.result.RELIGIONS
@@ -15,13 +17,18 @@ import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.ByteArrayOutputStream
-import java.io.OutputStreamWriter
+import java.net.ConnectException
 import java.net.HttpURLConnection
+import java.net.NoRouteToHostException
+import java.net.SocketException
+import java.net.SocketTimeoutException
 import java.net.URL
 import java.net.URLEncoder
+import java.net.UnknownHostException
 import java.security.MessageDigest
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
+import javax.net.ssl.SSLException
 import kotlin.math.abs
 import kotlin.math.ceil
 
@@ -671,6 +678,16 @@ class DirectGeminiAiRepository(
         primaryModelId: String,
         body: JSONObject
     ): Pair<String, String> {
+        if (!hasNetworkTransport(appContext)) {
+            throw GeminiNetworkException(
+                isTimeout = false,
+                isConnectionError = true,
+                userMessage = "মোবাইল ডেটা বা Wi-Fi চালু নেই। ইন্টারনেট সংযোগ চালু করে আবার চেষ্টা করুন।"
+            )
+        }
+
+        val serializedBody = body.toString().toByteArray(Charsets.UTF_8)
+        val isLargePayload = serializedBody.size > 100_000
         var lastError: Exception? = null
         val primaryCooldown = remainingCooldownSeconds(primaryModelId)
 
@@ -678,7 +695,7 @@ class DirectGeminiAiRepository(
         if (primaryCooldown == 0) {
             for (attempt in 0..1) {
                 try {
-                    val text = callGenerateContent(apiKey, primaryModelId, body)
+                    val text = callGenerateContent(apiKey, primaryModelId, body, serializedBody)
                     modelCooldownUntilMs.remove(GeminiApiConfig.normalizeModelId(primaryModelId))
                     return text to primaryModelId
                 } catch (e: GeminiHttpException) {
@@ -694,13 +711,19 @@ class DirectGeminiAiRepository(
                         continue
                     }
                     break
-                } catch (e: Exception) {
+                } catch (e: GeminiNetworkException) {
                     lastError = e
-                    val msg = (e.message ?: "").lowercase()
-                    if (attempt == 0 && (msg.contains("সময় শেষ") || msg.contains("timeout"))) {
+                    // For large image scans that already timed out, switch directly to a faster model
+                    if (e.isTimeout && isLargePayload) {
+                        break
+                    }
+                    if (attempt == 0 && (e.isTimeout || e.isConnectionError)) {
                         delay(1_000L)
                         continue
                     }
+                    break
+                } catch (e: Exception) {
+                    lastError = e
                     throw e
                 }
             }
@@ -713,17 +736,19 @@ class DirectGeminiAiRepository(
             )
         }
 
-        // 2. Bounded fallback: on HTTP 429 try at most 1 healthy lite/flash model (avoid burning free-tier RPM);
+        // 2. Bounded fallback: on HTTP 429 or timeout try at most 1 healthy lite/flash model;
         //    on HTTP 503/404/5xx try up to 2 healthy fallback models.
         val httpErr = lastError as? GeminiHttpException
-        val allowModelFallback = httpErr != null && httpErr.httpCode in setOf(404, 429, 500, 502, 503, 504)
-        if (allowModelFallback) {
+        val netErr = lastError as? GeminiNetworkException
+        val allowHttpFallback = httpErr != null && httpErr.httpCode in setOf(404, 429, 500, 502, 503, 504)
+        val allowTimeoutFallback = netErr != null && netErr.isTimeout
+        if (allowHttpFallback || allowTimeoutFallback) {
             val cached = GeminiApiConfig.getCachedModels(appContext)
-            val maxFallbacks = if (httpErr?.httpCode == 429) 1 else 2
+            val maxFallbacks = if (httpErr?.httpCode == 429 || allowTimeoutFallback) 1 else 2
             val fallbacks = selectFallbackCandidates(primaryModelId, cached, maxFallbacks)
             for (fallbackModel in fallbacks) {
                 try {
-                    val text = callGenerateContent(apiKey, fallbackModel, body)
+                    val text = callGenerateContent(apiKey, fallbackModel, body, serializedBody)
                     modelCooldownUntilMs.remove(GeminiApiConfig.normalizeModelId(fallbackModel))
                     return text to fallbackModel
                 } catch (e: GeminiHttpException) {
@@ -735,8 +760,11 @@ class DirectGeminiAiRepository(
                             break
                         }
                     }
+                } catch (e: GeminiNetworkException) {
+                    lastError = e
+                    break
                 } catch (_: Exception) {
-                    // Continue only within bounded fallback budget
+                    // Preserve primary lastError
                 }
             }
         }
@@ -971,26 +999,48 @@ class DirectGeminiAiRepository(
             val retryAfterSeconds: Int? = null
         ) : IllegalStateException(userMessage)
 
+        internal class GeminiNetworkException(
+            val isTimeout: Boolean,
+            val isConnectionError: Boolean,
+            userMessage: String,
+            cause: Throwable? = null
+        ) : IllegalStateException(userMessage, cause)
+
+        internal fun hasNetworkTransport(context: Context): Boolean {
+            return runCatching {
+                val cm = context.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
+                    ?: return true
+                val active = cm.activeNetwork ?: return false
+                val caps = cm.getNetworkCapabilities(active) ?: return false
+                caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+            }.getOrDefault(true)
+        }
+
         internal suspend fun callGenerateContent(
             apiKey: String,
             modelId: String,
-            body: JSONObject
+            body: JSONObject,
+            preSerializedBody: ByteArray? = null
         ): String = withContext(Dispatchers.IO) {
+            val bodyBytes = preSerializedBody ?: body.toString().toByteArray(Charsets.UTF_8)
+            val isVisionOrLarge = bodyBytes.size > 100_000
             val cleanModel = GeminiApiConfig.normalizeModelId(modelId)
             val encodedModel = URLEncoder.encode(cleanModel, "UTF-8")
             val endpoint = "$BASE_URL/models/$encodedModel:generateContent"
             val conn = (URL(endpoint).openConnection() as HttpURLConnection).apply {
                 requestMethod = "POST"
-                connectTimeout = 20_000
-                readTimeout = 70_000
+                connectTimeout = 30_000
+                readTimeout = if (isVisionOrLarge) 135_000 else 65_000
                 doOutput = true
+                setFixedLengthStreamingMode(bodyBytes.size)
                 setRequestProperty("x-goog-api-key", apiKey)
                 setRequestProperty("Content-Type", "application/json; charset=UTF-8")
                 setRequestProperty("Accept", "application/json")
             }
             try {
-                OutputStreamWriter(conn.outputStream, Charsets.UTF_8).use { writer ->
-                    writer.write(body.toString())
+                conn.outputStream.use { out ->
+                    out.write(bodyBytes)
+                    out.flush()
                 }
                 val code = conn.responseCode
                 val stream = if (code in 200..299) conn.inputStream else conn.errorStream
@@ -1008,10 +1058,12 @@ class DirectGeminiAiRepository(
                 extractCandidateText(JSONObject(respText))
             } catch (e: GeminiHttpException) {
                 throw e
+            } catch (e: GeminiNetworkException) {
+                throw e
             } catch (e: IllegalStateException) {
                 throw e
             } catch (e: Exception) {
-                throw IllegalStateException(friendlyNetworkError(e), e)
+                throw buildNetworkException(e)
             } finally {
                 conn.disconnect()
             }
@@ -1111,8 +1163,8 @@ class DirectGeminiAiRepository(
                 }
                 val conn = (URL(urlStr).openConnection() as HttpURLConnection).apply {
                     requestMethod = "GET"
-                    connectTimeout = 15_000
-                    readTimeout = 20_000
+                    connectTimeout = 25_000
+                    readTimeout = 35_000
                     setRequestProperty("x-goog-api-key", apiKey)
                     setRequestProperty("Accept", "application/json")
                 }
@@ -1155,7 +1207,7 @@ class DirectGeminiAiRepository(
                 } catch (e: IllegalStateException) {
                     throw e
                 } catch (e: Exception) {
-                    throw IllegalStateException(friendlyNetworkError(e), e)
+                    throw buildNetworkException(e)
                 } finally {
                     conn.disconnect()
                 }
@@ -1223,12 +1275,57 @@ class DirectGeminiAiRepository(
             }
         }
 
-        private fun friendlyNetworkError(e: Exception): String {
+        private fun buildNetworkException(e: Exception): GeminiNetworkException {
             val msg = (e.message ?: "").lowercase()
-            return if (msg.contains("unable to resolve host") || msg.contains("timeout") || msg.contains("connect")) {
-                "ইন্টারনেট সংযোগ পাওয়া যায়নি বা সময় শেষ হয়েছে। নেটওয়ার্ক যাচাই করে আবার চেষ্টা করুন।"
-            } else {
-                "AI সংযোগ ব্যর্থ হয়েছে: ${e.localizedMessage ?: "অজানা ত্রুটি"}"
+            return when {
+                e is UnknownHostException || msg.contains("unable to resolve host") ->
+                    GeminiNetworkException(
+                        isTimeout = false,
+                        isConnectionError = true,
+                        userMessage = "ইন্টারনেট সংযোগ পাওয়া যায়নি (সার্ভার খুঁজে পাওয়া যায়নি)। Wi-Fi বা মোবাইল ডেটা চালু আছে কিনা যাচাই করুন।",
+                        cause = e
+                    )
+                e is SocketTimeoutException || msg.contains("timed out") || msg.contains("timeout") -> {
+                    val isConnectTimeout = msg.contains("connect")
+                    GeminiNetworkException(
+                        isTimeout = true,
+                        isConnectionError = isConnectTimeout,
+                        userMessage = if (isConnectTimeout) {
+                            "Gemini সার্ভারে সংযোগের সময় শেষ হয়েছে। নেটওয়ার্ক স্পিড যাচাই করে আবার চেষ্টা করুন।"
+                        } else {
+                            "AI মডেল থেকে উত্তর আসতে অতিরিক্ত সময় লেগে যাওয়ায় সময় শেষ হয়েছে। বড় ছবির ক্ষেত্রে সেটিংস থেকে দ্রুততর Flash / Flash-Lite মডেল ব্যবহার করুন।"
+                        },
+                        cause = e
+                    )
+                }
+                e is ConnectException || e is NoRouteToHostException || msg.contains("failed to connect") ->
+                    GeminiNetworkException(
+                        isTimeout = false,
+                        isConnectionError = true,
+                        userMessage = "Gemini সার্ভারে সংযোগ করা যায়নি। ইন্টারনেট বা VPN সংযোগ পরীক্ষা করে আবার চেষ্টা করুন।",
+                        cause = e
+                    )
+                e is SSLException ->
+                    GeminiNetworkException(
+                        isTimeout = false,
+                        isConnectionError = true,
+                        userMessage = "নিরাপদ HTTPS সংযোগ ব্যর্থ হয়েছে। ফোনের তারিখ ও সময় ঠিক আছে কিনা দেখুন এবং আবার চেষ্টা করুন।",
+                        cause = e
+                    )
+                e is SocketException ->
+                    GeminiNetworkException(
+                        isTimeout = false,
+                        isConnectionError = true,
+                        userMessage = "নেটওয়ার্ক সংযোগ মাঝপথে বিচ্ছিন্ন হয়েছে। অনুগ্রহ করে আবার চেষ্টা করুন।",
+                        cause = e
+                    )
+                else ->
+                    GeminiNetworkException(
+                        isTimeout = false,
+                        isConnectionError = false,
+                        userMessage = "AI সংযোগ ব্যর্থ হয়েছে: ${e.localizedMessage ?: e.javaClass.simpleName}",
+                        cause = e
+                    )
             }
         }
     }
