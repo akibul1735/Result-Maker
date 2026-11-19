@@ -126,8 +126,24 @@ object Repo {
         }
     }
 
+    fun cleanCsvText(raw: String): String {
+        var t = raw.removePrefix("\uFEFF").trim()
+        if (t.startsWith("```")) {
+            val firstNewline = t.indexOf('\n')
+            if (firstNewline >= 0) {
+                t = t.substring(firstNewline + 1)
+            } else {
+                t = t.removePrefix("```csv").removePrefix("```CSV").removePrefix("```")
+            }
+            if (t.trimEnd().endsWith("```")) {
+                t = t.trimEnd().removeSuffix("```")
+            }
+        }
+        return t.trim()
+    }
+
     fun parseCsv(t0: String): List<List<String>> {
-        val t = t0.removePrefix("\uFEFF")
+        val t = cleanCsvText(t0)
         val sep = detectDelimiter(t)
         val rows = mutableListOf<List<String>>()
         var row = mutableListOf<String>()
@@ -223,24 +239,27 @@ object Repo {
         if (rows.isEmpty()) return emptyList()
         val headers = rows[0]
         val dataRows = rows.drop(1)
-        val markSet = MARK_KEYS.toSet()
-        val textSet = TEXT_KEYS.toSet()
+        val markLookup = MARK_KEYS.associateBy { it.uppercase() }
+        val textLookup = TEXT_KEYS.associateBy { it.uppercase() }
 
         return headers.mapIndexed { colIndex, rawHeader ->
             val header = rawHeader.trim().ifBlank { "কলাম_${colIndex + 1}" }
             val norm = normHeader(header)
+            val upperKey = header.uppercase().replace(Regex("\\s+"), "_")
             val samples = dataRows.mapNotNull { r -> r.getOrNull(colIndex)?.trim()?.takeIf { it.isNotBlank() } }.take(2)
 
             val matchedStd = FIELD_ALIASES.entries.firstOrNull { (_, aliases) ->
                 aliases.any { normHeader(it) == norm }
             }?.key
+            val matchedMark = markLookup[upperKey]
+            val matchedText = textLookup[upperKey]
 
             if (matchedStd != null) {
                 CsvColMapping(colIndex, header, samples, isNew = false, targetType = "standard", targetKey = matchedStd, newLabel = header)
-            } else if (markSet.contains(header)) {
-                CsvColMapping(colIndex, header, samples, isNew = false, targetType = "mark", targetKey = header, newLabel = header)
-            } else if (textSet.contains(header)) {
-                CsvColMapping(colIndex, header, samples, isNew = false, targetType = "text", targetKey = header, newLabel = header)
+            } else if (matchedMark != null) {
+                CsvColMapping(colIndex, header, samples, isNew = false, targetType = "mark", targetKey = matchedMark, newLabel = header)
+            } else if (matchedText != null) {
+                CsvColMapping(colIndex, header, samples, isNew = false, targetType = "text", targetKey = matchedText, newLabel = header)
             } else {
                 val existingCf = existingCustomFields.find { it.key == header || normHeader(it.label) == norm }
                 if (existingCf != null) {
@@ -361,5 +380,168 @@ object Repo {
         if (rows.size < 2) return existing
         val cols = detectCsvColumns(rows, emptyList())
         return applyMappedCsvImport(rows, cols, existing, DEFAULT_SETTINGS, 1).students
+    }
+
+    // ---------- AI দিয়ে CSV তৈরির প্রম্পট জেনারেটর ----------
+    enum class CsvSourceKind(val labelBn: String, val promptDescBn: String) {
+        IMAGE("ছবি / হাতের লেখা খাতা", "আমার দেওয়া ছবি বা স্ক্যান করা খাতা/রেজিস্টার"),
+        PDF("PDF / ডকুমেন্ট", "আমার দেওয়া PDF বা ডকুমেন্ট ফাইল"),
+        EXCEL("Excel / Google Sheet", "আমার দেওয়া Excel, স্প্রেডশিট বা এলোমেলো টেবিল"),
+        TEXT("মেসেজ / টেক্সট তালিকা", "আমার দেওয়া নিচের টেক্সট তালিকা বা মেসেজ")
+    }
+
+    data class CsvPromptOptions(
+        val targetCls: Int? = null, // null = একাধিক বা সব শ্রেণি (১-৫)
+        val includeGuardianMobile: Boolean = true,
+        val includeAddress: Boolean = false,
+        val includeExistingCustomFields: Boolean = true,
+        val extraCustomColumnsRaw: String = "",
+        val includeMarks: Boolean = false,
+        val selectedTerms: Set<Int> = setOf(1),
+        val selectedSubjects: Set<String> = emptySet(), // empty => classes' default subjects
+        val includeAttendanceTraits: Boolean = false,
+        val sourceKind: CsvSourceKind = CsvSourceKind.IMAGE,
+        val extraInstruction: String = ""
+    )
+
+    data class GeneratedCsvPrompt(
+        val prompt: String,
+        val columns: List<String>
+    )
+
+    fun buildAiCsvPrompt(
+        options: CsvPromptOptions,
+        existingCustomFields: List<CustomFieldDef>
+    ): GeneratedCsvPrompt {
+        val cols = mutableListOf("cls", "roll", "name")
+        if (options.includeGuardianMobile) {
+            cols += listOf("guardian", "mobile", "religion")
+        }
+        if (options.includeAddress) {
+            cols += listOf("village", "post", "upazila", "district")
+        }
+        if (options.includeExistingCustomFields && existingCustomFields.isNotEmpty()) {
+            cols += existingCustomFields.map { it.label }
+        }
+        val extraCols = options.extraCustomColumnsRaw
+            .split(',', '،', '\n')
+            .map { it.trim() }
+            .filter { it.isNotBlank() && it !in cols }
+        cols += extraCols
+
+        val activeTerms = options.selectedTerms.filter { it in 1..3 }.sorted().ifEmpty { listOf(1) }
+        val refCls = options.targetCls ?: 3
+        val classSubs = subjectsFor(refCls, RELIGIONS.first())
+        val allPossibleSubs = if (options.targetCls == null) {
+            (subjectsFor(1, RELIGIONS.first()) + subjectsFor(3, RELIGIONS.first())).distinctBy { it.key }
+        } else {
+            classSubs
+        }
+        val chosenSubs = if (options.selectedSubjects.isNotEmpty()) {
+            allPossibleSubs.filter { it.key in options.selectedSubjects }.ifEmpty { allPossibleSubs }
+        } else {
+            classSubs
+        }
+
+        val markRulesDesc = mutableListOf<String>()
+        if (options.includeMarks) {
+            for (t in activeTerms) {
+                for (sub in chosenSubs) {
+                    sub.comps.forEach { c -> cols += mk(sub.key, t, c.key) }
+                    if (sub.written > 0) cols += mk(sub.key, t, "WR")
+                }
+            }
+            chosenSubs.forEach { sub ->
+                val parts = sub.comps.joinToString(", ") { "${it.key} (সর্বোচ্চ ${it.max})" } +
+                    if (sub.written > 0) ", WR (লিখিত সর্বোচ্চ ${sub.written})" else ""
+                markRulesDesc += "• ${sub.key} (${sub.bn}): $parts"
+            }
+        }
+
+        if (options.includeAttendanceTraits) {
+            for (t in activeTerms) {
+                cols += listOf("DAYS_$t", "PRES_$t", "ACT_$t", "DISC_$t", "COND_$t", "REM_$t")
+            }
+        }
+
+        val distinctCols = cols.distinct()
+        val headerLine = distinctCols.joinToString(",")
+        val sampleCls = options.targetCls ?: 3
+        val sampleRow = distinctCols.joinToString(",") { col ->
+            when (col) {
+                "cls" -> sampleCls.toString()
+                "roll" -> "1"
+                "name" -> "আরিয়ান ইসলাম"
+                "guardian" -> "মোঃ রফিকুল ইসলাম"
+                "mobile" -> "01712345678"
+                "religion" -> "ইসলাম"
+                "village" -> "কামারখালী"
+                "post" -> "কামারখালী"
+                "upazila" -> "মধুখালী"
+                "district" -> "ফরিদপুর"
+                else -> when {
+                    col.startsWith("DAYS_") -> "64"
+                    col.startsWith("PRES_") -> "60"
+                    col.startsWith("ACT_") || col.startsWith("DISC_") || col.startsWith("COND_") -> "ক"
+                    col.startsWith("REM_") -> "অগ্রগতি সন্তোষজনক"
+                    col.endsWith("_TB") -> "9"
+                    col.endsWith("_ACT") || col.endsWith("_LANG") -> "5"
+                    col.endsWith("_CT") -> "8"
+                    col.endsWith("_WR") -> if (sampleCls <= 2) "45" else "62"
+                    col.endsWith("_TOTAL") -> "45"
+                    else -> ""
+                }
+            }
+        }
+
+        val clsRule = if (options.targetCls != null) {
+            "সব শিক্ষার্থীর `cls` কলামে `${options.targetCls}` (${CLSN[options.targetCls - 1]} শ্রেণি) বসাবে।"
+        } else {
+            "`cls` কলামে ১ থেকে ৫ এর মধ্যে শুধু ইংরেজি সংখ্যা (1, 2, 3, 4 বা 5) বসাবে।"
+        }
+
+        val prompt = buildString {
+            appendLine("${options.sourceKind.promptDescBn} থেকে বাংলাদেশের সরকারি প্রাথমিক বিদ্যালয়ের শিক্ষার্থীর তথ্য নিখুঁতভাবে বের করে নিচের হুবহু CSV ফরম্যাটে রূপান্তর করে দাও।")
+            appendLine()
+            appendLine("## ১. আবশ্যিক CSV হেডার (ঠিক এই ক্রমে ও বানানে প্রথম সারিতে থাকবে):")
+            appendLine(headerLine)
+            appendLine()
+            appendLine("## ২. কলাম ও ডেটা ফরম্যাট নিয়ম:")
+            appendLine("- $clsRule")
+            appendLine("- `roll` ও সব নম্বর অবশ্যই ইংরেজি অঙ্কে (0-9) লিখবে; শিক্ষার্থীর নাম (`name`) ও বাংলা তথ্য স্পষ্ট বাংলায় লিখবে।")
+            if (options.includeGuardianMobile) {
+                appendLine("- `mobile` কলামে ১১ ডিজিটের নম্বর (যেমন 01712345678) লিখবে; `religion` কলামে শুধু `ইসলাম`, `হিন্দু`, `বৌদ্ধ` বা `খ্রীষ্ট` লিখবে।")
+            }
+            if (options.includeMarks && markRulesDesc.isNotEmpty()) {
+                val termLabel = activeTerms.joinToString(", ") { "${bn(it.toString())}ম প্রান্তিক (_${it}_)" }
+                appendLine("- নম্বর কলাম নিয়ম (<বিষয়>_<প্রান্তিক>_<অংশ>), প্রান্তিক: $termLabel:")
+                markRulesDesc.forEach { appendLine("  $it") }
+                appendLine("  (খাতায় ক্লাস টেস্ট বা CT ঘরে `06+07=13/2=07` ধরনের গড় থাকলে `=` চিহ্নের পরের চূড়ান্ত মান `7` বসাবে; অনুপস্থিত `A`/`অনু` থাকলে `0` বসাবে।)")
+            }
+            if (options.includeAttendanceTraits) {
+                appendLine("- উপস্থিতি ও আচরণ কলাম (_<প্রান্তিক>): `DAYS_t` (মোট কর্মদিবস), `PRES_t` (উপস্থিতি), `ACT_t` (পাঠ্য ও সহপাঠ্যক্রমিক কাজ: ক/খ/গ/ঘ), `DISC_t` (শৃঙ্খলা: ক/খ/গ/ঘ), `COND_t` (আচরণ: ক/খ/গ/ঘ), `REM_t` (মন্তব্য)।")
+            }
+            if (extraCols.isNotEmpty() || (options.includeExistingCustomFields && existingCustomFields.isNotEmpty())) {
+                val cfList = (if (options.includeExistingCustomFields) existingCustomFields.map { it.label } else emptyList()) + extraCols
+                if (cfList.isNotEmpty()) {
+                    appendLine("- অতিরিক্ত কলামসমূহ (${cfList.joinToString(", ")}): পাওয়া গেলে মান বসাবে, না থাকলে ফাঁকা রাখবে।")
+                }
+            }
+            appendLine("- কোনো তথ্য না থাকলে বা ঘর ফাঁকা থাকলে কিছু লিখবে না (শুধু কমা `,` দিয়ে ফাঁকা রাখবে; `N/A` বা `-` লিখবে না)।")
+            appendLine("- কোনো মানের ভেতরে কমা (`,`) থাকলে মানটি ডাবল কোটেশন `\"...\"`-এর ভেতরে লিখবে।")
+            if (options.extraInstruction.isNotBlank()) {
+                appendLine("- অতিরিক্ত নির্দেশনা: ${options.extraInstruction.trim()}")
+            }
+            appendLine()
+            appendLine("## ৩. নমুনা আউটপুট ফরম্যাট (শুধু উদাহরণ):")
+            appendLine("```csv")
+            appendLine(headerLine)
+            appendLine(sampleRow)
+            appendLine("```")
+            appendLine()
+            append("এখন কোনো বাড়তি ব্যাখ্যা বা ভূমিকা ছাড়া সম্পূর্ণ UTF-8 CSV ডেটা শুধু একটি ```csv কোড ব্লকের ভেতরে দাও যাতে আমি সরাসরি কপি করে Result Maker অ্যাপে ইমপোর্ট করতে পারি।")
+        }
+
+        return GeneratedCsvPrompt(prompt = prompt, columns = distinctCols)
     }
 }
