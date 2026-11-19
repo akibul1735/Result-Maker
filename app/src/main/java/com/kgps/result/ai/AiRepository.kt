@@ -586,6 +586,100 @@ class DirectGeminiAiRepository(
         return Base64.encodeToString(out.toByteArray(), Base64.NO_WRAP)
     }
 
+    private fun selectFallbackCandidates(
+        primaryModel: String,
+        cachedModels: List<DiscoveredGeminiModel>
+    ): List<String> {
+        val excludedTokens = listOf(
+            "embedding", "aqa", "attribution", "tts", "image", "imagen",
+            "veo", "robotics", "computer-use", "deep-research", "audio", "live"
+        )
+        val discoveredFlashFirst = cachedModels
+            .map { it.id }
+            .filter { id ->
+                id != primaryModel &&
+                    id.startsWith("gemini-", ignoreCase = true) &&
+                    excludedTokens.none { tok -> id.contains(tok, ignoreCase = true) }
+            }
+            .sortedWith(
+                compareByDescending<String> { it.contains("flash", ignoreCase = true) }
+                    .thenByDescending { it.contains("lite", ignoreCase = true) }
+            )
+
+        val builtinSafetyFallbacks = listOf(
+            GeminiApiConfig.FAST_FALLBACK_MODEL,
+            GeminiApiConfig.DEFAULT_MODEL,
+            "gemini-2.5-flash",
+            "gemini-2.5-flash-lite",
+            "gemini-2.0-flash"
+        ).filter { it != primaryModel }
+
+        return (discoveredFlashFirst + builtinSafetyFallbacks)
+            .distinct()
+            .take(3)
+    }
+
+    private suspend fun callGenerateContentResilient(
+        apiKey: String,
+        primaryModelId: String,
+        body: JSONObject
+    ): Pair<String, String> {
+        var lastError: Exception? = null
+        // 1. Retry primary model once on transient server spikes (HTTP 503/500/502/504 or timeout)
+        for (attempt in 0..1) {
+            try {
+                val text = callGenerateContent(apiKey, primaryModelId, body)
+                return text to primaryModelId
+            } catch (e: GeminiHttpException) {
+                lastError = e
+                // Invalid key or forbidden -> fail fast without retrying
+                if (e.httpCode == 401 || e.httpCode == 403 || e.httpCode == 400) throw e
+                val isTransient = e.httpCode in setOf(500, 502, 503, 504)
+                if (isTransient && attempt == 0) {
+                    delay(1_200L)
+                    continue
+                }
+                break
+            } catch (e: Exception) {
+                lastError = e
+                val msg = (e.message ?: "").lowercase()
+                if (attempt == 0 && (msg.contains("সময় শেষ") || msg.contains("timeout"))) {
+                    delay(1_000L)
+                    continue
+                }
+                throw e
+            }
+        }
+
+        // 2. If primary model is overloaded (503), rate-limited (429), or unavailable (404),
+        // automatically try healthy fallback models from cache or live discovery
+        val httpErr = lastError as? GeminiHttpException
+        val allowModelFallback = httpErr != null && httpErr.httpCode in setOf(404, 429, 500, 502, 503, 504)
+        if (allowModelFallback) {
+            var cached = GeminiApiConfig.getCachedModels(appContext)
+            if (cached.isEmpty()) {
+                cached = fetchModelsOnly(apiKey).getOrDefault(emptyList())
+                if (cached.isNotEmpty()) {
+                    GeminiApiConfig.saveCachedModels(appContext, cached)
+                }
+            }
+            val fallbacks = selectFallbackCandidates(primaryModelId, cached)
+            for (fallbackModel in fallbacks) {
+                try {
+                    val text = callGenerateContent(apiKey, fallbackModel, body)
+                    return text to fallbackModel
+                } catch (e: GeminiHttpException) {
+                    if (e.httpCode == 401 || e.httpCode == 403) throw e
+                    // Try next fallback model if this one is also busy/404/429
+                } catch (_: Exception) {
+                    // Continue trying remaining fallback models
+                }
+            }
+        }
+
+        throw (lastError ?: IllegalStateException("Gemini API সংযোগ ব্যর্থ হয়েছে।"))
+    }
+
     override suspend fun chat(
         history: List<AiChatMessage>,
         latestUserMessage: String,
@@ -625,12 +719,13 @@ class DirectGeminiAiRepository(
             })
         }
 
-        val replyText = callGenerateContent(apiKey, modelId, payload)
-            .ifBlank { "দুঃখিত, এই মুহূর্তে উত্তর পাওয়া যায়নি। আবার চেষ্টা করুন।" }
+        val (rawReply, usedModel) = callGenerateContentResilient(apiKey, modelId, payload)
+        val replyText = rawReply.ifBlank { "দুঃখিত, এই মুহূর্তে উত্তর পাওয়া যায়নি। আবার চেষ্টা করুন।" }
         val modeTag = if (modelMode == AiModelMode.FAST) "দ্রুত" else "বিস্তারিত"
+        val fallbackNote = if (usedModel != modelId) " · বিকল্প" else ""
         return AiChatReply(
             text = replyText,
-            modelLabel = "$modelId · $modeTag",
+            modelLabel = "$usedModel · $modeTag$fallbackNote",
             isPlaceholder = false
         )
     }
@@ -660,9 +755,11 @@ class DirectGeminiAiRepository(
             })
         }
 
-        val txt = callGenerateContent(apiKey, modelId, payload)
-            .ifBlank { "${bn(term.toString())} প্রান্তিকে শিক্ষার্থীর অগ্রগতি সন্তোষজনক; নিয়মিত অনুশীলন চালিয়ে গেলে আরও ভালো করবে।" }
-        return AiDraftRemarkResult(remark = txt, isPlaceholder = false)
+        val (txt, _) = callGenerateContentResilient(apiKey, modelId, payload)
+        val cleanRemark = txt.ifBlank {
+            "${bn(term.toString())} প্রান্তিকে শিক্ষার্থীর অগ্রগতি সন্তোষজনক; নিয়মিত অনুশীলন চালিয়ে গেলে আরও ভালো করবে।"
+        }
+        return AiDraftRemarkResult(remark = cleanRemark, isPlaceholder = false)
     }
 
     override suspend fun analyzeMarksheetImage(
@@ -691,9 +788,15 @@ class DirectGeminiAiRepository(
         """.trimIndent()
 
         val payload = buildVisionJsonPayload(b64, prompt)
-        val raw = callGenerateContent(apiKey, modelId, payload)
+        val (raw, usedModel) = callGenerateContentResilient(apiKey, modelId, payload)
         return try {
-            parseExtractedMarksheetJson(JSONObject(stripJsonFences(raw)))
+            val parsed = parseExtractedMarksheetJson(JSONObject(stripJsonFences(raw)))
+            if (usedModel != modelId) {
+                parsed.copy(
+                    uncertainNotes = parsed.uncertainNotes +
+                        "মূল মডেল ($modelId) ব্যস্ত থাকায় বিকল্প মডেল ($usedModel) দিয়ে স্ক্যান সম্পন্ন হয়েছে।"
+                )
+            } else parsed
         } catch (e: Exception) {
             throw IllegalStateException("ছবিটি থেকে কাঠামোবদ্ধ ডেটা পড়া যায়নি। আরও স্পষ্ট ছবি তুলে আবার চেষ্টা করুন।", e)
         }
@@ -757,9 +860,15 @@ class DirectGeminiAiRepository(
         """.trimIndent()
 
         val payload = buildVisionJsonPayload(b64, prompt)
-        val raw = callGenerateContent(apiKey, modelId, payload)
+        val (raw, usedModel) = callGenerateContentResilient(apiKey, modelId, payload)
         return try {
-            parseExtractedClassSheetJson(JSONObject(stripJsonFences(raw)), clsHint, termHint, subKeyHint)
+            val parsed = parseExtractedClassSheetJson(JSONObject(stripJsonFences(raw)), clsHint, termHint, subKeyHint)
+            if (usedModel != modelId) {
+                parsed.copy(
+                    warnings = parsed.warnings +
+                        "নির্বাচিত মডেল ($modelId) ব্যস্ত থাকায় বিকল্প মডেল ($usedModel) দিয়ে স্ক্যান সম্পন্ন হয়েছে।"
+                )
+            } else parsed
         } catch (e: Exception) {
             throw IllegalStateException("ছবিটি থেকে শ্রেণি-নম্বরপত্র পড়া যায়নি। আরও স্পষ্ট ও সোজা ছবি তুলে আবার চেষ্টা করুন।", e)
         }
@@ -790,6 +899,12 @@ class DirectGeminiAiRepository(
     companion object {
         private const val BASE_URL = "https://generativelanguage.googleapis.com/v1beta"
 
+        internal class GeminiHttpException(
+            val httpCode: Int,
+            val modelId: String,
+            userMessage: String
+        ) : IllegalStateException(userMessage)
+
         internal suspend fun callGenerateContent(
             apiKey: String,
             modelId: String,
@@ -815,9 +930,11 @@ class DirectGeminiAiRepository(
                 val stream = if (code in 200..299) conn.inputStream else conn.errorStream
                 val respText = stream?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }.orEmpty()
                 if (code !in 200..299) {
-                    throw IllegalStateException(friendlyHttpError(code, respText, cleanModel))
+                    throw GeminiHttpException(code, cleanModel, friendlyHttpError(code, respText, cleanModel))
                 }
                 extractCandidateText(JSONObject(respText))
+            } catch (e: GeminiHttpException) {
+                throw e
             } catch (e: IllegalStateException) {
                 throw e
             } catch (e: Exception) {
@@ -1005,6 +1122,10 @@ class DirectGeminiAiRepository(
                     "নির্বাচিত মডেল ($modelId) এই API Key-এর জন্য উপলব্ধ নয়। সেটিংস থেকে প্রস্তাবিত বা লোড করা অন্য একটি মডেল বেছে নিন।"
                 code == 429 || lower.contains("quota") || lower.contains("resource_exhausted") ->
                     "Gemini API-এর ব্যবহার সীমা (Quota) পূর্ণ হয়েছে। কিছুক্ষণ পর আবার চেষ্টা করুন বা অন্য মডেল বেছে নিন।"
+                code == 503 || lower.contains("high demand") || lower.contains("overloaded") || lower.contains("unavailable") ->
+                    "নির্বাচিত মডেলটিতে ($modelId) এই মুহূর্তে অতিরিক্ত চাপ (HTTP 503) চলছে। কিছুক্ষণ পর আবার চেষ্টা করুন অথবা সেটিংস থেকে অন্য একটি মডেল নির্বাচন করুন।"
+                code in listOf(500, 502, 504) ->
+                    "Gemini সার্ভারে সাময়িক সমস্যা হচ্ছে (HTTP $code)। কিছুক্ষণ পর আবার চেষ্টা করুন বা অন্য মডেল বেছে নিন।"
                 else ->
                     "Gemini API ত্রুটি (HTTP $code): ${apiMsg.ifBlank { "অনুরোধ সম্পন্ন হয়নি" }}"
             }

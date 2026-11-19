@@ -449,10 +449,25 @@ fun AiAssistantScreen(
                     state.chatError?.let { err ->
                         Surface(
                             color = RoseBg,
+                            border = BorderStroke(1.dp, RoseDanger.copy(alpha = 0.35f)),
                             shape = RoundedCornerShape(8.dp),
                             modifier = Modifier.fillMaxWidth()
                         ) {
-                            Text(err, color = RoseDanger, fontSize = 12.sp, modifier = Modifier.padding(8.dp))
+                            Column(
+                                modifier = Modifier.padding(8.dp),
+                                verticalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                Text(err, color = RoseDanger, fontSize = 12.sp, lineHeight = 16.sp)
+                                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    TextButton(
+                                        onClick = onOpenAiSettings,
+                                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                                        modifier = Modifier.testTag("ai_chat_err_settings_btn")
+                                    ) {
+                                        Text("মডেল পরিবর্তন করুন", fontSize = 11.5.sp)
+                                    }
+                                }
+                            }
                         }
                     }
 
@@ -694,13 +709,43 @@ fun AiAssistantScreen(
                             shape = RoundedCornerShape(8.dp),
                             modifier = Modifier.fillMaxWidth()
                         ) {
-                            Row(
-                                Modifier.padding(10.dp),
-                                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                verticalAlignment = Alignment.Top
+                            Column(
+                                modifier = Modifier.padding(10.dp),
+                                verticalArrangement = Arrangement.spacedBy(6.dp)
                             ) {
-                                Icon(Icons.Rounded.ErrorOutline, contentDescription = null, tint = RoseDanger, modifier = Modifier.size(18.dp))
-                                Text(err, color = RoseDanger, fontSize = 12.sp)
+                                Row(
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                    verticalAlignment = Alignment.Top
+                                ) {
+                                    Icon(Icons.Rounded.ErrorOutline, contentDescription = null, tint = RoseDanger, modifier = Modifier.size(18.dp))
+                                    Text(err, color = RoseDanger, fontSize = 12.sp, lineHeight = 17.sp)
+                                }
+                                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    if (state.selectedImageBitmap != null && !state.analyzingImage) {
+                                        OutlinedButton(
+                                            onClick = {
+                                                showOnlyIssues = false
+                                                if (scanMode == "class") {
+                                                    onAnalyzeClassSheet(clsHint, termHint, subKeyHint, teacherNote)
+                                                } else {
+                                                    onAnalyzeImage(teacherNote)
+                                                }
+                                            },
+                                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                                            shape = RoundedCornerShape(8.dp),
+                                            modifier = Modifier.testTag("ai_scan_retry_btn")
+                                        ) {
+                                            Text("আবার চেষ্টা করুন", fontSize = 11.5.sp)
+                                        }
+                                    }
+                                    TextButton(
+                                        onClick = onOpenAiSettings,
+                                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
+                                        modifier = Modifier.testTag("ai_scan_err_settings_btn")
+                                    ) {
+                                        Text("মডেল পরিবর্তন করুন", fontSize = 11.5.sp)
+                                    }
+                                }
                             }
                         }
                     }
