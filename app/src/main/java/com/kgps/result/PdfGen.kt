@@ -551,7 +551,6 @@ object PdfGen {
         c.drawText("শ্রেণি: ${CLSN[s.cls - 1]}", 399f, 38f, topRightP)
 
         c.drawText("রোল/আইডি: ${bn(s.roll.toString())}", 443f, 38f, topLeftP)
-        c.drawText("ধর্ম: ${s.religion}", 814f, 38f, topRightP)
 
         // ---- বাম ভেতরের অর্ধেক (x: 28..399) ----
         val lx = 28f
