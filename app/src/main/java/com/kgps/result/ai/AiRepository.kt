@@ -19,8 +19,11 @@ import java.io.OutputStreamWriter
 import java.net.HttpURLConnection
 import java.net.URL
 import java.net.URLEncoder
+import java.security.MessageDigest
 import java.util.UUID
+import java.util.concurrent.ConcurrentHashMap
 import kotlin.math.abs
+import kotlin.math.ceil
 
 data class GeminiModelSuggestion(
     val id: String,
@@ -580,15 +583,58 @@ class DirectGeminiAiRepository(
         }
     }
 
-    private fun encodeBitmapJpegBase64(bitmap: Bitmap): String {
+    private data class EncodedVisionPayload(
+        val base64: String,
+        val byteSize: Int,
+        val sha256Hex: String
+    )
+
+    private val modelCooldownUntilMs = ConcurrentHashMap<String, Long>()
+    private val cacheLock = Any()
+    private val singleSheetCache = object : LinkedHashMap<String, ExtractedMarksheet>(8, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, ExtractedMarksheet>?): Boolean = size > 8
+    }
+    private val classSheetCache = object : LinkedHashMap<String, ExtractedClassSheet>(8, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, ExtractedClassSheet>?): Boolean = size > 8
+    }
+    private val remarkCache = object : LinkedHashMap<String, AiDraftRemarkResult>(16, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, AiDraftRemarkResult>?): Boolean = size > 16
+    }
+
+    private fun remainingCooldownSeconds(modelId: String): Int {
+        val clean = GeminiApiConfig.normalizeModelId(modelId)
+        val until = modelCooldownUntilMs[clean] ?: return 0
+        val diff = until - System.currentTimeMillis()
+        if (diff <= 0L) {
+            modelCooldownUntilMs.remove(clean)
+            return 0
+        }
+        return ceil(diff / 1000.0).toInt().coerceAtLeast(1)
+    }
+
+    private fun recordRateLimitCooldown(modelId: String, retryAfterSec: Int?) {
+        val clean = GeminiApiConfig.normalizeModelId(modelId)
+        val waitSec = (retryAfterSec ?: DEFAULT_RATE_LIMIT_COOLDOWN_SEC).coerceIn(5, 180)
+        modelCooldownUntilMs[clean] = System.currentTimeMillis() + waitSec * 1000L
+    }
+
+    private fun encodeFullQualityVisionImage(bitmap: Bitmap): EncodedVisionPayload {
         val out = ByteArrayOutputStream()
-        bitmap.compress(Bitmap.CompressFormat.JPEG, 88, out)
-        return Base64.encodeToString(out.toByteArray(), Base64.NO_WRAP)
+        bitmap.compress(Bitmap.CompressFormat.JPEG, 92, out)
+        val jpegBytes = out.toByteArray()
+        val digest = MessageDigest.getInstance("SHA-256").digest(jpegBytes)
+        val shaHex = digest.joinToString("") { "%02x".format(it) }
+        return EncodedVisionPayload(
+            base64 = Base64.encodeToString(jpegBytes, Base64.NO_WRAP),
+            byteSize = jpegBytes.size,
+            sha256Hex = shaHex
+        )
     }
 
     private fun selectFallbackCandidates(
         primaryModel: String,
-        cachedModels: List<DiscoveredGeminiModel>
+        cachedModels: List<DiscoveredGeminiModel>,
+        maxCount: Int
     ): List<String> {
         val excludedTokens = listOf(
             "embedding", "aqa", "attribution", "tts", "image", "imagen",
@@ -602,21 +648,22 @@ class DirectGeminiAiRepository(
                     excludedTokens.none { tok -> id.contains(tok, ignoreCase = true) }
             }
             .sortedWith(
-                compareByDescending<String> { it.contains("flash", ignoreCase = true) }
-                    .thenByDescending { it.contains("lite", ignoreCase = true) }
+                compareByDescending<String> { it.contains("lite", ignoreCase = true) }
+                    .thenByDescending { it.contains("flash", ignoreCase = true) }
             )
 
         val builtinSafetyFallbacks = listOf(
             GeminiApiConfig.FAST_FALLBACK_MODEL,
             GeminiApiConfig.DEFAULT_MODEL,
-            "gemini-2.5-flash",
             "gemini-2.5-flash-lite",
+            "gemini-2.5-flash",
             "gemini-2.0-flash"
         ).filter { it != primaryModel }
 
         return (discoveredFlashFirst + builtinSafetyFallbacks)
             .distinct()
-            .take(3)
+            .filter { remainingCooldownSeconds(it) == 0 }
+            .take(maxCount)
     }
 
     private suspend fun callGenerateContentResilient(
@@ -625,54 +672,71 @@ class DirectGeminiAiRepository(
         body: JSONObject
     ): Pair<String, String> {
         var lastError: Exception? = null
-        // 1. Retry primary model once on transient server spikes (HTTP 503/500/502/504 or timeout)
-        for (attempt in 0..1) {
-            try {
-                val text = callGenerateContent(apiKey, primaryModelId, body)
-                return text to primaryModelId
-            } catch (e: GeminiHttpException) {
-                lastError = e
-                // Invalid key or forbidden -> fail fast without retrying
-                if (e.httpCode == 401 || e.httpCode == 403 || e.httpCode == 400) throw e
-                val isTransient = e.httpCode in setOf(500, 502, 503, 504)
-                if (isTransient && attempt == 0) {
-                    delay(1_200L)
-                    continue
+        val primaryCooldown = remainingCooldownSeconds(primaryModelId)
+
+        // 1. Only hit primary model if not currently in 429 cooldown
+        if (primaryCooldown == 0) {
+            for (attempt in 0..1) {
+                try {
+                    val text = callGenerateContent(apiKey, primaryModelId, body)
+                    modelCooldownUntilMs.remove(GeminiApiConfig.normalizeModelId(primaryModelId))
+                    return text to primaryModelId
+                } catch (e: GeminiHttpException) {
+                    lastError = e
+                    if (e.httpCode == 401 || e.httpCode == 403 || e.httpCode == 400) throw e
+                    if (e.httpCode == 429) {
+                        recordRateLimitCooldown(e.modelId, e.retryAfterSeconds)
+                        break // Never burst-retry same model on 429
+                    }
+                    val isTransient = e.httpCode in setOf(500, 502, 503, 504)
+                    if (isTransient && attempt == 0) {
+                        delay(1_200L)
+                        continue
+                    }
+                    break
+                } catch (e: Exception) {
+                    lastError = e
+                    val msg = (e.message ?: "").lowercase()
+                    if (attempt == 0 && (msg.contains("সময় শেষ") || msg.contains("timeout"))) {
+                        delay(1_000L)
+                        continue
+                    }
+                    throw e
                 }
-                break
-            } catch (e: Exception) {
-                lastError = e
-                val msg = (e.message ?: "").lowercase()
-                if (attempt == 0 && (msg.contains("সময় শেষ") || msg.contains("timeout"))) {
-                    delay(1_000L)
-                    continue
-                }
-                throw e
             }
+        } else {
+            lastError = GeminiHttpException(
+                httpCode = 429,
+                modelId = primaryModelId,
+                userMessage = formatRateLimitMessage(primaryModelId, primaryCooldown),
+                retryAfterSeconds = primaryCooldown
+            )
         }
 
-        // 2. If primary model is overloaded (503), rate-limited (429), or unavailable (404),
-        // automatically try healthy fallback models from cache or live discovery
+        // 2. Bounded fallback: on HTTP 429 try at most 1 healthy lite/flash model (avoid burning free-tier RPM);
+        //    on HTTP 503/404/5xx try up to 2 healthy fallback models.
         val httpErr = lastError as? GeminiHttpException
         val allowModelFallback = httpErr != null && httpErr.httpCode in setOf(404, 429, 500, 502, 503, 504)
         if (allowModelFallback) {
-            var cached = GeminiApiConfig.getCachedModels(appContext)
-            if (cached.isEmpty()) {
-                cached = fetchModelsOnly(apiKey).getOrDefault(emptyList())
-                if (cached.isNotEmpty()) {
-                    GeminiApiConfig.saveCachedModels(appContext, cached)
-                }
-            }
-            val fallbacks = selectFallbackCandidates(primaryModelId, cached)
+            val cached = GeminiApiConfig.getCachedModels(appContext)
+            val maxFallbacks = if (httpErr?.httpCode == 429) 1 else 2
+            val fallbacks = selectFallbackCandidates(primaryModelId, cached, maxFallbacks)
             for (fallbackModel in fallbacks) {
                 try {
                     val text = callGenerateContent(apiKey, fallbackModel, body)
+                    modelCooldownUntilMs.remove(GeminiApiConfig.normalizeModelId(fallbackModel))
                     return text to fallbackModel
                 } catch (e: GeminiHttpException) {
                     if (e.httpCode == 401 || e.httpCode == 403) throw e
-                    // Try next fallback model if this one is also busy/404/429
+                    if (e.httpCode == 429) {
+                        recordRateLimitCooldown(e.modelId, e.retryAfterSeconds)
+                        if (httpErr?.httpCode == 429) {
+                            lastError = e
+                            break
+                        }
+                    }
                 } catch (_: Exception) {
-                    // Continue trying remaining fallback models
+                    // Continue only within bounded fallback budget
                 }
             }
         }
@@ -688,21 +752,20 @@ class DirectGeminiAiRepository(
     ): AiChatReply {
         val apiKey = requireApiKey()
         val modelId = resolveModelId(modelMode)
-        val recentTurns = history.takeLast(6).joinToString("\n") { m ->
-            val who = if (m.isUser) "শিক্ষক" else "সহায়ক"
-            "$who: ${m.text.take(400)}"
+        val recentTurns = history.takeLast(4).joinToString("\n") { m ->
+            val who = if (m.isUser) "শ" else "স"
+            "$who: ${m.text.take(220)}"
         }
         val prompt = buildString {
-            appendLine("আপনি বাংলাদেশের সরকারি প্রাথমিক বিদ্যালয়ের (১ম–৫ম শ্রেণি) একজন অভিজ্ঞ শিক্ষামূলক AI সহায়ক।")
-            appendLine("সব উত্তর সহজ, প্রাঞ্জল ও প্রাতিষ্ঠানিক বাংলায় দিন।")
-            appendLine("NCTB প্রাথমিক মূল্যায়ন কাঠামো: ১ম–২য় শ্রেণি (বাংলা/ইংরেজি/গণিত = ধারাবাহিক ৫০ + সামষ্টিক ৫০), ৩য়–৫ম শ্রেণি (বাংলা/ইংরেজি/গণিত/বিজ্ঞান/বাওবি/ধর্ম = ধারাবাহিক ৩০ [পাঠ্যবই ১০ + সক্রিয়তা ৫ + ভাষা ৫ + ক্লাস টেস্ট ১০] + সামষ্টিক ৭০)।")
+            appendLine("বাংলাদেশের সরকারি প্রাথমিক (১ম–৫ম) শিক্ষামূলক সহায়ক। সহজ ও প্রাতিষ্ঠানিক বাংলায় উত্তর দিন।")
+            appendLine("NCTB: ১–২য়(বাং/ইং/গণিত=ধারাবাহিক ৫০+সামষ্টিক ৫০), ৩–৫ম(ধারাবাহিক ৩০[TB ১০+ACT ৫+LANG ৫+CT ১০]+সামষ্টিক ৭০)।")
             if (!studentContext.isNullOrBlank()) {
-                appendLine("নির্বাচিত শিক্ষার্থীর তথ্য: $studentContext")
+                appendLine("শিক্ষার্থী: ${studentContext.take(280)}")
             }
             if (recentTurns.isNotBlank()) {
-                appendLine("পূর্ববর্তী কথোপকথন:\n$recentTurns")
+                appendLine("আলাপ:\n$recentTurns")
             }
-            appendLine("শিক্ষকের বর্তমান প্রশ্ন: $latestUserMessage")
+            append("প্রশ্ন: $latestUserMessage")
         }
 
         val payload = JSONObject().apply {
@@ -716,6 +779,7 @@ class DirectGeminiAiRepository(
             })
             put("generationConfig", JSONObject().apply {
                 put("temperature", if (modelMode == AiModelMode.FAST) 0.3 else 0.5)
+                put("maxOutputTokens", 1024)
             })
         }
 
@@ -736,10 +800,13 @@ class DirectGeminiAiRepository(
     ): AiDraftRemarkResult {
         val apiKey = requireApiKey()
         val modelId = resolveModelId(AiModelMode.FAST)
-        val prompt = """
-            বাংলাদেশের প্রাথমিক বিদ্যালয়ের ${bn(term.toString())} প্রান্তিক মূল্যায়নের জন্য নিচের শিক্ষার্থীর তথ্যের ভিত্তিতে ২–৩ বাক্যের একটি ইতিবাচক, গঠনমূলক ও প্রাতিষ্ঠানিক বাংলা মন্তব্য (Remark) লিখে দিন। শুধু মন্তব্যটি লিখুন, কোনো শিরোনাম বা অতিরিক্ত ভূমিকা দেবেন না।
-            তথ্য: $studentSummary
-        """.trimIndent()
+        val trimmedSummary = studentSummary.trim().take(260)
+        val cacheKey = "$modelId|$term|${trimmedSummary.hashCode()}"
+        synchronized(cacheLock) {
+            remarkCache[cacheKey]?.let { return it }
+        }
+
+        val prompt = "${bn(term.toString())} প্রান্তিকের জন্য নিচের তথ্যে ২–৩ বাক্যের প্রাতিষ্ঠানিক বাংলা মন্তব্য লিখুন (শুধু মন্তব্য):\n$trimmedSummary"
 
         val payload = JSONObject().apply {
             put("contents", JSONArray().apply {
@@ -752,6 +819,7 @@ class DirectGeminiAiRepository(
             })
             put("generationConfig", JSONObject().apply {
                 put("temperature", 0.35)
+                put("maxOutputTokens", 220)
             })
         }
 
@@ -759,7 +827,9 @@ class DirectGeminiAiRepository(
         val cleanRemark = txt.ifBlank {
             "${bn(term.toString())} প্রান্তিকে শিক্ষার্থীর অগ্রগতি সন্তোষজনক; নিয়মিত অনুশীলন চালিয়ে গেলে আরও ভালো করবে।"
         }
-        return AiDraftRemarkResult(remark = cleanRemark, isPlaceholder = false)
+        return AiDraftRemarkResult(remark = cleanRemark, isPlaceholder = false).also { result ->
+            synchronized(cacheLock) { remarkCache[cacheKey] = result }
+        }
     }
 
     override suspend fun analyzeMarksheetImage(
@@ -768,35 +838,35 @@ class DirectGeminiAiRepository(
     ): ExtractedMarksheet {
         val apiKey = requireApiKey()
         val modelId = resolveModelId(null)
-        val b64 = withContext(Dispatchers.Default) { encodeBitmapJpegBase64(bitmap) }
+        val encoded = withContext(Dispatchers.Default) {
+            encodeFullQualityVisionImage(bitmap)
+        }
+        val cleanNote = teacherNote.trim()
+        val cacheKey = "$modelId|${encoded.sha256Hex}|$cleanNote"
+        synchronized(cacheLock) {
+            singleSheetCache[cacheKey]?.let { return it }
+        }
+
         val prompt = """
-            আপনি বাংলাদেশের প্রাথমিক বিদ্যালয়ের নম্বরপত্র OCR বিশেষজ্ঞ। ছবি থেকে একজন শিক্ষার্থীর তথ্য ও নম্বর JSON আকারে বের করুন।
-            অতিরিক্ত নির্দেশনা: ${teacherNote.ifBlank { "নেই" }}
-            বিষয় কোড: BAN (বাংলা), ENG (ইংরেজি), MATH (গণিত), SOC (সামাজিক ও বিজ্ঞান ১-২য়), SCI (বিজ্ঞান ৩-৫ম), BGW (বাওবি), REL (ধর্ম), PE (শারীরিক), ART (শিল্পকলা)।
-            অংশ কোড: TB (পাঠ্যবই), ACT (সক্রিয়তা), LANG (ভাষা), CT (ক্লাস টেস্ট), WR (সামষ্টিক লিখিত), TOTAL (শিল্পকলা মোট)।
-            কী ফরম্যাট: "<SUB>_<TERM>_<COMP>", যেমন "MATH_1_TB", "MATH_1_WR"।
-            যদি কোনো লেখা বুঝতে অসুবিধা হয় বা কাটাকাটি থাকে, uncertainNotes লিস্টে বাংলায় উল্লেখ করুন।
-            ঠিক এই JSON স্কিমায় উত্তর দিন:
-            {
-              "summary": "সংক্ষিপ্ত বাংলা বিবরণ",
-              "term": 1,
-              "student": { "name": "", "cls": 3, "roll": 1, "guardian": "", "religion": "ইসলাম" },
-              "marks": [ { "key": "MATH_1_TB", "value": 9.0, "subjectLabel": "গণিত (পাঠ্যবই)" } ],
-              "attendanceAndTraits": { "days": "", "present": "", "act": "", "disc": "", "cond": "", "remark": "" },
-              "uncertainNotes": ["যদি কোনো লেখা অস্পষ্ট থাকে তার বিবরণ"]
-            }
+            বাংলাদেশ প্রাথমিক নম্বরপত্র OCR। শুধু JSON দিন।
+            নোট: ${cleanNote.ifBlank { "নেই" }}
+            বিষয়: BAN, ENG, MATH, SOC(১-২), SCI(৩-৫), BGW, REL, PE, ART। অংশ: TB, ACT, LANG, CT, WR, TOTAL। কী: "<SUB>_<TERM>_<COMP>"।
+            অস্পষ্ট থাকলে uncertainNotes-এ বাংলায় লিখুন।
+            {"summary":"","term":1,"student":{"name":"","cls":3,"roll":1,"guardian":"","religion":"ইসলাম"},"marks":[{"key":"MATH_1_TB","value":9.0,"subjectLabel":"গণিত (পাঠ্যবই)"}],"attendanceAndTraits":{"days":"","present":"","act":"","disc":"","cond":"","remark":""},"uncertainNotes":[]}
         """.trimIndent()
 
-        val payload = buildVisionJsonPayload(b64, prompt)
+        val payload = buildVisionJsonPayload(encoded.base64, prompt, maxOutputTokens = 2048)
         val (raw, usedModel) = callGenerateContentResilient(apiKey, modelId, payload)
         return try {
             val parsed = parseExtractedMarksheetJson(JSONObject(stripJsonFences(raw)))
-            if (usedModel != modelId) {
+            val withFallbackNote = if (usedModel != modelId) {
                 parsed.copy(
                     uncertainNotes = parsed.uncertainNotes +
                         "মূল মডেল ($modelId) ব্যস্ত থাকায় বিকল্প মডেল ($usedModel) দিয়ে স্ক্যান সম্পন্ন হয়েছে।"
                 )
             } else parsed
+            synchronized(cacheLock) { singleSheetCache[cacheKey] = withFallbackNote }
+            withFallbackNote
         } catch (e: Exception) {
             throw IllegalStateException("ছবিটি থেকে কাঠামোবদ্ধ ডেটা পড়া যায়নি। আরও স্পষ্ট ছবি তুলে আবার চেষ্টা করুন।", e)
         }
@@ -811,70 +881,63 @@ class DirectGeminiAiRepository(
     ): ExtractedClassSheet {
         val apiKey = requireApiKey()
         val modelId = resolveModelId(null)
-        val targetCls = clsHint ?: 3
-        val subsInfo = subjectsFor(targetCls, RELIGIONS.first()).joinToString("; ") { s ->
-            val compDesc = s.comps.joinToString(", ") { "${it.key}=${it.max}" }
-            val wrDesc = if (s.written > 0) ", WR=${s.written}" else ""
-            "${s.key}(${s.bn}): $compDesc$wrDesc"
+        val encoded = withContext(Dispatchers.Default) {
+            encodeFullQualityVisionImage(bitmap)
         }
-        val b64 = withContext(Dispatchers.Default) { encodeBitmapJpegBase64(bitmap) }
+        val cleanNote = teacherNote.trim()
+        val cacheKey = "$modelId|${encoded.sha256Hex}|$clsHint|$termHint|$subKeyHint|$cleanNote"
+        synchronized(cacheLock) {
+            classSheetCache[cacheKey]?.let { return it }
+        }
+
+        val targetCls = clsHint ?: 3
+        val allSubs = subjectsFor(targetCls, RELIGIONS.first())
+        val scopedSubs = if (!subKeyHint.isNullOrBlank()) {
+            allSubs.filter { it.key == subKeyHint }.ifEmpty { allSubs }
+        } else {
+            allSubs
+        }
+        val subsInfo = scopedSubs.joinToString("; ") { s ->
+            val compDesc = s.comps.joinToString(",") { "${it.key}=${it.max}" }
+            val wrDesc = if (s.written > 0) ",WR=${s.written}" else ""
+            "${s.key}(${s.bn}):$compDesc$wrDesc"
+        }
+
         val prompt = """
-            আপনি বাংলাদেশের প্রাথমিক বিদ্যালয়ের (১ম–৫ম শ্রেণি) হাতে লেখা শ্রেণি-নম্বরপত্র (Marksheet Register) OCR বিশেষজ্ঞ।
-            ছবিতে একাধিক শিক্ষার্থীর রোল, নাম ও একটি বিষয়ের অংশভিত্তিক নম্বর রয়েছে। সব সারি নিখুঁতভাবে পড়ে শুধু JSON দিন।
-
-            ব্যবহারকারীর নির্বাচন/ইঙ্গিত:
-            - শ্রেণি: ${clsHint?.let { "${CLSN[it - 1]} ($it)" } ?: "ছবি থেকে শনাক্ত করুন (1 থেকে 5)"}
-            - প্রান্তিক: ${termHint?.let { "${bn(it.toString())}ম ($it)" } ?: "ছবি থেকে শনাক্ত করুন (1, 2 বা 3)"}
-            - বিষয় কোড: ${subKeyHint ?: "ছবি থেকে শনাক্ত করুন (BAN, ENG, MATH, SCI, BGW, SOC, REL, PE, ART)"}
-            - অতিরিক্ত নোট: ${teacherNote.ifBlank { "নেই" }}
-
-            বিষয় ও সর্বোচ্চ নম্বরের কাঠামো:
-            $subsInfo
-
-            গুরুত্বপূর্ণ OCR ও যাচাইকরণ নিয়ম:
-            1. বাংলা ও ইংরেজি সব সংখ্যা JSON-এ ইংরেজি অঙ্কে লিখুন (যেমন ০৭ -> "7", ২৫ -> "25")। শিক্ষার্থীর নাম বাংলাতেই পরিষ্কারভাবে লিখুন।
-            2. ক্লাস টেস্ট (CT) ঘরে যদি "০৬+০৭=১৩/২=০৭" বা "A+০৮=০৮/২=০৪" ধরনের হিসাব থাকে, তবে "=" চিহ্নের পরের চূড়ান্ত গড় মানটি ("7" বা "4") `CT` ফিল্ডে দিন এবং `rawNotes`-এ সংক্ষেপে লিখুন।
-            3. কোনো ঘরে `A` বা `অনু` লেখা থাকলে `0` বসান এবং `rawNotes`-এ "অনুপস্থিত (A)" লিখুন। কোনো ঘর সম্পূর্ণ ফাঁকা থাকলে খালি স্ট্রিং "" দিন।
-            4. যদি খাতায় "মোট নম্বর (ধারাবাহিক)" বা "প্রান্তিক সর্বমোট" কলাম থাকে, সেগুলোও `sheetContinuousTotal` ও `sheetGrandTotal` ফিল্ডে দিন।
-            5. কোনো শিক্ষার্থীর নাম, রোল বা কোনো নম্বর অস্পষ্ট, ঝাপসা, কাটা-ছেঁড়া বা বুঝতে অসুবিধা হলে সেরা অনুমানটি সেই ফিল্ডে দিন এবং `uncertainFields` অবজেক্টে সেই ফিল্ড কী ("roll", "name", "TB", "ACT", "LANG", "CT", "WR", "TOTAL") দিয়ে বাংলায় সংক্ষিপ্ত কারণ লিখুন। একেবারেই পড়া না গেলে মান "" দিন এবং `uncertainFields`-এ অবশ্যই উল্লেখ করুন।
-
-            ঠিক নিচের JSON ফরম্যাটে উত্তর দিন:
-            {
-              "cls": ${clsHint ?: 3},
-              "term": ${termHint ?: 1},
-              "subKey": "${subKeyHint ?: "MATH"}",
-              "summary": "ছবি থেকে শনাক্ত শ্রেণি, বিষয় ও মোট সারির সংক্ষিপ্ত বিবরণ",
-              "warnings": [],
-              "rows": [
-                {
-                  "roll": "1",
-                  "name": "শিক্ষার্থীর নাম",
-                  "marks": { "TB": "9", "ACT": "5", "LANG": "5", "CT": "7", "WR": "50" },
-                  "sheetContinuousTotal": "26",
-                  "sheetGrandTotal": "76",
-                  "rawNotes": "",
-                  "uncertainFields": {}
-                }
-              ]
-            }
+            বাংলাদেশ প্রাথমিক শ্রেণি-নম্বরপত্র OCR। সব সারির রোল, নাম ও নম্বর পড়ে শুধু JSON দিন।
+            ইঙ্গিত: শ্রেণি=${clsHint ?: "শনাক্ত(1-5)"}, প্রান্তিক=${termHint ?: "শনাক্ত(1-3)"}, বিষয়=${subKeyHint ?: "শনাক্ত"}, নোট=${cleanNote.ifBlank { "নেই" }}
+            কাঠামো: $subsInfo
+            নিয়ম:
+            1. সব সংখ্যা ইংরেজি অঙ্কে (০৭->"7"); নাম বাংলায়।
+            2. CT ঘরে "০৬+০৭=১৩/২=০৭" থাকলে "=" পরের গড় মানটি ("7") `CT`-তে এবং `rawNotes`-এ সংক্ষেপে লিখুন।
+            3. `A`/`অনু` থাকলে "0" ও `rawNotes`-এ "অনুপস্থিত (A)"; ফাঁকা ঘর ""।
+            4. "মোট (ধারাবাহিক)" -> `sheetContinuousTotal`, "সর্বমোট" -> `sheetGrandTotal`।
+            5. অস্পষ্ট/কাটা-ছেঁড়া হলে সেরা অনুমান দিন এবং `uncertainFields`-এ ফিল্ড কী ("roll","name","TB","ACT","LANG","CT","WR","TOTAL") দিয়ে বাংলায় কারণ লিখুন; পড়া না গেলে "" দিন।
+            JSON: {"cls":${clsHint ?: 3},"term":${termHint ?: 1},"subKey":"${subKeyHint ?: "MATH"}","summary":"","warnings":[],"rows":[{"roll":"1","name":"","marks":{"TB":"","ACT":"","LANG":"","CT":"","WR":""},"sheetContinuousTotal":"","sheetGrandTotal":"","rawNotes":"","uncertainFields":{}}]}
         """.trimIndent()
 
-        val payload = buildVisionJsonPayload(b64, prompt)
+        val payload = buildVisionJsonPayload(encoded.base64, prompt, maxOutputTokens = 4096)
         val (raw, usedModel) = callGenerateContentResilient(apiKey, modelId, payload)
         return try {
             val parsed = parseExtractedClassSheetJson(JSONObject(stripJsonFences(raw)), clsHint, termHint, subKeyHint)
-            if (usedModel != modelId) {
+            val withFallbackWarning = if (usedModel != modelId) {
                 parsed.copy(
                     warnings = parsed.warnings +
                         "নির্বাচিত মডেল ($modelId) ব্যস্ত থাকায় বিকল্প মডেল ($usedModel) দিয়ে স্ক্যান সম্পন্ন হয়েছে।"
                 )
             } else parsed
+            synchronized(cacheLock) { classSheetCache[cacheKey] = withFallbackWarning }
+            withFallbackWarning
         } catch (e: Exception) {
             throw IllegalStateException("ছবিটি থেকে শ্রেণি-নম্বরপত্র পড়া যায়নি। আরও স্পষ্ট ও সোজা ছবি তুলে আবার চেষ্টা করুন।", e)
         }
     }
 
-    private fun buildVisionJsonPayload(imageBase64: String, prompt: String): JSONObject =
+    private fun buildVisionJsonPayload(
+        imageBase64: String,
+        prompt: String,
+        maxOutputTokens: Int = 2048
+    ): JSONObject =
         JSONObject().apply {
             put("contents", JSONArray().apply {
                 put(JSONObject().apply {
@@ -892,17 +955,20 @@ class DirectGeminiAiRepository(
             })
             put("generationConfig", JSONObject().apply {
                 put("temperature", 0.1)
+                put("maxOutputTokens", maxOutputTokens)
                 put("responseMimeType", "application/json")
             })
         }
 
     companion object {
         private const val BASE_URL = "https://generativelanguage.googleapis.com/v1beta"
+        private const val DEFAULT_RATE_LIMIT_COOLDOWN_SEC = 15
 
         internal class GeminiHttpException(
             val httpCode: Int,
             val modelId: String,
-            userMessage: String
+            userMessage: String,
+            val retryAfterSeconds: Int? = null
         ) : IllegalStateException(userMessage)
 
         internal suspend fun callGenerateContent(
@@ -930,7 +996,14 @@ class DirectGeminiAiRepository(
                 val stream = if (code in 200..299) conn.inputStream else conn.errorStream
                 val respText = stream?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }.orEmpty()
                 if (code !in 200..299) {
-                    throw GeminiHttpException(code, cleanModel, friendlyHttpError(code, respText, cleanModel))
+                    val headerRetry = conn.getHeaderField("Retry-After")?.trim()?.toIntOrNull()
+                    val retrySec = if (code == 429) parseRetryAfterSeconds(headerRetry, respText) else null
+                    throw GeminiHttpException(
+                        httpCode = code,
+                        modelId = cleanModel,
+                        userMessage = friendlyHttpError(code, respText, cleanModel, retrySec),
+                        retryAfterSeconds = retrySec
+                    )
                 }
                 extractCandidateText(JSONObject(respText))
             } catch (e: GeminiHttpException) {
@@ -1108,7 +1181,26 @@ class DirectGeminiAiRepository(
             return Regex("-(?:\\d{3}|\\d{2}-\\d{2}|\\d{4}|preview-\\d+)").containsMatchIn(id.lowercase())
         }
 
-        private fun friendlyHttpError(code: Int, respText: String, modelId: String): String {
+        private fun parseRetryAfterSeconds(headerRetry: Int?, respText: String): Int? {
+            if (headerRetry != null && headerRetry > 0) return headerRetry.coerceIn(5, 180)
+            val retryMatch = Regex("retry\\s*(?:in|after|delay\"?\\s*[:=]\\s*\"?)\\s*(\\d+(?:\\.\\d+)?)s?", RegexOption.IGNORE_CASE)
+                .find(respText)
+            val parsed = retryMatch?.groupValues?.getOrNull(1)?.toDoubleOrNull()?.let { ceil(it).toInt() }
+            return parsed?.coerceIn(5, 180)
+        }
+
+        private fun formatRateLimitMessage(modelId: String, retryAfterSec: Int?): String {
+            val waitText = retryAfterSec?.let { "${bn(it.toString())} সেকেন্ড পর আবার চেষ্টা করুন" }
+                ?: "কিছুক্ষণ পর আবার চেষ্টা করুন"
+            return "ফ্রি-টিয়ার রেট-লিমিট পূর্ণ ($modelId) — $waitText অথবা সেটিংস থেকে Flash-Lite/অন্য মডেল বেছে নিন।"
+        }
+
+        private fun friendlyHttpError(
+            code: Int,
+            respText: String,
+            modelId: String,
+            retryAfterSec: Int? = null
+        ): String {
             val apiMsg = runCatching {
                 JSONObject(respText).optJSONObject("error")?.optString("message").orEmpty()
             }.getOrDefault("")
@@ -1121,7 +1213,7 @@ class DirectGeminiAiRepository(
                 code == 404 || lower.contains("not found") || lower.contains("not supported for generatecontent") ->
                     "নির্বাচিত মডেল ($modelId) এই API Key-এর জন্য উপলব্ধ নয়। সেটিংস থেকে প্রস্তাবিত বা লোড করা অন্য একটি মডেল বেছে নিন।"
                 code == 429 || lower.contains("quota") || lower.contains("resource_exhausted") ->
-                    "Gemini API-এর ব্যবহার সীমা (Quota) পূর্ণ হয়েছে। কিছুক্ষণ পর আবার চেষ্টা করুন বা অন্য মডেল বেছে নিন।"
+                    formatRateLimitMessage(modelId, retryAfterSec)
                 code == 503 || lower.contains("high demand") || lower.contains("overloaded") || lower.contains("unavailable") ->
                     "নির্বাচিত মডেলটিতে ($modelId) এই মুহূর্তে অতিরিক্ত চাপ (HTTP 503) চলছে। কিছুক্ষণ পর আবার চেষ্টা করুন অথবা সেটিংস থেকে অন্য একটি মডেল নির্বাচন করুন।"
                 code in listOf(500, 502, 504) ->
