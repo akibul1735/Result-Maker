@@ -56,6 +56,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -158,6 +159,7 @@ fun BulkSheetScreen(
     onClassPdf: () -> Unit,
     onBatchEdit: (Int) -> Unit = {},
     onBatchPatchTraits: (studentIds: Set<String>, xKeys: Set<String>, value: String?) -> Unit = { _, _, _ -> },
+    onBatchPatchAttendance: (studentIds: Set<String>, term: Int, workingDays: Int?, presentDays: Int?) -> Unit = { _, _, _, _ -> },
     onShowMessage: (String) -> Unit
 ) {
     val clipboard = LocalClipboardManager.current
@@ -191,10 +193,27 @@ fun BulkSheetScreen(
     var selectedTraitValue by remember { mutableStateOf<String?>("ক") }
     var activeTraitMenuCellKey by remember { mutableStateOf<String?>(null) }
 
+    var attBatchFillMode by remember { mutableStateOf(false) }
+    var selectedAttStudentIds by remember { mutableStateOf<Set<String>>(emptySet()) }
+    var batchWorkingDaysInput by remember { mutableStateOf("") }
+    var batchPresentDaysInput by remember { mutableStateOf("") }
+
     LaunchedEffect(activeCls, mode) {
         traitBatchSelectMode = false
         selectedTraitStudentIds = emptySet()
         activeTraitMenuCellKey = null
+        attBatchFillMode = false
+        selectedAttStudentIds = emptySet()
+        batchWorkingDaysInput = ""
+        batchPresentDaysInput = ""
+    }
+    LaunchedEffect(useBnDigits) {
+        if (batchWorkingDaysInput.isNotEmpty()) {
+            batchWorkingDaysInput = if (useBnDigits) bn(fromBn(batchWorkingDaysInput)) else fromBn(batchWorkingDaysInput)
+        }
+        if (batchPresentDaysInput.isNotEmpty()) {
+            batchPresentDaysInput = if (useBnDigits) bn(fromBn(batchPresentDaysInput)) else fromBn(batchPresentDaysInput)
+        }
     }
     LaunchedEffect(isEditMode) {
         if (!isEditMode) activeTraitMenuCellKey = null
@@ -701,12 +720,48 @@ fun BulkSheetScreen(
                             }
                         )
                     } else if (mode != "traits") {
-                        FilterChip(
-                            selected = navDir == "down",
-                            onClick = { navDir = if (navDir == "down") "right" else "down" },
-                            modifier = Modifier.testTag("sheet_nav_dir_chip"),
-                            label = { Text(if (navDir == "down") "↓ নিচে" else "→ ডানে", fontSize = 11.sp, maxLines = 1, softWrap = false) }
-                        )
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            if (mode == "attendance" && permissions.canEditAttendance) {
+                                FilterChip(
+                                    selected = attBatchFillMode,
+                                    onClick = {
+                                        val next = !attBatchFillMode
+                                        attBatchFillMode = next
+                                        selectedAttStudentIds = if (next) {
+                                            classStudents.map { it.id }.toSet()
+                                        } else {
+                                            emptySet()
+                                        }
+                                    },
+                                    modifier = Modifier.testTag("sheet_att_batch_btn"),
+                                    leadingIcon = {
+                                        Icon(
+                                            if (attBatchFillMode) Icons.Rounded.Close else Icons.Rounded.DoneAll,
+                                            contentDescription = null,
+                                            modifier = Modifier.size(15.dp)
+                                        )
+                                    },
+                                    label = {
+                                        Text(
+                                            if (attBatchFillMode) "ফিল শেষ" else "ব্যাচ ফিল",
+                                            fontSize = 11.sp,
+                                            fontWeight = FontWeight.SemiBold,
+                                            maxLines = 1,
+                                            softWrap = false
+                                        )
+                                    }
+                                )
+                            }
+                            FilterChip(
+                                selected = navDir == "down",
+                                onClick = { navDir = if (navDir == "down") "right" else "down" },
+                                modifier = Modifier.testTag("sheet_nav_dir_chip"),
+                                label = { Text(if (navDir == "down") "↓ নিচে" else "→ ডানে", fontSize = 11.sp, maxLines = 1, softWrap = false) }
+                            )
+                        }
                     }
                 }
 
@@ -948,6 +1003,143 @@ fun BulkSheetScreen(
             }
         }
 
+        if (mode == "attendance" && attBatchFillMode && permissions.canEditAttendance && classStudents.isNotEmpty()) {
+            val allAttSelected = selectedAttStudentIds.size == classStudents.size && classStudents.isNotEmpty()
+            val cleanDaysStr = fromBn(batchWorkingDaysInput.trim())
+            val cleanPresStr = fromBn(batchPresentDaysInput.trim())
+            val parsedDays = if (cleanDaysStr.isEmpty()) null else cleanDaysStr.toIntOrNull()
+            val parsedPres = if (cleanPresStr.isEmpty()) null else cleanPresStr.toIntOrNull()
+            val daysInvalid = cleanDaysStr.isNotEmpty() && (parsedDays == null || parsedDays !in 0..365)
+            val presInvalid = cleanPresStr.isNotEmpty() && (parsedPres == null || parsedPres !in 0..365)
+            val crossInvalid = parsedDays != null && parsedPres != null && parsedPres > parsedDays
+            val hasAnyAttVal = parsedDays != null || parsedPres != null
+            val canApplyAtt = selectedAttStudentIds.isNotEmpty() && hasAnyAttVal && !daysInvalid && !presInvalid && !crossInvalid
+
+            Surface(
+                color = TealSoft.copy(alpha = 0.72f),
+                border = BorderStroke(1.dp, TealContainer),
+                shape = RoundedCornerShape(12.dp),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(
+                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text(
+                            "নির্বাচিত: ${fmtSheetDigits(selectedAttStudentIds.size.toString())} / ${fmtSheetDigits(classStudents.size.toString())} জন (নামে ট্যাপ করে বাছাই করুন)",
+                            fontSize = 11.5.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = TealPrimary,
+                            modifier = Modifier.weight(1f)
+                        )
+                        OutlinedButton(
+                            onClick = {
+                                selectedAttStudentIds = if (allAttSelected) {
+                                    emptySet()
+                                } else {
+                                    classStudents.map { it.id }.toSet()
+                                }
+                            },
+                            shape = RoundedCornerShape(8.dp),
+                            border = BorderStroke(1.dp, TealContainer),
+                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
+                            modifier = Modifier.testTag("sheet_att_select_all_btn")
+                        ) {
+                            Text(
+                                if (allAttSelected) "সব বাদ" else "সবাই",
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = TealPrimary
+                            )
+                        }
+                    }
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        OutlinedTextField(
+                            value = batchWorkingDaysInput,
+                            onValueChange = { raw ->
+                                val filtered = fromBn(raw).filter { it.isDigit() }.take(3)
+                                batchWorkingDaysInput = if (useBnDigits) bn(filtered) else filtered
+                            },
+                            label = { Text("কার্যদিবস", fontSize = 11.sp) },
+                            placeholder = { Text(fmtSheetDigits("65"), fontSize = 12.sp) },
+                            singleLine = true,
+                            isError = daysInvalid,
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                            modifier = Modifier.weight(1f).testTag("sheet_att_batch_days_input")
+                        )
+                        OutlinedTextField(
+                            value = batchPresentDaysInput,
+                            onValueChange = { raw ->
+                                val filtered = fromBn(raw).filter { it.isDigit() }.take(3)
+                                batchPresentDaysInput = if (useBnDigits) bn(filtered) else filtered
+                            },
+                            label = { Text("উপস্থিতি", fontSize = 11.sp) },
+                            placeholder = { Text(fmtSheetDigits("60"), fontSize = 12.sp) },
+                            singleLine = true,
+                            isError = presInvalid || crossInvalid,
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                            modifier = Modifier.weight(1f).testTag("sheet_att_batch_pres_input")
+                        )
+                    }
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        val hintText = when {
+                            daysInvalid || presInvalid -> "সংখ্যা ০ থেকে ${fmtSheetDigits("365")} এর মধ্যে হতে হবে"
+                            crossInvalid -> "উপস্থিতি কার্যদিবসের চেয়ে বেশি হতে পারবে না"
+                            else -> "যেকোনো ১টি বা উভয় ঘরে সংখ্যা লিখে প্রয়োগ করুন"
+                        }
+                        Text(
+                            hintText,
+                            fontSize = 11.sp,
+                            color = if (daysInvalid || presInvalid || crossInvalid) RoseDanger else SlateMuted,
+                            modifier = Modifier.weight(1f)
+                        )
+                        Button(
+                            onClick = {
+                                focusManager.clearFocus(force = true)
+                                onBatchPatchAttendance(
+                                    selectedAttStudentIds,
+                                    term,
+                                    parsedDays,
+                                    parsedPres
+                                )
+                            },
+                            enabled = canApplyAtt,
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = TealPrimary,
+                                contentColor = Color.White
+                            ),
+                            shape = RoundedCornerShape(8.dp),
+                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                            modifier = Modifier.testTag("sheet_att_batch_apply_btn")
+                        ) {
+                            Text(
+                                "প্রয়োগ করুন",
+                                fontSize = 11.5.sp,
+                                fontWeight = FontWeight.Bold,
+                                maxLines = 1,
+                                softWrap = false
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
         // Frozen Roll+Name Column + Horizontally Scrollable Grid
         Card(
             Modifier.weight(1f).fillMaxWidth(),
@@ -1029,31 +1221,43 @@ fun BulkSheetScreen(
                         itemsIndexed(classStudents, key = { _, s -> s.id }) { rIdx, s ->
                             val rowHeight = 48.dp
                             val isTraitRowSelected = mode == "traits" && traitBatchSelectMode && (s.id in selectedTraitStudentIds)
+                            val isAttRowSelected = mode == "attendance" && attBatchFillMode && (s.id in selectedAttStudentIds)
+                            val isRowSelected = isTraitRowSelected || isAttRowSelected
+                            val isAnyBatchSelect = (mode == "traits" && traitBatchSelectMode && permissions.canEditAttendance) ||
+                                (mode == "attendance" && attBatchFillMode && permissions.canEditAttendance)
                             Column {
                                 Row(Modifier.fillMaxWidth().height(rowHeight), verticalAlignment = Alignment.CenterVertically) {
                                     Row(
                                         Modifier
                                             .width(136.dp)
                                             .fillMaxHeight()
-                                            .background(if (isTraitRowSelected) TealSoft else Color.Transparent)
+                                            .background(if (isRowSelected) TealSoft else Color.Transparent)
                                             .clickable {
-                                                if (mode == "traits" && traitBatchSelectMode && permissions.canEditAttendance) {
-                                                    selectedTraitStudentIds = if (isTraitRowSelected) {
-                                                        selectedTraitStudentIds - s.id
-                                                    } else {
-                                                        selectedTraitStudentIds + s.id
+                                                when {
+                                                    mode == "traits" && traitBatchSelectMode && permissions.canEditAttendance -> {
+                                                        selectedTraitStudentIds = if (isTraitRowSelected) {
+                                                            selectedTraitStudentIds - s.id
+                                                        } else {
+                                                            selectedTraitStudentIds + s.id
+                                                        }
                                                     }
-                                                } else {
-                                                    onOpenStudent(s)
+                                                    mode == "attendance" && attBatchFillMode && permissions.canEditAttendance -> {
+                                                        selectedAttStudentIds = if (isAttRowSelected) {
+                                                            selectedAttStudentIds - s.id
+                                                        } else {
+                                                            selectedAttStudentIds + s.id
+                                                        }
+                                                    }
+                                                    else -> onOpenStudent(s)
                                                 }
                                             }
                                             .padding(horizontal = 6.dp),
                                         verticalAlignment = Alignment.CenterVertically,
                                         horizontalArrangement = Arrangement.spacedBy(4.dp)
                                     ) {
-                                        if (mode == "traits" && traitBatchSelectMode && permissions.canEditAttendance) {
+                                        if (isAnyBatchSelect) {
                                             Checkbox(
-                                                checked = isTraitRowSelected,
+                                                checked = isRowSelected,
                                                 onCheckedChange = null,
                                                 colors = CheckboxDefaults.colors(checkedColor = TealPrimary),
                                                 modifier = Modifier.size(18.dp)

@@ -972,6 +972,62 @@ class ResultMakerViewModel(
         }
     }
 
+    fun batchUpdateAttendance(
+        studentIds: Set<String>,
+        term: Int,
+        workingDays: Int?,
+        presentDays: Int?
+    ) {
+        val school = activeSchool.value ?: return
+        val perm = school.permissionsFor(currentUserId)
+        if (!perm.canEditAttendance) {
+            showMessage("উপস্থিতি ও কার্যদিবস সম্পাদনার অনুমতি আপনার নেই")
+            return
+        }
+        val safeTerm = term.coerceIn(1, 3)
+        if (studentIds.isEmpty()) {
+            showMessage("অন্তত ১ জন শিক্ষার্থী নির্বাচন করুন")
+            return
+        }
+        if (workingDays == null && presentDays == null) {
+            showMessage("কার্যদিবস বা উপস্থিতির সংখ্যা লিখুন")
+            return
+        }
+        if ((workingDays != null && workingDays !in 0..365) || (presentDays != null && presentDays !in 0..365)) {
+            showMessage("সংখ্যা ০ থেকে ৩৬৫ এর মধ্যে হতে হবে")
+            return
+        }
+        if (workingDays != null && presentDays != null && presentDays > workingDays) {
+            showMessage("উপস্থিতি কার্যদিবসের চেয়ে বেশি হতে পারবে না")
+            return
+        }
+        val allowedIds = students.value
+            .filter { it.id in studentIds && perm.canAccessClass(it.cls) }
+            .map { it.id }
+        if (allowedIds.isEmpty()) {
+            showMessage("অনুমোদিত কোনো শিক্ষার্থী নির্বাচিত হয়নি")
+            return
+        }
+        val xUpdates = buildMap<String, String?> {
+            workingDays?.let { put("DAYS_$safeTerm", it.toString()) }
+            presentDays?.let { put("PRES_$safeTerm", it.toString()) }
+        }
+        viewModelScope.launch {
+            cloudRepo.patchBatchXFields(school.id, allowedIds, xUpdates)
+                .onSuccess {
+                    val what = when {
+                        workingDays != null && presentDays != null -> "কার্যদিবস ও উপস্থিতি"
+                        workingDays != null -> "কার্যদিবস"
+                        else -> "উপস্থিতি"
+                    }
+                    showMessage("${bn(allowedIds.size.toString())} জন শিক্ষার্থীর $what আপডেট হয়েছে")
+                }
+                .onFailure { e ->
+                    showMessage(friendlyFirestoreErrorMessage(e))
+                }
+        }
+    }
+
     fun deleteStudent(id: String) {
         val school = activeSchool.value ?: return
         val target = students.value.find { it.id == id } ?: return
