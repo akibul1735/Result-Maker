@@ -3,6 +3,9 @@ package com.kgps.result.ui.screens
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.waitForUpOrCancellation
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -27,9 +30,13 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.ArrowDropDown
+import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.ContentPaste
 import androidx.compose.material.icons.rounded.Description
+import androidx.compose.material.icons.rounded.Edit
 import androidx.compose.material.icons.rounded.Lock
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.DropdownMenu
@@ -45,8 +52,10 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -55,8 +64,16 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.testTag
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
@@ -113,7 +130,8 @@ private data class SheetColDef(
 private val SHEET_MODES = listOf(
     "subject" to "বিষয়ভিত্তিক নম্বর",
     "all" to "সকল বিষয় মোট",
-    "attendance" to "উপস্থিতি ও গুণাবলি",
+    "attendance" to "উপস্থিতি এন্ট্রি",
+    "traits" to "গুণাবলি এন্ট্রি",
     "info" to "তথ্য ও কাস্টম"
 )
 
@@ -131,6 +149,8 @@ fun BulkSheetScreen(
     onShowMessage: (String) -> Unit
 ) {
     val clipboard = LocalClipboardManager.current
+    val focusManager = LocalFocusManager.current
+    val haptic = LocalHapticFeedback.current
     val allowedClasses = remember(permissions) { permissions.effectiveClasses() }
     val activeCls = if (cls in allowedClasses) cls else (allowedClasses.firstOrNull() ?: cls)
 
@@ -139,7 +159,7 @@ fun BulkSheetScreen(
             when (id) {
                 "subject" -> permissions.allSubjects || permissions.effectiveSubjects().isNotEmpty() || permissions.canViewOtherSubjects
                 "all" -> permissions.allSubjects || permissions.effectiveSubjects().isNotEmpty() || permissions.canViewOtherSubjects
-                "attendance" -> permissions.canEditAttendance
+                "attendance", "traits" -> permissions.canEditAttendance
                 "info" -> permissions.canManageStudents
                 else -> true
             }
@@ -149,6 +169,7 @@ fun BulkSheetScreen(
     var term by remember { mutableStateOf(1) }
     var mode by remember { mutableStateOf(availableModes.firstOrNull()?.first ?: "subject") }
     var navDir by remember { mutableStateOf("down") }
+    var isEditMode by remember { mutableStateOf(false) }
 
     LaunchedEffect(availableModes) {
         if (availableModes.isNotEmpty() && availableModes.none { it.first == mode }) {
@@ -177,7 +198,7 @@ fun BulkSheetScreen(
     fun isColumnEditable(col: SheetColDef): Boolean {
         return when {
             col.isMark && col.markSubKey != null -> permissions.canEditSubject(col.markSubKey)
-            col.xKey != null && mode == "attendance" -> permissions.canEditAttendance
+            col.xKey != null && (mode == "attendance" || mode == "traits") -> permissions.canEditAttendance
             col.xKey != null || col.infoFieldKey != null -> permissions.canManageStudents
             else -> false
         }
@@ -247,11 +268,13 @@ fun BulkSheetScreen(
                 )
             }
             "attendance" -> listOf(
-                SheetColDef("DAYS_$term", "কার্যদিবস", "সর্বোচ্চ ৩৬৫", max = 365, width = 82.dp, xKey = "DAYS_$term"),
-                SheetColDef("PRES_$term", "উপস্থিতি", "সর্বোচ্চ ৩৬৫", max = 365, width = 82.dp, xKey = "PRES_$term"),
-                SheetColDef("ACT_$term", "সক্রিয়তা", "ট্যাপ: ক/খ/গ", width = 76.dp, xKey = "ACT_$term", isNumeric = false, isTraitCycle = true),
-                SheetColDef("DISC_$term", "শৃঙ্খলা", "ট্যাপ: ক/খ/গ", width = 76.dp, xKey = "DISC_$term", isNumeric = false, isTraitCycle = true),
-                SheetColDef("COND_$term", "আচরণ", "ট্যাপ: ক/খ/গ", width = 76.dp, xKey = "COND_$term", isNumeric = false, isTraitCycle = true)
+                SheetColDef("DAYS_$term", "কার্যদিবস", "সর্বোচ্চ ৩৬৫", max = 365, width = 96.dp, xKey = "DAYS_$term"),
+                SheetColDef("PRES_$term", "উপস্থিতি", "সর্বোচ্চ ৩৬৫", max = 365, width = 96.dp, xKey = "PRES_$term")
+            )
+            "traits" -> listOf(
+                SheetColDef("ACT_$term", "সক্রিয়তা", "চেপে ধরুন (২–৩সে.)", width = 92.dp, xKey = "ACT_$term", isNumeric = false, isTraitCycle = true),
+                SheetColDef("DISC_$term", "শৃঙ্খলা", "চেপে ধরুন (২–৩সে.)", width = 92.dp, xKey = "DISC_$term", isNumeric = false, isTraitCycle = true),
+                SheetColDef("COND_$term", "আচরণ", "চেপে ধরুন (২–৩সে.)", width = 92.dp, xKey = "COND_$term", isNumeric = false, isTraitCycle = true)
             )
             else -> buildList {
                 add(SheetColDef("info_guardian", "অভিভাবকের নাম", "তথ্য", width = 132.dp, infoFieldKey = "guardian", isNumeric = false))
@@ -443,13 +466,40 @@ fun BulkSheetScreen(
                     Spacer(Modifier.weight(1f))
 
                     if (canPasteCurrentSheet) {
-                        IconButton(
-                            onClick = { applyClipboardPaste() },
-                            modifier = Modifier.size(48.dp).testTag("sheet_paste_btn")
+                        Button(
+                            onClick = {
+                                if (isEditMode) {
+                                    focusManager.clearFocus(force = true)
+                                    isEditMode = false
+                                    onShowMessage("এডিট মোড বন্ধ করা হয়েছে")
+                                } else {
+                                    isEditMode = true
+                                }
+                            },
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = if (isEditMode) TealPrimary else TealSoft,
+                                contentColor = if (isEditMode) Color.White else TealPrimary
+                            ),
+                            shape = RoundedCornerShape(8.dp),
+                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp),
+                            modifier = Modifier.testTag("sheet_edit_toggle_btn")
                         ) {
-                            Icon(Icons.Rounded.ContentPaste, contentDescription = "ক্লিপবোর্ড পেস্ট", tint = TealPrimary)
+                            Icon(
+                                if (isEditMode) Icons.Rounded.Check else Icons.Rounded.Edit,
+                                contentDescription = if (isEditMode) "এডিট সম্পন্ন" else "এডিট চালু",
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Spacer(Modifier.width(4.dp))
+                            Text(
+                                if (isEditMode) "সম্পন্ন" else "এডিট",
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold,
+                                maxLines = 1,
+                                softWrap = false
+                            )
                         }
                     }
+
                     if (permissions.canExportPdf) {
                         IconButton(
                             onClick = onClassPdf,
@@ -536,12 +586,14 @@ fun BulkSheetScreen(
                         }
                     }
 
-                    FilterChip(
-                        selected = navDir == "down",
-                        onClick = { navDir = if (navDir == "down") "right" else "down" },
-                        modifier = Modifier.testTag("sheet_nav_dir_chip"),
-                        label = { Text(if (navDir == "down") "↓ নিচে" else "→ ডানে", fontSize = 11.5.sp) }
-                    )
+                    if (mode != "traits") {
+                        FilterChip(
+                            selected = navDir == "down",
+                            onClick = { navDir = if (navDir == "down") "right" else "down" },
+                            modifier = Modifier.testTag("sheet_nav_dir_chip"),
+                            label = { Text(if (navDir == "down") "↓ নিচে" else "→ ডানে", fontSize = 11.5.sp) }
+                        )
+                    }
                 }
 
                 if (mode == "subject" && activeSub != null && !permissions.canEditSubject(activeSub.key)) {
@@ -556,6 +608,86 @@ fun BulkSheetScreen(
                             color = AmberNotice,
                             modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp)
                         )
+                    }
+                } else if (canPasteCurrentSheet && !isEditMode) {
+                    Surface(
+                        color = SlateBg,
+                        border = BorderStroke(1.dp, SlateOutline),
+                        shape = RoundedCornerShape(8.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { isEditMode = true }
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text(
+                                "নিরাপদ ভিউ মোড চালু — এডিট করতে ডানের 'এডিট' বাটনে ট্যাপ করুন",
+                                fontSize = 11.sp,
+                                color = SlateMuted,
+                                modifier = Modifier.weight(1f)
+                            )
+                            Text(
+                                "এডিট চালু",
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = TealPrimary
+                            )
+                        }
+                    }
+                } else if (isEditMode && mode == "traits") {
+                    Surface(
+                        color = TealSoft,
+                        border = BorderStroke(1.dp, TealContainer),
+                        shape = RoundedCornerShape(8.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text(
+                            "গুণাবলি এন্ট্রি: সরাসরি ট্যাপে মান বদলাবে না — ক / খ / গ পরিবর্তন করতে ঘরটি ২–৩ সেকেন্ড চেপে ধরে রাখুন।",
+                            fontSize = 11.sp,
+                            color = TealPrimary,
+                            fontWeight = FontWeight.Medium,
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
+                        )
+                    }
+                } else if (isEditMode && canPasteCurrentSheet) {
+                    Surface(
+                        color = TealSoft,
+                        border = BorderStroke(1.dp, TealContainer),
+                        shape = RoundedCornerShape(8.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(start = 10.dp, end = 6.dp, top = 4.dp, bottom = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text(
+                                "এডিট মোড চালু — ঘরে ট্যাপ করে লিখুন (শেষে 'সম্পন্ন' চাপুন)",
+                                fontSize = 11.sp,
+                                color = TealPrimary,
+                                fontWeight = FontWeight.Medium,
+                                modifier = Modifier.weight(1f)
+                            )
+                            OutlinedButton(
+                                onClick = { applyClipboardPaste() },
+                                shape = RoundedCornerShape(6.dp),
+                                border = BorderStroke(1.dp, TealContainer),
+                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                                modifier = Modifier.testTag("sheet_paste_btn")
+                            ) {
+                                Icon(
+                                    Icons.Rounded.ContentPaste,
+                                    contentDescription = "ক্লিপবোর্ড পেস্ট",
+                                    tint = TealPrimary,
+                                    modifier = Modifier.size(14.dp)
+                                )
+                                Spacer(Modifier.width(4.dp))
+                                Text("পেস্ট", fontSize = 11.sp, color = TealPrimary, fontWeight = FontWeight.Bold)
+                            }
+                        }
                     }
                 }
             }
@@ -670,7 +802,8 @@ fun BulkSheetScreen(
 
                                     Row(Modifier.weight(1f).fillMaxHeight().horizontalScroll(hScroll)) {
                                         cols.forEachIndexed { cIdx, col ->
-                                            val colEditable = isColumnEditable(col)
+                                            val hasPerm = isColumnEditable(col)
+                                            val colEditable = isEditMode && hasPerm
 
                                             if (col.isTraitCycle && col.xKey != null) {
                                                 val currentVal = s.x[col.xKey] ?: ""
@@ -692,26 +825,121 @@ fun BulkSheetScreen(
                                                     "গ" -> RoseDanger
                                                     else -> SlateMuted
                                                 }
+
+                                                var holdProgress by remember(s.id, col.xKey) { mutableFloatStateOf(0f) }
+                                                var isHolding by remember(s.id, col.xKey) { mutableStateOf(false) }
+                                                val latestCanEdit by rememberUpdatedState(colEditable)
+                                                val latestHasPerm by rememberUpdatedState(hasPerm)
+                                                val latestOnCycle by rememberUpdatedState {
+                                                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                                    onPatchStudentField(
+                                                        s.id,
+                                                        "x.${col.xKey}",
+                                                        nextVal.ifEmpty { null }
+                                                    )
+                                                }
+
                                                 Box(
                                                     Modifier
                                                         .width(col.width)
                                                         .fillMaxHeight()
-                                                        .background(if (colEditable) badgeBg else SlateBg)
-                                                        .clickable(enabled = colEditable) {
-                                                            onPatchStudentField(
-                                                                s.id,
-                                                                "x.${col.xKey}",
-                                                                nextVal.ifEmpty { null }
-                                                            )
+                                                        .background(if (hasPerm) badgeBg else SlateBg)
+                                                        .pointerInput(s.id, col.xKey) {
+                                                            coroutineScope {
+                                                                val holdScope = this
+                                                                awaitEachGesture {
+                                                                    val down = awaitFirstDown(requireUnconsumed = false)
+                                                                    if (!latestCanEdit) {
+                                                                        val up = waitForUpOrCancellation()
+                                                                        if (up != null) {
+                                                                            onShowMessage(
+                                                                                if (!latestHasPerm) "গুণাবলি সম্পাদনার অনুমতি নেই"
+                                                                                else "পরিবর্তন করতে উপরের 'এডিট' বাটনে ট্যাপ করুন"
+                                                                            )
+                                                                        }
+                                                                        return@awaitEachGesture
+                                                                    }
+
+                                                                    val startPos = down.position
+                                                                    val startTime = System.currentTimeMillis()
+                                                                    var completed = false
+                                                                    var movedAway = false
+                                                                    isHolding = true
+                                                                    holdProgress = 0f
+
+                                                                    val timerJob = holdScope.launch {
+                                                                        val holdDurationMs = 2200L
+                                                                        while (isActive) {
+                                                                            val elapsed = System.currentTimeMillis() - startTime
+                                                                            holdProgress = (elapsed.toFloat() / holdDurationMs).coerceIn(0f, 1f)
+                                                                            if (elapsed >= holdDurationMs) {
+                                                                                completed = true
+                                                                                isHolding = false
+                                                                                holdProgress = 0f
+                                                                                latestOnCycle()
+                                                                                break
+                                                                            }
+                                                                            delay(16L)
+                                                                        }
+                                                                    }
+
+                                                                    try {
+                                                                        while (!completed) {
+                                                                            val event = awaitPointerEvent()
+                                                                            val change = event.changes.firstOrNull { it.id == down.id }
+                                                                            if (change == null || !change.pressed || change.isConsumed) {
+                                                                                break
+                                                                            }
+                                                                            if ((change.position - startPos).getDistance() > viewConfiguration.touchSlop) {
+                                                                                movedAway = true
+                                                                                break
+                                                                            }
+                                                                        }
+                                                                    } finally {
+                                                                        timerJob.cancel()
+                                                                        val heldDuration = System.currentTimeMillis() - startTime
+                                                                        isHolding = false
+                                                                        holdProgress = 0f
+                                                                        if (!completed && !movedAway && heldDuration < 2200L) {
+                                                                            onShowMessage("পরিবর্তন করতে ২–৩ সেকেন্ড চেপে ধরে রাখুন")
+                                                                        }
+                                                                    }
+                                                                }
+                                                            }
                                                         },
                                                     contentAlignment = Alignment.Center
                                                 ) {
-                                                    Text(
-                                                        currentVal.ifEmpty { "—" },
-                                                        fontSize = 13.sp,
-                                                        fontWeight = if (currentVal.isNotEmpty()) FontWeight.Bold else FontWeight.Normal,
-                                                        color = badgeFg
-                                                    )
+                                                    if (isHolding && holdProgress > 0f) {
+                                                        Box(
+                                                            Modifier
+                                                                .align(Alignment.CenterStart)
+                                                                .fillMaxHeight()
+                                                                .fillMaxWidth(holdProgress)
+                                                                .background(TealPrimary.copy(alpha = 0.22f))
+                                                        )
+                                                        Box(
+                                                            Modifier
+                                                                .align(Alignment.BottomStart)
+                                                                .height(3.dp)
+                                                                .fillMaxWidth(holdProgress)
+                                                                .background(TealPrimary)
+                                                        )
+                                                    }
+                                                    if (isHolding) {
+                                                        Text(
+                                                            "→ ${nextVal.ifEmpty { "ফাঁকা" }}",
+                                                            fontSize = 11.5.sp,
+                                                            fontWeight = FontWeight.Bold,
+                                                            color = TealPrimary
+                                                        )
+                                                    } else {
+                                                        Text(
+                                                            currentVal.ifEmpty { "—" },
+                                                            fontSize = 13.sp,
+                                                            fontWeight = if (currentVal.isNotEmpty()) FontWeight.Bold else FontWeight.Normal,
+                                                            color = badgeFg
+                                                        )
+                                                    }
                                                 }
                                                 Box(Modifier.width(1.dp).fillMaxHeight().background(SlateOutline))
                                                 return@forEachIndexed
@@ -747,7 +975,7 @@ fun BulkSheetScreen(
                                                 (parsedNum == null || parsedNum < 0 || parsedNum > col.max)
 
                                             fun commitDraft(text: String) {
-                                                if (!colEditable) return
+                                                if (!hasPerm) return
                                                 val clean = fromBn(text.trim())
                                                 if (col.isMark && col.markSubKey != null && col.markCompKey != null) {
                                                     val k = mk(col.markSubKey, term, col.markCompKey)
