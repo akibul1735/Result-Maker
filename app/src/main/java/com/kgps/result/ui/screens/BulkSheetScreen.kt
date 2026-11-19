@@ -459,32 +459,47 @@ fun BulkSheetScreen(
         Modifier
             .fillMaxSize()
             .imePadding()
-            .padding(horizontal = 10.dp, vertical = 6.dp),
-        verticalArrangement = Arrangement.spacedBy(6.dp)
+            .padding(horizontal = 8.dp, vertical = 4.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp)
     ) {
-        // Compact 2-Row Android Toolbar
+        // Ultra-Compact 2-Row Toolbar
         Surface(
             color = MaterialTheme.colorScheme.surface,
             border = BorderStroke(1.dp, SlateOutline),
-            shape = RoundedCornerShape(12.dp)
+            shape = RoundedCornerShape(10.dp)
         ) {
-            Column(Modifier.padding(horizontal = 8.dp, vertical = 6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                // Row 1: Class + Term + Quick Actions
+            Column(
+                Modifier.padding(horizontal = 8.dp, vertical = 5.dp),
+                verticalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                // Row 1: Class + Term + Digit Switch + Edit + PDF
                 Row(
                     Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
                     Box {
-                        OutlinedButton(
+                        Surface(
                             onClick = { classMenuOpen = true },
-                            shape = RoundedCornerShape(8.dp),
+                            shape = RoundedCornerShape(7.dp),
+                            color = MaterialTheme.colorScheme.surface,
                             border = BorderStroke(1.dp, SlateOutline),
-                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp),
-                            modifier = Modifier.testTag("sheet_class_dropdown")
+                            modifier = Modifier.height(32.dp).testTag("sheet_class_dropdown")
                         ) {
-                            Text("${CLSN[activeCls - 1]} শ্রেণি", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
-                            Icon(Icons.Rounded.ArrowDropDown, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Row(
+                                modifier = Modifier.padding(start = 8.dp, end = 4.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    "${CLSN[activeCls - 1]} শ্রেণি",
+                                    fontSize = 11.5.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = SlateText,
+                                    maxLines = 1,
+                                    softWrap = false
+                                )
+                                Icon(Icons.Rounded.ArrowDropDown, contentDescription = null, modifier = Modifier.size(16.dp), tint = SlateMuted)
+                            }
                         }
                         DropdownMenu(expanded = classMenuOpen, onDismissRequest = { classMenuOpen = false }) {
                             allowedClasses.forEach { c ->
@@ -499,15 +514,27 @@ fun BulkSheetScreen(
 
                     if (mode != "info") {
                         Box {
-                            OutlinedButton(
+                            Surface(
                                 onClick = { termMenuOpen = true },
-                                shape = RoundedCornerShape(8.dp),
+                                shape = RoundedCornerShape(7.dp),
+                                color = MaterialTheme.colorScheme.surface,
                                 border = BorderStroke(1.dp, SlateOutline),
-                                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp),
-                                modifier = Modifier.testTag("sheet_term_dropdown")
+                                modifier = Modifier.height(32.dp).testTag("sheet_term_dropdown")
                             ) {
-                                Text("${bn(term.toString())} প্রান্তিক", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
-                                Icon(Icons.Rounded.ArrowDropDown, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Row(
+                                    modifier = Modifier.padding(start = 8.dp, end = 4.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(
+                                        "${bn(term.toString())} প্রান্তিক",
+                                        fontSize = 11.5.sp,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = SlateText,
+                                        maxLines = 1,
+                                        softWrap = false
+                                    )
+                                    Icon(Icons.Rounded.ArrowDropDown, contentDescription = null, modifier = Modifier.size(16.dp), tint = SlateMuted)
+                                }
                             }
                             DropdownMenu(expanded = termMenuOpen, onDismissRequest = { termMenuOpen = false }) {
                                 (1..3).forEach { t ->
@@ -522,8 +549,51 @@ fun BulkSheetScreen(
 
                     Spacer(Modifier.weight(1f))
 
+                    // Compact Digit Toggle (০-৯ | 0-9)
+                    Surface(
+                        shape = RoundedCornerShape(7.dp),
+                        color = SlateBg,
+                        border = BorderStroke(1.dp, SlateOutline),
+                        modifier = Modifier.height(32.dp)
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxHeight()
+                                    .background(if (useBnDigits) TealPrimary else Color.Transparent)
+                                    .clickable { useBnDigits = true }
+                                    .padding(horizontal = 7.dp)
+                                    .testTag("sheet_digit_bn_chip"),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    "০-৯",
+                                    fontSize = 10.5.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = if (useBnDigits) Color.White else SlateMuted
+                                )
+                            }
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxHeight()
+                                    .background(if (!useBnDigits) TealPrimary else Color.Transparent)
+                                    .clickable { useBnDigits = false }
+                                    .padding(horizontal = 7.dp)
+                                    .testTag("sheet_digit_en_chip"),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    "0-9",
+                                    fontSize = 10.5.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = if (!useBnDigits) Color.White else SlateMuted
+                                )
+                            }
+                        }
+                    }
+
                     if (canPasteCurrentSheet) {
-                        Button(
+                        Surface(
                             onClick = {
                                 if (isEditMode) {
                                     focusManager.clearFocus(force = true)
@@ -533,63 +603,84 @@ fun BulkSheetScreen(
                                     isEditMode = true
                                 }
                             },
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = if (isEditMode) TealPrimary else TealSoft,
-                                contentColor = if (isEditMode) Color.White else TealPrimary
-                            ),
-                            shape = RoundedCornerShape(8.dp),
-                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp),
-                            modifier = Modifier.testTag("sheet_edit_toggle_btn")
+                            color = if (isEditMode) TealPrimary else TealSoft,
+                            border = BorderStroke(1.dp, if (isEditMode) TealPrimary else TealContainer),
+                            shape = RoundedCornerShape(7.dp),
+                            modifier = Modifier.height(32.dp).testTag("sheet_edit_toggle_btn")
                         ) {
-                            Icon(
-                                if (isEditMode) Icons.Rounded.Check else Icons.Rounded.Edit,
-                                contentDescription = if (isEditMode) "এডিট সম্পন্ন" else "এডিট চালু",
-                                modifier = Modifier.size(16.dp)
-                            )
-                            Spacer(Modifier.width(4.dp))
-                            Text(
-                                if (isEditMode) "সম্পন্ন" else "এডিট",
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.Bold,
-                                maxLines = 1,
-                                softWrap = false
-                            )
+                            Row(
+                                modifier = Modifier.padding(horizontal = 8.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(3.dp)
+                            ) {
+                                Icon(
+                                    if (isEditMode) Icons.Rounded.Check else Icons.Rounded.Edit,
+                                    contentDescription = if (isEditMode) "এডিট সম্পন্ন" else "এডিট চালু",
+                                    tint = if (isEditMode) Color.White else TealPrimary,
+                                    modifier = Modifier.size(14.dp)
+                                )
+                                Text(
+                                    if (isEditMode) "সম্পন্ন" else "এডিট",
+                                    fontSize = 11.5.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = if (isEditMode) Color.White else TealPrimary,
+                                    maxLines = 1,
+                                    softWrap = false
+                                )
+                            }
                         }
                     }
 
                     if (permissions.canExportPdf) {
-                        IconButton(
+                        Surface(
                             onClick = onClassPdf,
-                            modifier = Modifier.size(48.dp).testTag("sheet_pdf_btn")
+                            shape = RoundedCornerShape(7.dp),
+                            color = MaterialTheme.colorScheme.surface,
+                            border = BorderStroke(1.dp, SlateOutline),
+                            modifier = Modifier.size(32.dp).testTag("sheet_pdf_btn")
                         ) {
-                            Icon(Icons.Rounded.Description, contentDescription = "শ্রেণির PDF", tint = TealPrimary)
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(
+                                    Icons.Rounded.Description,
+                                    contentDescription = "শ্রেণির PDF",
+                                    tint = TealPrimary,
+                                    modifier = Modifier.size(17.dp)
+                                )
+                            }
                         }
                     }
                 }
 
-                // Row 2: Mode Dropdown + Subject Dropdown + Enter Direction
+                // Row 2: Mode Dropdown + Subject Dropdown + Context Quick Action (Batch / Nav Dir)
                 Row(
                     Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
                     Box(Modifier.weight(1f)) {
                         val activeModeLabel = availableModes.find { it.first == mode }?.second ?: mode
-                        OutlinedButton(
+                        Surface(
                             onClick = { modeMenuOpen = true },
-                            shape = RoundedCornerShape(8.dp),
+                            shape = RoundedCornerShape(7.dp),
+                            color = MaterialTheme.colorScheme.surface,
                             border = BorderStroke(1.dp, SlateOutline),
-                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp),
-                            modifier = Modifier.fillMaxWidth().testTag("sheet_mode_dropdown")
+                            modifier = Modifier.fillMaxWidth().height(32.dp).testTag("sheet_mode_dropdown")
                         ) {
-                            Text(
-                                activeModeLabel,
-                                fontSize = 12.sp,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                                modifier = Modifier.weight(1f)
-                            )
-                            Icon(Icons.Rounded.ArrowDropDown, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Row(
+                                modifier = Modifier.padding(start = 8.dp, end = 4.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    activeModeLabel,
+                                    fontSize = 11.5.sp,
+                                    fontWeight = FontWeight.Medium,
+                                    color = SlateText,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    modifier = Modifier.weight(1f)
+                                )
+                                Icon(Icons.Rounded.ArrowDropDown, contentDescription = null, modifier = Modifier.size(16.dp), tint = SlateMuted)
+                            }
                         }
                         DropdownMenu(expanded = modeMenuOpen, onDismissRequest = { modeMenuOpen = false }) {
                             availableModes.forEach { (id, label) ->
@@ -609,21 +700,28 @@ fun BulkSheetScreen(
 
                     if (mode == "subject" && activeSub != null) {
                         Box(Modifier.weight(1f)) {
-                            OutlinedButton(
+                            Surface(
                                 onClick = { subjectMenuOpen = true },
-                                shape = RoundedCornerShape(8.dp),
+                                shape = RoundedCornerShape(7.dp),
+                                color = MaterialTheme.colorScheme.surface,
                                 border = BorderStroke(1.dp, SlateOutline),
-                                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp),
-                                modifier = Modifier.fillMaxWidth().testTag("sheet_subject_dropdown")
+                                modifier = Modifier.fillMaxWidth().height(32.dp).testTag("sheet_subject_dropdown")
                             ) {
-                                Text(
-                                    activeSub.bn + if (!permissions.canEditSubject(activeSub.key)) " (দেখা)" else "",
-                                    fontSize = 12.sp,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis,
-                                    modifier = Modifier.weight(1f)
-                                )
-                                Icon(Icons.Rounded.ArrowDropDown, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Row(
+                                    modifier = Modifier.padding(start = 8.dp, end = 4.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(
+                                        activeSub.bn + if (!permissions.canEditSubject(activeSub.key)) " (দেখা)" else "",
+                                        fontSize = 11.5.sp,
+                                        fontWeight = FontWeight.Medium,
+                                        color = SlateText,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                    Icon(Icons.Rounded.ArrowDropDown, contentDescription = null, modifier = Modifier.size(16.dp), tint = SlateMuted)
+                                }
                             }
                             DropdownMenu(expanded = subjectMenuOpen, onDismissRequest = { subjectMenuOpen = false }) {
                                 visibleSubs.forEach { s ->
@@ -642,219 +740,219 @@ fun BulkSheetScreen(
                             }
                         }
                     }
-                }
-
-                // Row 3: Consistent Digit Mode (বাংলা ০-৯ vs ইংরেজি 0-9) + Nav Direction / Batch Update
-                Row(
-                    Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(4.dp)
-                    ) {
-                        FilterChip(
-                            selected = useBnDigits,
-                            onClick = { useBnDigits = true },
-                            modifier = Modifier.testTag("sheet_digit_bn_chip"),
-                            label = { Text("সংখ্যা: ০-৯", fontSize = 11.sp, maxLines = 1, softWrap = false) }
-                        )
-                        FilterChip(
-                            selected = !useBnDigits,
-                            onClick = { useBnDigits = false },
-                            modifier = Modifier.testTag("sheet_digit_en_chip"),
-                            label = { Text("0-9", fontSize = 11.sp, maxLines = 1, softWrap = false) }
-                        )
-                    }
-
-                    Spacer(Modifier.weight(1f))
 
                     if (mode == "info" && permissions.canManageStudents) {
-                        OutlinedButton(
+                        Surface(
                             onClick = { onBatchEdit(activeCls) },
-                            shape = RoundedCornerShape(8.dp),
+                            shape = RoundedCornerShape(7.dp),
+                            color = TealSoft,
                             border = BorderStroke(1.dp, TealContainer),
-                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp),
-                            modifier = Modifier.testTag("sheet_batch_update_btn")
+                            modifier = Modifier.height(32.dp).testTag("sheet_batch_update_btn")
                         ) {
-                            Icon(
-                                Icons.Rounded.EditNote,
-                                contentDescription = null,
-                                tint = TealPrimary,
-                                modifier = Modifier.size(16.dp)
-                            )
-                            Spacer(Modifier.width(4.dp))
-                            Text(
-                                "ব্যাচ আপডেট",
-                                fontSize = 11.5.sp,
-                                fontWeight = FontWeight.SemiBold,
-                                color = TealPrimary,
-                                maxLines = 1,
-                                softWrap = false
-                            )
+                            Row(
+                                modifier = Modifier.padding(horizontal = 8.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(3.dp)
+                            ) {
+                                Icon(Icons.Rounded.EditNote, contentDescription = null, tint = TealPrimary, modifier = Modifier.size(15.dp))
+                                Text("ব্যাচ আপডেট", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = TealPrimary, maxLines = 1, softWrap = false)
+                            }
                         }
                     } else if (mode == "traits" && permissions.canEditAttendance) {
-                        FilterChip(
-                            selected = traitBatchSelectMode,
+                        Surface(
                             onClick = {
                                 traitBatchSelectMode = !traitBatchSelectMode
                                 if (!traitBatchSelectMode) selectedTraitStudentIds = emptySet()
                             },
-                            modifier = Modifier.testTag("sheet_trait_batch_btn"),
-                            leadingIcon = {
+                            shape = RoundedCornerShape(7.dp),
+                            color = if (traitBatchSelectMode) TealPrimary else TealSoft,
+                            border = BorderStroke(1.dp, if (traitBatchSelectMode) TealPrimary else TealContainer),
+                            modifier = Modifier.height(32.dp).testTag("sheet_trait_batch_btn")
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 9.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
                                 Icon(
                                     if (traitBatchSelectMode) Icons.Rounded.Close else Icons.Rounded.DoneAll,
                                     contentDescription = null,
-                                    modifier = Modifier.size(15.dp)
+                                    tint = if (traitBatchSelectMode) Color.White else TealPrimary,
+                                    modifier = Modifier.size(14.dp)
                                 )
-                            },
-                            label = {
                                 Text(
                                     if (traitBatchSelectMode) "সিলেক্ট শেষ" else "ব্যাচ সিলেক্ট",
                                     fontSize = 11.sp,
-                                    fontWeight = FontWeight.SemiBold,
+                                    fontWeight = FontWeight.Bold,
+                                    color = if (traitBatchSelectMode) Color.White else TealPrimary,
                                     maxLines = 1,
                                     softWrap = false
                                 )
                             }
-                        )
-                    } else if (mode != "traits") {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        }
+                    } else if (mode == "attendance" && permissions.canEditAttendance) {
+                        Surface(
+                            onClick = {
+                                val next = !attBatchFillMode
+                                attBatchFillMode = next
+                                selectedAttStudentIds = if (next) {
+                                    classStudents.map { it.id }.toSet()
+                                } else {
+                                    emptySet()
+                                }
+                            },
+                            shape = RoundedCornerShape(7.dp),
+                            color = if (attBatchFillMode) TealPrimary else TealSoft,
+                            border = BorderStroke(1.dp, if (attBatchFillMode) TealPrimary else TealContainer),
+                            modifier = Modifier.height(32.dp).testTag("sheet_att_batch_btn")
                         ) {
-                            if (mode == "attendance" && permissions.canEditAttendance) {
-                                FilterChip(
-                                    selected = attBatchFillMode,
-                                    onClick = {
-                                        val next = !attBatchFillMode
-                                        attBatchFillMode = next
-                                        selectedAttStudentIds = if (next) {
-                                            classStudents.map { it.id }.toSet()
-                                        } else {
-                                            emptySet()
-                                        }
-                                    },
-                                    modifier = Modifier.testTag("sheet_att_batch_btn"),
-                                    leadingIcon = {
-                                        Icon(
-                                            if (attBatchFillMode) Icons.Rounded.Close else Icons.Rounded.DoneAll,
-                                            contentDescription = null,
-                                            modifier = Modifier.size(15.dp)
-                                        )
-                                    },
-                                    label = {
-                                        Text(
-                                            if (attBatchFillMode) "ফিল শেষ" else "ব্যাচ ফিল",
-                                            fontSize = 11.sp,
-                                            fontWeight = FontWeight.SemiBold,
-                                            maxLines = 1,
-                                            softWrap = false
-                                        )
-                                    }
+                            Row(
+                                modifier = Modifier.padding(horizontal = 8.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(3.dp)
+                            ) {
+                                Icon(
+                                    if (attBatchFillMode) Icons.Rounded.Close else Icons.Rounded.DoneAll,
+                                    contentDescription = null,
+                                    tint = if (attBatchFillMode) Color.White else TealPrimary,
+                                    modifier = Modifier.size(14.dp)
+                                )
+                                Text(
+                                    if (attBatchFillMode) "ফিল শেষ" else "ব্যাচ ফিল",
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = if (attBatchFillMode) Color.White else TealPrimary,
+                                    maxLines = 1,
+                                    softWrap = false
                                 )
                             }
-                            FilterChip(
-                                selected = navDir == "down",
-                                onClick = { navDir = if (navDir == "down") "right" else "down" },
-                                modifier = Modifier.testTag("sheet_nav_dir_chip"),
-                                label = { Text(if (navDir == "down") "↓ নিচে" else "→ ডানে", fontSize = 11.sp, maxLines = 1, softWrap = false) }
-                            )
+                        }
+                    }
+
+                    if (mode != "traits") {
+                        Surface(
+                            onClick = { navDir = if (navDir == "down") "right" else "down" },
+                            shape = RoundedCornerShape(7.dp),
+                            color = MaterialTheme.colorScheme.surface,
+                            border = BorderStroke(1.dp, SlateOutline),
+                            modifier = Modifier.height(32.dp).testTag("sheet_nav_dir_chip")
+                        ) {
+                            Box(
+                                modifier = Modifier.padding(horizontal = 8.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    if (navDir == "down") "↓ নিচে" else "→ ডানে",
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = SlateText,
+                                    maxLines = 1,
+                                    softWrap = false
+                                )
+                            }
                         }
                     }
                 }
 
-                if (mode == "subject" && activeSub != null && !permissions.canEditSubject(activeSub.key)) {
-                    Surface(
-                        color = AmberBg,
-                        shape = RoundedCornerShape(8.dp),
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Text(
-                            "\"${activeSub.bn}\" বিষয়ে আপনার শুধুমাত্র দেখার অনুমতি রয়েছে — নম্বর পরিবর্তন করা যাবে না।",
-                            fontSize = 11.sp,
-                            color = AmberNotice,
-                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp)
-                        )
-                    }
-                } else if (canPasteCurrentSheet && !isEditMode) {
-                    Surface(
-                        color = SlateBg,
-                        border = BorderStroke(1.dp, SlateOutline),
-                        shape = RoundedCornerShape(8.dp),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clickable { isEditMode = true }
-                    ) {
-                        Row(
-                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.SpaceBetween
+                // Compact single-line status strip (hidden when batch panel is active to save vertical space)
+                if (!traitBatchSelectMode && !attBatchFillMode) {
+                    if (mode == "subject" && activeSub != null && !permissions.canEditSubject(activeSub.key)) {
+                        Surface(
+                            color = AmberBg,
+                            shape = RoundedCornerShape(6.dp),
+                            modifier = Modifier.fillMaxWidth()
                         ) {
                             Text(
-                                "নিরাপদ ভিউ মোড চালু — এডিট করতে ডানের 'এডিট' বাটনে ট্যাপ করুন",
-                                fontSize = 11.sp,
-                                color = SlateMuted,
-                                modifier = Modifier.weight(1f)
-                            )
-                            Text(
-                                "এডিট চালু",
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = TealPrimary
+                                "\"${activeSub.bn}\" বিষয়ে শুধুমাত্র দেখার অনুমতি আছে",
+                                fontSize = 10.5.sp,
+                                color = AmberNotice,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
                             )
                         }
-                    }
-                } else if (isEditMode && mode == "traits" && !traitBatchSelectMode) {
-                    Surface(
-                        color = TealSoft,
-                        border = BorderStroke(1.dp, TealContainer),
-                        shape = RoundedCornerShape(8.dp),
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Text(
-                            "গুণাবলি এন্ট্রি: ঘরে হালকা (০.৫ সে.) চেপে ধরে ক / খ / গ / ফাঁকা মেনু খুলুন অথবা 'ব্যাচ সিলেক্ট' দিয়ে একসাথে মান দিন।",
-                            fontSize = 11.sp,
-                            color = TealPrimary,
-                            fontWeight = FontWeight.Medium,
-                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
-                        )
-                    }
-                } else if (isEditMode && canPasteCurrentSheet) {
-                    Surface(
-                        color = TealSoft,
-                        border = BorderStroke(1.dp, TealContainer),
-                        shape = RoundedCornerShape(8.dp),
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Row(
-                            modifier = Modifier.padding(start = 10.dp, end = 6.dp, top = 4.dp, bottom = 4.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.SpaceBetween
+                    } else if (canPasteCurrentSheet && !isEditMode) {
+                        Surface(
+                            color = SlateBg,
+                            shape = RoundedCornerShape(6.dp),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { isEditMode = true }
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Text(
+                                    "নিরাপদ ভিউ চালু — লিখতে ডানের 'এডিট' চাপুন",
+                                    fontSize = 10.5.sp,
+                                    color = SlateMuted,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    modifier = Modifier.weight(1f)
+                                )
+                                Text(
+                                    "এডিট চালু",
+                                    fontSize = 10.5.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = TealPrimary
+                                )
+                            }
+                        }
+                    } else if (isEditMode && mode == "traits") {
+                        Surface(
+                            color = TealSoft,
+                            shape = RoundedCornerShape(6.dp),
+                            modifier = Modifier.fillMaxWidth()
                         ) {
                             Text(
-                                "এডিট মোড চালু — ঘরে ট্যাপ করে লিখুন (শেষে 'সম্পন্ন' চাপুন)",
-                                fontSize = 11.sp,
+                                "ঘরে ০.৫ সে. চেপে ধরে ক/খ/গ বাছাই করুন অথবা 'ব্যাচ সিলেক্ট' চাপুন",
+                                fontSize = 10.5.sp,
                                 color = TealPrimary,
                                 fontWeight = FontWeight.Medium,
-                                modifier = Modifier.weight(1f)
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
                             )
-                            OutlinedButton(
-                                onClick = { applyClipboardPaste() },
-                                shape = RoundedCornerShape(6.dp),
-                                border = BorderStroke(1.dp, TealContainer),
-                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
-                                modifier = Modifier.testTag("sheet_paste_btn")
+                        }
+                    } else if (isEditMode && canPasteCurrentSheet) {
+                        Surface(
+                            color = TealSoft,
+                            shape = RoundedCornerShape(6.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(start = 8.dp, end = 6.dp, top = 2.dp, bottom = 2.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween
                             ) {
-                                Icon(
-                                    Icons.Rounded.ContentPaste,
-                                    contentDescription = "ক্লিপবোর্ড পেস্ট",
-                                    tint = TealPrimary,
-                                    modifier = Modifier.size(14.dp)
+                                Text(
+                                    "এডিট চালু — ঘরে ট্যাপ করে লিখুন (শেষে 'সম্পন্ন' চাপুন)",
+                                    fontSize = 10.5.sp,
+                                    color = TealPrimary,
+                                    fontWeight = FontWeight.Medium,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    modifier = Modifier.weight(1f)
                                 )
-                                Spacer(Modifier.width(4.dp))
-                                Text("পেস্ট", fontSize = 11.sp, color = TealPrimary, fontWeight = FontWeight.Bold)
+                                Row(
+                                    modifier = Modifier
+                                        .background(MaterialTheme.colorScheme.surface, RoundedCornerShape(5.dp))
+                                        .clickable { applyClipboardPaste() }
+                                        .padding(horizontal = 6.dp, vertical = 2.dp)
+                                        .testTag("sheet_paste_btn"),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(3.dp)
+                                ) {
+                                    Icon(
+                                        Icons.Rounded.ContentPaste,
+                                        contentDescription = "ক্লিপবোর্ড পেস্ট",
+                                        tint = TealPrimary,
+                                        modifier = Modifier.size(13.dp)
+                                    )
+                                    Text("পেস্ট", fontSize = 10.5.sp, color = TealPrimary, fontWeight = FontWeight.Bold)
+                                }
                             }
                         }
                     }
@@ -870,14 +968,14 @@ fun BulkSheetScreen(
                 "COND_$term" to "আচরণ"
             )
             Surface(
-                color = TealSoft.copy(alpha = 0.72f),
-                border = BorderStroke(1.dp, TealContainer),
-                shape = RoundedCornerShape(12.dp),
+                color = MaterialTheme.colorScheme.surface,
+                border = BorderStroke(1.5.dp, TealPrimary.copy(alpha = 0.55f)),
+                shape = RoundedCornerShape(10.dp),
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Column(
-                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
-                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
+                    verticalArrangement = Arrangement.spacedBy(5.dp)
                 ) {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
@@ -885,13 +983,13 @@ fun BulkSheetScreen(
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
                         Text(
-                            "নির্বাচিত: ${fmtSheetDigits(selectedTraitStudentIds.size.toString())} / ${fmtSheetDigits(classStudents.size.toString())} জন (নামে ট্যাপ করে বাছাই করুন)",
-                            fontSize = 11.5.sp,
+                            "নির্বাচিত: ${fmtSheetDigits(selectedTraitStudentIds.size.toString())}/${fmtSheetDigits(classStudents.size.toString())} জন (নামে ট্যাপ করুন)",
+                            fontSize = 11.sp,
                             fontWeight = FontWeight.Bold,
                             color = TealPrimary,
                             modifier = Modifier.weight(1f)
                         )
-                        OutlinedButton(
+                        Surface(
                             onClick = {
                                 selectedTraitStudentIds = if (allSelected) {
                                     emptySet()
@@ -899,28 +997,30 @@ fun BulkSheetScreen(
                                     classStudents.map { it.id }.toSet()
                                 }
                             },
-                            shape = RoundedCornerShape(8.dp),
-                            border = BorderStroke(1.dp, TealContainer),
-                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
-                            modifier = Modifier.testTag("sheet_trait_select_all_btn")
+                            shape = RoundedCornerShape(6.dp),
+                            color = if (allSelected) TealPrimary else TealSoft,
+                            border = BorderStroke(1.dp, if (allSelected) TealPrimary else TealContainer),
+                            modifier = Modifier.height(28.dp).testTag("sheet_trait_select_all_btn")
                         ) {
-                            Text(
-                                if (allSelected) "সব বাদ" else "সবাই",
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = TealPrimary
-                            )
+                            Box(modifier = Modifier.padding(horizontal = 8.dp), contentAlignment = Alignment.Center) {
+                                Text(
+                                    if (allSelected) "সব বাদ" else "সবাই",
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = if (allSelected) Color.White else TealPrimary
+                                )
+                            }
                         }
                     }
 
-                    FlowRow(
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(6.dp),
-                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
                         traitColOptions.forEach { (colKey, colLabel) ->
                             val picked = colKey in selectedTraitCols
-                            FilterChip(
-                                selected = picked,
+                            Surface(
                                 onClick = {
                                     selectedTraitCols = if (picked && selectedTraitCols.size > 1) {
                                         selectedTraitCols - colKey
@@ -928,46 +1028,82 @@ fun BulkSheetScreen(
                                         selectedTraitCols + colKey
                                     }
                                 },
-                                label = { Text(colLabel, fontSize = 11.sp) }
-                            )
+                                shape = RoundedCornerShape(7.dp),
+                                color = if (picked) TealPrimary else SlateBg,
+                                border = BorderStroke(1.dp, if (picked) TealPrimary else SlateOutline),
+                                modifier = Modifier.weight(1f).height(30.dp)
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 6.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.Center
+                                ) {
+                                    if (picked) {
+                                        Icon(
+                                            Icons.Rounded.Check,
+                                            contentDescription = null,
+                                            tint = Color.White,
+                                            modifier = Modifier.size(13.dp)
+                                        )
+                                        Spacer(Modifier.width(3.dp))
+                                    }
+                                    Text(
+                                        colLabel,
+                                        fontSize = 11.sp,
+                                        fontWeight = if (picked) FontWeight.Bold else FontWeight.Medium,
+                                        color = if (picked) Color.White else SlateText,
+                                        maxLines = 1,
+                                        softWrap = false
+                                    )
+                                }
+                            }
                         }
                     }
 
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        horizontalArrangement = Arrangement.spacedBy(5.dp)
                     ) {
                         listOf("ক" to "ক", "খ" to "খ", "গ" to "গ", null to "ফাঁকা").forEach { (v, lbl) ->
                             val isSelectedVal = selectedTraitValue == v
-                            val chipBg = when (v) {
-                                "ক" -> TealSoft
-                                "খ" -> AmberBg
-                                "গ" -> RoseDanger.copy(alpha = 0.12f)
-                                else -> SlateBg
-                            }
-                            val chipFg = when (v) {
+                            val accentColor = when (v) {
                                 "ক" -> EmeraldGrade
                                 "খ" -> AmberNotice
                                 "গ" -> RoseDanger
-                                else -> SlateMuted
+                                else -> SlateText
                             }
-                            FilterChip(
-                                selected = isSelectedVal,
+                            Surface(
                                 onClick = { selectedTraitValue = v },
-                                modifier = Modifier.testTag("sheet_trait_val_${lbl}"),
-                                colors = FilterChipDefaults.filterChipColors(
-                                    selectedContainerColor = chipBg,
-                                    selectedLabelColor = chipFg
+                                shape = RoundedCornerShape(7.dp),
+                                color = if (isSelectedVal) accentColor else MaterialTheme.colorScheme.surface,
+                                border = BorderStroke(
+                                    if (isSelectedVal) 1.5.dp else 1.dp,
+                                    if (isSelectedVal) accentColor else accentColor.copy(alpha = 0.45f)
                                 ),
-                                label = {
+                                modifier = Modifier.height(32.dp).testTag("sheet_trait_val_${lbl}")
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 9.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(3.dp)
+                                ) {
+                                    if (isSelectedVal) {
+                                        Icon(
+                                            Icons.Rounded.Check,
+                                            contentDescription = null,
+                                            tint = Color.White,
+                                            modifier = Modifier.size(13.dp)
+                                        )
+                                    }
                                     Text(
                                         lbl,
-                                        fontSize = 12.sp,
-                                        fontWeight = FontWeight.Bold
+                                        fontSize = 11.5.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = if (isSelectedVal) Color.White else accentColor
                                     )
                                 }
-                            )
+                            }
                         }
 
                         Spacer(Modifier.weight(1f))
@@ -986,13 +1122,13 @@ fun BulkSheetScreen(
                                 containerColor = TealPrimary,
                                 contentColor = Color.White
                             ),
-                            shape = RoundedCornerShape(8.dp),
-                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
-                            modifier = Modifier.testTag("sheet_trait_batch_apply_btn")
+                            shape = RoundedCornerShape(7.dp),
+                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                            modifier = Modifier.height(32.dp).testTag("sheet_trait_batch_apply_btn")
                         ) {
                             Text(
                                 "প্রয়োগ করুন",
-                                fontSize = 11.5.sp,
+                                fontSize = 11.sp,
                                 fontWeight = FontWeight.Bold,
                                 maxLines = 1,
                                 softWrap = false
@@ -1016,14 +1152,14 @@ fun BulkSheetScreen(
             val canApplyAtt = selectedAttStudentIds.isNotEmpty() && hasAnyAttVal && !daysInvalid && !presInvalid && !crossInvalid
 
             Surface(
-                color = TealSoft.copy(alpha = 0.72f),
-                border = BorderStroke(1.dp, TealContainer),
-                shape = RoundedCornerShape(12.dp),
+                color = MaterialTheme.colorScheme.surface,
+                border = BorderStroke(1.5.dp, TealPrimary.copy(alpha = 0.55f)),
+                shape = RoundedCornerShape(10.dp),
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Column(
-                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
-                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
+                    verticalArrangement = Arrangement.spacedBy(5.dp)
                 ) {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
@@ -1031,13 +1167,13 @@ fun BulkSheetScreen(
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
                         Text(
-                            "নির্বাচিত: ${fmtSheetDigits(selectedAttStudentIds.size.toString())} / ${fmtSheetDigits(classStudents.size.toString())} জন (নামে ট্যাপ করে বাছাই করুন)",
-                            fontSize = 11.5.sp,
+                            "নির্বাচিত: ${fmtSheetDigits(selectedAttStudentIds.size.toString())}/${fmtSheetDigits(classStudents.size.toString())} জন (নামে ট্যাপ করুন)",
+                            fontSize = 11.sp,
                             fontWeight = FontWeight.Bold,
                             color = TealPrimary,
                             modifier = Modifier.weight(1f)
                         )
-                        OutlinedButton(
+                        Surface(
                             onClick = {
                                 selectedAttStudentIds = if (allAttSelected) {
                                     emptySet()
@@ -1045,23 +1181,25 @@ fun BulkSheetScreen(
                                     classStudents.map { it.id }.toSet()
                                 }
                             },
-                            shape = RoundedCornerShape(8.dp),
-                            border = BorderStroke(1.dp, TealContainer),
-                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
-                            modifier = Modifier.testTag("sheet_att_select_all_btn")
+                            shape = RoundedCornerShape(6.dp),
+                            color = if (allAttSelected) TealPrimary else TealSoft,
+                            border = BorderStroke(1.dp, if (allAttSelected) TealPrimary else TealContainer),
+                            modifier = Modifier.height(28.dp).testTag("sheet_att_select_all_btn")
                         ) {
-                            Text(
-                                if (allAttSelected) "সব বাদ" else "সবাই",
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = TealPrimary
-                            )
+                            Box(modifier = Modifier.padding(horizontal = 8.dp), contentAlignment = Alignment.Center) {
+                                Text(
+                                    if (allAttSelected) "সব বাদ" else "সবাই",
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = if (allAttSelected) Color.White else TealPrimary
+                                )
+                            }
                         }
                     }
 
                     Row(
                         modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         OutlinedTextField(
@@ -1100,11 +1238,11 @@ fun BulkSheetScreen(
                         val hintText = when {
                             daysInvalid || presInvalid -> "সংখ্যা ০ থেকে ${fmtSheetDigits("365")} এর মধ্যে হতে হবে"
                             crossInvalid -> "উপস্থিতি কার্যদিবসের চেয়ে বেশি হতে পারবে না"
-                            else -> "যেকোনো ১টি বা উভয় ঘরে সংখ্যা লিখে প্রয়োগ করুন"
+                            else -> "১টি বা উভয় ঘরে সংখ্যা লিখে প্রয়োগ করুন"
                         }
                         Text(
                             hintText,
-                            fontSize = 11.sp,
+                            fontSize = 10.5.sp,
                             color = if (daysInvalid || presInvalid || crossInvalid) RoseDanger else SlateMuted,
                             modifier = Modifier.weight(1f)
                         )
@@ -1123,13 +1261,13 @@ fun BulkSheetScreen(
                                 containerColor = TealPrimary,
                                 contentColor = Color.White
                             ),
-                            shape = RoundedCornerShape(8.dp),
-                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
-                            modifier = Modifier.testTag("sheet_att_batch_apply_btn")
+                            shape = RoundedCornerShape(7.dp),
+                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                            modifier = Modifier.height(32.dp).testTag("sheet_att_batch_apply_btn")
                         ) {
                             Text(
                                 "প্রয়োগ করুন",
-                                fontSize = 11.5.sp,
+                                fontSize = 11.sp,
                                 fontWeight = FontWeight.Bold,
                                 maxLines = 1,
                                 softWrap = false
