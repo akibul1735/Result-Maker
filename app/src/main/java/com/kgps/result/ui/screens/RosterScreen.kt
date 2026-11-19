@@ -22,6 +22,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.Description
 import androidx.compose.material.icons.rounded.DocumentScanner
+import androidx.compose.material.icons.rounded.EditNote
 import androidx.compose.material.icons.rounded.FolderOpen
 import androidx.compose.material.icons.rounded.GridOn
 import androidx.compose.material.icons.rounded.HourglassTop
@@ -97,6 +98,7 @@ fun RosterScreen(
     onNewStudentInClass: (Int) -> Unit,
     onOpenSheetInClass: (Int) -> Unit,
     onCsvImport: () -> Unit,
+    onBatchEdit: () -> Unit = {},
     onAiScan: () -> Unit,
     onClassPdf: (Int) -> Unit,
     onAllPdf: () -> Unit
@@ -236,6 +238,12 @@ fun RosterScreen(
                                     modifier = Modifier.testTag("roster_csv_import_btn"),
                                     leadingIcon = { Icon(Icons.Rounded.UploadFile, contentDescription = null, modifier = Modifier.size(16.dp)) },
                                     label = { Text("CSV ইমপোর্ট", fontSize = 11.5.sp) }
+                                )
+                                AssistChip(
+                                    onClick = onBatchEdit,
+                                    modifier = Modifier.testTag("roster_batch_update_btn"),
+                                    leadingIcon = { Icon(Icons.Rounded.EditNote, contentDescription = null, modifier = Modifier.size(16.dp)) },
+                                    label = { Text("ব্যাচ আপডেট", fontSize = 11.5.sp) }
                                 )
                             }
                             if (canScanSheet) {

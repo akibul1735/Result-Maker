@@ -97,6 +97,7 @@ import com.kgps.result.cloud.onGoogleSignInClicked
 import com.kgps.result.cloud.signOutFromGoogle
 import com.kgps.result.ui.screens.AiAssistantScreen
 import com.kgps.result.ui.screens.AuthScreen
+import com.kgps.result.ui.screens.BatchStudentEditDialog
 import com.kgps.result.ui.screens.BulkSheetScreen
 import com.kgps.result.ui.screens.ReportStudioScreen
 import com.kgps.result.ui.screens.RosterScreen
@@ -431,6 +432,8 @@ fun ResultMakerWorkspace(
     val editingStudent by vm.editingStudent.collectAsStateWithLifecycle()
     val studioStudentId by vm.studioStudentId.collectAsStateWithLifecycle()
     val csvImportState by vm.csvImportState.collectAsStateWithLifecycle()
+    val batchEditOpen by vm.batchEditOpen.collectAsStateWithLifecycle()
+    val batchEditInitialClass by vm.batchEditInitialClass.collectAsStateWithLifecycle()
     val aiState by vm.aiState.collectAsStateWithLifecycle()
     val draftingTerm by vm.draftingRemarkTerm.collectAsStateWithLifecycle()
     val geminiApiKey by vm.geminiApiKey.collectAsStateWithLifecycle()
@@ -610,6 +613,7 @@ fun ResultMakerWorkspace(
                                     },
                                     onOpenSheetInClass = vm::openSheetForClass,
                                     onCsvImport = { vm.openCsvImport("") },
+                                    onBatchEdit = { vm.openBatchEdit(null) },
                                     onAiScan = vm::openAiScanner,
                                     onClassPdf = { targetCls ->
                                         makePdf(
@@ -641,6 +645,7 @@ fun ResultMakerWorkspace(
                                             "শ্রেণি-$cls-প্রতিবেদন.pdf"
                                         )
                                     },
+                                    onBatchEdit = { targetCls -> vm.openBatchEdit(targetCls) },
                                     onShowMessage = vm::showMessage
                                 )
 
@@ -794,6 +799,17 @@ fun ResultMakerWorkspace(
                 onDismiss = vm::closeCsvImport,
                 onImported = vm::applyCsvImport,
                 onError = vm::showMessage
+            )
+        }
+
+        if (batchEditOpen) {
+            BatchStudentEditDialog(
+                students = students,
+                settings = settings,
+                permissions = permissions,
+                initialClassFilter = batchEditInitialClass,
+                onDismiss = vm::closeBatchEdit,
+                onApply = vm::batchUpdateStudents
             )
         }
     }

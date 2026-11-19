@@ -39,6 +39,7 @@ import com.kgps.result.cloud.StudentSyncMeta
 import com.kgps.result.cloud.TeacherPermissions
 import com.kgps.result.cloud.UserCloudProfile
 import com.kgps.result.cloud.friendlyFirestoreErrorMessage
+import com.kgps.result.ui.screens.BatchStudentUpdatePatch
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -302,6 +303,12 @@ class ResultMakerViewModel(
 
     private val _csvImportState = MutableStateFlow(CsvImportModalState())
     val csvImportState: StateFlow<CsvImportModalState> = _csvImportState.asStateFlow()
+
+    private val _batchEditOpen = MutableStateFlow(false)
+    val batchEditOpen: StateFlow<Boolean> = _batchEditOpen.asStateFlow()
+
+    private val _batchEditInitialClass = MutableStateFlow<Int?>(null)
+    val batchEditInitialClass: StateFlow<Int?> = _batchEditInitialClass.asStateFlow()
 
     private val _snackbarMessage = MutableStateFlow<String?>(null)
     val snackbarMessage: StateFlow<String?> = _snackbarMessage.asStateFlow()
@@ -748,6 +755,73 @@ class ResultMakerViewModel(
 
     fun closeCsvImport() {
         _csvImportState.value = CsvImportModalState(isOpen = false, initialText = "")
+    }
+
+    fun openBatchEdit(initialCls: Int? = null) {
+        if (!activePermissions.value.canManageStudents) {
+            showMessage("শিক্ষার্থীদের তথ্য ব্যাচ পরিবর্তনের অনুমতি আপনার নেই")
+            return
+        }
+        _batchEditInitialClass.value = initialCls
+        _batchEditOpen.value = true
+    }
+
+    fun closeBatchEdit() {
+        _batchEditOpen.value = false
+    }
+
+    fun batchUpdateStudents(studentIds: Set<String>, patch: BatchStudentUpdatePatch) {
+        val school = activeSchool.value ?: return
+        val perm = school.permissionsFor(currentUserId)
+        if (!perm.canManageStudents) {
+            showMessage("শিক্ষার্থীদের তথ্য পরিবর্তনের অনুমতি আপনার নেই")
+            return
+        }
+        if (studentIds.isEmpty() || !patch.hasAnyField) {
+            showMessage("অন্তত ১ জন শিক্ষার্থী ও ১টি পরিবর্তনের তথ্য নির্বাচন করুন")
+            return
+        }
+        val prevList = students.value
+        var touchedCount = 0
+        val nextList = prevList.map { st ->
+            if (st.id !in studentIds || !perm.canAccessClass(st.cls)) {
+                st
+            } else {
+                touchedCount++
+                val nextX = if (patch.customFieldUpdates.isEmpty()) {
+                    st.x
+                } else {
+                    st.x.toMutableMap().apply {
+                        patch.customFieldUpdates.forEach { (cfKey, cfVal) ->
+                            val clean = cfVal.trim()
+                            if (clean.isEmpty()) remove(cfKey) else put(cfKey, clean)
+                        }
+                    }
+                }
+                st.copy(
+                    village = if (patch.updateVillage) patch.village.trim() else st.village,
+                    union = if (patch.updateUnion) patch.union.trim() else st.union,
+                    upazila = if (patch.updateUpazila) patch.upazila.trim().ifBlank { DEFAULT_UPAZILA } else st.upazila,
+                    district = if (patch.updateDistrict) patch.district.trim().ifBlank { DEFAULT_DISTRICT } else st.district,
+                    religion = if (patch.updateReligion) patch.religion.trim().ifBlank { st.religion } else st.religion,
+                    x = nextX
+                )
+            }
+        }
+        if (touchedCount == 0) {
+            showMessage("অনুমোদিত কোনো শিক্ষার্থী নির্বাচিত হয়নি")
+            return
+        }
+        closeBatchEdit()
+        viewModelScope.launch {
+            cloudRepo.syncBatchStudents(school.id, prevList, nextList, deleteRemoved = false)
+                .onSuccess {
+                    showMessage("${bn(touchedCount.toString())} জন শিক্ষার্থীর তথ্য ব্যাচ আপডেট সম্পন্ন হয়েছে")
+                }
+                .onFailure { e ->
+                    showMessage(friendlyFirestoreErrorMessage(e))
+                }
+        }
     }
 
     fun showMessage(msg: String) {

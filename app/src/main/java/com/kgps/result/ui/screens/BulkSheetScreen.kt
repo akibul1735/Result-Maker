@@ -34,6 +34,7 @@ import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.ContentPaste
 import androidx.compose.material.icons.rounded.Description
 import androidx.compose.material.icons.rounded.Edit
+import androidx.compose.material.icons.rounded.EditNote
 import androidx.compose.material.icons.rounded.Lock
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -146,6 +147,7 @@ fun BulkSheetScreen(
     onPatchStudentField: (studentId: String, fieldPath: String, value: Any?) -> Unit,
     onOpenStudent: (Student) -> Unit,
     onClassPdf: () -> Unit,
+    onBatchEdit: (Int) -> Unit = {},
     onShowMessage: (String) -> Unit
 ) {
     val clipboard = LocalClipboardManager.current
@@ -592,7 +594,31 @@ fun BulkSheetScreen(
                         }
                     }
 
-                    if (mode != "traits") {
+                    if (mode == "info" && permissions.canManageStudents) {
+                        OutlinedButton(
+                            onClick = { onBatchEdit(activeCls) },
+                            shape = RoundedCornerShape(8.dp),
+                            border = BorderStroke(1.dp, TealContainer),
+                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp),
+                            modifier = Modifier.testTag("sheet_batch_update_btn")
+                        ) {
+                            Icon(
+                                Icons.Rounded.EditNote,
+                                contentDescription = null,
+                                tint = TealPrimary,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Spacer(Modifier.width(4.dp))
+                            Text(
+                                "ব্যাচ আপডেট",
+                                fontSize = 11.5.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = TealPrimary,
+                                maxLines = 1,
+                                softWrap = false
+                            )
+                        }
+                    } else if (mode != "traits") {
                         FilterChip(
                             selected = navDir == "down",
                             onClick = { navDir = if (navDir == "down") "right" else "down" },
