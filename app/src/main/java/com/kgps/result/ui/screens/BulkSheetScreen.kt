@@ -10,6 +10,8 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -31,8 +33,11 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.ArrowDropDown
 import androidx.compose.material.icons.rounded.Check
+import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.ContentPaste
+import androidx.compose.material.icons.rounded.DeleteOutline
 import androidx.compose.material.icons.rounded.Description
+import androidx.compose.material.icons.rounded.DoneAll
 import androidx.compose.material.icons.rounded.Edit
 import androidx.compose.material.icons.rounded.EditNote
 import androidx.compose.material.icons.rounded.Lock
@@ -40,9 +45,12 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.Checkbox
+import androidx.compose.material3.CheckboxDefaults
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -136,6 +144,7 @@ private val SHEET_MODES = listOf(
     "info" to "তথ্য ও কাস্টম"
 )
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun BulkSheetScreen(
     students: List<Student>,
@@ -148,6 +157,7 @@ fun BulkSheetScreen(
     onOpenStudent: (Student) -> Unit,
     onClassPdf: () -> Unit,
     onBatchEdit: (Int) -> Unit = {},
+    onBatchPatchTraits: (studentIds: Set<String>, xKeys: Set<String>, value: String?) -> Unit = { _, _, _ -> },
     onShowMessage: (String) -> Unit
 ) {
     val clipboard = LocalClipboardManager.current
@@ -172,6 +182,26 @@ fun BulkSheetScreen(
     var mode by remember { mutableStateOf(availableModes.firstOrNull()?.first ?: "subject") }
     var navDir by remember { mutableStateOf("down") }
     var isEditMode by remember { mutableStateOf(false) }
+    var useBnDigits by remember { mutableStateOf(true) }
+    var traitBatchSelectMode by remember { mutableStateOf(false) }
+    var selectedTraitStudentIds by remember { mutableStateOf<Set<String>>(emptySet()) }
+    var selectedTraitCols by remember(term) {
+        mutableStateOf(setOf("ACT_$term", "DISC_$term", "COND_$term"))
+    }
+    var selectedTraitValue by remember { mutableStateOf<String?>("ক") }
+    var activeTraitMenuCellKey by remember { mutableStateOf<String?>(null) }
+
+    LaunchedEffect(activeCls, mode) {
+        traitBatchSelectMode = false
+        selectedTraitStudentIds = emptySet()
+        activeTraitMenuCellKey = null
+    }
+    LaunchedEffect(isEditMode) {
+        if (!isEditMode) activeTraitMenuCellKey = null
+    }
+
+    fun fmtSheetNum(v: Double): String = if (useBnDigits) fmt(v) else fmtEn(v)
+    fun fmtSheetDigits(raw: String): String = if (useBnDigits) bn(fromBn(raw)) else fromBn(raw)
 
     LaunchedEffect(availableModes) {
         if (availableModes.isNotEmpty() && availableModes.none { it.first == mode }) {
@@ -210,7 +240,7 @@ fun BulkSheetScreen(
         students.filter { it.cls == activeCls }.sortedBy { it.roll }
     }
 
-    val cols: List<SheetColDef> = remember(mode, activeSub, term, visibleSubs, settings.customFields) {
+    val cols: List<SheetColDef> = remember(mode, activeSub, term, visibleSubs, settings.customFields, useBnDigits) {
         when (mode) {
             "subject" -> if (activeSub == null) emptyList() else buildList {
                 activeSub.comps.forEach { c ->
@@ -225,7 +255,7 @@ fun BulkSheetScreen(
                         SheetColDef(
                             key = "${activeSub.key}_${c.key}",
                             label = short,
-                            subLabel = "সর্বোচ্চ ${bn(c.max.toString())}",
+                            subLabel = "সর্বোচ্চ ${fmtSheetDigits(c.max.toString())}",
                             max = c.max,
                             width = 76.dp,
                             isMark = true,
@@ -239,7 +269,7 @@ fun BulkSheetScreen(
                         SheetColDef(
                             key = "${activeSub.key}_WR",
                             label = "সামষ্টিক",
-                            subLabel = "সর্বোচ্চ ${bn(activeSub.written.toString())}",
+                            subLabel = "সর্বোচ্চ ${fmtSheetDigits(activeSub.written.toString())}",
                             max = activeSub.written,
                             width = 76.dp,
                             isMark = true,
@@ -261,7 +291,7 @@ fun BulkSheetScreen(
                 SheetColDef(
                     key = "all_${sub.key}",
                     label = shortName,
-                    subLabel = "${if (isArt) "মোট" else "সামষ্টিক"} (${bn((if (sub.written > 0) sub.written else sub.max).toString())})",
+                    subLabel = "${if (isArt) "মোট" else "সামষ্টিক"} (${fmtSheetDigits((if (sub.written > 0) sub.written else sub.max).toString())})",
                     max = if (sub.written > 0) sub.written else sub.max,
                     width = 86.dp,
                     isMark = true,
@@ -270,13 +300,13 @@ fun BulkSheetScreen(
                 )
             }
             "attendance" -> listOf(
-                SheetColDef("DAYS_$term", "কার্যদিবস", "সর্বোচ্চ ৩৬৫", max = 365, width = 96.dp, xKey = "DAYS_$term"),
-                SheetColDef("PRES_$term", "উপস্থিতি", "সর্বোচ্চ ৩৬৫", max = 365, width = 96.dp, xKey = "PRES_$term")
+                SheetColDef("DAYS_$term", "কার্যদিবস", "সর্বোচ্চ ${fmtSheetDigits("365")}", max = 365, width = 96.dp, xKey = "DAYS_$term"),
+                SheetColDef("PRES_$term", "উপস্থিতি", "সর্বোচ্চ ${fmtSheetDigits("365")}", max = 365, width = 96.dp, xKey = "PRES_$term")
             )
             "traits" -> listOf(
-                SheetColDef("ACT_$term", "সক্রিয়তা", "চেপে ধরুন (২–৩সে.)", width = 92.dp, xKey = "ACT_$term", isNumeric = false, isTraitCycle = true),
-                SheetColDef("DISC_$term", "শৃঙ্খলা", "চেপে ধরুন (২–৩সে.)", width = 92.dp, xKey = "DISC_$term", isNumeric = false, isTraitCycle = true),
-                SheetColDef("COND_$term", "আচরণ", "চেপে ধরুন (২–৩সে.)", width = 92.dp, xKey = "COND_$term", isNumeric = false, isTraitCycle = true)
+                SheetColDef("ACT_$term", "সক্রিয়তা", "হালকা চেপে ধরুন", width = 94.dp, xKey = "ACT_$term", isNumeric = false, isTraitCycle = true),
+                SheetColDef("DISC_$term", "শৃঙ্খলা", "হালকা চেপে ধরুন", width = 94.dp, xKey = "DISC_$term", isNumeric = false, isTraitCycle = true),
+                SheetColDef("COND_$term", "আচরণ", "হালকা চেপে ধরুন", width = 94.dp, xKey = "COND_$term", isNumeric = false, isTraitCycle = true)
             )
             else -> buildList {
                 add(SheetColDef("info_guardian", "অভিভাবকের নাম", "তথ্য", width = 132.dp, infoFieldKey = "guardian", isNumeric = false))
@@ -582,7 +612,7 @@ fun BulkSheetScreen(
                                     DropdownMenuItem(
                                         text = {
                                             Text(
-                                                "${s.bn} (${bn(s.max.toString())})" + if (!editableSub) " · শুধু দেখা" else "",
+                                                "${s.bn} (${fmtSheetDigits(s.max.toString())})" + if (!editableSub) " · শুধু দেখা" else "",
                                                 fontWeight = if (subKey == s.key) FontWeight.Bold else FontWeight.Normal,
                                                 color = if (subKey == s.key) TealPrimary else if (editableSub) SlateText else SlateMuted
                                             )
@@ -593,6 +623,33 @@ fun BulkSheetScreen(
                             }
                         }
                     }
+                }
+
+                // Row 3: Consistent Digit Mode (বাংলা ০-৯ vs ইংরেজি 0-9) + Nav Direction / Batch Update
+                Row(
+                    Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        FilterChip(
+                            selected = useBnDigits,
+                            onClick = { useBnDigits = true },
+                            modifier = Modifier.testTag("sheet_digit_bn_chip"),
+                            label = { Text("সংখ্যা: ০-৯", fontSize = 11.sp, maxLines = 1, softWrap = false) }
+                        )
+                        FilterChip(
+                            selected = !useBnDigits,
+                            onClick = { useBnDigits = false },
+                            modifier = Modifier.testTag("sheet_digit_en_chip"),
+                            label = { Text("0-9", fontSize = 11.sp, maxLines = 1, softWrap = false) }
+                        )
+                    }
+
+                    Spacer(Modifier.weight(1f))
 
                     if (mode == "info" && permissions.canManageStudents) {
                         OutlinedButton(
@@ -618,12 +675,37 @@ fun BulkSheetScreen(
                                 softWrap = false
                             )
                         }
+                    } else if (mode == "traits" && permissions.canEditAttendance) {
+                        FilterChip(
+                            selected = traitBatchSelectMode,
+                            onClick = {
+                                traitBatchSelectMode = !traitBatchSelectMode
+                                if (!traitBatchSelectMode) selectedTraitStudentIds = emptySet()
+                            },
+                            modifier = Modifier.testTag("sheet_trait_batch_btn"),
+                            leadingIcon = {
+                                Icon(
+                                    if (traitBatchSelectMode) Icons.Rounded.Close else Icons.Rounded.DoneAll,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(15.dp)
+                                )
+                            },
+                            label = {
+                                Text(
+                                    if (traitBatchSelectMode) "সিলেক্ট শেষ" else "ব্যাচ সিলেক্ট",
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    maxLines = 1,
+                                    softWrap = false
+                                )
+                            }
+                        )
                     } else if (mode != "traits") {
                         FilterChip(
                             selected = navDir == "down",
                             onClick = { navDir = if (navDir == "down") "right" else "down" },
                             modifier = Modifier.testTag("sheet_nav_dir_chip"),
-                            label = { Text(if (navDir == "down") "↓ নিচে" else "→ ডানে", fontSize = 11.5.sp) }
+                            label = { Text(if (navDir == "down") "↓ নিচে" else "→ ডানে", fontSize = 11.sp, maxLines = 1, softWrap = false) }
                         )
                     }
                 }
@@ -669,7 +751,7 @@ fun BulkSheetScreen(
                             )
                         }
                     }
-                } else if (isEditMode && mode == "traits") {
+                } else if (isEditMode && mode == "traits" && !traitBatchSelectMode) {
                     Surface(
                         color = TealSoft,
                         border = BorderStroke(1.dp, TealContainer),
@@ -677,7 +759,7 @@ fun BulkSheetScreen(
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         Text(
-                            "গুণাবলি এন্ট্রি: সরাসরি ট্যাপে মান বদলাবে না — ক / খ / গ পরিবর্তন করতে ঘরটি ২–৩ সেকেন্ড চেপে ধরে রাখুন।",
+                            "গুণাবলি এন্ট্রি: ঘরে হালকা (০.৫ সে.) চেপে ধরে ক / খ / গ / ফাঁকা মেনু খুলুন অথবা 'ব্যাচ সিলেক্ট' দিয়ে একসাথে মান দিন।",
                             fontSize = 11.sp,
                             color = TealPrimary,
                             fontWeight = FontWeight.Medium,
@@ -719,6 +801,147 @@ fun BulkSheetScreen(
                                 Spacer(Modifier.width(4.dp))
                                 Text("পেস্ট", fontSize = 11.sp, color = TealPrimary, fontWeight = FontWeight.Bold)
                             }
+                        }
+                    }
+                }
+            }
+        }
+
+        if (mode == "traits" && traitBatchSelectMode && permissions.canEditAttendance && classStudents.isNotEmpty()) {
+            val allSelected = selectedTraitStudentIds.size == classStudents.size && classStudents.isNotEmpty()
+            val traitColOptions = listOf(
+                "ACT_$term" to "সক্রিয়তা",
+                "DISC_$term" to "শৃঙ্খলা",
+                "COND_$term" to "আচরণ"
+            )
+            Surface(
+                color = TealSoft.copy(alpha = 0.72f),
+                border = BorderStroke(1.dp, TealContainer),
+                shape = RoundedCornerShape(12.dp),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(
+                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text(
+                            "নির্বাচিত: ${fmtSheetDigits(selectedTraitStudentIds.size.toString())} / ${fmtSheetDigits(classStudents.size.toString())} জন (নামে ট্যাপ করে বাছাই করুন)",
+                            fontSize = 11.5.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = TealPrimary,
+                            modifier = Modifier.weight(1f)
+                        )
+                        OutlinedButton(
+                            onClick = {
+                                selectedTraitStudentIds = if (allSelected) {
+                                    emptySet()
+                                } else {
+                                    classStudents.map { it.id }.toSet()
+                                }
+                            },
+                            shape = RoundedCornerShape(8.dp),
+                            border = BorderStroke(1.dp, TealContainer),
+                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
+                            modifier = Modifier.testTag("sheet_trait_select_all_btn")
+                        ) {
+                            Text(
+                                if (allSelected) "সব বাদ" else "সবাই",
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = TealPrimary
+                            )
+                        }
+                    }
+
+                    FlowRow(
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        traitColOptions.forEach { (colKey, colLabel) ->
+                            val picked = colKey in selectedTraitCols
+                            FilterChip(
+                                selected = picked,
+                                onClick = {
+                                    selectedTraitCols = if (picked && selectedTraitCols.size > 1) {
+                                        selectedTraitCols - colKey
+                                    } else {
+                                        selectedTraitCols + colKey
+                                    }
+                                },
+                                label = { Text(colLabel, fontSize = 11.sp) }
+                            )
+                        }
+                    }
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        listOf("ক" to "ক", "খ" to "খ", "গ" to "গ", null to "ফাঁকা").forEach { (v, lbl) ->
+                            val isSelectedVal = selectedTraitValue == v
+                            val chipBg = when (v) {
+                                "ক" -> TealSoft
+                                "খ" -> AmberBg
+                                "গ" -> RoseDanger.copy(alpha = 0.12f)
+                                else -> SlateBg
+                            }
+                            val chipFg = when (v) {
+                                "ক" -> EmeraldGrade
+                                "খ" -> AmberNotice
+                                "গ" -> RoseDanger
+                                else -> SlateMuted
+                            }
+                            FilterChip(
+                                selected = isSelectedVal,
+                                onClick = { selectedTraitValue = v },
+                                modifier = Modifier.testTag("sheet_trait_val_${lbl}"),
+                                colors = FilterChipDefaults.filterChipColors(
+                                    selectedContainerColor = chipBg,
+                                    selectedLabelColor = chipFg
+                                ),
+                                label = {
+                                    Text(
+                                        lbl,
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
+                            )
+                        }
+
+                        Spacer(Modifier.weight(1f))
+
+                        Button(
+                            onClick = {
+                                onBatchPatchTraits(
+                                    selectedTraitStudentIds,
+                                    selectedTraitCols,
+                                    selectedTraitValue
+                                )
+                                selectedTraitStudentIds = emptySet()
+                            },
+                            enabled = selectedTraitStudentIds.isNotEmpty() && selectedTraitCols.isNotEmpty(),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = TealPrimary,
+                                contentColor = Color.White
+                            ),
+                            shape = RoundedCornerShape(8.dp),
+                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                            modifier = Modifier.testTag("sheet_trait_batch_apply_btn")
+                        ) {
+                            Text(
+                                "প্রয়োগ করুন",
+                                fontSize = 11.5.sp,
+                                fontWeight = FontWeight.Bold,
+                                maxLines = 1,
+                                softWrap = false
+                            )
                         }
                     }
                 }
@@ -805,19 +1028,39 @@ fun BulkSheetScreen(
                     LazyColumn(Modifier.fillMaxSize()) {
                         itemsIndexed(classStudents, key = { _, s -> s.id }) { rIdx, s ->
                             val rowHeight = 48.dp
+                            val isTraitRowSelected = mode == "traits" && traitBatchSelectMode && (s.id in selectedTraitStudentIds)
                             Column {
                                 Row(Modifier.fillMaxWidth().height(rowHeight), verticalAlignment = Alignment.CenterVertically) {
                                     Row(
                                         Modifier
                                             .width(136.dp)
                                             .fillMaxHeight()
-                                            .clickable { onOpenStudent(s) }
+                                            .background(if (isTraitRowSelected) TealSoft else Color.Transparent)
+                                            .clickable {
+                                                if (mode == "traits" && traitBatchSelectMode && permissions.canEditAttendance) {
+                                                    selectedTraitStudentIds = if (isTraitRowSelected) {
+                                                        selectedTraitStudentIds - s.id
+                                                    } else {
+                                                        selectedTraitStudentIds + s.id
+                                                    }
+                                                } else {
+                                                    onOpenStudent(s)
+                                                }
+                                            }
                                             .padding(horizontal = 6.dp),
                                         verticalAlignment = Alignment.CenterVertically,
                                         horizontalArrangement = Arrangement.spacedBy(4.dp)
                                     ) {
+                                        if (mode == "traits" && traitBatchSelectMode && permissions.canEditAttendance) {
+                                            Checkbox(
+                                                checked = isTraitRowSelected,
+                                                onCheckedChange = null,
+                                                colors = CheckboxDefaults.colors(checkedColor = TealPrimary),
+                                                modifier = Modifier.size(18.dp)
+                                            )
+                                        }
                                         Text(
-                                            bn(s.roll.toString().padStart(2, '0')),
+                                            fmtSheetDigits(s.roll.toString().padStart(2, '0')),
                                             fontWeight = FontWeight.Bold,
                                             fontSize = 12.sp,
                                             color = TealPrimary
@@ -839,16 +1082,11 @@ fun BulkSheetScreen(
 
                                             if (col.isTraitCycle && col.xKey != null) {
                                                 val currentVal = s.x[col.xKey] ?: ""
-                                                val nextVal = when (currentVal) {
-                                                    "" -> "ক"
-                                                    "ক" -> "খ"
-                                                    "খ" -> "গ"
-                                                    else -> ""
-                                                }
-                                                val badgeBg = when (currentVal) {
-                                                    "ক" -> TealSoft
-                                                    "খ" -> AmberBg
-                                                    "গ" -> RoseDanger.copy(alpha = 0.1f)
+                                                val badgeBg = when {
+                                                    isTraitRowSelected -> TealSoft.copy(alpha = 0.55f)
+                                                    currentVal == "ক" -> TealSoft
+                                                    currentVal == "খ" -> AmberBg
+                                                    currentVal == "গ" -> RoseDanger.copy(alpha = 0.1f)
                                                     else -> MaterialTheme.colorScheme.surface
                                                 }
                                                 val badgeFg = when (currentVal) {
@@ -858,17 +1096,22 @@ fun BulkSheetScreen(
                                                     else -> SlateMuted
                                                 }
 
+                                                val cellMenuKey = "${s.id}__${col.xKey}"
                                                 var holdProgress by remember(s.id, col.xKey) { mutableFloatStateOf(0f) }
                                                 var isHolding by remember(s.id, col.xKey) { mutableStateOf(false) }
                                                 val latestCanEdit by rememberUpdatedState(colEditable)
                                                 val latestHasPerm by rememberUpdatedState(hasPerm)
-                                                val latestOnCycle by rememberUpdatedState {
+                                                val latestBatchSelect by rememberUpdatedState(traitBatchSelectMode)
+                                                val latestToggleBatchRow by rememberUpdatedState {
+                                                    selectedTraitStudentIds = if (s.id in selectedTraitStudentIds) {
+                                                        selectedTraitStudentIds - s.id
+                                                    } else {
+                                                        selectedTraitStudentIds + s.id
+                                                    }
+                                                }
+                                                val latestOpenMenu by rememberUpdatedState {
                                                     haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                                                    onPatchStudentField(
-                                                        s.id,
-                                                        "x.${col.xKey}",
-                                                        nextVal.ifEmpty { null }
-                                                    )
+                                                    activeTraitMenuCellKey = cellMenuKey
                                                 }
 
                                                 Box(
@@ -881,12 +1124,19 @@ fun BulkSheetScreen(
                                                                 val holdScope = this
                                                                 awaitEachGesture {
                                                                     val down = awaitFirstDown(requireUnconsumed = false)
+                                                                    if (latestBatchSelect && latestHasPerm) {
+                                                                        val up = waitForUpOrCancellation()
+                                                                        if (up != null) {
+                                                                            latestToggleBatchRow()
+                                                                        }
+                                                                        return@awaitEachGesture
+                                                                    }
                                                                     if (!latestCanEdit) {
                                                                         val up = waitForUpOrCancellation()
                                                                         if (up != null) {
                                                                             onShowMessage(
                                                                                 if (!latestHasPerm) "গুণাবলি সম্পাদনার অনুমতি নেই"
-                                                                                else "পরিবর্তন করতে উপরের 'এডিট' বাটনে ট্যাপ করুন"
+                                                                                else "পরিবর্তন করতে উপরের 'এডিট' বা 'ব্যাচ সিলেক্ট' চাপুন"
                                                                             )
                                                                         }
                                                                         return@awaitEachGesture
@@ -899,8 +1149,8 @@ fun BulkSheetScreen(
                                                                     isHolding = true
                                                                     holdProgress = 0f
 
+                                                                    val holdDurationMs = 450L
                                                                     val timerJob = holdScope.launch {
-                                                                        val holdDurationMs = 2200L
                                                                         while (isActive) {
                                                                             val elapsed = System.currentTimeMillis() - startTime
                                                                             holdProgress = (elapsed.toFloat() / holdDurationMs).coerceIn(0f, 1f)
@@ -908,7 +1158,7 @@ fun BulkSheetScreen(
                                                                                 completed = true
                                                                                 isHolding = false
                                                                                 holdProgress = 0f
-                                                                                latestOnCycle()
+                                                                                latestOpenMenu()
                                                                                 break
                                                                             }
                                                                             delay(16L)
@@ -932,8 +1182,8 @@ fun BulkSheetScreen(
                                                                         val heldDuration = System.currentTimeMillis() - startTime
                                                                         isHolding = false
                                                                         holdProgress = 0f
-                                                                        if (!completed && !movedAway && heldDuration < 2200L) {
-                                                                            onShowMessage("পরিবর্তন করতে ২–৩ সেকেন্ড চেপে ধরে রাখুন")
+                                                                        if (!completed && !movedAway && heldDuration < holdDurationMs) {
+                                                                            onShowMessage("বিকল্প খুলতে ০.৫ সেকেন্ড চেপে ধরুন")
                                                                         }
                                                                     }
                                                                 }
@@ -959,8 +1209,8 @@ fun BulkSheetScreen(
                                                     }
                                                     if (isHolding) {
                                                         Text(
-                                                            "→ ${nextVal.ifEmpty { "ফাঁকা" }}",
-                                                            fontSize = 11.5.sp,
+                                                            "ধরুন...",
+                                                            fontSize = 11.sp,
                                                             fontWeight = FontWeight.Bold,
                                                             color = TealPrimary
                                                         )
@@ -972,17 +1222,78 @@ fun BulkSheetScreen(
                                                             color = badgeFg
                                                         )
                                                     }
+
+                                                    DropdownMenu(
+                                                        expanded = activeTraitMenuCellKey == cellMenuKey,
+                                                        onDismissRequest = { activeTraitMenuCellKey = null }
+                                                    ) {
+                                                        listOf(
+                                                            Triple("ক", "ক · সর্বোত্তম", EmeraldGrade),
+                                                            Triple("খ", "খ · উত্তম", AmberNotice),
+                                                            Triple("গ", "গ · অগ্রগতি প্রয়োজন", RoseDanger)
+                                                        ).forEach { (optVal, optLabel, optColor) ->
+                                                            DropdownMenuItem(
+                                                                text = {
+                                                                    Text(
+                                                                        optLabel,
+                                                                        fontSize = 13.sp,
+                                                                        fontWeight = if (currentVal == optVal) FontWeight.Bold else FontWeight.Medium,
+                                                                        color = optColor
+                                                                    )
+                                                                },
+                                                                trailingIcon = if (currentVal == optVal) {
+                                                                    {
+                                                                        Icon(
+                                                                            Icons.Rounded.Check,
+                                                                            contentDescription = null,
+                                                                            tint = optColor,
+                                                                            modifier = Modifier.size(16.dp)
+                                                                        )
+                                                                    }
+                                                                } else null,
+                                                                onClick = {
+                                                                    activeTraitMenuCellKey = null
+                                                                    onPatchStudentField(s.id, "x.${col.xKey}", optVal)
+                                                                }
+                                                            )
+                                                        }
+                                                        HorizontalDivider()
+                                                        DropdownMenuItem(
+                                                            text = {
+                                                                Text(
+                                                                    "ফাঁকা (মুছুন)",
+                                                                    fontSize = 12.5.sp,
+                                                                    color = SlateMuted
+                                                                )
+                                                            },
+                                                            leadingIcon = {
+                                                                Icon(
+                                                                    Icons.Rounded.DeleteOutline,
+                                                                    contentDescription = null,
+                                                                    tint = SlateMuted,
+                                                                    modifier = Modifier.size(16.dp)
+                                                                )
+                                                            },
+                                                            onClick = {
+                                                                activeTraitMenuCellKey = null
+                                                                onPatchStudentField(s.id, "x.${col.xKey}", null)
+                                                            }
+                                                        )
+                                                    }
                                                 }
                                                 Box(Modifier.width(1.dp).fillMaxHeight().background(SlateOutline))
                                                 return@forEachIndexed
                                             }
 
-                                            val initialVal = remember(s.id, s.m, s.x, s.guardian, s.mobile, s.village, s.union, s.upazila, s.district, s.religion, col.key, term) {
+                                            val initialVal = remember(s.id, s.m, s.x, s.guardian, s.mobile, s.village, s.union, s.upazila, s.district, s.religion, col.key, term, useBnDigits) {
                                                 when {
                                                     col.isMark && col.markSubKey != null && col.markCompKey != null -> {
-                                                        s.m[mk(col.markSubKey, term, col.markCompKey)]?.let { fmtEn(it) } ?: ""
+                                                        s.m[mk(col.markSubKey, term, col.markCompKey)]?.let { fmtSheetNum(it) } ?: ""
                                                     }
-                                                    col.xKey != null -> s.x[col.xKey] ?: ""
+                                                    col.xKey != null -> {
+                                                        val rawX = s.x[col.xKey].orEmpty()
+                                                        if (col.isNumeric && rawX.isNotBlank()) fmtSheetDigits(rawX) else rawX
+                                                    }
                                                     col.infoFieldKey != null -> when (col.infoFieldKey) {
                                                         "guardian" -> s.guardian
                                                         "mobile" -> s.mobile
@@ -1080,7 +1391,15 @@ fun BulkSheetScreen(
                                             ) {
                                                 BasicTextField(
                                                     value = draft,
-                                                    onValueChange = { v -> if (colEditable) draft = v },
+                                                    onValueChange = { v ->
+                                                        if (colEditable) {
+                                                            draft = if (col.isNumeric && col.infoFieldKey != "mobile") {
+                                                                if (useBnDigits) bn(v) else fromBn(v)
+                                                            } else {
+                                                                v
+                                                            }
+                                                        }
+                                                    },
                                                     enabled = colEditable,
                                                     readOnly = !colEditable,
                                                     singleLine = true,
@@ -1125,18 +1444,18 @@ fun BulkSheetScreen(
                                             val cScore = s.cont(subForStudent, term)
                                             val tScore = s.total(subForStudent, term)
                                             val grade = gradeOf((tScore / subForStudent.max.toDouble()) * 100.0)
-                                            SheetComputedCell(fmt(cScore), SlateBg, SlateMuted)
-                                            SheetComputedCell(fmt(tScore), TealContainer.copy(alpha = 0.25f), TealPrimary, bold = true)
+                                            SheetComputedCell(fmtSheetNum(cScore), SlateBg, SlateMuted)
+                                            SheetComputedCell(fmtSheetNum(tScore), TealContainer.copy(alpha = 0.25f), TealPrimary, bold = true)
                                             SheetComputedCell(grade, SlateBg, TealPrimary, bold = true)
                                         } else if (mode == "all" && (permissions.allSubjects || permissions.canViewOtherSubjects)) {
                                             val maxSum = allSubsForClass.sumOf { it.max }.coerceAtLeast(1)
                                             val avgSum = allSubsForClass.sumOf { s.avg(it) }
                                             val pct = avgSum / maxSum * 100.0
-                                            SheetComputedCell("${fmt(pct)}%", TealContainer.copy(alpha = 0.25f), TealPrimary, bold = true)
+                                            SheetComputedCell("${fmtSheetNum(pct)}%", TealContainer.copy(alpha = 0.25f), TealPrimary, bold = true)
                                         } else if (mode == "attendance") {
                                             val dVal = s.x["DAYS_$term"]?.let { fromBn(it).toDoubleOrNull() }
                                             val pVal = s.x["PRES_$term"]?.let { fromBn(it).toDoubleOrNull() }
-                                            val pctStr = if (dVal != null && pVal != null && dVal > 0) "${fmt((pVal / dVal) * 100)}%" else "—"
+                                            val pctStr = if (dVal != null && pVal != null && dVal > 0) "${fmtSheetNum((pVal / dVal) * 100)}%" else "—"
                                             SheetComputedCell(pctStr, TealContainer.copy(alpha = 0.25f), TealPrimary, bold = true)
                                         }
                                     }

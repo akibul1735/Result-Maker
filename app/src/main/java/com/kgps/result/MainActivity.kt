@@ -646,6 +646,7 @@ fun ResultMakerWorkspace(
                                         )
                                     },
                                     onBatchEdit = { targetCls -> vm.openBatchEdit(targetCls) },
+                                    onBatchPatchTraits = vm::batchUpdateTraits,
                                     onShowMessage = vm::showMessage
                                 )
 

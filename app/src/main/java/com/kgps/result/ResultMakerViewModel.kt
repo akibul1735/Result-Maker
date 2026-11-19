@@ -933,6 +933,45 @@ class ResultMakerViewModel(
         }
     }
 
+    fun batchUpdateTraits(
+        studentIds: Set<String>,
+        xKeys: Set<String>,
+        value: String?
+    ) {
+        val school = activeSchool.value ?: return
+        val perm = school.permissionsFor(currentUserId)
+        if (!perm.canEditAttendance) {
+            showMessage("গুণাবলি সম্পাদনার অনুমতি আপনার নেই")
+            return
+        }
+        val validTraitKeys = xKeys.filter { k ->
+            k.startsWith("ACT_") || k.startsWith("DISC_") || k.startsWith("COND_")
+        }
+        if (studentIds.isEmpty() || validTraitKeys.isEmpty()) {
+            showMessage("অন্তত ১ জন শিক্ষার্থী ও ১টি গুণাবলি নির্বাচন করুন")
+            return
+        }
+        val cleanVal = value?.trim()?.takeIf { it in setOf("ক", "খ", "গ") }
+        val allowedIds = students.value
+            .filter { it.id in studentIds && perm.canAccessClass(it.cls) }
+            .map { it.id }
+        if (allowedIds.isEmpty()) {
+            showMessage("অনুমোদিত কোনো শিক্ষার্থী নির্বাচিত হয়নি")
+            return
+        }
+        val xUpdates = validTraitKeys.associateWith { cleanVal }
+        viewModelScope.launch {
+            cloudRepo.patchBatchXFields(school.id, allowedIds, xUpdates)
+                .onSuccess {
+                    val valLabel = if (cleanVal == null) "ফাঁকা (মুছে ফেলা)" else "'$cleanVal'"
+                    showMessage("${bn(allowedIds.size.toString())} জন শিক্ষার্থীর গুণাবলি $valLabel হিসেবে আপডেট হয়েছে")
+                }
+                .onFailure { e ->
+                    showMessage(friendlyFirestoreErrorMessage(e))
+                }
+        }
+    }
+
     fun deleteStudent(id: String) {
         val school = activeSchool.value ?: return
         val target = students.value.find { it.id == id } ?: return
