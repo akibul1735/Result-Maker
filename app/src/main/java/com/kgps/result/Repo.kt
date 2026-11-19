@@ -126,8 +126,22 @@ object Repo {
         }
     }
 
+    fun stripCsvCodeFences(raw: String): String {
+        val cleaned = raw.removePrefix("\uFEFF").trim()
+        val fenceRegex = Regex("```(?:csv|tsv|txt|text|excel)?\\s*\\n([\\s\\S]*?)```", RegexOption.IGNORE_CASE)
+        val match = fenceRegex.find(cleaned)
+        if (match != null) {
+            return match.groupValues[1].trim()
+        }
+        return cleaned
+            .replace(Regex("^```(?:csv|tsv|txt|text|excel)?\\s*\\n?", RegexOption.IGNORE_CASE), "")
+            .replace(Regex("\\n?```\\s*$"), "")
+            .trim()
+    }
+
     fun parseCsv(t0: String): List<List<String>> {
-        val t = t0.removePrefix("\uFEFF")
+        val t = stripCsvCodeFences(t0)
+        if (t.isBlank()) return emptyList()
         val sep = detectDelimiter(t)
         val rows = mutableListOf<List<String>>()
         var row = mutableListOf<String>()

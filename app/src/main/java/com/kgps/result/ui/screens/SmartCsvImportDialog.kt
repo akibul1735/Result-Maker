@@ -1,58 +1,80 @@
 package com.kgps.result.ui.screens
 
+import android.widget.Toast
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.AlertDialog
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.AutoAwesome
+import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material3.Button
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.FilterChip
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.kgps.result.CLS_SHORT
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
+import com.kgps.result.CsvImportAssistant
+import com.kgps.result.CsvImportModule
+import com.kgps.result.CsvPromptConfig
+import com.kgps.result.CsvRowStatus
 import com.kgps.result.Repo
 import com.kgps.result.Settings
 import com.kgps.result.Student
 import com.kgps.result.bn
-import com.kgps.result.ui.theme.AmberBg
-import com.kgps.result.ui.theme.AmberBorder
-import com.kgps.result.ui.theme.AmberNotice
-import com.kgps.result.ui.theme.EmeraldGrade
+import com.kgps.result.defaultSelectedColumnKeys
 import com.kgps.result.ui.theme.SlateBg
 import com.kgps.result.ui.theme.SlateMuted
 import com.kgps.result.ui.theme.SlateOutline
+import com.kgps.result.ui.theme.SlateSurfaceVariant
+import com.kgps.result.ui.theme.SlateText
+import com.kgps.result.ui.theme.TealContainer
+import com.kgps.result.ui.theme.TealDark
 import com.kgps.result.ui.theme.TealPrimary
+import com.kgps.result.ui.theme.TealSoft
+
+private enum class CsvWizardStep(val num: Int, val shortTitle: String) {
+    OPTIONS(1, "অপশন"),
+    PROMPT(2, "প্রম্পট"),
+    INPUT(3, "আউটপুট"),
+    PREVIEW(4, "প্রিভিউ")
+}
 
 @Composable
 fun SmartCsvImportDialog(
@@ -65,257 +87,379 @@ fun SmartCsvImportDialog(
     onError: (String) -> Unit
 ) {
     val ctx = LocalContext.current
+    val clipboard = LocalClipboardManager.current
+
+    var currentStep by remember(initialText) {
+        mutableStateOf(
+            if (initialText.isNotBlank()) CsvWizardStep.INPUT else CsvWizardStep.OPTIONS
+        )
+    }
+
+    var promptConfig by remember(defaultCls, settings.customFields) {
+        val safeCls = defaultCls.coerceIn(1, 5)
+        mutableStateOf(
+            CsvPromptConfig(
+                module = CsvImportModule.STUDENT_PROFILE,
+                targetCls = safeCls,
+                targetTerm = 1,
+                selectedColumnKeys = defaultSelectedColumnKeys(
+                    module = CsvImportModule.STUDENT_PROFILE,
+                    targetCls = safeCls,
+                    targetTerm = 1,
+                    customFields = settings.customFields
+                )
+            )
+        )
+    }
+    var promptCopiedRecently by remember { mutableStateOf(false) }
+
     var rawText by remember(initialText) { mutableStateOf(initialText) }
-    var fallbackCls by remember(defaultCls) { mutableStateOf(defaultCls) }
-    val parsedRows = remember(rawText) { if (rawText.isBlank()) emptyList() else Repo.parseCsv(rawText) }
+    var fallbackCls by remember(defaultCls) { mutableStateOf(defaultCls.coerceIn(1, 5)) }
+    val parsedRows = remember(rawText) {
+        if (rawText.isBlank()) emptyList() else Repo.parseCsv(rawText)
+    }
     var columns by remember(parsedRows, settings.customFields) {
         mutableStateOf(Repo.detectCsvColumns(parsedRows, settings.customFields))
     }
 
+    val validationReport = remember(parsedRows, columns, students, fallbackCls) {
+        CsvImportAssistant.validateCsvData(
+            parsedRows = parsedRows,
+            columns = columns,
+            existingStudents = students,
+            fallbackCls = fallbackCls
+        )
+    }
+
+    var selectedRowIndices by remember { mutableStateOf<Set<Int>>(emptySet()) }
+    LaunchedEffect(validationReport) {
+        selectedRowIndices = validationReport.rows
+            .filter { it.status != CsvRowStatus.ERROR }
+            .map { it.dataRowIndex }
+            .toSet()
+    }
+    var previewFilter by remember { mutableStateOf(CsvPreviewFilter.ALL) }
+
     val filePicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) {
             try {
-                rawText = ctx.contentResolver.openInputStream(uri)
+                val loaded = ctx.contentResolver.openInputStream(uri)
                     ?.bufferedReader(Charsets.UTF_8)
                     ?.use { it.readText() }
                     ?: ""
+                rawText = loaded
+                if (Repo.parseCsv(loaded).size >= 2) {
+                    currentStep = CsvWizardStep.PREVIEW
+                } else {
+                    Toast.makeText(ctx, "ফাইল লোড হয়েছে", Toast.LENGTH_SHORT).show()
+                }
             } catch (e: Exception) {
                 onError("ফাইল পড়া যায়নি: ${e.message ?: "ত্রুটি"}")
             }
         }
     }
 
-    val summary = remember(parsedRows, columns, students, settings, fallbackCls) {
-        if (parsedRows.size >= 2 && columns.isNotEmpty()) {
-            Repo.applyMappedCsvImport(parsedRows, columns, students, settings, fallbackCls)
-        } else null
-    }
-    val hasRollOrName = columns.any {
-        it.targetType == "standard" && (it.targetKey == "roll" || it.targetKey == "name")
+    val finalSummary = remember(parsedRows, columns, selectedRowIndices, students, settings, fallbackCls) {
+        CsvImportAssistant.buildFilteredImportSummary(
+            parsedRows = parsedRows,
+            columns = columns,
+            selectedDataRowIndices = selectedRowIndices,
+            existingStudents = students,
+            existingSettings = settings,
+            fallbackCls = fallbackCls
+        )
     }
 
-    AlertDialog(
+    BackHandler {
+        when (currentStep) {
+            CsvWizardStep.OPTIONS -> onDismiss()
+            CsvWizardStep.PROMPT -> currentStep = CsvWizardStep.OPTIONS
+            CsvWizardStep.INPUT -> currentStep = CsvWizardStep.PROMPT
+            CsvWizardStep.PREVIEW -> currentStep = CsvWizardStep.INPUT
+        }
+    }
+
+    Dialog(
         onDismissRequest = onDismiss,
-        title = {
-            Text("স্মার্ট CSV / Excel ইমপোর্ট", fontWeight = FontWeight.Bold, fontSize = 16.sp)
-        },
-        text = {
-            Column(
-                Modifier
-                    .fillMaxWidth()
-                    .heightIn(max = 460.dp)
-                    .verticalScroll(rememberScrollState()),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                OutlinedButton(
-                    onClick = { filePicker.launch(arrayOf("*/*")) },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .testTag("csv_pick_file_btn"),
-                    shape = RoundedCornerShape(8.dp)
-                ) {
-                    Text("CSV / TSV ফাইল নির্বাচন করুন", fontSize = 12.sp)
-                }
-
-                OutlinedTextField(
-                    value = rawText,
-                    onValueChange = { rawText = it },
-                    label = { Text("অথবা Excel/CSV ডাটা এখানে পেস্ট করুন", fontSize = 11.sp) },
-                    minLines = if (parsedRows.isEmpty()) 4 else 2,
-                    maxLines = 4,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .testTag("csv_raw_input")
-                )
-
-                if (parsedRows.isNotEmpty()) {
-                    val newCols = columns.count { it.isNew }
-                    val matchedCols = columns.size - newCols
-                    Text(
-                        "মোট কলাম: ${bn(columns.size.toString())}টি · শনাক্ত: ${bn(matchedCols.toString())}টি · নতুন: ${bn(newCols.toString())}টি",
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        color = if (newCols > 0) AmberNotice else TealPrimary
-                    )
-
-                    if (newCols > 0) {
-                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.fillMaxWidth()) {
-                            OutlinedButton(
-                                onClick = {
-                                    columns = columns.map {
-                                        if (it.isNew) it.copy(targetType = "create_new", newLabel = it.header) else it
-                                    }
-                                },
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .testTag("csv_create_all_new_btn"),
-                                contentPadding = PaddingValues(horizontal = 6.dp, vertical = 4.dp),
-                                shape = RoundedCornerShape(6.dp)
-                            ) {
-                                Text("নতুন সব তৈরি করুন", fontSize = 11.sp, maxLines = 1)
-                            }
-                            OutlinedButton(
-                                onClick = {
-                                    columns = columns.map {
-                                        if (it.isNew) it.copy(targetType = "skip") else it
-                                    }
-                                },
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .testTag("csv_skip_all_new_btn"),
-                                contentPadding = PaddingValues(horizontal = 6.dp, vertical = 4.dp),
-                                shape = RoundedCornerShape(6.dp)
-                            ) {
-                                Text("নতুনগুলো বাদ দিন", fontSize = 11.sp, maxLines = 1)
-                            }
-                        }
-                    }
-
-                    Text("ডিফল্ট শ্রেণি (CSV-তে না থাকলে):", fontSize = 11.sp, color = SlateMuted)
-                    Row(
-                        Modifier.horizontalScroll(rememberScrollState()),
-                        horizontalArrangement = Arrangement.spacedBy(4.dp)
-                    ) {
-                        (1..5).forEach { c ->
-                            FilterChip(
-                                selected = fallbackCls == c,
-                                onClick = { fallbackCls = c },
-                                label = { Text(CLS_SHORT[c - 1], fontSize = 11.sp) }
-                            )
-                        }
-                    }
-
-                    columns.forEachIndexed { idx, col ->
-                        var dropdownOpen by remember(col.colIndex) { mutableStateOf(false) }
-                        val targetDesc = when (col.targetType) {
-                            "create_new" -> "+ নতুন ফিল্ড: ${col.newLabel}"
-                            "skip" -> "✕ বাদ দিন"
-                            "standard" -> Repo.STANDARD_FIELDS.find { it.first == col.targetKey }?.second ?: col.targetKey
-                            "custom" -> "কাস্টম: ${settings.customFields.find { it.key == col.targetKey }?.label ?: col.targetKey}"
-                            else -> col.targetKey
-                        }
-
-                        Card(
-                            Modifier.fillMaxWidth(),
-                            colors = CardDefaults.cardColors(containerColor = if (col.isNew) AmberBg else SlateBg),
-                            border = BorderStroke(1.dp, if (col.isNew) AmberBorder else SlateOutline),
-                            shape = RoundedCornerShape(8.dp)
+        properties = DialogProperties(usePlatformDefaultWidth = false)
+    ) {
+        Surface(
+            modifier = Modifier
+                .fillMaxWidth(0.95f)
+                .widthIn(max = 880.dp)
+                .heightIn(min = 520.dp, max = 760.dp),
+            shape = RoundedCornerShape(18.dp),
+            color = Color.White,
+            tonalElevation = 4.dp
+        ) {
+            Column(modifier = Modifier.fillMaxSize()) {
+                // Header
+                Surface(color = TealSoft) {
+                    Column {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(start = 16.dp, end = 8.dp, top = 10.dp, bottom = 6.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Column(Modifier.padding(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                                Row(
-                                    Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Icon(
+                                    Icons.Rounded.AutoAwesome,
+                                    contentDescription = null,
+                                    tint = TealPrimary,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                                Column {
                                     Text(
-                                        "${bn((idx + 1).toString())}. ${col.header}",
-                                        fontWeight = FontWeight.Bold,
-                                        fontSize = 13.sp,
-                                        modifier = Modifier.weight(1f)
+                                        "স্মার্ট AI ও CSV ইমপোর্ট",
+                                        style = MaterialTheme.typography.titleMedium,
+                                        color = TealDark
                                     )
                                     Text(
-                                        if (col.isNew) "নতুন কলাম" else "মিলেছে",
-                                        fontSize = 10.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        color = if (col.isNew) AmberNotice else EmeraldGrade
-                                    )
-                                }
-                                if (col.samples.isNotEmpty()) {
-                                    Text(
-                                        "নমুনা: ${col.samples.joinToString(" · ")}",
+                                        "অপশন বেছে প্রম্পট নিন → AI CSV পেস্ট/আপলোড → প্রিভিউ ও সেভ",
                                         fontSize = 11.sp,
                                         color = SlateMuted,
                                         maxLines = 1,
                                         overflow = TextOverflow.Ellipsis
                                     )
                                 }
-                                Box {
-                                    OutlinedButton(
-                                        onClick = { dropdownOpen = true },
-                                        modifier = Modifier.fillMaxWidth(),
-                                        shape = RoundedCornerShape(6.dp),
-                                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)
+                            }
+                            IconButton(
+                                onClick = onDismiss,
+                                modifier = Modifier.testTag("csv_dialog_close_btn")
+                            ) {
+                                Icon(Icons.Rounded.Close, contentDescription = "বন্ধ করুন", tint = SlateText)
+                            }
+                        }
+
+                        // 4-step interactive stepper
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 12.dp, vertical = 8.dp),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            CsvWizardStep.entries.forEach { step ->
+                                val active = currentStep == step
+                                val done = step.num < currentStep.num ||
+                                    (step == CsvWizardStep.INPUT && parsedRows.size >= 2)
+                                val bg = when {
+                                    active -> TealPrimary
+                                    done -> TealContainer
+                                    else -> Color.White
+                                }
+                                val fg = when {
+                                    active -> Color.White
+                                    done -> TealDark
+                                    else -> SlateMuted
+                                }
+                                Surface(
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .testTag("csv_step_tab_${step.num}")
+                                        .clickable { currentStep = step },
+                                    shape = RoundedCornerShape(10.dp),
+                                    color = bg,
+                                    border = BorderStroke(1.dp, if (active || done) TealPrimary.copy(alpha = 0.4f) else SlateOutline)
+                                ) {
+                                    Row(
+                                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 8.dp),
+                                        horizontalArrangement = Arrangement.Center,
+                                        verticalAlignment = Alignment.CenterVertically
                                     ) {
-                                        Text("$targetDesc ▾", fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                    }
-                                    DropdownMenu(expanded = dropdownOpen, onDismissRequest = { dropdownOpen = false }) {
-                                        DropdownMenuItem(
-                                            text = { Text("+ নতুন ফিল্ড তৈরি করুন (ডাটাবেসে যোগ হবে)", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = AmberNotice) },
-                                            onClick = {
-                                                columns = columns.map { if (it.colIndex == col.colIndex) it.copy(targetType = "create_new", newLabel = it.header) else it }
-                                                dropdownOpen = false
-                                            }
+                                        Text(
+                                            "${bn(step.num.toString())}. ${step.shortTitle}",
+                                            fontSize = 11.5.sp,
+                                            fontWeight = if (active) FontWeight.Bold else FontWeight.SemiBold,
+                                            color = fg,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
                                         )
-                                        DropdownMenuItem(
-                                            text = { Text("✕ বাদ দিন (ইমপোর্ট করবেন না)", fontSize = 12.sp, color = SlateMuted) },
-                                            onClick = {
-                                                columns = columns.map { if (it.colIndex == col.colIndex) it.copy(targetType = "skip") else it }
-                                                dropdownOpen = false
-                                            }
-                                        )
-                                        HorizontalDivider()
-                                        Repo.STANDARD_FIELDS.forEach { (fKey, fLabel) ->
-                                            DropdownMenuItem(
-                                                text = { Text(fLabel, fontSize = 12.sp) },
-                                                onClick = {
-                                                    columns = columns.map { if (it.colIndex == col.colIndex) it.copy(targetType = "standard", targetKey = fKey) else it }
-                                                    dropdownOpen = false
-                                                }
-                                            )
-                                        }
-                                        if (settings.customFields.isNotEmpty()) {
-                                            HorizontalDivider()
-                                            settings.customFields.forEach { cf ->
-                                                DropdownMenuItem(
-                                                    text = { Text("কাস্টম: ${cf.label}", fontSize = 12.sp) },
-                                                    onClick = {
-                                                        columns = columns.map { if (it.colIndex == col.colIndex) it.copy(targetType = "custom", targetKey = cf.key) else it }
-                                                        dropdownOpen = false
-                                                    }
-                                                )
-                                            }
-                                        }
                                     }
                                 }
-                                if (col.targetType == "create_new") {
-                                    OutlinedTextField(
-                                        value = col.newLabel,
-                                        onValueChange = { lbl ->
-                                            columns = columns.map { if (it.colIndex == col.colIndex) it.copy(newLabel = lbl) else it }
+                            }
+                        }
+                        HorizontalDivider(color = SlateOutline)
+                    }
+                }
+
+                // Body
+                Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
+                    when (currentStep) {
+                        CsvWizardStep.OPTIONS -> CsvStepOptions(
+                            config = promptConfig,
+                            customFields = settings.customFields,
+                            onConfigChange = {
+                                promptConfig = it
+                                promptCopiedRecently = false
+                            }
+                        )
+
+                        CsvWizardStep.PROMPT -> CsvStepPrompt(
+                            config = promptConfig,
+                            settings = settings,
+                            promptCopiedRecently = promptCopiedRecently,
+                            onCopyPrompt = { txt ->
+                                clipboard.setText(AnnotatedString(txt))
+                                promptCopiedRecently = true
+                                Toast.makeText(ctx, "AI প্রম্পট ক্লিপবোর্ডে কপি হয়েছে", Toast.LENGTH_SHORT).show()
+                            },
+                            onCopyHeaderOnly = { hdr ->
+                                clipboard.setText(AnnotatedString(hdr))
+                                Toast.makeText(ctx, "শুধু হেডার লাইন কপি হয়েছে", Toast.LENGTH_SHORT).show()
+                            },
+                            onGoToStep3 = { currentStep = CsvWizardStep.INPUT }
+                        )
+
+                        CsvWizardStep.INPUT -> CsvStepInputAndMapping(
+                            rawText = rawText,
+                            onRawTextChange = { rawText = it },
+                            parsedRows = parsedRows,
+                            columns = columns,
+                            onColumnsChange = { columns = it },
+                            fallbackCls = fallbackCls,
+                            onFallbackClsChange = { fallbackCls = it },
+                            settings = settings,
+                            onPickFile = { filePicker.launch(arrayOf("*/*")) },
+                            onPasteClipboard = {
+                                val pasted = clipboard.getText()?.text.orEmpty()
+                                if (pasted.isBlank()) {
+                                    Toast.makeText(ctx, "ক্লিপবোর্ড ফাঁকা আছে", Toast.LENGTH_SHORT).show()
+                                } else {
+                                    rawText = pasted
+                                    Toast.makeText(ctx, "ক্লিপবোর্ড থেকে পেস্ট হয়েছে", Toast.LENGTH_SHORT).show()
+                                }
+                            },
+                            onGoToPreview = { currentStep = CsvWizardStep.PREVIEW }
+                        )
+
+                        CsvWizardStep.PREVIEW -> CsvStepPreviewAndSave(
+                            report = validationReport,
+                            selectedRowIndices = selectedRowIndices,
+                            onToggleRow = { idx ->
+                                selectedRowIndices = if (selectedRowIndices.contains(idx)) {
+                                    selectedRowIndices - idx
+                                } else {
+                                    selectedRowIndices + idx
+                                }
+                            },
+                            onSelectAllValid = {
+                                selectedRowIndices = validationReport.rows
+                                    .filter { it.status != CsvRowStatus.ERROR }
+                                    .map { it.dataRowIndex }
+                                    .toSet()
+                            },
+                            onClearSelection = { selectedRowIndices = emptySet() },
+                            filter = previewFilter,
+                            onFilterChange = { previewFilter = it },
+                            onJumpToInput = { currentStep = CsvWizardStep.INPUT }
+                        )
+                    }
+                }
+
+                // Bottom action bar
+                HorizontalDivider(color = SlateOutline)
+                Surface(color = SlateBg) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 14.dp, vertical = 10.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        if (currentStep == CsvWizardStep.OPTIONS) {
+                            OutlinedButton(
+                                onClick = onDismiss,
+                                shape = RoundedCornerShape(10.dp),
+                                modifier = Modifier.testTag("csv_cancel_btn")
+                            ) {
+                                Text("বাতিল", fontSize = 12.5.sp)
+                            }
+                        } else {
+                            OutlinedButton(
+                                onClick = {
+                                    currentStep = when (currentStep) {
+                                        CsvWizardStep.PROMPT -> CsvWizardStep.OPTIONS
+                                        CsvWizardStep.INPUT -> CsvWizardStep.PROMPT
+                                        CsvWizardStep.PREVIEW -> CsvWizardStep.INPUT
+                                        CsvWizardStep.OPTIONS -> CsvWizardStep.OPTIONS
+                                    }
+                                },
+                                shape = RoundedCornerShape(10.dp),
+                                modifier = Modifier.testTag("csv_prev_step_btn")
+                            ) {
+                                Text("← পূর্ববর্তী", fontSize = 12.5.sp)
+                            }
+                        }
+
+                        Spacer(Modifier.width(8.dp))
+
+                        when (currentStep) {
+                            CsvWizardStep.OPTIONS -> Button(
+                                onClick = { currentStep = CsvWizardStep.PROMPT },
+                                colors = ButtonDefaults.buttonColors(containerColor = TealPrimary),
+                                shape = RoundedCornerShape(10.dp),
+                                modifier = Modifier.testTag("csv_next_to_prompt_btn")
+                            ) {
+                                Text("AI প্রম্পট তৈরি করুন →", fontSize = 12.5.sp)
+                            }
+
+                            CsvWizardStep.PROMPT -> Button(
+                                onClick = {
+                                    val promptText = CsvImportAssistant.buildAiPrompt(promptConfig, settings)
+                                    clipboard.setText(AnnotatedString(promptText))
+                                    promptCopiedRecently = true
+                                    Toast.makeText(ctx, "প্রম্পট কপি হয়েছে — এবার AI-তে ব্যবহার করুন", Toast.LENGTH_SHORT).show()
+                                    currentStep = CsvWizardStep.INPUT
+                                },
+                                colors = ButtonDefaults.buttonColors(containerColor = TealPrimary),
+                                shape = RoundedCornerShape(10.dp),
+                                modifier = Modifier.testTag("csv_copy_and_next_btn")
+                            ) {
+                                Text("প্রম্পট কপি ও পরবর্তী ধাপ →", fontSize = 12.5.sp)
+                            }
+
+                            CsvWizardStep.INPUT -> Button(
+                                onClick = { currentStep = CsvWizardStep.PREVIEW },
+                                enabled = parsedRows.size >= 2,
+                                colors = ButtonDefaults.buttonColors(containerColor = TealPrimary),
+                                shape = RoundedCornerShape(10.dp),
+                                modifier = Modifier.testTag("csv_next_to_preview_btn")
+                            ) {
+                                Text("প্রিভিউ ও ভ্যালিডেশন →", fontSize = 12.5.sp)
+                            }
+
+                            CsvWizardStep.PREVIEW -> {
+                                val selectedValidCount = finalSummary?.let { it.addedCount + it.updatedCount } ?: 0
+                                val canSave = finalSummary != null &&
+                                    !validationReport.hasMissingRollOrNameMapping &&
+                                    selectedValidCount > 0
+                                Button(
+                                    onClick = { if (finalSummary != null) onImported(finalSummary) },
+                                    enabled = canSave,
+                                    colors = ButtonDefaults.buttonColors(containerColor = TealPrimary),
+                                    shape = RoundedCornerShape(10.dp),
+                                    modifier = Modifier.testTag("csv_confirm_import_btn")
+                                ) {
+                                    Text(
+                                        if (selectedValidCount > 0) {
+                                            "চূড়ান্ত সেভ (${bn(selectedValidCount.toString())} জন)"
+                                        } else {
+                                            "চূড়ান্ত সেভ"
                                         },
-                                        label = { Text("নতুন ডাটাবেস ফিল্ডের নাম", fontSize = 10.sp) },
-                                        singleLine = true,
-                                        modifier = Modifier.fillMaxWidth()
+                                        fontSize = 12.5.sp
                                     )
                                 }
                             }
                         }
                     }
-
-                    if (summary != null) {
-                        Text(
-                            "নতুন ${bn(summary.addedCount.toString())} জন · হালনাগাদ ${bn(summary.updatedCount.toString())} জন · নতুন ফিল্ড ${bn(summary.createdFields.size.toString())}টি",
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = TealPrimary
-                        )
-                    }
                 }
             }
-        },
-        confirmButton = {
-            Button(
-                onClick = { if (summary != null) onImported(summary) },
-                enabled = summary != null && hasRollOrName && (summary.addedCount + summary.updatedCount > 0),
-                modifier = Modifier.testTag("csv_confirm_import_btn")
-            ) {
-                Text("ইমপোর্ট করুন")
-            }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss, modifier = Modifier.testTag("csv_cancel_btn")) {
-                Text("বাতিল")
-            }
         }
-    )
+    }
 }
