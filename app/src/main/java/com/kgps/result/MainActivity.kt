@@ -431,6 +431,9 @@ fun ResultMakerWorkspace(
     val csvImportState by vm.csvImportState.collectAsStateWithLifecycle()
     val aiState by vm.aiState.collectAsStateWithLifecycle()
     val draftingTerm by vm.draftingRemarkTerm.collectAsStateWithLifecycle()
+    val cloudRunUrl by vm.cloudRunUrl.collectAsStateWithLifecycle()
+    val cloudRunTesting by vm.cloudRunTesting.collectAsStateWithLifecycle()
+    val cloudRunTestStatus by vm.cloudRunTestStatus.collectAsStateWithLifecycle()
 
     var askSignOut by remember { mutableStateOf(false) }
 
@@ -716,6 +719,9 @@ fun ResultMakerWorkspace(
                                     backupStatus = backupStatus,
                                     driveFiles = driveFiles,
                                     driveFilesLoading = driveFilesLoading,
+                                    cloudRunUrl = cloudRunUrl,
+                                    cloudRunTesting = cloudRunTesting,
+                                    cloudRunTestStatus = cloudRunTestStatus,
                                     onUpdateSettings = vm::updateSettings,
                                     onAddCustomField = vm::addCustomField,
                                     onRemoveCustomField = vm::removeCustomField,
@@ -744,6 +750,8 @@ fun ResultMakerWorkspace(
                                     onRestoreLocalSnapshot = vm::restoreLocalSnapshot,
                                     onLoadDriveBackups = vm::loadDriveBackupList,
                                     onRestoreFromDriveFile = vm::restoreFromDriveFile,
+                                    onSaveCloudRunUrl = vm::saveCloudRunUrl,
+                                    onTestCloudRunUrl = vm::testCloudRunUrl,
                                     onSignOut = onSignOut,
                                     onShowMessage = vm::showMessage,
                                     onBack = { vm.navigate(NavSection.ROSTER) }

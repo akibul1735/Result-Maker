@@ -13,10 +13,12 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.kgps.result.ai.AiChatMessage
 import com.kgps.result.ai.AiModelMode
+import com.kgps.result.ai.AiProxyConfig
 import com.kgps.result.ai.AiRepository
+import com.kgps.result.ai.CloudRunAiRepository
 import com.kgps.result.ai.ExtractedClassSheet
 import com.kgps.result.ai.ExtractedMarksheet
-import com.kgps.result.ai.FirebaseAiRepository
+import com.kgps.result.ai.HybridAiRepository
 import com.kgps.result.ai.PlaceholderAiRepository
 import com.kgps.result.ai.ScannedStudentRow
 import com.kgps.result.ai.validateScannedStudentRow
@@ -105,7 +107,8 @@ class ResultMakerViewModel(
     private val initialLocalSnapshot: Pair<List<Student>, Settings>? = null
 ) : ViewModel() {
 
-    private val aiRepository: AiRepository = FirebaseAiRepository()
+    private val hybridAiRepository = HybridAiRepository(appContext)
+    private val aiRepository: AiRepository get() = hybridAiRepository
     private val sampleAiRepository = PlaceholderAiRepository()
 
     val localSeedCount: Int get() = initialLocalSnapshot?.first?.size ?: 0
@@ -290,6 +293,15 @@ class ResultMakerViewModel(
     private val _draftingRemarkTerm = MutableStateFlow<Int?>(null)
     val draftingRemarkTerm: StateFlow<Int?> = _draftingRemarkTerm.asStateFlow()
 
+    private val _cloudRunUrl = MutableStateFlow(AiProxyConfig.getEffectiveUrl(appContext))
+    val cloudRunUrl: StateFlow<String> = _cloudRunUrl.asStateFlow()
+
+    private val _cloudRunTesting = MutableStateFlow(false)
+    val cloudRunTesting: StateFlow<Boolean> = _cloudRunTesting.asStateFlow()
+
+    private val _cloudRunTestStatus = MutableStateFlow<String?>(null)
+    val cloudRunTestStatus: StateFlow<String?> = _cloudRunTestStatus.asStateFlow()
+
     val activePermissions: StateFlow<TeacherPermissions> = activeSchool
         .map { school ->
             school?.permissionsFor(currentUserId) ?: TeacherPermissions.fullAccess()
@@ -297,6 +309,7 @@ class ResultMakerViewModel(
         .stateIn(viewModelScope, SharingStarted.Eagerly, TeacherPermissions.fullAccess())
 
     val isPlaceholderAi: Boolean get() = aiRepository.isPlaceholderBackend
+    val isUsingCloudRun: Boolean get() = hybridAiRepository.isUsingCloudRun()
 
     init {
         viewModelScope.launch {
@@ -1603,6 +1616,38 @@ class ResultMakerViewModel(
         return updated
     }
 
+    fun saveCloudRunUrl(rawUrl: String) {
+        AiProxyConfig.saveUrl(appContext, rawUrl)
+        val effective = AiProxyConfig.getEffectiveUrl(appContext)
+        _cloudRunUrl.value = effective
+        _cloudRunTestStatus.value = null
+        showMessage(
+            if (effective.isNotBlank()) "Cloud Run AI প্রক্সি URL সংরক্ষিত হয়েছে"
+            else "Cloud Run URL মুছে ফেলা হয়েছে (Firebase AI Logic ব্যবহার হবে)"
+        )
+    }
+
+    fun testCloudRunUrl(rawUrl: String) {
+        if (_cloudRunTesting.value) return
+        val normalized = AiProxyConfig.normalizeUrl(rawUrl)
+        if (normalized.isBlank()) {
+            _cloudRunTestStatus.value = "পরীক্ষার জন্য একটি বৈধ Cloud Run URL লিখুন।"
+            return
+        }
+        _cloudRunTesting.value = true
+        _cloudRunTestStatus.value = null
+        viewModelScope.launch {
+            CloudRunAiRepository.testHealth(normalized)
+                .onSuccess { statusText ->
+                    _cloudRunTestStatus.value = statusText
+                }
+                .onFailure { e ->
+                    _cloudRunTestStatus.value = "ব্যর্থ: ${e.message ?: "সার্ভারের সাথে সংযোগ হয়নি"}"
+                }
+            _cloudRunTesting.value = false
+        }
+    }
+
     fun draftRemark(student: Student, term: Int, onResult: (String) -> Unit) {
         if (_draftingRemarkTerm.value != null) return
         _draftingRemarkTerm.value = term
@@ -1611,7 +1656,7 @@ class ResultMakerViewModel(
                 val res = aiRepository.draftRemark(buildStudentAiContext(student), term)
                 onResult(res.remark)
                 if (res.isPlaceholder) {
-                    showMessage("নমুনা মতামত খসড়া যুক্ত হয়েছে (লাইভ AI-এর জন্য Firebase AI Logic প্রয়োজন)")
+                    showMessage("নমুনা মতামত খসড়া যুক্ত হয়েছে (লাইভ AI-এর জন্য সার্ভার বা Firebase প্রয়োজন)")
                 }
             } catch (e: CancellationException) {
                 throw e

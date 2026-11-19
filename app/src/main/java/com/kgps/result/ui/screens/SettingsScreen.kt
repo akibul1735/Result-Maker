@@ -130,6 +130,9 @@ fun SettingsScreen(
     backupStatus: AutoBackupStatus,
     driveFiles: List<DriveBackupFile>,
     driveFilesLoading: Boolean,
+    cloudRunUrl: String,
+    cloudRunTesting: Boolean,
+    cloudRunTestStatus: String?,
     onUpdateSettings: (Settings) -> Unit,
     onAddCustomField: (String) -> Boolean,
     onRemoveCustomField: (String) -> Unit,
@@ -152,6 +155,8 @@ fun SettingsScreen(
     onRestoreLocalSnapshot: (String) -> Unit,
     onLoadDriveBackups: () -> Unit,
     onRestoreFromDriveFile: (String) -> Unit,
+    onSaveCloudRunUrl: (String) -> Unit,
+    onTestCloudRunUrl: (String) -> Unit,
     onSignOut: () -> Unit,
     onShowMessage: (String) -> Unit,
     onBack: () -> Unit
@@ -164,8 +169,9 @@ fun SettingsScreen(
     val isOwner = activeSchool?.ownerUid == currentUserId
 
     var s by remember(settings) { mutableStateOf(settings) }
-    var expandedGroup by remember { mutableStateOf("collab") } // collab, school, font, teachers, backup
+    var expandedGroup by remember { mutableStateOf("collab") } // collab, school, font, teachers, backup, aiproxy
     var newFieldLabel by remember { mutableStateOf("") }
+    var cloudRunInput by remember(cloudRunUrl) { mutableStateOf(cloudRunUrl) }
 
     var askReset by remember { mutableStateOf(false) }
     var askClear by remember { mutableStateOf(false) }
@@ -1019,6 +1025,114 @@ fun SettingsScreen(
                                     modifier = Modifier.weight(1f).testTag("settings_clear_all_btn"),
                                     shape = RoundedCornerShape(8.dp)
                                 ) { Text("সব মুছুন", fontSize = 12.sp) }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Group 6: Cloud Run + Firebase Auth ID Token AI Proxy
+            TreeGroupCard(
+                title = "AI সার্ভার (Cloud Run + Auth)",
+                subtitle = if (cloudRunUrl.isNotBlank()) {
+                    "সক্রিয়: Cloud Run প্রক্সি ($cloudRunUrl)"
+                } else {
+                    "ডিফল্ট: Firebase AI Logic · Play Store ছাড়া APK-তে Cloud Run ব্যবহার করুন"
+                },
+                badgeText = if (cloudRunUrl.isNotBlank()) "Cloud Run" else "ডিফল্ট",
+                badgeColor = if (cloudRunUrl.isNotBlank()) EmeraldGrade else SlateMuted,
+                badgeContainerColor = if (cloudRunUrl.isNotBlank()) TealSoft else SlateBg,
+                icon = Icons.Rounded.CloudDone,
+                expanded = expandedGroup == "aiproxy",
+                headerTestTag = "settings_group_aiproxy",
+                onToggle = { expandedGroup = if (expandedGroup == "aiproxy") "" else "aiproxy" }
+            ) {
+                TreeBranchItem(isLast = false) {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text(
+                            text = "Play Store-এ অ্যাপ প্রকাশ না করলে Play Integrity App Check ছাড়াই আপনার সাইন-ইন করা Firebase Auth ID Token ব্যবহার করে Cloud Run প্রক্সির মাধ্যমে Gemini AI ও নম্বরপত্র স্ক্যান নিরাপদভাবে চালানো যায়।",
+                            fontSize = 12.sp,
+                            color = SlateMuted,
+                            lineHeight = 17.sp
+                        )
+                        OutlinedTextField(
+                            value = cloudRunInput,
+                            onValueChange = { cloudRunInput = it },
+                            label = { Text("Cloud Run সার্ভার URL") },
+                            placeholder = { Text("https://result-maker-ai-proxy-xxxx.run.app") },
+                            singleLine = true,
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .testTag("settings_cloud_run_url_input")
+                        )
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Button(
+                                onClick = { onSaveCloudRunUrl(cloudRunInput) },
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .testTag("settings_cloud_run_save_btn"),
+                                shape = RoundedCornerShape(8.dp)
+                            ) {
+                                Text("সংরক্ষণ", fontSize = 12.sp)
+                            }
+                            OutlinedButton(
+                                onClick = { onTestCloudRunUrl(cloudRunInput) },
+                                enabled = !cloudRunTesting,
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .testTag("settings_cloud_run_test_btn"),
+                                shape = RoundedCornerShape(8.dp)
+                            ) {
+                                if (cloudRunTesting) {
+                                    CircularProgressIndicator(
+                                        modifier = Modifier.size(14.dp),
+                                        strokeWidth = 2.dp
+                                    )
+                                } else {
+                                    Text("সংযোগ পরীক্ষা", fontSize = 12.sp)
+                                }
+                            }
+                        }
+                    }
+                }
+
+                TreeBranchItem(isLast = true) {
+                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        if (!cloudRunTestStatus.isNullOrBlank()) {
+                            val isSuccess = cloudRunTestStatus.startsWith("সংযোগ সফল")
+                            Surface(
+                                color = if (isSuccess) TealSoft else AmberBg,
+                                border = BorderStroke(
+                                    1.dp,
+                                    if (isSuccess) TealPrimary.copy(alpha = 0.4f) else AmberBorder
+                                ),
+                                shape = RoundedCornerShape(8.dp),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Text(
+                                    text = cloudRunTestStatus,
+                                    fontSize = 12.sp,
+                                    color = if (isSuccess) TealDark else AmberNotice,
+                                    modifier = Modifier.padding(10.dp)
+                                )
+                            }
+                        }
+                        if (cloudRunUrl.isNotBlank() || cloudRunInput.isNotBlank()) {
+                            OutlinedButton(
+                                onClick = {
+                                    cloudRunInput = ""
+                                    onSaveCloudRunUrl("")
+                                },
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .testTag("settings_cloud_run_clear_btn"),
+                                shape = RoundedCornerShape(8.dp)
+                            ) {
+                                Text("URL মুছে ডিফল্ট মোডে ফিরুন", fontSize = 12.sp, color = RoseDanger)
                             }
                         }
                     }
