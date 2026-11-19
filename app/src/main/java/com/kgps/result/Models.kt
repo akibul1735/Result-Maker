@@ -94,7 +94,14 @@ fun fmt(d: Double): String = bn(fmtEn(d))
 fun Student.subs() = subjectsFor(cls, religion)
 fun Student.hasTerm(t: Int) = m.keys.any { it.contains("_${t}_") }
 fun Student.hasSub(s: Sub, t: Int) = m.keys.any { it.startsWith("${s.key}_${t}_") }
-fun Student.cont(s: Sub, t: Int) = s.comps.sumOf { m[mk(s.key, t, it.key)] ?: 0.0 }
+fun Student.cont(s: Sub, t: Int): Double {
+    val hasBreakdown = s.comps.any { m.containsKey(mk(s.key, t, it.key)) }
+    return if (hasBreakdown) {
+        s.comps.sumOf { m[mk(s.key, t, it.key)] ?: 0.0 }
+    } else {
+        m[mk(s.key, t, "CONT")] ?: 0.0
+    }
+}
 fun Student.wr(s: Sub, t: Int) = if (s.written > 0) (m[mk(s.key, t, "WR")] ?: 0.0) else 0.0
 fun Student.total(s: Sub, t: Int) = cont(s, t) + wr(s, t)
 fun Student.avg(s: Sub) = (1..3).sumOf { total(s, it) } / 3.0

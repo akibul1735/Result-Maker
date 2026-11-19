@@ -279,7 +279,8 @@ data class ScannedStudentRow(
     val rawNotes: String = "",
     val aiIssues: Map<String, String> = emptyMap(),
     val resolvedFields: Set<String> = emptySet(),
-    val deducedFields: Map<String, String> = emptyMap()
+    val deducedFields: Map<String, String> = emptyMap(),
+    val useScannedNameForExisting: Boolean = false
 )
 
 data class ExtractedClassSheet(
@@ -300,7 +301,8 @@ data class RowValidationReport(
     val calculatedGrandTotal: Double? = null,
     val fieldConfidences: Map<String, FieldConfidence> = emptyMap(),
     val mismatchFields: Set<String> = emptySet(),
-    val quickFixes: List<ArithFixSuggestion> = emptyList()
+    val quickFixes: List<ArithFixSuggestion> = emptyList(),
+    val isSummaryOnlyMode: Boolean = false
 ) {
     val hasHardError: Boolean get() = hardErrors.isNotEmpty()
     val hasAnyIssue: Boolean get() = hardErrors.isNotEmpty() || uncertainWarnings.isNotEmpty() || arithmeticWarning != null
@@ -310,8 +312,9 @@ fun validateScannedStudentRow(
     row: ScannedStudentRow,
     cls: Int,
     subKey: String,
-    duplicateRolls: Set<Int>
-): RowValidationReport = ScanConstraintSolver.validateRow(row, cls, subKey, duplicateRolls)
+    duplicateRolls: Set<Int>,
+    hasExistingDbName: Boolean = false
+): RowValidationReport = ScanConstraintSolver.validateRow(row, cls, subKey, duplicateRolls, hasExistingDbName)
 
 data class AiChatReply(
     val text: String,
@@ -866,7 +869,8 @@ class DirectGeminiAiRepository(
             2. CT ঘরে "০৬+০৭=১৩/২=০৭" থাকলে "=" পরের গড় মানটি ("7") `CT`-তে এবং `rawNotes`-এ সংক্ষেপে লিখুন।
             3. `A`/`অনু` থাকলে "0" ও `rawNotes`-এ "অনুপস্থিত (A)"; ফাঁকা ঘর ""।
             4. "ধারাবাহিক মোট" -> `sheetContinuousTotal`, "সামষ্টিক" -> `WR`, "সর্বমোট/মোট" -> `sheetGrandTotal` (এগুলো সবসময় খাতা থেকে পড়ুন)।
-            5. কেবল স্পষ্ট ও নিশ্চিত মানগুলো স্বাভাবিক রাখুন; অস্পষ্ট/কাটা-ছেঁড়া বা অনুমান করা মান হলে `uncertainFields`-এ কী ("roll","name","TB","ACT","LANG","CT","WR","TOTAL","CONT","GRAND") দিয়ে বাংলায় কারণ লিখুন; পড়া না গেলে "" দিন।
+            5. রেজাল্ট কার্ড/ছবিতে কেবল ধারাবাহিক মোট, সামষ্টিক এবং মোট থাকলে (`TB`,`ACT`,`LANG`,`CT` আলাদা না থাকলে) অনুমান করে ভাগ করবেন না — `TB`,`ACT`,`LANG`,`CT` ফাঁকা ("") রেখে কেবল `sheetContinuousTotal`, `WR`, `sheetGrandTotal` দিন।
+            6. কেবল স্পষ্ট ও নিশ্চিত মানগুলো স্বাভাবিক রাখুন; অস্পষ্ট/কাটা-ছেঁড়া বা অনুমান করা মান হলে `uncertainFields`-এ কী ("roll","name","TB","ACT","LANG","CT","WR","TOTAL","CONT","GRAND") দিয়ে বাংলায় কারণ লিখুন; পড়া না গেলে "" দিন।
             JSON: {"cls":${clsHint ?: 3},"term":${termHint ?: 1},"subKey":"${subKeyHint ?: "MATH"}","summary":"","warnings":[],"rows":[{"roll":"1","name":"","marks":{"TB":"","ACT":"","LANG":"","CT":"","WR":""},"sheetContinuousTotal":"","sheetGrandTotal":"","rawNotes":"","uncertainFields":{}}]}
         """.trimIndent()
 

@@ -1096,9 +1096,13 @@ private fun ClassSheetPreviewSection(
             .keys
     }
 
-    val reportsByRowId = remember(sheet.rows, sheet.cls, sheet.subKey, rollDuplicates) {
+    val reportsByRowId = remember(sheet.rows, sheet.cls, sheet.subKey, rollDuplicates, existingStudents) {
         sheet.rows.associate { r ->
-            r.id to validateScannedStudentRow(r, sheet.cls, sheet.subKey, rollDuplicates)
+            val rInt = fromBn(r.rollText.trim()).toIntOrNull()
+            val hasDbName = rInt != null && existingStudents.any {
+                it.cls == sheet.cls && it.roll == rInt && it.name.isNotBlank()
+            }
+            r.id to validateScannedStudentRow(r, sheet.cls, sheet.subKey, rollDuplicates, hasDbName)
         }
     }
 
@@ -1484,19 +1488,52 @@ private fun ScannedStudentPreviewCard(
                     isNumeric = true,
                     modifier = Modifier.width(80.dp)
                 )
-                EditableCellField(
-                    value = row.name,
-                    onValueChange = onUpdateName,
-                    label = "শিক্ষার্থীর নাম",
-                    confidence = report.fieldConfidences["name"] ?: FieldConfidence.SURE,
-                    hardError = report.hardErrors["name"],
-                    uncertainWarning = report.uncertainWarnings["name"],
-                    deducedHint = row.deducedFields["name"],
-                    onVerify = { onVerifyField("name") },
-                    isNumeric = false,
-                    centered = false,
-                    modifier = Modifier.weight(1f)
-                )
+                val hasDbName = isExistingStudent && !existingName.isNullOrBlank()
+                val useDbName = hasDbName && !row.useScannedNameForExisting
+                val displayedName = if (useDbName) existingName!! else row.name
+                val nameHint = when {
+                    useDbName -> "অ্যাপ ডেটাবেসের নাম সুরক্ষিত"
+                    else -> row.deducedFields["name"]
+                }
+
+                Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    EditableCellField(
+                        value = displayedName,
+                        onValueChange = { if (!useDbName) onUpdateName(it) },
+                        label = if (useDbName) "শিক্ষার্থীর নাম (ডেটাবেস)" else "শিক্ষার্থীর নাম",
+                        confidence = if (useDbName) FieldConfidence.SURE else (report.fieldConfidences["name"] ?: FieldConfidence.SURE),
+                        hardError = if (useDbName) null else report.hardErrors["name"],
+                        uncertainWarning = if (useDbName) null else report.uncertainWarnings["name"],
+                        deducedHint = nameHint,
+                        onVerify = { onVerifyField("name") },
+                        isNumeric = false,
+                        centered = false,
+                        readOnly = useDbName,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    if (hasDbName && row.name.isNotBlank() && row.name.trim() != existingName!!.trim()) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Text(
+                                if (useDbName) "স্ক্যান পাঠ: ${row.name}" else "ডেটাবেস: $existingName",
+                                fontSize = 9.5.sp,
+                                color = SlateMuted,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.weight(1f)
+                            )
+                            Text(
+                                if (useDbName) "স্ক্যান নাম নিন" else "ডেটাবেস নাম রাখুন",
+                                fontSize = 9.5.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = TealPrimary,
+                                modifier = Modifier.clickable { onVerifyField("toggle_use_scanned_name") }
+                            )
+                        }
+                    }
+                }
             }
 
             val isArt = activeSub.comps.size == 1 && activeSub.comps.first().key == "TOTAL" && activeSub.written == 0
@@ -1608,11 +1645,14 @@ private fun ScannedStudentPreviewCard(
                 val contStr = report.calculatedContinuous?.let { bn(fmtEn(it)) } ?: "—"
                 val grandStr = report.calculatedGrandTotal?.let { bn(fmtEn(it)) } ?: "—"
                 Text(
-                    if (activeSub.written > 0) "হিসাব: ধারাবাহিক $contStr · মোট $grandStr"
-                    else "হিসাব: মোট $contStr",
+                    buildString {
+                        if (activeSub.written > 0) append("হিসাব: ধারাবাহিক $contStr · মোট $grandStr")
+                        else append("হিসাব: মোট $contStr")
+                        if (report.isSummaryOnlyMode) append(" · রেজাল্ট কার্ড মোড")
+                    },
                     fontSize = 11.sp,
                     fontWeight = FontWeight.Medium,
-                    color = SlateText
+                    color = if (report.isSummaryOnlyMode) TealDark else SlateText
                 )
                 if (row.rawNotes.isNotBlank()) {
                     Text(
@@ -1692,10 +1732,11 @@ private fun EditableCellField(
     onVerify: () -> Unit,
     isNumeric: Boolean,
     centered: Boolean = true,
+    readOnly: Boolean = false,
     modifier: Modifier = Modifier
 ) {
     val isSuspect = hardError != null || uncertainWarning != null || confidence == FieldConfidence.SUSPECT
-    val isSure = !isSuspect && value.isNotBlank()
+    val isSure = !isSuspect && confidence == FieldConfidence.SURE && value.isNotBlank()
     val msg = hardError ?: uncertainWarning
     val sureGreenBg = Color(0xFFECFDF5)
     val containerBg = when {
@@ -1730,6 +1771,7 @@ private fun EditableCellField(
         BasicTextField(
             value = value,
             onValueChange = onValueChange,
+            readOnly = readOnly,
             singleLine = true,
             textStyle = TextStyle(
                 fontSize = 14.sp,

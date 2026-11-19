@@ -9,7 +9,8 @@ import kotlin.math.abs
 
 enum class FieldConfidence {
     SURE,
-    SUSPECT
+    SUSPECT,
+    NEUTRAL
 }
 
 data class ArithFixSuggestion(
@@ -218,13 +219,16 @@ object ScanConstraintSolver {
         row: ScannedStudentRow,
         cls: Int,
         subKey: String,
-        duplicateRolls: Set<Int>
+        duplicateRolls: Set<Int>,
+        hasExistingDbName: Boolean = false
     ): RowValidationReport {
         val hard = mutableMapOf<String, String>()
         val warn = mutableMapOf<String, String>()
         val aiNorm = row.aiIssues.entries.associate { (k, v) -> normalizeIssueKey(k) to v }
+        val dbNameActive = hasExistingDbName && !row.useScannedNameForExisting
 
         aiNorm.forEach { (field, reason) ->
+            if (field == "name" && dbNameActive) return@forEach
             if (field !in row.resolvedFields) {
                 warn[field] = reason.ifBlank { "লেখা অস্পষ্ট — যাচাই করুন" }
             }
@@ -238,7 +242,7 @@ object ScanConstraintSolver {
             hard["roll"] = "রোল ${bn(rollNum.toString())} একাধিক সারিতে আছে"
         }
 
-        if (row.name.isBlank() && "name" !in row.resolvedFields && "name" !in warn) {
+        if (!dbNameActive && row.name.isBlank() && "name" !in row.resolvedFields && "name" !in warn) {
             warn["name"] = "নাম পড়া যায়নি — প্রয়োজনে লিখে দিন"
         }
 
@@ -250,6 +254,15 @@ object ScanConstraintSolver {
         val maxWr = subDef?.written ?: 0
         val maxGrand = subDef?.max ?: 100
         val isArt = compKeys == listOf("TOTAL") && !hasWritten
+
+        val rawCont = row.sheetContinuousTotal?.trim().orEmpty()
+        val rawGrand = row.sheetGrandTotal?.trim().orEmpty()
+        val rawWr = row.marksText["WR"]?.trim().orEmpty()
+
+        // রেজাল্ট কার্ড মোড: পাঠ্যবই–ক্লাস টেস্ট নেই, কেবল ধারাবাহিক মোট / সামষ্টিক / মোট আছে
+        val isSummaryOnlyMode = !isArt &&
+            compKeys.all { row.marksText[it]?.trim().isNullOrEmpty() && !aiNorm.containsKey(it) } &&
+            (rawCont.isNotEmpty() || rawGrand.isNotEmpty() || rawWr.isNotEmpty())
 
         val expectedMarkKeys = buildList {
             compSpecs.forEach { add(it.key to it.max) }
@@ -265,7 +278,8 @@ object ScanConstraintSolver {
             val raw = row.marksText[cKey]?.trim().orEmpty()
             if (raw.isEmpty()) {
                 if (cKey != "WR") hasAllComps = false
-                if (cKey !in row.resolvedFields && cKey !in warn) {
+                val isOptionalSummaryComp = isSummaryOnlyMode && cKey in compKeys
+                if (!isOptionalSummaryComp && cKey !in row.resolvedFields && cKey !in warn) {
                     warn[cKey] = "মান ফাঁকা — যাচাই করুন"
                 }
                 return@forEach
@@ -287,7 +301,6 @@ object ScanConstraintSolver {
         }
 
         // ধারাবাহিক মোট (CONT) ও সর্বমোট (GRAND) পার্সিং
-        val rawCont = row.sheetContinuousTotal?.trim().orEmpty()
         val sheetCont = if (rawCont.isEmpty()) null else fromBn(rawCont).toDoubleOrNull()?.also {
             if (it < 0.0 || it > maxCont.toDouble()) {
                 hard["CONT"] = "সর্বোচ্চ ${bn(maxCont.toString())}-এর মধ্যে হতে হবে"
@@ -300,7 +313,6 @@ object ScanConstraintSolver {
             warn["CONT"] = "ধারাবাহিক মোট ফাঁকা"
         }
 
-        val rawGrand = row.sheetGrandTotal?.trim().orEmpty()
         val sheetGrand = if (rawGrand.isEmpty()) null else fromBn(rawGrand).toDoubleOrNull()?.also {
             if (it < 0.0 || it > maxGrand.toDouble()) {
                 hard["GRAND"] = "সর্বোচ্চ ${bn(maxGrand.toString())}-এর মধ্যে হতে হবে"
@@ -349,7 +361,6 @@ object ScanConstraintSolver {
                 if (contMismatch) {
                     compKeys.forEach { if (it !in row.resolvedFields) mismatchFields.add(it) }
                     if ("CONT" !in row.resolvedFields) mismatchFields.add("CONT")
-                    // যদি সবগুলোই resolved হয় কিন্তু তবুও অমিল থাকে, সব সংশ্লিষ্ট ঘর লাল দেখান
                     if (mismatchFields.isEmpty()) {
                         mismatchFields.addAll(compKeys)
                         mismatchFields.add("CONT")
@@ -427,7 +438,7 @@ object ScanConstraintSolver {
             }
         }
 
-        // প্রতিটি ফিল্ডের শিউর (সবুজ) বনাম সন্দেহযুক্ত (লাল) অবস্থা নির্ধারণ
+        // প্রতিটি ফিল্ডের শিউর (সবুজ) বনাম সন্দেহযুক্ত (লাল) বনাম ঐচ্ছিক (নিউট্রাল) অবস্থা নির্ধারণ
         val allFieldKeys = buildList {
             add("roll")
             add("name")
@@ -440,7 +451,12 @@ object ScanConstraintSolver {
         val confidences = mutableMapOf<String, FieldConfidence>()
         allFieldKeys.forEach { key ->
             val isSuspect = key in hard || key in warn || key in mismatchFields
-            confidences[key] = if (isSuspect) FieldConfidence.SUSPECT else FieldConfidence.SURE
+            val isOptionalSummaryCell = isSummaryOnlyMode && key in compKeys && !isSuspect
+            confidences[key] = when {
+                isSuspect -> FieldConfidence.SUSPECT
+                isOptionalSummaryCell -> FieldConfidence.NEUTRAL
+                else -> FieldConfidence.SURE
+            }
         }
 
         return RowValidationReport(
@@ -451,7 +467,8 @@ object ScanConstraintSolver {
             calculatedGrandTotal = calcGrand,
             fieldConfidences = confidences,
             mismatchFields = mismatchFields,
-            quickFixes = fixes.distinctBy { "${it.targetField}:${it.newValue}" }
+            quickFixes = fixes.distinctBy { "${it.targetField}:${it.newValue}" },
+            isSummaryOnlyMode = isSummaryOnlyMode
         )
     }
 }

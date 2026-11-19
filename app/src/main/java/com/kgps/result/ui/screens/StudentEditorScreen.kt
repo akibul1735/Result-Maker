@@ -504,6 +504,7 @@ fun StudentEditorScreen(
                                                             else -> "${c.bn} (${bn(c.max.toString())})"
                                                         }
                                                         Box(Modifier.weight(1f)) {
+                                                            val ck = mk(sub.key, t, "CONT")
                                                             MarkField(
                                                                 label = shortLabel,
                                                                 max = c.max.toDouble(),
@@ -511,11 +512,25 @@ fun StudentEditorScreen(
                                                                 k = k,
                                                                 enabled = canEditSub
                                                             ) { v ->
-                                                                s = s.copy(m = if (v == null) s.m - k else s.m + (k to v))
+                                                                s = s.copy(m = if (v == null) s.m - k else (s.m - ck) + (k to v))
                                                             }
                                                         }
                                                     }
                                                     if (pair.size == 1) Spacer(Modifier.weight(1f))
+                                                }
+                                            }
+                                            val ck = mk(sub.key, t, "CONT")
+                                            val hasBreakdown = sub.comps.any { s.m.containsKey(mk(sub.key, t, it.key)) }
+                                            if (!hasBreakdown && s.m.containsKey(ck) && sub.key != "ART") {
+                                                val contMax = sub.comps.sumOf { it.max }
+                                                MarkField(
+                                                    label = "ধারাবাহিক মোট (সরাসরি · সর্বোচ্চ ${bn(contMax.toString())})",
+                                                    max = contMax.toDouble(),
+                                                    value = s.m[ck],
+                                                    k = ck,
+                                                    enabled = canEditSub
+                                                ) { v ->
+                                                    s = s.copy(m = if (v == null) s.m - ck else s.m + (ck to v))
                                                 }
                                             }
                                             if (sub.written > 0) {

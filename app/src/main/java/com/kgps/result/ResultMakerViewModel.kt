@@ -1486,7 +1486,10 @@ class ResultMakerViewModel(
                         }
                     }
 
-                    if (verifyField != null) {
+                    var nextUseScannedName = r.useScannedNameForExisting
+                    if (verifyField == "toggle_use_scanned_name") {
+                        nextUseScannedName = !nextUseScannedName
+                    } else if (verifyField != null) {
                         nextResolved.add(verifyField)
                     }
 
@@ -1497,7 +1500,8 @@ class ResultMakerViewModel(
                         sheetContinuousTotal = nextCont,
                         sheetGrandTotal = nextGrand,
                         resolvedFields = nextResolved,
-                        deducedFields = nextDeduced
+                        deducedFields = nextDeduced,
+                        useScannedNameForExisting = nextUseScannedName
                     )
                     if (editedKey != null) {
                         ScanConstraintSolver.reconcileInterdependencies(updatedRow, current.cls, current.subKey)
@@ -1572,15 +1576,19 @@ class ResultMakerViewModel(
             return
         }
 
+        val prevList = students.value
         val rollCounts = selectedRows.mapNotNull { fromBn(it.rollText.trim()).toIntOrNull() }.groupingBy { it }.eachCount()
         val duplicates = rollCounts.filterValues { it > 1 }.keys
-        val hasHardError = selectedRows.any { validateScannedStudentRow(it, cls, subKey, duplicates).hasHardError }
+        val hasHardError = selectedRows.any { row ->
+            val rInt = fromBn(row.rollText.trim()).toIntOrNull()
+            val hasDbName = rInt != null && prevList.any { it.cls == cls && it.roll == rInt && it.name.isNotBlank() }
+            validateScannedStudentRow(row, cls, subKey, duplicates, hasDbName).hasHardError
+        }
         if (hasHardError) {
             showMessage("লাল চিহ্নিত ত্রুটিপূর্ণ ঘরগুলো ঠিক করে আবার সংরক্ষণ করুন")
             return
         }
 
-        val prevList = students.value
         val out = prevList.toMutableList()
         var addedCount = 0
         var updatedCount = 0
@@ -1596,22 +1604,55 @@ class ResultMakerViewModel(
             val base = if (pos >= 0) out[pos] else createEmptyStudent(cls, roll)
             val nextM = base.m.toMutableMap()
             val subDef = subjectsFor(cls, RELIGIONS.first()).find { it.key == subKey }
-            val allowedComps = buildSet {
-                subDef?.comps?.forEach { add(it.key) }
-                if ((subDef?.written ?: 0) > 0) add("WR")
-            }
-            allowedComps.forEach { compKey ->
-                val raw = row.marksText[compKey]?.trim().orEmpty()
-                val fullKey = mk(subKey, term, compKey)
-                if (raw.isEmpty()) {
-                    nextM.remove(fullKey)
+            val compKeys = subDef?.comps?.map { it.key } ?: emptyList()
+            val hasWritten = (subDef?.written ?: 0) > 0
+            val isArt = compKeys == listOf("TOTAL") && !hasWritten
+            val hasBreakdown = compKeys.any { !row.marksText[it]?.trim().isNullOrEmpty() }
+
+            if (isArt) {
+                val totalRaw = row.marksText["TOTAL"]?.trim().takeIf { !it.isNullOrEmpty() }
+                    ?: row.sheetGrandTotal?.trim().orEmpty()
+                val fullKey = mk(subKey, term, "TOTAL")
+                if (totalRaw.isEmpty()) nextM.remove(fullKey)
+                else fromBn(totalRaw).toDoubleOrNull()?.let { nextM[fullKey] = it }
+            } else if (hasBreakdown) {
+                nextM.remove(mk(subKey, term, "CONT"))
+                compKeys.forEach { compKey ->
+                    val raw = row.marksText[compKey]?.trim().orEmpty()
+                    val fullKey = mk(subKey, term, compKey)
+                    if (raw.isEmpty()) {
+                        nextM.remove(fullKey)
+                    } else {
+                        fromBn(raw).toDoubleOrNull()?.let { d -> nextM[fullKey] = d }
+                    }
+                }
+            } else {
+                // রেজাল্ট কার্ড মোড (কেবল ধারাবাহিক মোট, সামষ্টিক ও মোট দিয়ে সংরক্ষণ)
+                compKeys.forEach { nextM.remove(mk(subKey, term, it)) }
+                val rawCont = row.sheetContinuousTotal?.trim().takeIf { !it.isNullOrEmpty() }
+                    ?: if (!hasWritten) row.sheetGrandTotal?.trim().orEmpty() else ""
+                val contKey = mk(subKey, term, "CONT")
+                if (rawCont.isEmpty()) {
+                    nextM.remove(contKey)
                 } else {
-                    fromBn(raw).toDoubleOrNull()?.let { d -> nextM[fullKey] = d }
+                    fromBn(rawCont).toDoubleOrNull()?.let { d -> nextM[contKey] = d }
                 }
             }
-            val cleanName = row.name.trim()
-            val candidate = if (perm.canManageStudents && cleanName.isNotBlank()) {
-                base.copy(name = cleanName, m = nextM)
+
+            if (hasWritten) {
+                val rawWr = row.marksText["WR"]?.trim().orEmpty()
+                val wrKey = mk(subKey, term, "WR")
+                if (rawWr.isEmpty()) {
+                    nextM.remove(wrKey)
+                } else {
+                    fromBn(rawWr).toDoubleOrNull()?.let { d -> nextM[wrKey] = d }
+                }
+            }
+
+            val cleanScannedName = row.name.trim()
+            val shouldKeepDbName = pos >= 0 && base.name.isNotBlank() && !row.useScannedNameForExisting
+            val candidate = if (!shouldKeepDbName && perm.canManageStudents && cleanScannedName.isNotBlank()) {
+                base.copy(name = cleanScannedName, m = nextM)
             } else {
                 base.copy(m = nextM)
             }
