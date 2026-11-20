@@ -369,14 +369,129 @@ interface AiRepository {
 }
 
 internal fun stripJsonFences(raw: String): String {
-    val trimmed = raw.trim()
-    if (!trimmed.startsWith("```")) return trimmed
+    var trimmed = raw.trim()
+    if (trimmed.startsWith("```")) {
+        trimmed = trimmed
+            .removePrefix("```json")
+            .removePrefix("```JSON")
+            .removePrefix("```")
+            .trim()
+        if (trimmed.endsWith("```")) {
+            trimmed = trimmed.removeSuffix("```").trim()
+        }
+    }
     return trimmed
-        .removePrefix("```json")
-        .removePrefix("```JSON")
-        .removePrefix("```")
-        .removeSuffix("```")
-        .trim()
+}
+
+internal fun extractBalancedJsonObject(raw: String): String {
+    val cleaned = stripJsonFences(raw)
+    val start = cleaned.indexOf('{')
+    if (start < 0) return cleaned
+    var depth = 0
+    var inString = false
+    var escaped = false
+    for (i in start until cleaned.length) {
+        val c = cleaned[i]
+        if (escaped) {
+            escaped = false
+            continue
+        }
+        if (c == '\\' && inString) {
+            escaped = true
+            continue
+        }
+        if (c == '"') {
+            inString = !inString
+            continue
+        }
+        if (!inString) {
+            if (c == '{') depth++
+            else if (c == '}') {
+                depth--
+                if (depth == 0) {
+                    return cleaned.substring(start, i + 1)
+                }
+            }
+        }
+    }
+    return cleaned.substring(start)
+}
+
+internal fun parseClassSheetJsonRobust(
+    raw: String,
+    clsHint: Int?,
+    termHint: Int?,
+    subKeyHint: String?
+): JSONObject {
+    val slice = extractBalancedJsonObject(raw)
+    try {
+        return JSONObject(slice)
+    } catch (primaryErr: Exception) {
+        // If output was truncated mid-array (e.g. MAX_TOKENS on large class), salvage all complete row objects
+        val rowsMatch = Regex("\"rows\"\\s*:\\s*\\[").find(slice) ?: throw primaryErr
+        val rowsStart = rowsMatch.range.last + 1
+        val salvagedRows = JSONArray()
+        var i = rowsStart
+        var inString = false
+        var escaped = false
+        var depth = 0
+        var objStart = -1
+        while (i < slice.length) {
+            val c = slice[i]
+            if (escaped) {
+                escaped = false
+                i++
+                continue
+            }
+            if (c == '\\' && inString) {
+                escaped = true
+                i++
+                continue
+            }
+            if (c == '"') {
+                inString = !inString
+                i++
+                continue
+            }
+            if (!inString) {
+                when (c) {
+                    '{' -> {
+                        if (depth == 0) objStart = i
+                        depth++
+                    }
+                    '}' -> {
+                        if (depth > 0) {
+                            depth--
+                            if (depth == 0 && objStart >= 0) {
+                                val rowText = slice.substring(objStart, i + 1)
+                                runCatching { JSONObject(rowText) }.getOrNull()?.let { salvagedRows.put(it) }
+                                objStart = -1
+                            }
+                        }
+                    }
+                    ']' -> if (depth == 0) break
+                }
+            }
+            i++
+        }
+        if (salvagedRows.length() == 0) throw primaryErr
+
+        val headerPrefix = slice.substring(0, rowsMatch.range.first)
+        val clsVal = clsHint ?: Regex("\"cls\"\\s*:\\s*(\\d)").find(headerPrefix)?.groupValues?.getOrNull(1)?.toIntOrNull() ?: 3
+        val termVal = termHint ?: Regex("\"term\"\\s*:\\s*(\\d)").find(headerPrefix)?.groupValues?.getOrNull(1)?.toIntOrNull() ?: 1
+        val subVal = subKeyHint ?: Regex("\"subKey\"\\s*:\\s*\"([A-Za-z0-9_]+)\"").find(headerPrefix)?.groupValues?.getOrNull(1) ?: "MATH"
+
+        return JSONObject().apply {
+            put("cls", clsVal)
+            put("term", termVal)
+            put("subKey", subVal)
+            put("summary", "")
+            put("warnings", JSONArray().apply {
+                put("মডেলের উত্তর দীর্ঘ হওয়ায় শেষ দিকের কিছু সারি অসম্পূর্ণ থাকতে পারে — প্রাপ্ত ${bn(salvagedRows.length().toString())}টি সারি দেখানো হয়েছে।")
+            })
+            put("rows", salvagedRows)
+        }
+    }
 }
 
 internal fun parseExtractedMarksheetJson(json: JSONObject): ExtractedMarksheet {
@@ -670,7 +785,7 @@ class DirectGeminiAiRepository(
         }
 
         val serializedBody = body.toString().toByteArray(Charsets.UTF_8)
-        val isLargePayload = serializedBody.size > 850_000
+        val isVisionOrHeavy = serializedBody.size > 80_000
         var lastError: Exception? = null
         val primaryCooldown = remainingCooldownSeconds(primaryModelId)
 
@@ -696,8 +811,8 @@ class DirectGeminiAiRepository(
                     break
                 } catch (e: GeminiNetworkException) {
                     lastError = e
-                    // For large image scans that already timed out, switch directly to a faster model
-                    if (e.isTimeout && isLargePayload) {
+                    // For vision scans that already timed out, switch directly to a faster healthy model
+                    if (e.isTimeout && isVisionOrHeavy) {
                         break
                     }
                     if (attempt == 0 && (e.isTimeout || e.isConnectionError)) {
@@ -867,10 +982,10 @@ class DirectGeminiAiRepository(
             {"summary":"","term":1,"student":{"name":"","cls":3,"roll":1,"guardian":"","religion":"ইসলাম"},"marks":[{"key":"MATH_1_TB","value":9.0,"subjectLabel":"গণিত (পাঠ্যবই)"}],"attendanceAndTraits":{"days":"","present":"","act":"","disc":"","cond":"","remark":""},"uncertainNotes":[]}
         """.trimIndent()
 
-        val payload = buildVisionJsonPayload(encoded.base64, prompt, maxOutputTokens = 2048)
+        val payload = buildVisionJsonPayload(encoded.base64, prompt, maxOutputTokens = 4096)
         val (raw, usedModel) = callGenerateContentResilient(apiKey, modelId, payload)
         return try {
-            val parsed = parseExtractedMarksheetJson(JSONObject(stripJsonFences(raw)))
+            val parsed = parseExtractedMarksheetJson(JSONObject(extractBalancedJsonObject(raw)))
             val withFallbackNote = if (usedModel != modelId) {
                 parsed.copy(
                     uncertainNotes = parsed.uncertainNotes +
@@ -879,8 +994,10 @@ class DirectGeminiAiRepository(
             } else parsed
             synchronized(cacheLock) { singleSheetCache[cacheKey] = withFallbackNote }
             withFallbackNote
+        } catch (e: IllegalStateException) {
+            throw e
         } catch (e: Exception) {
-            throw IllegalStateException("ছবিটি থেকে কাঠামোবদ্ধ ডেটা পড়া যায়নি। আরও স্পষ্ট ছবি তুলে আবার চেষ্টা করুন।", e)
+            throw IllegalStateException("ছবিটি থেকে কাঠামোবদ্ধ ডেটা পড়া যায়নি ($usedModel)। আরও স্পষ্ট ছবি তুলে আবার চেষ্টা করুন।", e)
         }
     }
 
@@ -943,16 +1060,16 @@ class DirectGeminiAiRepository(
             2. CT ঘরে "০৬+০৭=১৩/২=০৭" থাকলে "=" পরের গড় মানটি ("7") `CT`-তে এবং `rawNotes`-এ সংক্ষেপে লিখুন।
             3. `A`/`অনু` থাকলে "0" ও `rawNotes`-এ "অনুপস্থিত (A)"; ফাঁকা ঘর ""।
             $scopeRule
-            5. যে কলামগুলো ছবিতে নেই (`name`, `TB`, `ACT`, `LANG`, `CT`, `sheetContinuousTotal`, `WR`, `sheetGrandTotal`) সেগুলো কখনোই অনুমান করে ভাগ বা হিসাব করবেন না — ফাঁকা (`""`) রাখুন এবং অনুপস্থিত কলামের জন্য `uncertainFields`-এ সতর্কতা দেবেন না।
+            5. যে কলামগুলো ছবিতে নেই (`name`, `TB`, `ACT`, `LANG`, `CT`, `sheetContinuousTotal`, `WR`, `sheetGrandTotal`) সেগুলো অনুমান করে হিসাব করবেন না — ফাঁকা রাখুন এবং JSON ছোট রাখতে অনুপস্থিত বা ফাঁকা কীগুলো বাদ দিন।
             6. ছবিতে আসলে কোনো সংখ্যা/লেখা অস্পষ্ট হলে তবেই `uncertainFields`-এ কারণ দিন। `metaFound`-এ ছবির উপরে শ্রেণি/প্রান্তিক/বিষয় লেখা পেলে true দিন, না পেলে false।
             JSON: {"cls":${clsHint ?: 3},"term":${termHint ?: 1},"subKey":"${subKeyHint ?: "MATH"}","metaFound":{"cls":${clsHint != null},"term":${termHint != null},"sub":${!subKeyHint.isNullOrBlank()}},"summary":"","warnings":[],"rows":[{"roll":"1","name":"","marks":{"TB":"","ACT":"","LANG":"","CT":"","WR":""},"sheetContinuousTotal":"","sheetGrandTotal":"","rawNotes":"","uncertainFields":{}}]}
         """.trimIndent()
 
-        val payload = buildVisionJsonPayload(encoded.base64, prompt, maxOutputTokens = 4096)
+        val payload = buildVisionJsonPayload(encoded.base64, prompt, maxOutputTokens = 8192)
         val (raw, usedModel) = callGenerateContentResilient(apiKey, modelId, payload)
         return try {
             val parsed = parseExtractedClassSheetJson(
-                JSONObject(stripJsonFences(raw)),
+                parseClassSheetJsonRobust(raw, clsHint, termHint, subKeyHint),
                 clsHint,
                 termHint,
                 subKeyHint,
@@ -966,8 +1083,10 @@ class DirectGeminiAiRepository(
             } else parsed
             synchronized(cacheLock) { classSheetCache[cacheKey] = withFallbackWarning }
             withFallbackWarning
+        } catch (e: IllegalStateException) {
+            throw e
         } catch (e: Exception) {
-            throw IllegalStateException("ছবিটি থেকে শ্রেণি-নম্বরপত্র পড়া যায়নি। আরও স্পষ্ট ও সোজা ছবি তুলে আবার চেষ্টা করুন।", e)
+            throw IllegalStateException("ছবিটি থেকে শ্রেণি-নম্বরপত্র পড়া যায়নি ($usedModel)। আরও স্পষ্ট ও সোজা ছবি তুলে আবার চেষ্টা করুন।", e)
         }
     }
 
@@ -1026,21 +1145,92 @@ class DirectGeminiAiRepository(
             }.getOrDefault(true)
         }
 
+        private fun thinkingStepsForModel(cleanModel: String, body: JSONObject): List<JSONObject?> {
+            val genCfg = body.optJSONObject("generationConfig")
+            val isJsonExtraction = genCfg?.optString("responseMimeType") == "application/json"
+            if (!isJsonExtraction) return listOf(null)
+            val lower = cleanModel.lowercase()
+            return when {
+                lower.contains("2.5") -> {
+                    val budget = if (lower.contains("pro")) 128 else 0
+                    listOf(JSONObject().put("thinkingBudget", budget), null)
+                }
+                Regex("gemini-(?:3|4)(?:\\.|-)").containsMatchIn(lower) -> {
+                    if (lower.contains("flash")) {
+                        listOf(
+                            JSONObject().put("thinkingLevel", "MINIMAL"),
+                            JSONObject().put("thinkingLevel", "LOW"),
+                            null
+                        )
+                    } else {
+                        listOf(
+                            JSONObject().put("thinkingLevel", "LOW"),
+                            null
+                        )
+                    }
+                }
+                else -> listOf(null)
+            }
+        }
+
+        private fun cloneBodyWithThinkingConfig(baseBody: JSONObject, thinkingCfg: JSONObject?): JSONObject {
+            if (thinkingCfg == null) return baseBody
+            val oldGen = baseBody.optJSONObject("generationConfig") ?: JSONObject()
+            val newGen = JSONObject(oldGen.toString()).apply {
+                put("thinkingConfig", thinkingCfg)
+            }
+            return JSONObject().apply {
+                val keys = baseBody.keys()
+                while (keys.hasNext()) {
+                    val k = keys.next()
+                    if (k != "generationConfig") put(k, baseBody.get(k))
+                }
+                put("generationConfig", newGen)
+            }
+        }
+
         internal suspend fun callGenerateContent(
             apiKey: String,
             modelId: String,
             body: JSONObject,
             preSerializedBody: ByteArray? = null
         ): String = withContext(Dispatchers.IO) {
-            val bodyBytes = preSerializedBody ?: body.toString().toByteArray(Charsets.UTF_8)
-            val isVisionOrLarge = bodyBytes.size > 100_000
             val cleanModel = GeminiApiConfig.normalizeModelId(modelId)
+            val thinkingSteps = thinkingStepsForModel(cleanModel, body)
+            for (idx in thinkingSteps.indices) {
+                val thinkingCfg = thinkingSteps[idx]
+                val effectiveBytes = if (thinkingCfg == null && preSerializedBody != null) {
+                    preSerializedBody
+                } else {
+                    cloneBodyWithThinkingConfig(body, thinkingCfg).toString().toByteArray(Charsets.UTF_8)
+                }
+                try {
+                    return@withContext executeSingleGenerateCall(apiKey, cleanModel, effectiveBytes)
+                } catch (e: GeminiHttpException) {
+                    val canStepDownThinking = e.httpCode == 400 &&
+                        thinkingCfg != null &&
+                        idx < thinkingSteps.lastIndex
+                    if (canStepDownThinking) {
+                        continue
+                    }
+                    throw e
+                }
+            }
+            throw IllegalStateException("Gemini API অনুরোধ সম্পন্ন করা যায়নি।")
+        }
+
+        private fun executeSingleGenerateCall(
+            apiKey: String,
+            cleanModel: String,
+            bodyBytes: ByteArray
+        ): String {
+            val isVisionOrLarge = bodyBytes.size > 80_000
             val encodedModel = URLEncoder.encode(cleanModel, "UTF-8")
             val endpoint = "$BASE_URL/models/$encodedModel:generateContent"
             val conn = (URL(endpoint).openConnection() as HttpURLConnection).apply {
                 requestMethod = "POST"
                 connectTimeout = 30_000
-                readTimeout = if (isVisionOrLarge) 135_000 else 65_000
+                readTimeout = if (isVisionOrLarge) 80_000 else 55_000
                 doOutput = true
                 setFixedLengthStreamingMode(bodyBytes.size)
                 setRequestProperty("x-goog-api-key", apiKey)
@@ -1065,7 +1255,7 @@ class DirectGeminiAiRepository(
                         retryAfterSeconds = retrySec
                     )
                 }
-                extractCandidateText(JSONObject(respText))
+                return extractCandidateText(JSONObject(respText))
             } catch (e: GeminiHttpException) {
                 throw e
             } catch (e: GeminiNetworkException) {
@@ -1082,14 +1272,33 @@ class DirectGeminiAiRepository(
         private fun extractCandidateText(json: JSONObject): String {
             val candidates = json.optJSONArray("candidates") ?: return ""
             if (candidates.length() == 0) return ""
-            val content = candidates.optJSONObject(0)?.optJSONObject("content") ?: return ""
-            val parts = content.optJSONArray("parts") ?: return ""
-            return buildString {
-                for (i in 0 until parts.length()) {
-                    val t = parts.optJSONObject(i)?.optString("text", "").orEmpty()
-                    if (t.isNotEmpty()) append(t)
+            val first = candidates.optJSONObject(0) ?: return ""
+            val finishReason = first.optString("finishReason", "").uppercase()
+            val content = first.optJSONObject("content")
+            val parts = content?.optJSONArray("parts")
+            val text = if (parts != null) {
+                buildString {
+                    for (i in 0 until parts.length()) {
+                        val p = parts.optJSONObject(i) ?: continue
+                        // Skip internal thought summary parts from reasoning models
+                        if (p.optBoolean("thought", false)) continue
+                        val t = p.optString("text", "")
+                        if (t.isNotEmpty()) append(t)
+                    }
+                }.trim()
+            } else ""
+
+            if (text.isBlank()) {
+                when (finishReason) {
+                    "MAX_TOKENS" -> throw IllegalStateException(
+                        "মডেলের আউটপুট টোকেন সীমায় আটকে গেছে। ছবিটি ছোট করে ক্রপ করুন অথবা ২ ভাগে স্ক্যান করুন।"
+                    )
+                    "SAFETY", "RECITATION", "PROHIBITED_CONTENT" -> throw IllegalStateException(
+                        "সার্ভার ফিল্টারের কারণে ছবিটি প্রসেস করা যায়নি ($finishReason)। পরিষ্কার ছবি দিয়ে আবার চেষ্টা করুন।"
+                    )
                 }
-            }.trim()
+            }
+            return text
         }
 
         suspend fun fetchModelsOnly(rawApiKey: String): Result<List<DiscoveredGeminiModel>> = withContext(Dispatchers.IO) {
