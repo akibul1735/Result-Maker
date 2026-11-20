@@ -6,6 +6,7 @@ import android.graphics.Color as AndroidColor
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.SystemBarStyle
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -30,6 +31,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.AutoAwesome
+import androidx.compose.material.icons.rounded.Dashboard
 import androidx.compose.material.icons.rounded.Description
 import androidx.compose.material.icons.rounded.GridOn
 import androidx.compose.material.icons.rounded.Lock
@@ -99,6 +101,7 @@ import com.kgps.result.ui.screens.AiAssistantScreen
 import com.kgps.result.ui.screens.AuthScreen
 import com.kgps.result.ui.screens.BatchStudentEditDialog
 import com.kgps.result.ui.screens.BulkSheetScreen
+import com.kgps.result.ui.screens.DashboardScreen
 import com.kgps.result.ui.screens.ReportStudioScreen
 import com.kgps.result.ui.screens.RosterScreen
 import com.kgps.result.ui.screens.SchoolHubScreen
@@ -146,6 +149,7 @@ private data class NavItem(
 )
 
 private val PRIMARY_NAV_ITEMS = listOf(
+    NavItem(NavSection.DASHBOARD, "ড্যাশবোর্ড", Icons.Rounded.Dashboard),
     NavItem(NavSection.ROSTER, "শিক্ষার্থী", Icons.Rounded.People),
     NavItem(NavSection.SHEET, "ব্যাচ এন্ট্রি", Icons.Rounded.GridOn),
     NavItem(NavSection.STUDIO, "রিপোর্ট", Icons.Rounded.Description),
@@ -490,6 +494,10 @@ fun ResultMakerWorkspace(
     val isSettings = section == NavSection.SETTINGS
     val showPrimaryChrome = !isEditing && !isSettings
 
+    BackHandler(enabled = !isEditing && (section == NavSection.ROSTER || section == NavSection.SHEET || section == NavSection.ASSISTANT)) {
+        vm.navigate(NavSection.DASHBOARD)
+    }
+
     BoxWithConstraints(Modifier.fillMaxSize()) {
         val useRail = maxWidth >= 600.dp
 
@@ -505,7 +513,7 @@ fun ResultMakerWorkspace(
                         permissions = permissions,
                         pendingRequestCount = joinRequests.size,
                         isSettings = isSettings,
-                        onBackFromSettings = { vm.navigate(NavSection.ROSTER) },
+                        onBackFromSettings = { vm.navigate(NavSection.DASHBOARD) },
                         onOpenSettings = { vm.navigate(NavSection.SETTINGS) },
                         onCsvImport = { vm.openCsvImport("") },
                         onAiScan = vm::openAiScanner,
@@ -545,7 +553,8 @@ fun ResultMakerWorkspace(
                                 label = {
                                     Text(
                                         item.shortLabel,
-                                        fontSize = 11.5.sp,
+                                        fontSize = 10.5.sp,
+                                        softWrap = false,
                                         maxLines = 1,
                                         overflow = TextOverflow.Ellipsis
                                     )
@@ -606,37 +615,54 @@ fun ResultMakerWorkspace(
                             )
                         } else {
                             when (section) {
-                                NavSection.ROSTER -> RosterScreen(
+                                NavSection.DASHBOARD -> DashboardScreen(
                                     students = students,
                                     settings = settings,
-                                    cls = cls,
+                                    selectedClass = cls,
                                     permissions = permissions,
                                     isAdmin = isAdmin,
                                     pendingRequestCount = joinRequests.size,
+                                    backupStatus = backupStatus,
                                     onOpenApprovals = { vm.navigate(NavSection.SETTINGS) },
-                                    onSelectClass = vm::selectClass,
-                                    onOpenStudent = { vm.openEditor(it, NavSection.ROSTER) },
-                                    onPreviewStudent = { vm.openStudio(it.id) },
-                                    onNewStudentInClass = { targetCls ->
-                                        vm.selectClass(targetCls)
-                                        vm.openNewStudentEditor(NavSection.ROSTER)
-                                    },
-                                    onOpenSheetInClass = vm::openSheetForClass,
+                                    onOpenSettings = { vm.navigate(NavSection.SETTINGS) },
                                     onCsvImport = { vm.openCsvImport("") },
                                     onBatchEdit = { vm.openBatchEdit(null) },
                                     onAiScan = vm::openAiScanner,
-                                    onClassPdf = { targetCls ->
-                                        makePdf(
-                                            students.filter { it.cls == targetCls }.sortedBy { it.roll },
-                                            "শ্রেণি-$targetCls-প্রতিবেদন.pdf"
-                                        )
-                                    },
                                     onAllPdf = {
                                         val allowedCls = permissions.effectiveClasses().toSet()
                                         makePdf(
                                             students.filter { it.cls in allowedCls }.sortedWith(compareBy({ it.cls }, { it.roll })),
                                             "সব-শ্রেণির-প্রতিবেদন.pdf"
                                         )
+                                    },
+                                    onPrintBatch = { batchList, jobName ->
+                                        if (!permissions.canExportPdf) {
+                                            vm.showMessage("প্রিন্ট করার অনুমতি আপনার নেই")
+                                        } else if (batchList.isEmpty()) {
+                                            vm.showMessage("প্রিন্ট করার জন্য কোনো শিক্ষার্থী নির্বাচিত নেই")
+                                        } else {
+                                            PdfGen.printStudents(ctx, batchList, settings, jobName)
+                                        }
+                                    },
+                                    onExportBatchPdf = { batchList, fileName ->
+                                        makePdf(batchList, fileName)
+                                    },
+                                    onBackupNowAll = vm::backupNowAll,
+                                    onOpenStudent = { vm.openEditor(it, NavSection.DASHBOARD) },
+                                    onPreviewStudent = { vm.openStudio(it.id) },
+                                    onOpenSheetInClass = vm::openSheetForClass
+                                )
+
+                                NavSection.ROSTER -> RosterScreen(
+                                    students = students,
+                                    settings = settings,
+                                    cls = cls,
+                                    permissions = permissions,
+                                    onSelectClass = vm::selectClass,
+                                    onOpenStudent = { vm.openEditor(it, NavSection.ROSTER) },
+                                    onNewStudentInClass = { targetCls ->
+                                        vm.selectClass(targetCls)
+                                        vm.openNewStudentEditor(NavSection.ROSTER)
                                     }
                                 )
 
@@ -681,8 +707,8 @@ fun ResultMakerWorkspace(
                                             color = SlateMuted,
                                             modifier = Modifier.padding(top = 4.dp, bottom = 12.dp)
                                         )
-                                        Button(onClick = { vm.navigate(NavSection.ROSTER) }) {
-                                            Text("শিক্ষার্থী তালিকায় ফিরুন")
+                                        Button(onClick = { vm.navigate(NavSection.DASHBOARD) }) {
+                                            Text("ড্যাশবোর্ডে ফিরুন")
                                         }
                                     }
                                 } else {
@@ -713,7 +739,7 @@ fun ResultMakerWorkspace(
                                         onExportBatchPdf = { batchList, fileName ->
                                             makePdf(batchList, fileName)
                                         },
-                                        onBack = { vm.navigate(NavSection.ROSTER) }
+                                        onBack = { vm.navigate(NavSection.DASHBOARD) }
                                     )
                                 }
 
@@ -824,7 +850,7 @@ fun ResultMakerWorkspace(
                                     onClearGeminiApiKey = vm::clearGeminiApiKey,
                                     onSignOut = onSignOut,
                                     onShowMessage = vm::showMessage,
-                                    onBack = { vm.navigate(NavSection.ROSTER) }
+                                    onBack = { vm.navigate(NavSection.DASHBOARD) }
                                 )
                             }
                         }

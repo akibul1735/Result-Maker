@@ -72,6 +72,7 @@ import kotlinx.coroutines.withContext
 import java.util.UUID
 
 enum class NavSection(val route: String, val labelBn: String) {
+    DASHBOARD("dashboard", "ড্যাশবোর্ড"),
     ROSTER("roster", "শিক্ষার্থী তালিকা"),
     SHEET("sheet", "ব্যাচ এন্ট্রি"),
     STUDIO("studio", "রিপোর্ট স্টুডিও"),
@@ -302,13 +303,13 @@ class ResultMakerViewModel(
     private val _selectedClass = MutableStateFlow(1)
     val selectedClass: StateFlow<Int> = _selectedClass.asStateFlow()
 
-    private val _currentSection = MutableStateFlow(NavSection.ROSTER)
+    private val _currentSection = MutableStateFlow(NavSection.DASHBOARD)
     val currentSection: StateFlow<NavSection> = _currentSection.asStateFlow()
 
     private val _editingStudent = MutableStateFlow<Student?>(null)
     val editingStudent: StateFlow<Student?> = _editingStudent.asStateFlow()
 
-    private val _editReturnSection = MutableStateFlow(NavSection.ROSTER)
+    private val _editReturnSection = MutableStateFlow(NavSection.DASHBOARD)
     val editReturnSection: StateFlow<NavSection> = _editReturnSection.asStateFlow()
 
     private val _studioStudentId = MutableStateFlow<String?>(null)
@@ -540,7 +541,7 @@ class ResultMakerViewModel(
         _selectedSchoolOverrideId.value = schoolId
         _editingStudent.value = null
         _studioStudentId.value = null
-        _currentSection.value = NavSection.ROSTER
+        _currentSection.value = NavSection.DASHBOARD
         _inSchoolHub.value = false
         viewModelScope.launch {
             cloudRepo.setActiveSchoolId(schoolId).onFailure { e ->
@@ -581,7 +582,7 @@ class ResultMakerViewModel(
                 _pendingJoinSchoolId.value = null
                 _selectedSchoolOverrideId.value = created.id
                 _inSchoolHub.value = false
-                _currentSection.value = NavSection.ROSTER
+                _currentSection.value = NavSection.DASHBOARD
                 showMessage("বিদ্যালয় তৈরি হয়েছে! স্কুল কোড: ${created.joinCode}")
             }.onFailure { e ->
                 showMessage(friendlyFirestoreErrorMessage(e))
