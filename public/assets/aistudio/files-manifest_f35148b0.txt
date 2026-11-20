@@ -1,0 +1,9 @@
+build-logs:
+total 12K
+-rw-r--r-- 1 runner runner 1.6K Nov 20 04:51 environment.log
+-rw-r--r-- 1 runner runner    0 Nov 20 04:51 files-manifest.txt
+drwxr-xr-x 2 runner runner 4.0K Nov 20 04:51 gradle-reports
+-rw-r--r-- 1 runner runner 2.6K Nov 20 04:51 inspection-summary.md
+
+build-logs/gradle-reports:
+total 0
