@@ -114,6 +114,9 @@ import com.kgps.result.ui.theme.SlateMuted
 import com.kgps.result.ui.theme.SlateText
 import com.kgps.result.ui.theme.TealPrimary
 import com.kgps.result.ui.theme.TealSoft
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -444,18 +447,29 @@ fun ResultMakerWorkspace(
     val geminiTestSuccess by vm.geminiTestSuccess.collectAsStateWithLifecycle()
     val isGeminiConfigured by vm.isGeminiConfigured.collectAsStateWithLifecycle()
 
+    val workspaceScope = rememberCoroutineScope()
     var askSignOut by remember { mutableStateOf(false) }
 
     var pendingPdfStudents by remember { mutableStateOf<List<Student>>(emptyList()) }
+    var pdfExportingCount by remember { mutableStateOf<Int?>(null) }
     val pdfLauncher = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/pdf")) { uri ->
-        if (uri != null) {
-            try {
-                ctx.contentResolver.openOutputStream(uri)?.use { out ->
-                    PdfGen.write(ctx, pendingPdfStudents, settings, out)
+        val listToWrite = pendingPdfStudents
+        if (uri != null && listToWrite.isNotEmpty()) {
+            pdfExportingCount = listToWrite.size
+            workspaceScope.launch {
+                val result = runCatching {
+                    withContext(Dispatchers.IO) {
+                        ctx.contentResolver.openOutputStream(uri)?.use { out ->
+                            PdfGen.write(ctx, listToWrite, settings, out)
+                        }
+                    }
                 }
-                vm.showMessage("PDF সংরক্ষিত হয়েছে")
-            } catch (e: Exception) {
-                vm.showMessage("PDF তৈরি করা যায়নি: ${e.message ?: "ত্রুটি"}")
+                pdfExportingCount = null
+                result.onSuccess {
+                    vm.showMessage("PDF সংরক্ষিত হয়েছে (${bn(listToWrite.size.toString())} জন)")
+                }.onFailure { e ->
+                    vm.showMessage("PDF তৈরি করা যায়নি: ${e.message ?: "ত্রুটি"}")
+                }
             }
         }
     }
@@ -689,6 +703,16 @@ fun ResultMakerWorkspace(
                                             )
                                         },
                                         onExportPdf = { s -> makePdf(listOf(s), "${s.name.ifBlank { "student" }}-report.pdf") },
+                                        onPrintBatch = { batchList, jobName ->
+                                            if (batchList.isEmpty()) {
+                                                vm.showMessage("প্রিন্ট করার জন্য কোনো শিক্ষার্থী নির্বাচিত নেই")
+                                            } else {
+                                                PdfGen.printStudents(ctx, batchList, settings, jobName)
+                                            }
+                                        },
+                                        onExportBatchPdf = { batchList, fileName ->
+                                            makePdf(batchList, fileName)
+                                        },
                                         onBack = { vm.navigate(NavSection.ROSTER) }
                                     )
                                 }
@@ -851,6 +875,27 @@ fun ResultMakerWorkspace(
             dismissButton = {
                 TextButton(onClick = { askSignOut = false }) { Text("বাতিল") }
             }
+        )
+    }
+
+    pdfExportingCount?.let { count ->
+        AlertDialog(
+            onDismissRequest = {},
+            title = { Text("PDF তৈরি হচ্ছে...", fontWeight = FontWeight.Bold, fontSize = 16.sp) },
+            text = {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    CircularProgressIndicator(modifier = Modifier.size(24.dp), strokeWidth = 2.5.dp, color = TealPrimary)
+                    Text(
+                        "${bn(count.toString())} জন শিক্ষার্থীর (${bn((count * 2).toString())} পৃষ্ঠা) প্রতিবেদন প্রস্তুত করা হচ্ছে...",
+                        fontSize = 13.sp,
+                        color = SlateText
+                    )
+                }
+            },
+            confirmButton = {}
         )
     }
 }

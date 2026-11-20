@@ -43,6 +43,7 @@ import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.Download
 import androidx.compose.material.icons.rounded.Fullscreen
+import androidx.compose.material.icons.rounded.LibraryBooks
 import androidx.compose.material.icons.rounded.Print
 import androidx.compose.material.icons.rounded.Remove
 import androidx.compose.material.icons.rounded.Search
@@ -62,6 +63,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedIconButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -99,6 +101,7 @@ import com.kgps.result.Settings
 import com.kgps.result.Student
 import com.kgps.result.bn
 import com.kgps.result.fromBn
+import com.kgps.result.ui.components.BatchReportDialog
 import com.kgps.result.ui.theme.SlateBg
 import com.kgps.result.ui.theme.SlateMuted
 import com.kgps.result.ui.theme.SlateOutline
@@ -130,6 +133,8 @@ fun ReportStudioScreen(
     onUpdateSettings: (Settings) -> Unit,
     onPrintStudent: (Student) -> Unit,
     onExportPdf: (Student) -> Unit,
+    onPrintBatch: (List<Student>, String) -> Unit = { list, _ -> list.firstOrNull()?.let(onPrintStudent) },
+    onExportBatchPdf: (List<Student>, String) -> Unit = { list, _ -> list.firstOrNull()?.let(onExportPdf) },
     onBack: () -> Unit
 ) {
     val ctx = LocalContext.current
@@ -150,6 +155,7 @@ fun ReportStudioScreen(
     var showSearchDialog by remember { mutableStateOf(false) }
     var showCustomizeSheet by remember { mutableStateOf(false) }
     var showFullscreenPreview by remember { mutableStateOf(false) }
+    var showBatchDialog by remember { mutableStateOf(false) }
 
     var zoomScale by remember { mutableFloatStateOf(1f) }
     var panOffset by remember { mutableStateOf(Offset.Zero) }
@@ -694,49 +700,67 @@ fun ReportStudioScreen(
                 }
             }
 
-            // Bottom Compact Action Bar
+            // Bottom Compact Action Bar: Customize + Batch/Class/All + Single Print + Single PDF
             Surface(
                 color = MaterialTheme.colorScheme.surface,
                 border = BorderStroke(1.dp, SlateOutline),
                 shape = RoundedCornerShape(10.dp)
             ) {
                 Row(
-                    Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 5.dp),
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    Modifier.fillMaxWidth().padding(horizontal = 6.dp, vertical = 5.dp),
+                    horizontalArrangement = Arrangement.spacedBy(5.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    OutlinedButton(
+                    OutlinedIconButton(
                         onClick = { showCustomizeSheet = true },
                         shape = RoundedCornerShape(8.dp),
                         border = BorderStroke(1.dp, SlateOutline),
-                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 8.dp),
-                        modifier = Modifier.testTag("studio_customize_btn")
+                        modifier = Modifier.size(44.dp).testTag("studio_customize_btn")
                     ) {
-                        Icon(Icons.Rounded.Tune, contentDescription = null, modifier = Modifier.size(16.dp))
-                        Text(" ফন্ট/লোগো", fontSize = 11.5.sp, maxLines = 1)
+                        Icon(Icons.Rounded.Tune, contentDescription = "ফন্ট ও লোগো সেটিংস", modifier = Modifier.size(18.dp))
+                    }
+                    OutlinedButton(
+                        onClick = { showBatchDialog = true },
+                        shape = RoundedCornerShape(8.dp),
+                        border = BorderStroke(1.dp, TealPrimary),
+                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 8.dp),
+                        modifier = Modifier.weight(1.1f).testTag("studio_batch_btn")
+                    ) {
+                        Icon(Icons.Rounded.LibraryBooks, contentDescription = null, tint = TealPrimary, modifier = Modifier.size(15.dp))
+                        Text(" ব্যাচ/সব", fontSize = 11.5.sp, fontWeight = FontWeight.SemiBold, color = TealPrimary, maxLines = 1)
                     }
                     OutlinedButton(
                         onClick = { onPrintStudent(active) },
                         shape = RoundedCornerShape(8.dp),
                         border = BorderStroke(1.dp, SlateOutline),
-                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 8.dp),
-                        modifier = Modifier.weight(1f).testTag("studio_print_btn")
+                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 8.dp),
+                        modifier = Modifier.weight(0.9f).testTag("studio_print_btn")
                     ) {
-                        Icon(Icons.Rounded.Print, contentDescription = null, modifier = Modifier.size(16.dp))
-                        Text(" প্রিন্ট", fontSize = 12.sp, maxLines = 1)
+                        Icon(Icons.Rounded.Print, contentDescription = null, modifier = Modifier.size(15.dp))
+                        Text(" প্রিন্ট", fontSize = 11.5.sp, maxLines = 1)
                     }
                     Button(
                         onClick = { onExportPdf(active) },
                         shape = RoundedCornerShape(8.dp),
-                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 8.dp),
-                        modifier = Modifier.weight(1.1f).testTag("studio_download_pdf_btn")
+                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 8.dp),
+                        modifier = Modifier.weight(0.95f).testTag("studio_download_pdf_btn")
                     ) {
-                        Icon(Icons.Rounded.Download, contentDescription = null, modifier = Modifier.size(16.dp))
-                        Text(" PDF", fontSize = 12.sp, maxLines = 1)
+                        Icon(Icons.Rounded.Download, contentDescription = null, modifier = Modifier.size(15.dp))
+                        Text(" PDF", fontSize = 11.5.sp, maxLines = 1)
                     }
                 }
             }
         }
+    }
+
+    if (showBatchDialog) {
+        BatchReportDialog(
+            sortedStudents = sorted,
+            initialClass = active.cls,
+            onPrintBatch = onPrintBatch,
+            onExportBatchPdf = onExportBatchPdf,
+            onDismiss = { showBatchDialog = false }
+        )
     }
 
     // Student Quick Search Dialog (by Class, Roll, or Name)

@@ -323,18 +323,21 @@ object PdfGen {
 
     fun write(ctx: Context, students: List<Student>, st: Settings, out: OutputStream) {
         val doc = PdfDocument()
-        var n = 1
-        students.forEach { s ->
-            val p1 = doc.startPage(PdfDocument.PageInfo.Builder(W, H, n++).create())
-            cover(ctx, p1.canvas, s, st, showFoldGuide = false)
-            doc.finishPage(p1)
+        try {
+            var n = 1
+            students.forEach { s ->
+                val p1 = doc.startPage(PdfDocument.PageInfo.Builder(W, H, n++).create())
+                cover(ctx, p1.canvas, s, st, showFoldGuide = false)
+                doc.finishPage(p1)
 
-            val p2 = doc.startPage(PdfDocument.PageInfo.Builder(W, H, n++).create())
-            marks(ctx, p2.canvas, s, st.pdfFont, showFoldGuide = false)
-            doc.finishPage(p2)
+                val p2 = doc.startPage(PdfDocument.PageInfo.Builder(W, H, n++).create())
+                marks(ctx, p2.canvas, s, st.pdfFont, showFoldGuide = false)
+                doc.finishPage(p2)
+            }
+            doc.writeTo(out)
+        } finally {
+            doc.close()
         }
-        doc.writeTo(out)
-        doc.close()
     }
 
     fun printStudents(ctx: Context, students: List<Student>, st: Settings, jobName: String) {
