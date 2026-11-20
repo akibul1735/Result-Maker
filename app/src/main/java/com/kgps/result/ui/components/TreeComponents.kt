@@ -180,7 +180,7 @@ fun TreeGroupCard(
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(start = 12.dp, end = 12.dp, top = 8.dp, bottom = 12.dp),
+                            .padding(start = 6.dp, end = 8.dp, top = 8.dp, bottom = 10.dp),
                         verticalArrangement = Arrangement.spacedBy(8.dp),
                         content = content
                     )
@@ -207,23 +207,23 @@ fun TreeBranchItem(
     ) {
         Box(
             modifier = Modifier
-                .width(18.dp)
+                .width(10.dp)
                 .fillMaxHeight()
                 .drawBehind {
-                    val x = size.width * 0.45f
+                    val x = size.width * 0.4f
                     val midY = size.height * 0.5f
                     val endY = if (isLast) midY else size.height
                     drawLine(
                         color = lineColor,
                         start = Offset(x, 0f),
                         end = Offset(x, endY),
-                        strokeWidth = 2.5f
+                        strokeWidth = 2f
                     )
                     drawLine(
                         color = lineColor,
                         start = Offset(x, midY),
-                        end = Offset(size.width, midY),
-                        strokeWidth = 2.5f
+                        end = Offset(size.width - 1f, midY),
+                        strokeWidth = 2f
                     )
                 }
         )

@@ -12,21 +12,25 @@ import java.util.zip.ZipOutputStream
 enum class CsvHeaderStyle(
     val id: String,
     val labelBn: String,
+    val shortBn: String,
     val previewBn: String
 ) {
     FRIENDLY_BN(
         id = "friendly_bn",
         labelBn = "সহজ বাংলা হেডার",
+        shortBn = "সহজ বাংলা",
         previewBn = "শ্রেণি, রোল নম্বর, শিক্ষার্থীর নাম, বাংলা (১ম প্রান্তিক) - লিখিত"
     ),
     FRIENDLY_EN(
         id = "friendly_en",
         labelBn = "সহজ ইংরেজি হেডার",
+        shortBn = "সহজ ইংরেজি",
         previewBn = "Class, Roll No, Student Name, Bangla (Term 1) - Written"
     ),
     SYSTEM_KEYS(
         id = "system_keys",
         labelBn = "সিস্টেম কোড (Raw)",
+        shortBn = "সিস্টেম কোড",
         previewBn = "cls, roll, name, BAN_1_WR"
     );
 

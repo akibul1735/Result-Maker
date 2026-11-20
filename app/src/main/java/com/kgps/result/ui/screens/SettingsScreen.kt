@@ -358,7 +358,7 @@ fun SettingsScreen(
             .fillMaxSize()
             .imePadding()
             .verticalScroll(rememberScrollState())
-            .padding(12.dp),
+            .padding(horizontal = 8.dp, vertical = 10.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         Column(
@@ -978,6 +978,7 @@ fun SettingsScreen(
                     studentCountByClass = countByClass,
                     csvHeaderStyle = backupStatus.csvHeaderStyle,
                     onSelectCsvHeaderStyle = onSelectCsvHeaderStyle,
+                    onInstantCsvExport = onBackupCsvNow,
                     onExportAllPdf = onExportAllPdf,
                     onExportExcelMultiTab = { xlsxExportLauncher.launch("ResultMaker_AllClasses.xlsx") },
                     onExportCsvForClass = { c ->

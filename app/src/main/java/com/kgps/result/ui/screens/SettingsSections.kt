@@ -1,8 +1,11 @@
 package com.kgps.result.ui.screens
 
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
@@ -10,6 +13,7 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -18,6 +22,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.AccessTime
 import androidx.compose.material.icons.rounded.AutoAwesome
 import androidx.compose.material.icons.rounded.Backup
+import androidx.compose.material.icons.rounded.Bolt
 import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.CloudDone
@@ -58,6 +63,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.testTag
@@ -66,6 +72,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -256,50 +263,189 @@ internal fun SettingsOverviewCard(
     }
 }
 
-@OptIn(ExperimentalLayoutApi::class, ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 private fun BackupScheduleControl(
     kind: BackupSystemKind,
     titleBn: String,
     schedule: BackupScheduleConfig,
     enabled: Boolean,
-    accentSurfaceColor: Color,
+    segmentBackgroundColor: Color,
     onUpdateSchedule: (BackupScheduleConfig) -> Unit
 ) {
     var showTimePicker by remember { mutableStateOf(false) }
 
-    Surface(
-        color = accentSurfaceColor,
-        border = BorderStroke(1.dp, SlateOutline),
-        shape = RoundedCornerShape(8.dp),
-        modifier = Modifier.fillMaxWidth()
+    val activeBadgeText = when (schedule.mode) {
+        BackupScheduleMode.ON_CHANGE -> "তাৎক্ষণিক"
+        BackupScheduleMode.EVERY_6_HOURS -> "৬ ঘণ্টা পরপর"
+        BackupScheduleMode.EVERY_12_HOURS -> "১২ ঘণ্টা পরপর"
+        BackupScheduleMode.DAILY -> "প্রতিদিন · ${BackupScheduleCalculator.formatTime12hBn(schedule.hour, schedule.minute)}"
+        BackupScheduleMode.WEEKLY -> "${BackupScheduleCalculator.formatWeekdayShortBn(schedule.dayOfWeek)} · ${BackupScheduleCalculator.formatTime12hBn(schedule.hour, schedule.minute)}"
+    }
+
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(5.dp)
     ) {
-        Column(
-            modifier = Modifier.padding(8.dp),
-            verticalArrangement = Arrangement.spacedBy(5.dp)
+        HorizontalDivider(color = SlateOutline.copy(alpha = 0.65f))
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
         ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                Icon(
+                    Icons.Rounded.Schedule,
+                    contentDescription = null,
+                    tint = TealPrimary,
+                    modifier = Modifier.size(14.dp)
+                )
+                Text(
+                    text = "সময়সূচি:",
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = SlateText
+                )
+            }
+            Surface(
+                color = if (enabled) TealSoft else MaterialTheme.colorScheme.surfaceVariant,
+                shape = RoundedCornerShape(6.dp)
+            ) {
+                Text(
+                    text = activeBadgeText,
+                    fontSize = 10.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = if (enabled) TealDark else SlateMuted,
+                    maxLines = 1,
+                    modifier = Modifier.padding(horizontal = 7.dp, vertical = 2.dp)
+                )
+            }
+        }
+
+        // Single-row compact segmented selector — all 5 modes always stay on one line
+        Surface(
+            color = segmentBackgroundColor,
+            border = BorderStroke(1.dp, SlateOutline),
+            shape = RoundedCornerShape(9.dp),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(2.dp),
+                horizontalArrangement = Arrangement.spacedBy(2.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                BackupScheduleMode.entries.forEach { mode ->
+                    val selected = schedule.mode == mode
+                    val segWeight = when (mode) {
+                        BackupScheduleMode.ON_CHANGE -> 1.24f
+                        BackupScheduleMode.EVERY_6_HOURS -> 0.90f
+                        BackupScheduleMode.EVERY_12_HOURS -> 0.94f
+                        BackupScheduleMode.DAILY -> 0.94f
+                        BackupScheduleMode.WEEKLY -> 1.04f
+                    }
+                    Box(
+                        contentAlignment = Alignment.Center,
+                        modifier = Modifier
+                            .weight(segWeight)
+                            .heightIn(min = 38.dp)
+                            .clip(RoundedCornerShape(7.dp))
+                            .background(if (selected) TealPrimary else Color.Transparent)
+                            .clickable { onUpdateSchedule(schedule.copy(mode = mode)) }
+                            .testTag("settings_sched_${kind.name.lowercase()}_${mode.id}")
+                            .padding(horizontal = 2.dp, vertical = 4.dp)
+                    ) {
+                        Text(
+                            text = mode.shortBn,
+                            fontSize = 10.sp,
+                            fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
+                            color = if (selected) Color.White else SlateText,
+                            maxLines = 1,
+                            softWrap = false,
+                            overflow = TextOverflow.Ellipsis,
+                            textAlign = TextAlign.Center
+                        )
+                    }
+                }
+            }
+        }
+
+        // Weekday 1-row bar (shown only for Weekly)
+        AnimatedVisibility(visible = schedule.mode == BackupScheduleMode.WEEKLY) {
+            val weekDays = listOf(
+                Calendar.SATURDAY,
+                Calendar.SUNDAY,
+                Calendar.MONDAY,
+                Calendar.TUESDAY,
+                Calendar.WEDNESDAY,
+                Calendar.THURSDAY,
+                Calendar.FRIDAY
+            )
+            Surface(
+                color = segmentBackgroundColor,
+                border = BorderStroke(1.dp, SlateOutline),
+                shape = RoundedCornerShape(8.dp),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(2.dp),
+                    horizontalArrangement = Arrangement.spacedBy(2.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    weekDays.forEach { dow ->
+                        val selected = schedule.dayOfWeek == dow
+                        Box(
+                            contentAlignment = Alignment.Center,
+                            modifier = Modifier
+                                .weight(1f)
+                                .heightIn(min = 34.dp)
+                                .clip(RoundedCornerShape(6.dp))
+                                .background(if (selected) TealPrimary else Color.Transparent)
+                                .clickable { onUpdateSchedule(schedule.copy(dayOfWeek = dow)) }
+                                .padding(horizontal = 1.dp, vertical = 3.dp)
+                        ) {
+                            Text(
+                                text = BackupScheduleCalculator.formatWeekdayShortBn(dow),
+                                fontSize = 9.5.sp,
+                                fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
+                                color = if (selected) Color.White else SlateText,
+                                maxLines = 1,
+                                softWrap = false,
+                                textAlign = TextAlign.Center
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
+        // Clock time row (strictly hidden for Instant / ON_CHANGE)
+        AnimatedVisibility(visible = schedule.mode != BackupScheduleMode.ON_CHANGE) {
+            val timeFieldLabel = when (schedule.mode) {
+                BackupScheduleMode.EVERY_6_HOURS -> "শুরুর সময় (প্রতি ৬ ঘণ্টা):"
+                BackupScheduleMode.EVERY_12_HOURS -> "শুরুর সময় (প্রতি ১২ ঘণ্টা):"
+                BackupScheduleMode.DAILY -> "প্রতিদিন ব্যাকআপের সময়:"
+                BackupScheduleMode.WEEKLY -> "প্রতি ${BackupScheduleCalculator.formatWeekdayFullBn(schedule.dayOfWeek)} সময়:"
+                BackupScheduleMode.ON_CHANGE -> ""
+            }
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(4.dp)
-                ) {
-                    Icon(
-                        Icons.Rounded.Schedule,
-                        contentDescription = null,
-                        tint = TealPrimary,
-                        modifier = Modifier.size(14.dp)
-                    )
-                    Text(
-                        text = "অটো ব্যাকআপ সময়সূচি",
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        color = SlateText
-                    )
-                }
+                Text(
+                    text = timeFieldLabel,
+                    fontSize = 10.5.sp,
+                    color = SlateText,
+                    modifier = Modifier.weight(1f).padding(end = 6.dp)
+                )
                 OutlinedButton(
                     onClick = { showTimePicker = true },
                     contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
@@ -314,75 +460,20 @@ private fun BackupScheduleControl(
                     )
                 }
             }
-
-            FlowRow(
-                horizontalArrangement = Arrangement.spacedBy(4.dp),
-                verticalArrangement = Arrangement.spacedBy(4.dp)
-            ) {
-                BackupScheduleMode.entries.forEach { mode ->
-                    val selected = schedule.mode == mode
-                    FilterChip(
-                        selected = selected,
-                        onClick = { onUpdateSchedule(schedule.copy(mode = mode)) },
-                        colors = appFilterChipColors(),
-                        border = appFilterChipBorder(selected),
-                        label = {
-                            Text(
-                                text = mode.shortBn,
-                                fontSize = 10.5.sp,
-                                fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal
-                            )
-                        },
-                        modifier = Modifier.testTag("settings_sched_${kind.name.lowercase()}_${mode.id}")
-                    )
-                }
-            }
-
-            if (schedule.mode == BackupScheduleMode.WEEKLY) {
-                val weekDays = listOf(
-                    Calendar.SATURDAY,
-                    Calendar.SUNDAY,
-                    Calendar.MONDAY,
-                    Calendar.TUESDAY,
-                    Calendar.WEDNESDAY,
-                    Calendar.THURSDAY,
-                    Calendar.FRIDAY
-                )
-                FlowRow(
-                    horizontalArrangement = Arrangement.spacedBy(4.dp),
-                    verticalArrangement = Arrangement.spacedBy(4.dp)
-                ) {
-                    weekDays.forEach { dow ->
-                        val selected = schedule.dayOfWeek == dow
-                        FilterChip(
-                            selected = selected,
-                            onClick = { onUpdateSchedule(schedule.copy(dayOfWeek = dow)) },
-                            colors = appFilterChipColors(),
-                            border = appFilterChipBorder(selected),
-                            label = {
-                                Text(
-                                    text = BackupScheduleCalculator.formatWeekdayShortBn(dow),
-                                    fontSize = 10.sp
-                                )
-                            }
-                        )
-                    }
-                }
-            }
-
-            val scheduleHint = when {
-                !enabled -> "ব্যাকআপ বন্ধ আছে · চালু করলে ${schedule.mode.shortBn} সময়ে চলবে"
-                schedule.mode == BackupScheduleMode.ON_CHANGE -> "ডাটা পরিবর্তনের সাথে সাথে স্বয়ংক্রিয় ব্যাকআপ হবে"
-                schedule.mode == BackupScheduleMode.WEEKLY ->
-                    "প্রতি ${BackupScheduleCalculator.formatWeekdayFullBn(schedule.dayOfWeek)} · পরবর্তী: ${BackupScheduleCalculator.formatNextRunBn(schedule)}"
-                else -> "পরবর্তী ব্যাকআপ: ${BackupScheduleCalculator.formatNextRunBn(schedule)}"
-            }
-            Text(
-                text = scheduleHint,
-                fontSize = 10.5.sp,
-                color = if (enabled) TealDark else SlateMuted
-            )
         }
+
+        val scheduleHint = when {
+            !enabled -> "সুইচ বন্ধ আছে · চালু করলে \"$activeBadgeText\" নিয়মে চলবে"
+            schedule.mode == BackupScheduleMode.ON_CHANGE ->
+                "ডাটা বদলালেই সাথে সাথে ব্যাকআপ হবে (আলাদা সময়ের দরকার নেই)"
+            else -> "পরবর্তী ব্যাকআপ: ${BackupScheduleCalculator.formatNextRunBn(schedule)}"
+        }
+        Text(
+            text = scheduleHint,
+            fontSize = 10.sp,
+            lineHeight = 13.5.sp,
+            color = if (enabled) TealDark else SlateMuted
+        )
     }
 
     if (showTimePicker) {
@@ -393,7 +484,13 @@ private fun BackupScheduleControl(
         )
         AlertDialog(
             onDismissRequest = { showTimePicker = false },
-            title = { Text("$titleBn · সময় নির্বাচন", fontSize = 15.sp, fontWeight = FontWeight.Bold) },
+            title = {
+                Text(
+                    "$titleBn · ${schedule.mode.shortBn} সময়",
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.Bold
+                )
+            },
             text = {
                 Column(
                     horizontalAlignment = Alignment.CenterHorizontally,
@@ -463,46 +560,65 @@ private fun BackupScheduleControl(
     }
 }
 
-@OptIn(ExperimentalLayoutApi::class)
 @Composable
 internal fun CsvHeaderStyleSelector(
     selectedStyle: CsvHeaderStyle,
-    onSelectStyle: (CsvHeaderStyle) -> Unit
+    onSelectStyle: (CsvHeaderStyle) -> Unit,
+    segmentBackgroundColor: Color = Color.White
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
         Text(
             text = "CSV কলাম হেডার ফরম্যাট (সহজ পাঠযোগ্য)",
-            fontSize = 11.sp,
+            fontSize = 10.5.sp,
             fontWeight = FontWeight.SemiBold,
             color = SlateText
         )
-        FlowRow(
-            horizontalArrangement = Arrangement.spacedBy(5.dp),
-            verticalArrangement = Arrangement.spacedBy(4.dp)
+        // Single-row 3-option segmented bar — never wraps "সিস্টেম কোড" onto a second line
+        Surface(
+            color = segmentBackgroundColor,
+            border = BorderStroke(1.dp, SlateOutline),
+            shape = RoundedCornerShape(9.dp),
+            modifier = Modifier.fillMaxWidth()
         ) {
-            CsvHeaderStyle.entries.forEach { style ->
-                val selected = style == selectedStyle
-                FilterChip(
-                    selected = selected,
-                    onClick = { onSelectStyle(style) },
-                    colors = appFilterChipColors(),
-                    border = appFilterChipBorder(selected),
-                    label = {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(2.dp),
+                horizontalArrangement = Arrangement.spacedBy(2.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                CsvHeaderStyle.entries.forEach { style ->
+                    val selected = style == selectedStyle
+                    Box(
+                        contentAlignment = Alignment.Center,
+                        modifier = Modifier
+                            .weight(1f)
+                            .heightIn(min = 38.dp)
+                            .clip(RoundedCornerShape(7.dp))
+                            .background(if (selected) TealPrimary else Color.Transparent)
+                            .clickable { onSelectStyle(style) }
+                            .testTag("settings_csv_header_${style.id}")
+                            .padding(horizontal = 3.dp, vertical = 4.dp)
+                    ) {
                         Text(
-                            text = style.labelBn,
+                            text = style.shortBn,
                             fontSize = 10.5.sp,
-                            fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal
+                            fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
+                            color = if (selected) Color.White else SlateText,
+                            maxLines = 1,
+                            softWrap = false,
+                            overflow = TextOverflow.Ellipsis,
+                            textAlign = TextAlign.Center
                         )
-                    },
-                    modifier = Modifier.testTag("settings_csv_header_${style.id}")
-                )
+                    }
+                }
             }
         }
         Text(
             text = "উদাহরণ: ${selectedStyle.previewBn}",
-            fontSize = 10.sp,
+            fontSize = 9.5.sp,
             color = SlateMuted,
-            maxLines = 2,
+            maxLines = 1,
             overflow = TextOverflow.Ellipsis
         )
     }
@@ -528,26 +644,35 @@ internal fun SettingsAutoBackupContent(
     formatTime: (Long) -> String
 ) {
     TreeBranchItem(isLast = false) {
-        Button(
-            onClick = onBackupNowAll,
-            enabled = !backupStatus.driveBusy,
-            shape = RoundedCornerShape(8.dp),
-            modifier = Modifier
-                .fillMaxWidth()
-                .testTag("settings_backup_both_now_btn")
-        ) {
-            if (backupStatus.driveBusy) {
-                CircularProgressIndicator(
-                    color = MaterialTheme.colorScheme.onPrimary,
-                    strokeWidth = 2.dp,
-                    modifier = Modifier.size(16.dp)
-                )
-                Spacer(Modifier.size(8.dp))
-            } else {
-                Icon(Icons.Rounded.Backup, contentDescription = null, modifier = Modifier.size(17.dp))
-                Spacer(Modifier.size(6.dp))
+        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Button(
+                onClick = onBackupNowAll,
+                enabled = !backupStatus.driveBusy,
+                shape = RoundedCornerShape(8.dp),
+                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 8.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("settings_backup_both_now_btn")
+            ) {
+                if (backupStatus.driveBusy) {
+                    CircularProgressIndicator(
+                        color = MaterialTheme.colorScheme.onPrimary,
+                        strokeWidth = 2.dp,
+                        modifier = Modifier.size(16.dp)
+                    )
+                    Spacer(Modifier.size(8.dp))
+                } else {
+                    Icon(Icons.Rounded.Backup, contentDescription = null, modifier = Modifier.size(17.dp))
+                    Spacer(Modifier.size(6.dp))
+                }
+                Text("এখনই ৩টি সিস্টেমে ব্যাকআপ নিন (লোকাল · Drive · CSV)", fontSize = 11.5.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
-            Text("এখনই ৩টি সিস্টেমে ব্যাকআপ নিন (লোকাল · Drive · CSV)", fontSize = 12.sp)
+            Text(
+                text = "প্রতিটি সিস্টেমে ১টি নিয়ম বেছে নিন: \"তাৎক্ষণিক\" (ডাটা বদলালেই) অথবা নির্ধারিত সময়।",
+                fontSize = 10.sp,
+                lineHeight = 13.5.sp,
+                color = SlateMuted
+            )
         }
     }
 
@@ -559,15 +684,15 @@ internal fun SettingsAutoBackupContent(
             shape = RoundedCornerShape(10.dp),
             modifier = Modifier.fillMaxWidth()
         ) {
-            Column(Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Column(Modifier.padding(8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    Icon(Icons.Rounded.SdStorage, contentDescription = null, tint = TealPrimary, modifier = Modifier.size(20.dp))
+                    Icon(Icons.Rounded.SdStorage, contentDescription = null, tint = TealPrimary, modifier = Modifier.size(19.dp))
                     Column(Modifier.weight(1f)) {
-                        Text("১. লোকাল ডিভাইস (JSON) অটো ব্যাকআপ", fontWeight = FontWeight.SemiBold, fontSize = 12.5.sp)
-                        Text(backupStatus.localFolderLabel, fontSize = 10.5.sp, color = SlateMuted)
+                        Text("১. লোকাল ডিভাইস (JSON)", fontWeight = FontWeight.SemiBold, fontSize = 12.5.sp)
+                        Text(backupStatus.localFolderLabel, fontSize = 10.sp, color = SlateMuted, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     }
                     Switch(
                         checked = backupStatus.localEnabled,
@@ -579,12 +704,14 @@ internal fun SettingsAutoBackupContent(
                 if (backupStatus.lastLocalBackupMs > 0L) {
                     Text(
                         "সর্বশেষ: ${formatTime(backupStatus.lastLocalBackupMs)} (${backupStatus.lastLocalFileName})",
-                        fontSize = 10.5.sp,
-                        color = EmeraldGrade
+                        fontSize = 10.sp,
+                        color = EmeraldGrade,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
                     )
                 }
                 if (!backupStatus.lastLocalError.isNullOrBlank()) {
-                    Text("ত্রুটি: ${backupStatus.lastLocalError}", fontSize = 10.5.sp, color = RoseDanger)
+                    Text("ত্রুটি: ${backupStatus.lastLocalError}", fontSize = 10.sp, color = RoseDanger)
                 }
 
                 BackupScheduleControl(
@@ -592,7 +719,7 @@ internal fun SettingsAutoBackupContent(
                     titleBn = "লোকাল JSON ব্যাকআপ",
                     schedule = backupStatus.localSchedule,
                     enabled = backupStatus.localEnabled,
-                    accentSurfaceColor = Color.White,
+                    segmentBackgroundColor = Color.White,
                     onUpdateSchedule = { cfg -> onUpdateBackupSchedule(BackupSystemKind.LOCAL, cfg) }
                 )
 
@@ -601,31 +728,31 @@ internal fun SettingsAutoBackupContent(
                         onClick = onPickLocalFolder,
                         shape = RoundedCornerShape(8.dp),
                         contentPadding = PaddingValues(horizontal = 6.dp, vertical = 4.dp),
-                        modifier = Modifier.weight(1f)
+                        modifier = Modifier.weight(0.95f)
                     ) {
                         Icon(Icons.Rounded.Folder, contentDescription = null, modifier = Modifier.size(14.dp))
                         Spacer(Modifier.size(3.dp))
-                        Text("ফোল্ডার", fontSize = 11.sp)
+                        Text("ফোল্ডার", fontSize = 10.5.sp, maxLines = 1)
                     }
                     OutlinedButton(
                         onClick = onShowLocalSnapshots,
                         shape = RoundedCornerShape(8.dp),
                         contentPadding = PaddingValues(horizontal = 6.dp, vertical = 4.dp),
-                        modifier = Modifier.weight(1.1f)
+                        modifier = Modifier.weight(1.15f)
                     ) {
                         Icon(Icons.Rounded.Restore, contentDescription = null, modifier = Modifier.size(14.dp))
                         Spacer(Modifier.size(3.dp))
-                        Text("স্ন্যাপশট (${bn(backupStatus.localSnapshots.size.toString())})", fontSize = 11.sp)
+                        Text("স্ন্যাপশট (${bn(backupStatus.localSnapshots.size.toString())})", fontSize = 10.5.sp, maxLines = 1)
                     }
                     OutlinedButton(
                         onClick = onBackupLocalNow,
                         shape = RoundedCornerShape(8.dp),
                         contentPadding = PaddingValues(horizontal = 6.dp, vertical = 4.dp),
-                        modifier = Modifier.weight(0.85f).testTag("settings_backup_local_now_btn")
+                        modifier = Modifier.weight(0.9f).testTag("settings_backup_local_now_btn")
                     ) {
                         Icon(Icons.Rounded.PlayArrow, contentDescription = null, modifier = Modifier.size(14.dp))
                         Spacer(Modifier.size(2.dp))
-                        Text("এখনই", fontSize = 11.sp)
+                        Text("এখনই", fontSize = 10.5.sp, maxLines = 1)
                     }
                 }
             }
@@ -640,15 +767,15 @@ internal fun SettingsAutoBackupContent(
             shape = RoundedCornerShape(10.dp),
             modifier = Modifier.fillMaxWidth()
         ) {
-            Column(Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Column(Modifier.padding(8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    Icon(Icons.Rounded.CloudDone, contentDescription = null, tint = TealPrimary, modifier = Modifier.size(20.dp))
+                    Icon(Icons.Rounded.CloudDone, contentDescription = null, tint = TealPrimary, modifier = Modifier.size(19.dp))
                     Column(Modifier.weight(1f)) {
                         Text("২. Google Drive অটো ব্যাকআপ", fontWeight = FontWeight.SemiBold, fontSize = 12.5.sp, color = TealDark)
-                        Text("Google Drive → \"Result Maker Backups\" ফোল্ডার", fontSize = 10.5.sp, color = SlateMuted)
+                        Text("Google Drive → \"Result Maker Backups\" ফোল্ডার", fontSize = 10.sp, color = SlateMuted, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     }
                     Switch(
                         checked = backupStatus.driveEnabled,
@@ -661,8 +788,10 @@ internal fun SettingsAutoBackupContent(
                 if (backupStatus.lastDriveBackupMs > 0L) {
                     Text(
                         "সর্বশেষ: ${formatTime(backupStatus.lastDriveBackupMs)} (${backupStatus.lastDriveFileName})",
-                        fontSize = 10.5.sp,
-                        color = EmeraldGrade
+                        fontSize = 10.sp,
+                        color = EmeraldGrade,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
                     )
                 }
                 if (!backupStatus.lastDriveError.isNullOrBlank()) {
@@ -674,9 +803,9 @@ internal fun SettingsAutoBackupContent(
                     ) {
                         Text(
                             backupStatus.lastDriveError,
-                            fontSize = 10.5.sp,
+                            fontSize = 10.sp,
                             color = RoseDanger,
-                            modifier = Modifier.padding(8.dp)
+                            modifier = Modifier.padding(6.dp)
                         )
                     }
                 }
@@ -686,7 +815,7 @@ internal fun SettingsAutoBackupContent(
                     titleBn = "Google Drive ব্যাকআপ",
                     schedule = backupStatus.driveSchedule,
                     enabled = backupStatus.driveEnabled,
-                    accentSurfaceColor = Color.White,
+                    segmentBackgroundColor = Color.White,
                     onUpdateSchedule = { cfg -> onUpdateBackupSchedule(BackupSystemKind.DRIVE, cfg) }
                 )
 
@@ -696,29 +825,29 @@ internal fun SettingsAutoBackupContent(
                         enabled = !backupStatus.driveBusy,
                         contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
                         shape = RoundedCornerShape(8.dp),
-                        modifier = Modifier.weight(1.4f)
+                        modifier = Modifier.weight(1.35f)
                     ) {
                         Icon(Icons.Rounded.Restore, contentDescription = null, modifier = Modifier.size(15.dp))
                         Spacer(Modifier.size(4.dp))
-                        Text("Drive তালিকা ও রিস্টোর", fontSize = 11.sp)
+                        Text("Drive তালিকা ও রিস্টোর", fontSize = 10.5.sp, maxLines = 1)
                     }
                     OutlinedButton(
                         onClick = onBackupDriveNow,
                         enabled = !backupStatus.driveBusy,
                         contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
                         shape = RoundedCornerShape(8.dp),
-                        modifier = Modifier.weight(0.8f).testTag("settings_backup_drive_now_btn")
+                        modifier = Modifier.weight(0.85f).testTag("settings_backup_drive_now_btn")
                     ) {
                         Icon(Icons.Rounded.PlayArrow, contentDescription = null, modifier = Modifier.size(14.dp))
                         Spacer(Modifier.size(2.dp))
-                        Text("এখনই", fontSize = 11.sp)
+                        Text("এখনই", fontSize = 10.5.sp, maxLines = 1)
                     }
                 }
             }
         }
     }
 
-    // 3. CSV Auto Backup
+    // 3. CSV & Multi-Tab Excel Auto Backup
     TreeBranchItem(isLast = true) {
         Surface(
             color = SlateBg,
@@ -726,15 +855,15 @@ internal fun SettingsAutoBackupContent(
             shape = RoundedCornerShape(10.dp),
             modifier = Modifier.fillMaxWidth()
         ) {
-            Column(Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Column(Modifier.padding(8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    Icon(Icons.Rounded.TableChart, contentDescription = null, tint = TealPrimary, modifier = Modifier.size(20.dp))
+                    Icon(Icons.Rounded.TableChart, contentDescription = null, tint = TealPrimary, modifier = Modifier.size(19.dp))
                     Column(Modifier.weight(1f)) {
                         Text("৩. CSV (Excel) অটো ব্যাকআপ", fontWeight = FontWeight.SemiBold, fontSize = 12.5.sp)
-                        Text(backupStatus.csvFolderLabel, fontSize = 10.5.sp, color = SlateMuted)
+                        Text(backupStatus.csvFolderLabel, fontSize = 10.sp, color = SlateMuted, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     }
                     Switch(
                         checked = backupStatus.csvEnabled,
@@ -746,12 +875,14 @@ internal fun SettingsAutoBackupContent(
                 if (backupStatus.lastCsvBackupMs > 0L) {
                     Text(
                         "সর্বশেষ: ${formatTime(backupStatus.lastCsvBackupMs)} (${backupStatus.lastCsvFileName})",
-                        fontSize = 10.5.sp,
-                        color = EmeraldGrade
+                        fontSize = 10.sp,
+                        color = EmeraldGrade,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
                     )
                 }
                 if (!backupStatus.lastCsvError.isNullOrBlank()) {
-                    Text("ত্রুটি: ${backupStatus.lastCsvError}", fontSize = 10.5.sp, color = RoseDanger)
+                    Text("ত্রুটি: ${backupStatus.lastCsvError}", fontSize = 10.sp, color = RoseDanger)
                 }
 
                 BackupScheduleControl(
@@ -759,54 +890,48 @@ internal fun SettingsAutoBackupContent(
                     titleBn = "CSV অটো ব্যাকআপ",
                     schedule = backupStatus.csvSchedule,
                     enabled = backupStatus.csvEnabled,
-                    accentSurfaceColor = Color.White,
+                    segmentBackgroundColor = Color.White,
                     onUpdateSchedule = { cfg -> onUpdateBackupSchedule(BackupSystemKind.CSV, cfg) }
                 )
 
-                Surface(
-                    color = Color.White,
-                    border = BorderStroke(1.dp, SlateOutline),
-                    shape = RoundedCornerShape(8.dp),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Column(Modifier.padding(8.dp)) {
-                        CsvHeaderStyleSelector(
-                            selectedStyle = backupStatus.csvHeaderStyle,
-                            onSelectStyle = onSelectCsvHeaderStyle
-                        )
-                    }
-                }
+                HorizontalDivider(color = SlateOutline.copy(alpha = 0.65f))
+
+                CsvHeaderStyleSelector(
+                    selectedStyle = backupStatus.csvHeaderStyle,
+                    onSelectStyle = onSelectCsvHeaderStyle,
+                    segmentBackgroundColor = Color.White
+                )
 
                 Row(horizontalArrangement = Arrangement.spacedBy(5.dp), modifier = Modifier.fillMaxWidth()) {
                     OutlinedButton(
                         onClick = onPickCsvFolder,
                         shape = RoundedCornerShape(8.dp),
                         contentPadding = PaddingValues(horizontal = 6.dp, vertical = 4.dp),
-                        modifier = Modifier.weight(1f)
+                        modifier = Modifier.weight(0.9f)
                     ) {
                         Icon(Icons.Rounded.Folder, contentDescription = null, modifier = Modifier.size(14.dp))
                         Spacer(Modifier.size(3.dp))
-                        Text("ফোল্ডার", fontSize = 11.sp)
+                        Text("ফোল্ডার", fontSize = 10.5.sp, maxLines = 1)
                     }
                     OutlinedButton(
                         onClick = onShowCsvSnapshots,
                         shape = RoundedCornerShape(8.dp),
                         contentPadding = PaddingValues(horizontal = 6.dp, vertical = 4.dp),
-                        modifier = Modifier.weight(1.1f).testTag("settings_csv_snapshots_btn")
+                        modifier = Modifier.weight(1.05f).testTag("settings_csv_snapshots_btn")
                     ) {
                         Icon(Icons.Rounded.TableChart, contentDescription = null, modifier = Modifier.size(14.dp))
                         Spacer(Modifier.size(3.dp))
-                        Text("CSV ফাইল (${bn(backupStatus.csvSnapshots.size.toString())})", fontSize = 11.sp)
+                        Text("ফাইল (${bn(backupStatus.csvSnapshots.size.toString())})", fontSize = 10.5.sp, maxLines = 1)
                     }
-                    OutlinedButton(
+                    Button(
                         onClick = onBackupCsvNow,
                         shape = RoundedCornerShape(8.dp),
                         contentPadding = PaddingValues(horizontal = 6.dp, vertical = 4.dp),
-                        modifier = Modifier.weight(0.85f).testTag("settings_backup_csv_now_btn")
+                        modifier = Modifier.weight(1.15f).testTag("settings_backup_csv_now_btn")
                     ) {
-                        Icon(Icons.Rounded.PlayArrow, contentDescription = null, modifier = Modifier.size(14.dp))
+                        Icon(Icons.Rounded.Bolt, contentDescription = null, modifier = Modifier.size(14.dp))
                         Spacer(Modifier.size(2.dp))
-                        Text("এখনই", fontSize = 11.sp)
+                        Text("তাৎক্ষণিক এক্সপোর্ট", fontSize = 10.5.sp, maxLines = 1)
                     }
                 }
             }
@@ -814,7 +939,6 @@ internal fun SettingsAutoBackupContent(
     }
 }
 
-@OptIn(ExperimentalLayoutApi::class)
 @Composable
 internal fun SettingsCsvJsonContent(
     permissions: TeacherPermissions,
@@ -822,6 +946,7 @@ internal fun SettingsCsvJsonContent(
     studentCountByClass: Map<Int, Int>,
     csvHeaderStyle: CsvHeaderStyle,
     onSelectCsvHeaderStyle: (CsvHeaderStyle) -> Unit,
+    onInstantCsvExport: () -> Unit,
     onExportAllPdf: () -> Unit,
     onExportExcelMultiTab: () -> Unit,
     onExportCsvForClass: (Int) -> Unit,
@@ -848,31 +973,45 @@ internal fun SettingsCsvJsonContent(
                         .fillMaxWidth()
                         .testTag("settings_all_pdf_btn"),
                     shape = RoundedCornerShape(8.dp)
-                ) { Text("সব শ্রেণির সব শিক্ষার্থীর PDF ডাউনলোড") }
+                ) { Text("সব শ্রেণির সব শিক্ষার্থীর PDF ডাউনলোড", fontSize = 12.sp) }
             }
 
             Surface(
                 color = SlateBg,
                 border = BorderStroke(1.dp, SlateOutline),
-                shape = RoundedCornerShape(8.dp),
+                shape = RoundedCornerShape(10.dp),
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Column(Modifier.padding(8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     CsvHeaderStyleSelector(
                         selectedStyle = csvHeaderStyle,
-                        onSelectStyle = onSelectCsvHeaderStyle
+                        onSelectStyle = onSelectCsvHeaderStyle,
+                        segmentBackgroundColor = Color.White
                     )
 
-                    HorizontalDivider(color = SlateOutline)
+                    HorizontalDivider(color = SlateOutline.copy(alpha = 0.65f))
 
                     Text(
-                        text = "ভিন্ন ভিন্ন শ্রেণির আলাদা ট্যাব / CSV এক্সপোর্ট",
-                        fontSize = 11.5.sp,
+                        text = "তাৎক্ষণিক ও শ্রেণিভিত্তিক CSV / Excel এক্সপোর্ট",
+                        fontSize = 11.sp,
                         fontWeight = FontWeight.SemiBold,
                         color = TealDark
                     )
 
                     Button(
+                        onClick = onInstantCsvExport,
+                        shape = RoundedCornerShape(8.dp),
+                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("settings_instant_csv_export_btn")
+                    ) {
+                        Icon(Icons.Rounded.Bolt, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(Modifier.size(5.dp))
+                        Text("তাৎক্ষণিক CSV এক্সপোর্ট (১ ক্লিকে Downloads-এ সেভ)", fontSize = 11.5.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    }
+
+                    OutlinedButton(
                         onClick = onExportExcelMultiTab,
                         shape = RoundedCornerShape(8.dp),
                         contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp),
@@ -881,31 +1020,50 @@ internal fun SettingsCsvJsonContent(
                             .testTag("settings_xlsx_multitab_export_btn")
                     ) {
                         Icon(Icons.Rounded.TableChart, contentDescription = null, modifier = Modifier.size(16.dp))
-                        Spacer(Modifier.size(6.dp))
-                        Text("সব শ্রেণি আলাদা ট্যাবে Excel (.xlsx)", fontSize = 12.sp)
+                        Spacer(Modifier.size(5.dp))
+                        Text("সব শ্রেণি আলাদা ট্যাবে Excel (.xlsx) সেভ করুন", fontSize = 11.5.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     }
 
-                    FlowRow(
-                        horizontalArrangement = Arrangement.spacedBy(4.dp),
-                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                    // Single-row compact class selector pills
+                    Surface(
+                        color = Color.White,
+                        border = BorderStroke(1.dp, SlateOutline),
+                        shape = RoundedCornerShape(9.dp),
+                        modifier = Modifier.fillMaxWidth()
                     ) {
-                        allowedClasses.forEach { c ->
-                            val selected = selectedExportCls == c
-                            val count = studentCountByClass[c] ?: 0
-                            FilterChip(
-                                selected = selected,
-                                onClick = { selectedExportCls = c },
-                                colors = appFilterChipColors(),
-                                border = appFilterChipBorder(selected),
-                                label = {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(2.dp),
+                            horizontalArrangement = Arrangement.spacedBy(2.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            allowedClasses.forEach { c ->
+                                val selected = selectedExportCls == c
+                                val count = studentCountByClass[c] ?: 0
+                                Box(
+                                    contentAlignment = Alignment.Center,
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .heightIn(min = 38.dp)
+                                        .clip(RoundedCornerShape(7.dp))
+                                        .background(if (selected) TealPrimary else Color.Transparent)
+                                        .clickable { selectedExportCls = c }
+                                        .testTag("settings_csv_class_chip_$c")
+                                        .padding(horizontal = 2.dp, vertical = 3.dp)
+                                ) {
                                     Text(
                                         text = "${CLS_SHORT[c - 1]} (${bn(count.toString())})",
-                                        fontSize = 11.sp,
-                                        fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal
+                                        fontSize = 10.sp,
+                                        fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
+                                        color = if (selected) Color.White else SlateText,
+                                        maxLines = 1,
+                                        softWrap = false,
+                                        overflow = TextOverflow.Ellipsis,
+                                        textAlign = TextAlign.Center
                                     )
-                                },
-                                modifier = Modifier.testTag("settings_csv_class_chip_$c")
-                            )
+                                }
+                            }
                         }
                     }
 
@@ -918,7 +1076,7 @@ internal fun SettingsCsvJsonContent(
                                 .weight(1f)
                                 .testTag("settings_csv_export_btn"),
                             shape = RoundedCornerShape(8.dp)
-                        ) { Text("$clsLabel শ্রেণি CSV", fontSize = 11.5.sp) }
+                        ) { Text("$clsLabel শ্রেণি CSV", fontSize = 11.sp, maxLines = 1) }
                         OutlinedButton(
                             onClick = { onExportCsvTemplateForClass(selectedExportCls) },
                             contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
@@ -926,7 +1084,7 @@ internal fun SettingsCsvJsonContent(
                                 .weight(1f)
                                 .testTag("settings_csv_template_btn"),
                             shape = RoundedCornerShape(8.dp)
-                        ) { Text("$clsLabel টেমপ্লেট", fontSize = 11.5.sp) }
+                        ) { Text("$clsLabel টেমপ্লেট", fontSize = 11.sp, maxLines = 1) }
                     }
 
                     OutlinedButton(
@@ -936,7 +1094,7 @@ internal fun SettingsCsvJsonContent(
                             .fillMaxWidth()
                             .testTag("settings_csv_zip_export_btn"),
                         shape = RoundedCornerShape(8.dp)
-                    ) { Text("সব শ্রেণির আলাদা CSV ফাইল (ZIP — ৫টি ফাইল)", fontSize = 11.5.sp) }
+                    ) { Text("সব শ্রেণির আলাদা CSV ফাইল (ZIP আর্কাইভ)", fontSize = 11.sp, maxLines = 1) }
                 }
             }
             if (permissions.canManageStudents) {
