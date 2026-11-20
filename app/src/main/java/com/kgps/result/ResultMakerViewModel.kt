@@ -1976,6 +1976,15 @@ class ResultMakerViewModel(
         _geminiCustomModels.value = GeminiApiConfig.removeCustomModel(appContext, modelId)
     }
 
+    fun selectGeminiModel(rawModel: String) {
+        val cleanModel = GeminiApiConfig.normalizeModelId(rawModel)
+        GeminiApiConfig.saveConfig(appContext, _geminiApiKey.value, cleanModel)
+        val savedModel = GeminiApiConfig.getSelectedModel(appContext)
+        _geminiModel.value = savedModel
+        _geminiCustomModels.value = GeminiApiConfig.getCustomModels(appContext)
+        showMessage("Gemini মডেল পরিবর্তন হয়েছে: $savedModel")
+    }
+
     fun saveGeminiConfig(rawApiKey: String, rawModel: String) {
         GeminiApiConfig.saveConfig(appContext, rawApiKey, rawModel)
         val savedKey = GeminiApiConfig.getApiKey(appContext)

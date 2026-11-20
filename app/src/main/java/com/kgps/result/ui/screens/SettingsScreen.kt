@@ -29,35 +29,28 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ExitToApp
 import androidx.compose.material.icons.automirrored.rounded.Logout
+import androidx.compose.material.icons.rounded.AccountCircle
 import androidx.compose.material.icons.rounded.AdminPanelSettings
 import androidx.compose.material.icons.rounded.AutoAwesome
 import androidx.compose.material.icons.rounded.Backup
-import androidx.compose.material.icons.rounded.CheckCircle
+import androidx.compose.material.icons.rounded.Badge
 import androidx.compose.material.icons.rounded.Close
-import androidx.compose.material.icons.rounded.CloudDone
-import androidx.compose.material.icons.rounded.ContentCopy
-import androidx.compose.material.icons.rounded.Folder
+import androidx.compose.material.icons.rounded.Description
 import androidx.compose.material.icons.rounded.FontDownload
-import androidx.compose.material.icons.rounded.Group
-import androidx.compose.material.icons.rounded.Key
+import androidx.compose.material.icons.rounded.Image
 import androidx.compose.material.icons.rounded.PersonRemove
+import androidx.compose.material.icons.rounded.QrCode2
 import androidx.compose.material.icons.rounded.Refresh
-import androidx.compose.material.icons.rounded.Restore
 import androidx.compose.material.icons.rounded.School
-import androidx.compose.material.icons.rounded.SdStorage
-import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.Tune
-import androidx.compose.material.icons.rounded.Visibility
-import androidx.compose.material.icons.rounded.VisibilityOff
+import androidx.compose.material.icons.rounded.UploadFile
+import androidx.compose.material.icons.rounded.WarningAmber
+import androidx.compose.material.icons.rounded.ContentCopy
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.FilterChip
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -65,7 +58,6 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Surface
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -85,8 +77,6 @@ import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
-import androidx.compose.ui.text.input.PasswordVisualTransformation
-import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -99,7 +89,6 @@ import com.kgps.result.Repo
 import com.kgps.result.Settings
 import com.kgps.result.Student
 import com.kgps.result.ai.DiscoveredGeminiModel
-import com.kgps.result.ai.GeminiApiConfig
 import com.kgps.result.backup.AutoBackupStatus
 import com.kgps.result.backup.DriveBackupFile
 import com.kgps.result.backup.LocalBackupEntry
@@ -126,8 +115,6 @@ import com.kgps.result.ui.theme.TealContainer
 import com.kgps.result.ui.theme.TealDark
 import com.kgps.result.ui.theme.TealPrimary
 import com.kgps.result.ui.theme.TealSoft
-import com.kgps.result.ui.theme.appFilterChipBorder
-import com.kgps.result.ui.theme.appFilterChipColors
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -193,7 +180,8 @@ fun SettingsScreen(
     val isOwner = activeSchool?.ownerUid == currentUserId
 
     var s by remember(settings) { mutableStateOf(settings) }
-    var expandedGroup by remember { mutableStateOf("collab") } // collab, school, font, teachers, backup, aiproxy
+    // All settings groups start collapsed by default
+    var expandedGroup by remember { mutableStateOf("") }
     var newFieldLabel by remember { mutableStateOf("") }
     var apiKeyInput by remember(geminiApiKey) { mutableStateOf(geminiApiKey) }
     var showApiKey by remember { mutableStateOf(false) }
@@ -301,9 +289,21 @@ fun SettingsScreen(
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         Column(
-            Modifier.widthIn(max = 820.dp).fillMaxWidth(),
-            verticalArrangement = Arrangement.spacedBy(10.dp)
+            Modifier
+                .widthIn(max = 820.dp)
+                .fillMaxWidth(),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
+            SettingsOverviewCard(
+                schoolName = s.school,
+                year = s.year,
+                studentCount = students.size,
+                activeSchool = activeSchool,
+                currentUserId = currentUserId,
+                isGeminiConfigured = geminiApiKey.isNotBlank(),
+                geminiModel = geminiModel
+            )
+
             if (!isAdmin) {
                 Surface(
                     color = AmberBg,
@@ -328,20 +328,77 @@ fun SettingsScreen(
                 }
             }
 
-            // Group 1: Collaborative School Workspace, Join Code, Members & Approvals
+            // Category 1: School & Team
+            SettingsCategoryHeader(title = "বিদ্যালয় ও শিক্ষক দল", icon = Icons.Rounded.School)
+
+            TreeGroupCard(
+                title = "বিদ্যালয় ও শিক্ষাবর্ষ",
+                subtitle = s.school.ifBlank { "বিদ্যালয়ের নাম ও ঠিকানা" },
+                badgeText = bn(s.year),
+                icon = Icons.Rounded.School,
+                expanded = expandedGroup == "school",
+                headerTestTag = "settings_group_school",
+                onToggle = { expandedGroup = if (expandedGroup == "school") "" else "school" }
+            ) {
+                TreeBranchItem(isLast = true) {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedTextField(
+                            value = s.school,
+                            onValueChange = { if (isAdmin) s = s.copy(school = it) },
+                            enabled = isAdmin,
+                            label = { Text("বিদ্যালয়ের নাম") },
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth().testTag("settings_school_input")
+                        )
+                        OutlinedTextField(
+                            value = s.schoolAddress,
+                            onValueChange = { if (isAdmin) s = s.copy(schoolAddress = it) },
+                            enabled = isAdmin,
+                            label = { Text("বিদ্যালয়ের ঠিকানা (ব্যাক কভারে মুদ্রিত হবে)") },
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth().testTag("settings_address_input")
+                        )
+                        OutlinedTextField(
+                            value = s.year,
+                            onValueChange = { if (isAdmin) s = s.copy(year = it) },
+                            enabled = isAdmin,
+                            label = { Text("শিক্ষাবর্ষ") },
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth().testTag("settings_year_input")
+                        )
+                        if (isAdmin && (s.school != settings.school || s.schoolAddress != settings.schoolAddress || s.year != settings.year)) {
+                            Button(
+                                onClick = {
+                                    onUpdateSettings(s)
+                                    onShowMessage("বিদ্যালয়ের তথ্য সংরক্ষিত হয়েছে")
+                                },
+                                shape = RoundedCornerShape(8.dp),
+                                modifier = Modifier.fillMaxWidth().testTag("settings_save_school_btn")
+                            ) {
+                                Text("বিদ্যালয়ের তথ্য সংরক্ষণ করুন")
+                            }
+                        }
+                    }
+                }
+            }
+
             if (activeSchool != null) {
                 TreeGroupCard(
-                    title = "বিদ্যালয় কোড, সদস্য ও অনুমতি",
-                    subtitle = "কোড: ${activeSchool.joinCode} · ${bn(activeSchool.members.size.toString())} জন শিক্ষক",
-                    badgeText = if (joinRequests.isNotEmpty() && isAdmin) "${bn(joinRequests.size.toString())} অনুরোধ" else activeSchool.roleOf(currentUserId).labelBn,
+                    title = "আমন্ত্রণ কোড ও যোগদান অনুরোধ",
+                    subtitle = if (joinRequests.isNotEmpty() && isAdmin) {
+                        "কোড: ${activeSchool.joinCode} · নতুন অনুরোধ অপেক্ষমাণ"
+                    } else {
+                        "কোড: ${activeSchool.joinCode}"
+                    },
+                    badgeText = if (joinRequests.isNotEmpty() && isAdmin) "${bn(joinRequests.size.toString())} অনুরোধ" else "কোড",
                     badgeColor = if (joinRequests.isNotEmpty() && isAdmin) AmberNotice else TealPrimary,
                     badgeContainerColor = if (joinRequests.isNotEmpty() && isAdmin) AmberBg else TealSoft,
-                    icon = Icons.Rounded.AdminPanelSettings,
+                    icon = Icons.Rounded.QrCode2,
                     expanded = expandedGroup == "collab",
                     headerTestTag = "settings_group_collab",
                     onToggle = { expandedGroup = if (expandedGroup == "collab") "" else "collab" }
                 ) {
-                    TreeBranchItem(isLast = false) {
+                    TreeBranchItem(isLast = !(isAdmin && joinRequests.isNotEmpty())) {
                         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                             Surface(
                                 color = TealSoft,
@@ -409,9 +466,14 @@ fun SettingsScreen(
                     }
 
                     if (isAdmin && joinRequests.isNotEmpty()) {
-                        TreeBranchItem(isLast = false) {
+                        TreeBranchItem(isLast = true) {
                             Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                                Text("অপেক্ষমান যোগদানের অনুরোধ (${bn(joinRequests.size.toString())})", fontWeight = FontWeight.SemiBold, fontSize = 13.sp, color = AmberNotice)
+                                Text(
+                                    "অপেক্ষমান যোগদানের অনুরোধ (${bn(joinRequests.size.toString())})",
+                                    fontWeight = FontWeight.SemiBold,
+                                    fontSize = 13.sp,
+                                    color = AmberNotice
+                                )
                                 joinRequests.forEach { req ->
                                     Surface(
                                         color = AmberBg,
@@ -452,10 +514,19 @@ fun SettingsScreen(
                             }
                         }
                     }
+                }
 
-                    TreeBranchItem(isLast = false) {
+                TreeGroupCard(
+                    title = "সদস্য তালিকা ও অনুমতি",
+                    subtitle = "${bn(activeSchool.members.size.toString())} জন শিক্ষক যুক্ত আছেন",
+                    badgeText = if (isOwner) "প্রতিষ্ঠাতা" else activeSchool.roleOf(currentUserId).labelBn,
+                    icon = Icons.Rounded.AdminPanelSettings,
+                    expanded = expandedGroup == "members",
+                    headerTestTag = "settings_group_members",
+                    onToggle = { expandedGroup = if (expandedGroup == "members") "" else "members" }
+                ) {
+                    TreeBranchItem(isLast = true) {
                         Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                            Text("সদস্য তালিকা (${bn(activeSchool.members.size.toString())} জন)", fontWeight = FontWeight.SemiBold, fontSize = 13.sp, color = TealPrimary)
                             activeSchool.members.forEach { member ->
                                 val memberIsOwner = member.uid == activeSchool.ownerUid
                                 val isSelf = member.uid == currentUserId
@@ -546,100 +617,72 @@ fun SettingsScreen(
                             }
                         }
                     }
-
-                    TreeBranchItem(isLast = true) {
-                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                            if (!isOwner) {
-                                OutlinedButton(
-                                    onClick = { askLeaveSchool = true },
-                                    shape = RoundedCornerShape(8.dp),
-                                    border = BorderStroke(1.dp, RoseDanger.copy(alpha = 0.5f)),
-                                    modifier = Modifier.fillMaxWidth().testTag("settings_leave_school_btn")
-                                ) {
-                                    Icon(Icons.AutoMirrored.Rounded.ExitToApp, contentDescription = null, modifier = Modifier.size(16.dp), tint = RoseDanger)
-                                    Spacer(Modifier.size(6.dp))
-                                    Text("এই বিদ্যালয় ত্যাগ করুন (অন্য বিদ্যালয়ে যুক্ত হতে)", fontSize = 12.sp, color = RoseDanger)
-                                }
-                            }
-                            OutlinedButton(
-                                onClick = { askSignOut = true },
-                                shape = RoundedCornerShape(8.dp),
-                                modifier = Modifier.fillMaxWidth().testTag("settings_sign_out_btn")
-                            ) {
-                                Icon(Icons.AutoMirrored.Rounded.Logout, contentDescription = null, modifier = Modifier.size(16.dp), tint = RoseDanger)
-                                Spacer(Modifier.size(4.dp))
-                                Text("সাইন আউট", fontSize = 12.sp, color = RoseDanger)
-                            }
-                        }
-                    }
                 }
             }
 
-            // Group 2: School Information
             TreeGroupCard(
-                title = "বিদ্যালয় ও শিক্ষাবর্ষ",
-                subtitle = s.school.ifBlank { "বিদ্যালয়ের নাম ও ঠিকানা" },
-                badgeText = bn(s.year),
-                icon = Icons.Rounded.School,
-                expanded = expandedGroup == "school",
-                headerTestTag = "settings_group_school",
-                onToggle = { expandedGroup = if (expandedGroup == "school") "" else "school" }
+                title = "শ্রেণি শিক্ষক ও মোবাইল",
+                subtitle = "১ম–৫ম শ্রেণির দায়িত্বপ্রাপ্ত শিক্ষক",
+                badgeText = "৫ শ্রেণি",
+                icon = Icons.Rounded.Badge,
+                expanded = expandedGroup == "teachers",
+                headerTestTag = "settings_group_teachers",
+                onToggle = { expandedGroup = if (expandedGroup == "teachers") "" else "teachers" }
             ) {
                 TreeBranchItem(isLast = true) {
-                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        OutlinedTextField(
-                            value = s.school,
-                            onValueChange = { if (isAdmin) s = s.copy(school = it) },
-                            enabled = isAdmin,
-                            label = { Text("বিদ্যালয়ের নাম") },
-                            singleLine = true,
-                            modifier = Modifier.fillMaxWidth().testTag("settings_school_input")
-                        )
-                        OutlinedTextField(
-                            value = s.schoolAddress,
-                            onValueChange = { if (isAdmin) s = s.copy(schoolAddress = it) },
-                            enabled = isAdmin,
-                            label = { Text("বিদ্যালয়ের ঠিকানা (ব্যাক কভারে মুদ্রিত হবে)") },
-                            singleLine = true,
-                            modifier = Modifier.fillMaxWidth().testTag("settings_address_input")
-                        )
-                        OutlinedTextField(
-                            value = s.year,
-                            onValueChange = { if (isAdmin) s = s.copy(year = it) },
-                            enabled = isAdmin,
-                            label = { Text("শিক্ষাবর্ষ") },
-                            singleLine = true,
-                            modifier = Modifier.fillMaxWidth().testTag("settings_year_input")
-                        )
-                        if (isAdmin && (s.school != settings.school || s.schoolAddress != settings.schoolAddress || s.year != settings.year)) {
+                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        (1..5).forEach { c ->
+                            Text("${CLSN[c - 1]} শ্রেণি", fontWeight = FontWeight.Medium, fontSize = 12.sp, color = SlateMuted)
+                            Row(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.fillMaxWidth()) {
+                                OutlinedTextField(
+                                    value = s.teachers[c] ?: "",
+                                    onValueChange = { v -> if (isAdmin) s = s.copy(teachers = s.teachers + (c to v)) },
+                                    enabled = isAdmin,
+                                    label = { Text("শিক্ষকের নাম", fontSize = 11.sp) },
+                                    singleLine = true,
+                                    modifier = Modifier.weight(1f)
+                                )
+                                OutlinedTextField(
+                                    value = s.teacherMobiles[c] ?: "",
+                                    onValueChange = { v -> if (isAdmin) s = s.copy(teacherMobiles = s.teacherMobiles + (c to v)) },
+                                    enabled = isAdmin,
+                                    label = { Text("মোবাইল", fontSize = 11.sp) },
+                                    singleLine = true,
+                                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
+                                    modifier = Modifier.weight(0.85f)
+                                )
+                            }
+                        }
+                        if (isAdmin && (s.teachers != settings.teachers || s.teacherMobiles != settings.teacherMobiles)) {
                             Button(
                                 onClick = {
                                     onUpdateSettings(s)
-                                    onShowMessage("বিদ্যালয়ের তথ্য সংরক্ষিত হয়েছে")
+                                    onShowMessage("শ্রেণি শিক্ষকের তথ্য সংরক্ষিত হয়েছে")
                                 },
                                 shape = RoundedCornerShape(8.dp),
-                                modifier = Modifier.fillMaxWidth().testTag("settings_save_school_btn")
+                                modifier = Modifier.fillMaxWidth().testTag("settings_save_teachers_btn")
                             ) {
-                                Text("বিদ্যালয়ের তথ্য সংরক্ষণ করুন")
+                                Text("শিক্ষকের তথ্য সংরক্ষণ করুন")
                             }
                         }
                     }
                 }
             }
 
-            // Group 3: PDF Fonts & DPE Cover Logo
+            // Category 2: Reports, Print & Form Structure
+            SettingsCategoryHeader(title = "রিপোর্ট, প্রিন্ট ও ফর্ম", icon = Icons.Rounded.Description)
+
             TreeGroupCard(
-                title = "PDF ফন্ট ও কভার লোগো",
-                subtitle = "$activeFontLabel · $activeLogoLabel",
-                badgeText = "প্রিন্ট",
+                title = "PDF বাংলা ফন্ট",
+                subtitle = "সক্রিয়: $activeFontLabel",
+                badgeText = "ফন্ট",
                 icon = Icons.Rounded.FontDownload,
                 expanded = expandedGroup == "font",
                 headerTestTag = "settings_group_font",
                 onToggle = { expandedGroup = if (expandedGroup == "font") "" else "font" }
             ) {
-                TreeBranchItem(isLast = false) {
+                TreeBranchItem(isLast = true) {
                     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                        Text("অফিসিয়াল বাংলা ফন্ট", fontWeight = FontWeight.SemiBold, fontSize = 13.sp, color = TealPrimary)
                         PDF_FONT_LIST.forEach { font ->
                             val selected = s.pdfFont == font.id
                             val sampleFamily = remember(font.id) {
@@ -688,10 +731,19 @@ fun SettingsScreen(
                         }
                     }
                 }
+            }
 
+            TreeGroupCard(
+                title = "প্রাথমিক শিক্ষা অধিদপ্তর লোগো",
+                subtitle = "সক্রিয়: $activeLogoLabel",
+                badgeText = "কভার",
+                icon = Icons.Rounded.Image,
+                expanded = expandedGroup == "logo",
+                headerTestTag = "settings_group_logo",
+                onToggle = { expandedGroup = if (expandedGroup == "logo") "" else "logo" }
+            ) {
                 TreeBranchItem(isLast = true) {
                     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                        Text("প্রাথমিক শিক্ষা অধিদপ্তর লোগো", fontWeight = FontWeight.SemiBold, fontSize = 13.sp, color = TealPrimary)
                         DPE_LOGO_LIST.forEach { logo ->
                             val selected = s.dpeLogo == logo.id
                             val thumbBmp = remember(logo.id) { PdfGen.resolveLogoBitmap(ctx, logo.id) }
@@ -741,58 +793,17 @@ fun SettingsScreen(
                 }
             }
 
-            // Group 4: Teachers & Custom Fields
             TreeGroupCard(
-                title = "শ্রেণি শিক্ষক ও কাস্টম ফিল্ড",
-                subtitle = "১ম–৫ম শ্রেণি · ${bn(s.customFields.size.toString())}টি কাস্টম ফিল্ড",
-                icon = Icons.Rounded.Group,
-                expanded = expandedGroup == "teachers",
-                headerTestTag = "settings_group_teachers",
-                onToggle = { expandedGroup = if (expandedGroup == "teachers") "" else "teachers" }
+                title = "কাস্টম ডাটাবেস ফিল্ড",
+                subtitle = if (s.customFields.isEmpty()) "কোনো অতিরিক্ত ফিল্ড নেই" else "বর্তমান ${bn(s.customFields.size.toString())}টি অতিরিক্ত ফিল্ড",
+                badgeText = "${bn(s.customFields.size.toString())}টি",
+                icon = Icons.Rounded.Tune,
+                expanded = expandedGroup == "custom_fields",
+                headerTestTag = "settings_group_custom_fields",
+                onToggle = { expandedGroup = if (expandedGroup == "custom_fields") "" else "custom_fields" }
             ) {
-                TreeBranchItem(isLast = false) {
-                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                        Text("শ্রেণি শিক্ষক ও মোবাইল", fontWeight = FontWeight.SemiBold, fontSize = 13.sp, color = TealPrimary)
-                        (1..5).forEach { c ->
-                            Text("${CLSN[c - 1]} শ্রেণি", fontWeight = FontWeight.Medium, fontSize = 12.sp, color = SlateMuted)
-                            Row(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.fillMaxWidth()) {
-                                OutlinedTextField(
-                                    value = s.teachers[c] ?: "",
-                                    onValueChange = { v -> if (isAdmin) s = s.copy(teachers = s.teachers + (c to v)) },
-                                    enabled = isAdmin,
-                                    label = { Text("শিক্ষকের নাম", fontSize = 11.sp) },
-                                    singleLine = true,
-                                    modifier = Modifier.weight(1f)
-                                )
-                                OutlinedTextField(
-                                    value = s.teacherMobiles[c] ?: "",
-                                    onValueChange = { v -> if (isAdmin) s = s.copy(teacherMobiles = s.teacherMobiles + (c to v)) },
-                                    enabled = isAdmin,
-                                    label = { Text("মোবাইল", fontSize = 11.sp) },
-                                    singleLine = true,
-                                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
-                                    modifier = Modifier.weight(0.85f)
-                                )
-                            }
-                        }
-                        if (isAdmin && (s.teachers != settings.teachers || s.teacherMobiles != settings.teacherMobiles)) {
-                            Button(
-                                onClick = {
-                                    onUpdateSettings(s)
-                                    onShowMessage("শ্রেণি শিক্ষকের তথ্য সংরক্ষিত হয়েছে")
-                                },
-                                shape = RoundedCornerShape(8.dp),
-                                modifier = Modifier.fillMaxWidth().testTag("settings_save_teachers_btn")
-                            ) {
-                                Text("শিক্ষকের তথ্য সংরক্ষণ করুন")
-                            }
-                        }
-                    }
-                }
-
                 TreeBranchItem(isLast = true) {
                     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                        Text("কাস্টম ডাটাবেস ফিল্ড", fontWeight = FontWeight.SemiBold, fontSize = 13.sp, color = TealPrimary)
                         if (isAdmin) {
                             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                                 OutlinedTextField(
@@ -838,215 +849,78 @@ fun SettingsScreen(
                 }
             }
 
-            // Group 5: Side-by-Side Auto Backup (Local + Google Drive), CSV & Database
+            // Category 3: Data, Backup & Import/Export
+            SettingsCategoryHeader(title = "ব্যাকআপ, ইমপোর্ট ও ডাটা", icon = Icons.Rounded.Backup)
+
+            val autoBackupActive = backupStatus.localEnabled || backupStatus.driveEnabled
             TreeGroupCard(
-                title = "অটো ব্যাকআপ (লোকাল + Drive) ও CSV",
-                subtitle = "মোট ${bn(students.size.toString())} জন · Firestore + লোকাল + Drive",
-                badgeText = "ব্যাকআপ",
+                title = "অটো ব্যাকআপ (লোকাল ও Drive)",
+                subtitle = "লোকাল: ${if (backupStatus.localEnabled) "চালু" else "বন্ধ"} · Drive: ${if (backupStatus.driveEnabled) "চালু" else "বন্ধ"}",
+                badgeText = if (autoBackupActive) "চালু" else "বন্ধ",
+                badgeColor = if (autoBackupActive) EmeraldGrade else SlateMuted,
+                badgeContainerColor = if (autoBackupActive) TealSoft else MaterialTheme.colorScheme.surfaceVariant,
                 icon = Icons.Rounded.Backup,
                 expanded = expandedGroup == "backup",
                 headerTestTag = "settings_group_backup",
                 onToggle = { expandedGroup = if (expandedGroup == "backup") "" else "backup" }
             ) {
-                // Auto Backup Controls (Local + Google Drive side by side with Firestore)
-                TreeBranchItem(isLast = false) {
-                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Button(
-                            onClick = onBackupNowBoth,
-                            enabled = !backupStatus.driveBusy,
-                            shape = RoundedCornerShape(8.dp),
-                            modifier = Modifier.fillMaxWidth().testTag("settings_backup_both_now_btn")
-                        ) {
-                            if (backupStatus.driveBusy) {
-                                CircularProgressIndicator(
-                                    color = MaterialTheme.colorScheme.onPrimary,
-                                    strokeWidth = 2.dp,
-                                    modifier = Modifier.size(16.dp)
-                                )
-                                Spacer(Modifier.size(8.dp))
-                            } else {
-                                Icon(Icons.Rounded.Backup, contentDescription = null, modifier = Modifier.size(18.dp))
-                                Spacer(Modifier.size(6.dp))
-                            }
-                            Text("এখনই লোকাল ও Google Drive-এ ব্যাকআপ নিন", fontSize = 12.5.sp)
-                        }
+                SettingsAutoBackupContent(
+                    backupStatus = backupStatus,
+                    onBackupNowBoth = onBackupNowBoth,
+                    onToggleLocalAutoBackup = onToggleLocalAutoBackup,
+                    onPickLocalFolder = { folderPickerLauncher.launch(null) },
+                    onShowLocalSnapshots = { showLocalSnapshotsDialog = true },
+                    onToggleDriveAutoBackup = onToggleDriveAutoBackup,
+                    onShowDriveBackups = {
+                        onLoadDriveBackups()
+                        showDriveBackupsDialog = true
+                    },
+                    formatTime = ::formatTimeBn
+                )
+            }
 
-                        // Local Auto Backup Card
-                        Surface(
-                            color = SlateBg,
-                            border = BorderStroke(1.dp, SlateOutline),
-                            shape = RoundedCornerShape(10.dp),
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Column(Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                    Icon(Icons.Rounded.SdStorage, contentDescription = null, tint = TealPrimary, modifier = Modifier.size(20.dp))
-                                    Column(Modifier.weight(1f)) {
-                                        Text("লোকাল ডিভাইস অটো ব্যাকআপ", fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
-                                        Text(backupStatus.localFolderLabel, fontSize = 11.sp, color = SlateMuted)
-                                    }
-                                    Switch(
-                                        checked = backupStatus.localEnabled,
-                                        onCheckedChange = onToggleLocalAutoBackup
-                                    )
-                                }
+            TreeGroupCard(
+                title = "PDF, CSV ও JSON ডাটা",
+                subtitle = "মোট ${bn(students.size.toString())} জন শিক্ষার্থীর ফাইল",
+                badgeText = "ফাইল",
+                icon = Icons.Rounded.UploadFile,
+                expanded = expandedGroup == "csv_json",
+                headerTestTag = "settings_group_csv_json",
+                onToggle = { expandedGroup = if (expandedGroup == "csv_json") "" else "csv_json" }
+            ) {
+                SettingsCsvJsonContent(
+                    permissions = permissions,
+                    isAdmin = isAdmin,
+                    onExportAllPdf = onExportAllPdf,
+                    onExportCsv = { csvExportLauncher.launch("students.csv") },
+                    onExportCsvTemplate = { csvTemplateLauncher.launch("students_template.csv") },
+                    onOpenSmartCsvImport = { onOpenCsvImport("") },
+                    onPickCsvFile = { csvFilePickLauncher.launch(arrayOf("*/*")) },
+                    onExportJson = { jsonExportLauncher.launch("result_maker_backup.json") },
+                    onRestoreJsonFile = { jsonRestoreLauncher.launch(arrayOf("application/json", "*/*")) }
+                )
+            }
 
-                                if (backupStatus.lastLocalBackupMs > 0L) {
-                                    Text(
-                                        "সর্বশেষ লোকাল ব্যাকআপ: ${formatTimeBn(backupStatus.lastLocalBackupMs)} (${backupStatus.lastLocalFileName})",
-                                        fontSize = 11.sp,
-                                        color = EmeraldGrade
-                                    )
-                                }
-                                if (!backupStatus.lastLocalError.isNullOrBlank()) {
-                                    Text("ত্রুটি: ${backupStatus.lastLocalError}", fontSize = 11.sp, color = RoseDanger)
-                                }
-
-                                Row(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.fillMaxWidth()) {
-                                    OutlinedButton(
-                                        onClick = { folderPickerLauncher.launch(null) },
-                                        shape = RoundedCornerShape(8.dp),
-                                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
-                                        modifier = Modifier.weight(1f)
-                                    ) {
-                                        Icon(Icons.Rounded.Folder, contentDescription = null, modifier = Modifier.size(15.dp))
-                                        Spacer(Modifier.size(4.dp))
-                                        Text("ফোল্ডার বাছাই", fontSize = 11.5.sp)
-                                    }
-                                    OutlinedButton(
-                                        onClick = { showLocalSnapshotsDialog = true },
-                                        shape = RoundedCornerShape(8.dp),
-                                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
-                                        modifier = Modifier.weight(1f)
-                                    ) {
-                                        Icon(Icons.Rounded.Restore, contentDescription = null, modifier = Modifier.size(15.dp))
-                                        Spacer(Modifier.size(4.dp))
-                                        Text("স্ন্যাপশট (${bn(backupStatus.localSnapshots.size.toString())})", fontSize = 11.5.sp)
-                                    }
-                                }
-                            }
-                        }
-
-                        // Google Drive Auto Backup Card
-                        Surface(
-                            color = TealSoft,
-                            border = BorderStroke(1.dp, TealPrimary.copy(alpha = 0.3f)),
-                            shape = RoundedCornerShape(10.dp),
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Column(Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                    Icon(Icons.Rounded.CloudDone, contentDescription = null, tint = TealPrimary, modifier = Modifier.size(20.dp))
-                                    Column(Modifier.weight(1f)) {
-                                        Text("Google Drive অটো ব্যাকআপ", fontWeight = FontWeight.SemiBold, fontSize = 13.sp, color = TealDark)
-                                        Text("Google Drive → \"Result Maker Backups\" ফোল্ডারে স্বয়ংক্রিয় সিঙ্ক", fontSize = 11.sp, color = SlateMuted)
-                                    }
-                                    Switch(
-                                        checked = backupStatus.driveEnabled,
-                                        enabled = !backupStatus.driveBusy,
-                                        onCheckedChange = onToggleDriveAutoBackup
-                                    )
-                                }
-
-                                if (backupStatus.lastDriveBackupMs > 0L) {
-                                    Text(
-                                        "সর্বশেষ Drive ব্যাকআপ: ${formatTimeBn(backupStatus.lastDriveBackupMs)} (${backupStatus.lastDriveFileName})",
-                                        fontSize = 11.sp,
-                                        color = EmeraldGrade
-                                    )
-                                }
-                                if (!backupStatus.lastDriveError.isNullOrBlank()) {
-                                    Surface(
-                                        color = RoseBg,
-                                        border = BorderStroke(1.dp, RoseDanger.copy(alpha = 0.25f)),
-                                        shape = RoundedCornerShape(8.dp),
-                                        modifier = Modifier.fillMaxWidth()
-                                    ) {
-                                        Text(
-                                            backupStatus.lastDriveError,
-                                            fontSize = 11.sp,
-                                            color = RoseDanger,
-                                            modifier = Modifier.padding(8.dp)
-                                        )
-                                    }
-                                }
-
-                                OutlinedButton(
-                                    onClick = {
-                                        onLoadDriveBackups()
-                                        showDriveBackupsDialog = true
-                                    },
-                                    enabled = !backupStatus.driveBusy,
-                                    shape = RoundedCornerShape(8.dp),
-                                    modifier = Modifier.fillMaxWidth()
-                                ) {
-                                    Icon(Icons.Rounded.Restore, contentDescription = null, modifier = Modifier.size(16.dp))
-                                    Spacer(Modifier.size(6.dp))
-                                    Text("Google Drive ব্যাকআপ তালিকা ও রিস্টোর", fontSize = 12.sp)
-                                }
-                            }
-                        }
-                    }
-                }
-
-                // Manual Export / Import / PDF
-                TreeBranchItem(isLast = !isAdmin) {
-                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                        if (permissions.canExportPdf) {
-                            Button(
-                                onClick = onExportAllPdf,
-                                modifier = Modifier.fillMaxWidth().testTag("settings_all_pdf_btn"),
-                                shape = RoundedCornerShape(8.dp)
-                            ) { Text("সব শ্রেণির সব শিক্ষার্থীর PDF ডাউনলোড") }
-                        }
-
-                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.fillMaxWidth()) {
-                            OutlinedButton(
-                                onClick = { csvExportLauncher.launch("students.csv") },
-                                modifier = Modifier.weight(1f).testTag("settings_csv_export_btn"),
-                                shape = RoundedCornerShape(8.dp)
-                            ) { Text("CSV এক্সপোর্ট", fontSize = 12.sp) }
-                            OutlinedButton(
-                                onClick = { csvTemplateLauncher.launch("students_template.csv") },
-                                modifier = Modifier.weight(1f).testTag("settings_csv_template_btn"),
-                                shape = RoundedCornerShape(8.dp)
-                            ) { Text("খালি টেমপ্লেট", fontSize = 12.sp) }
-                        }
-                        if (permissions.canManageStudents) {
-                            Row(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.fillMaxWidth()) {
-                                OutlinedButton(
-                                    onClick = { onOpenCsvImport("") },
-                                    modifier = Modifier.weight(1f).testTag("settings_smart_csv_btn"),
-                                    shape = RoundedCornerShape(8.dp)
-                                ) { Text("স্মার্ট CSV ইমপোর্ট", fontSize = 12.sp) }
-                                OutlinedButton(
-                                    onClick = { csvFilePickLauncher.launch(arrayOf("*/*")) },
-                                    modifier = Modifier.weight(1f).testTag("settings_pick_csv_btn"),
-                                    shape = RoundedCornerShape(8.dp)
-                                ) { Text("CSV ফাইল খুলুন", fontSize = 12.sp) }
-                            }
-                        }
-                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.fillMaxWidth()) {
-                            OutlinedButton(
-                                onClick = { jsonExportLauncher.launch("result_maker_backup.json") },
-                                modifier = Modifier.weight(1f).testTag("settings_json_export_btn"),
-                                shape = RoundedCornerShape(8.dp)
-                            ) { Text("JSON এক্সপোর্ট", fontSize = 12.sp) }
-                            if (isAdmin) {
-                                OutlinedButton(
-                                    onClick = { jsonRestoreLauncher.launch(arrayOf("application/json", "*/*")) },
-                                    modifier = Modifier.weight(1f).testTag("settings_json_restore_btn"),
-                                    shape = RoundedCornerShape(8.dp)
-                                ) { Text("ফাইল থেকে রিস্টোর", fontSize = 12.sp) }
-                            }
-                        }
-                    }
-                }
-
-                if (isAdmin) {
+            if (isAdmin) {
+                TreeGroupCard(
+                    title = "ডাটা রিসেট ও মুছে ফেলা",
+                    subtitle = "নমুনা রিসেট অথবা সকল শিক্ষার্থী মুছুন",
+                    badgeText = "সতর্কতা",
+                    badgeColor = RoseDanger,
+                    badgeContainerColor = RoseBg,
+                    icon = Icons.Rounded.WarningAmber,
+                    expanded = expandedGroup == "danger",
+                    headerTestTag = "settings_group_danger",
+                    onToggle = { expandedGroup = if (expandedGroup == "danger") "" else "danger" }
+                ) {
                     TreeBranchItem(isLast = true) {
-                        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                            HorizontalDivider(color = SlateOutline)
+                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Text(
+                                "সতর্কতা: নিচের অপশনগুলো ব্যবহার করলে বিদ্যালয়ের বর্তমান তালিকা পরিবর্তিত বা স্থায়ীভাবে মুছে যেতে পারে।",
+                                fontSize = 11.5.sp,
+                                color = RoseDanger,
+                                lineHeight = 16.sp
+                            )
                             Row(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.fillMaxWidth()) {
                                 OutlinedButton(
                                     onClick = { askReset = true },
@@ -1065,13 +939,15 @@ fun SettingsScreen(
                 }
             }
 
-            // Group 6: Manual Gemini API Key & Latest Model Suggestions
+            // Category 4: AI & Account
+            SettingsCategoryHeader(title = "AI সহায়ক ও অ্যাকাউন্ট", icon = Icons.Rounded.AutoAwesome)
+
             TreeGroupCard(
                 title = "Gemini AI ও মডেল",
                 subtitle = if (geminiApiKey.isNotBlank()) {
-                    "সক্রিয় মডেল: $geminiModel · API Key সংরক্ষিত"
+                    "সক্রিয়: $geminiModel · API Key সংরক্ষিত"
                 } else {
-                    "Google AI Studio থেকে নিজস্ব Gemini API Key যুক্ত করুন"
+                    "Google AI Studio থেকে নিজস্ব API Key যুক্ত করুন"
                 },
                 badgeText = if (geminiApiKey.isNotBlank()) "সংযুক্ত" else "সেটআপ বাকি",
                 badgeColor = if (geminiApiKey.isNotBlank()) EmeraldGrade else AmberNotice,
@@ -1081,536 +957,89 @@ fun SettingsScreen(
                 headerTestTag = "settings_group_aiproxy",
                 onToggle = { expandedGroup = if (expandedGroup == "aiproxy") "" else "aiproxy" }
             ) {
-                TreeBranchItem(isLast = false) {
-                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Text(
-                            text = "Google AI Studio (aistudio.google.com/apikey) থেকে আপনার Gemini API Key এখানে দিন। কী শুধুমাত্র এই ডিভাইসে সংরক্ষিত থাকে এবং ছবি স্ক্যান, বাংলা OCR ও শিক্ষক চ্যাট সরাসরি Gemini API দিয়ে চলে।",
-                            fontSize = 12.sp,
-                            color = SlateMuted,
-                            lineHeight = 17.sp
-                        )
-                        OutlinedTextField(
-                            value = apiKeyInput,
-                            onValueChange = { apiKeyInput = it },
-                            label = { Text("Gemini API Key") },
-                            placeholder = { Text("AIza...") },
-                            singleLine = true,
-                            leadingIcon = { Icon(Icons.Rounded.Key, contentDescription = null) },
-                            trailingIcon = {
-                                IconButton(
-                                    onClick = { showApiKey = !showApiKey },
-                                    modifier = Modifier.testTag("settings_gemini_key_toggle_btn")
-                                ) {
-                                    Icon(
-                                        imageVector = if (showApiKey) Icons.Rounded.VisibilityOff else Icons.Rounded.Visibility,
-                                        contentDescription = if (showApiKey) "কী লুকান" else "কী দেখুন"
-                                    )
-                                }
-                            },
-                            visualTransformation = if (showApiKey) VisualTransformation.None else PasswordVisualTransformation(),
-                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Ascii),
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .testTag("settings_gemini_api_key_input")
-                        )
+                SettingsGeminiAiContent(
+                    apiKeyInput = apiKeyInput,
+                    onApiKeyChange = { apiKeyInput = it },
+                    showApiKey = showApiKey,
+                    onToggleShowApiKey = { showApiKey = !showApiKey },
+                    modelInput = modelInput,
+                    onModelInputChange = { modelInput = it },
+                    modelSearchQuery = modelSearchQuery,
+                    onModelSearchChange = { modelSearchQuery = it },
+                    showAllLiveModels = showAllLiveModels,
+                    onToggleShowAllLiveModels = { showAllLiveModels = !showAllLiveModels },
+                    geminiApiKey = geminiApiKey,
+                    geminiModel = geminiModel,
+                    geminiAvailableModels = geminiAvailableModels,
+                    geminiCustomModels = geminiCustomModels,
+                    geminiNewModelIds = geminiNewModelIds,
+                    geminiRefreshingModels = geminiRefreshingModels,
+                    geminiModelsError = geminiModelsError,
+                    geminiTesting = geminiTesting,
+                    geminiTestStatus = geminiTestStatus,
+                    geminiTestSuccess = geminiTestSuccess,
+                    onSaveGeminiConfig = onSaveGeminiConfig,
+                    onTestGeminiConnection = onTestGeminiConnection,
+                    onRefreshGeminiModels = onRefreshGeminiModels,
+                    onRemoveCustomGeminiModel = onRemoveCustomGeminiModel,
+                    onClearGeminiApiKey = {
+                        apiKeyInput = ""
+                        onClearGeminiApiKey()
                     }
-                }
+                )
+            }
 
+            TreeGroupCard(
+                title = "অ্যাকাউন্ট ও অ্যাপ তথ্য",
+                subtitle = "সাইন আউট, বিদ্যালয় ত্যাগ ও সংস্করণ",
+                badgeText = "১.০.০",
+                icon = Icons.Rounded.AccountCircle,
+                expanded = expandedGroup == "account",
+                headerTestTag = "settings_group_account",
+                onToggle = { expandedGroup = if (expandedGroup == "account") "" else "account" }
+            ) {
                 TreeBranchItem(isLast = false) {
                     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Text(
-                            text = "প্রস্তাবিত সর্বশেষ Gemini মডেল",
-                            fontWeight = FontWeight.SemiBold,
-                            fontSize = 12.5.sp,
-                            color = SlateText
-                        )
-                        GeminiApiConfig.SUGGESTED_MODELS.forEach { preset ->
-                            val isSelected = GeminiApiConfig.normalizeModelId(modelInput) == preset.id
-                            Surface(
-                                color = if (isSelected) TealContainer.copy(alpha = 0.65f) else SlateBg,
-                                border = BorderStroke(
-                                    if (isSelected) 2.dp else 1.dp,
-                                    if (isSelected) TealPrimary else SlateOutline
-                                ),
-                                shape = RoundedCornerShape(10.dp),
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .clickable { modelInput = preset.id }
-                                    .testTag("settings_model_preset_${preset.id}")
+                        if (activeSchool != null && !isOwner) {
+                            OutlinedButton(
+                                onClick = { askLeaveSchool = true },
+                                shape = RoundedCornerShape(8.dp),
+                                border = BorderStroke(1.dp, RoseDanger.copy(alpha = 0.5f)),
+                                modifier = Modifier.fillMaxWidth().testTag("settings_leave_school_btn")
                             ) {
-                                Row(
-                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                                ) {
-                                    RadioButton(
-                                        selected = isSelected,
-                                        onClick = { modelInput = preset.id }
-                                    )
-                                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                                        Row(
-                                            verticalAlignment = Alignment.CenterVertically,
-                                            horizontalArrangement = Arrangement.spacedBy(6.dp)
-                                        ) {
-                                            Text(
-                                                text = preset.title,
-                                                fontWeight = FontWeight.SemiBold,
-                                                fontSize = 12.5.sp,
-                                                color = SlateText
-                                            )
-                                            Surface(
-                                                color = if (isSelected) TealContainer else MaterialTheme.colorScheme.surface,
-                                                shape = RoundedCornerShape(6.dp)
-                                            ) {
-                                                Text(
-                                                    text = preset.badge,
-                                                    fontSize = 10.sp,
-                                                    fontWeight = FontWeight.SemiBold,
-                                                    color = if (isSelected) TealDark else SlateMuted,
-                                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
-                                                )
-                                            }
-                                        }
-                                        Text(
-                                            text = "${preset.id} · ${preset.description}",
-                                            fontSize = 11.sp,
-                                            color = SlateMuted,
-                                            lineHeight = 15.sp
-                                        )
-                                    }
-                                }
+                                Icon(Icons.AutoMirrored.Rounded.ExitToApp, contentDescription = null, modifier = Modifier.size(16.dp), tint = RoseDanger)
+                                Spacer(Modifier.size(6.dp))
+                                Text("এই বিদ্যালয় ত্যাগ করুন (অন্য বিদ্যালয়ে যুক্ত হতে)", fontSize = 12.sp, color = RoseDanger)
                             }
                         }
-
-                        val suggestedIds = remember { GeminiApiConfig.SUGGESTED_MODEL_IDS }
-                        val normalizedTypedModel = remember(modelInput) {
-                            modelInput.trim().removePrefix("models/").trim()
-                        }
-                        val extraLiveModels = remember(geminiAvailableModels, geminiNewModelIds) {
-                            geminiAvailableModels
-                                .filter { it.id !in suggestedIds }
-                                .sortedWith(
-                                    compareByDescending<DiscoveredGeminiModel> { it.id in geminiNewModelIds }
-                                )
-                        }
-                        val filteredLiveModels = remember(extraLiveModels, modelSearchQuery) {
-                            val q = modelSearchQuery.trim().lowercase()
-                            if (q.isBlank()) extraLiveModels
-                            else extraLiveModels.filter {
-                                it.id.lowercase().contains(q) || it.displayName.lowercase().contains(q)
-                            }
-                        }
-
-                        HorizontalDivider(color = SlateOutline, modifier = Modifier.padding(vertical = 2.dp))
-
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.SpaceBetween
+                        OutlinedButton(
+                            onClick = { askSignOut = true },
+                            shape = RoundedCornerShape(8.dp),
+                            modifier = Modifier.fillMaxWidth().testTag("settings_sign_out_btn")
                         ) {
-                            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                                ) {
-                                    Text(
-                                        text = "API থেকে পাওয়া নতুন ও অন্যান্য মডেল",
-                                        fontWeight = FontWeight.SemiBold,
-                                        fontSize = 12.5.sp,
-                                        color = SlateText
-                                    )
-                                    if (extraLiveModels.isNotEmpty()) {
-                                        Surface(
-                                            color = TealSoft,
-                                            shape = RoundedCornerShape(6.dp)
-                                        ) {
-                                            Text(
-                                                text = "${bn(extraLiveModels.size.toString())}টি",
-                                                fontSize = 10.sp,
-                                                fontWeight = FontWeight.SemiBold,
-                                                color = TealDark,
-                                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
-                                            )
-                                        }
-                                    }
-                                }
-                                Text(
-                                    text = "Google নতুন কোনো মডেল চালু করলে নির্বাচিত মডেলের বাইরেও এখানে স্বয়ংক্রিয়ভাবে দেখাবে",
-                                    fontSize = 11.sp,
-                                    color = SlateMuted,
-                                    lineHeight = 15.sp
-                                )
-                            }
-                            TextButton(
-                                onClick = {
-                                    onRefreshGeminiModels(apiKeyInput.ifBlank { geminiApiKey })
-                                },
-                                enabled = !geminiRefreshingModels,
-                                modifier = Modifier.testTag("settings_refresh_models_btn"),
-                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)
-                            ) {
-                                if (geminiRefreshingModels) {
-                                    CircularProgressIndicator(
-                                        modifier = Modifier.size(14.dp),
-                                        strokeWidth = 2.dp
-                                    )
-                                } else {
-                                    Icon(
-                                        Icons.Rounded.Refresh,
-                                        contentDescription = "নতুন মডেল খুঁজুন",
-                                        modifier = Modifier.size(16.dp)
-                                    )
-                                    Spacer(Modifier.size(4.dp))
-                                    Text("রিফ্রেশ", fontSize = 11.5.sp)
-                                }
-                            }
-                        }
-
-                        if (!geminiModelsError.isNullOrBlank()) {
-                            Text(
-                                text = geminiModelsError,
-                                fontSize = 11.sp,
-                                color = RoseDanger,
-                                lineHeight = 15.sp
-                            )
-                        }
-
-                        if (geminiNewModelIds.isNotEmpty()) {
-                            Surface(
-                                color = TealSoft,
-                                border = BorderStroke(1.dp, TealPrimary.copy(alpha = 0.35f)),
-                                shape = RoundedCornerShape(8.dp),
-                                modifier = Modifier.fillMaxWidth()
-                            ) {
-                                Text(
-                                    text = "নতুন মডেল শনাক্ত হয়েছে: ${geminiNewModelIds.joinToString(", ")}",
-                                    fontSize = 11.sp,
-                                    fontWeight = FontWeight.Medium,
-                                    color = TealDark,
-                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
-                                )
-                            }
-                        }
-
-                        if (extraLiveModels.isNotEmpty()) {
-                            if (extraLiveModels.size > 6) {
-                                OutlinedTextField(
-                                    value = modelSearchQuery,
-                                    onValueChange = { modelSearchQuery = it },
-                                    placeholder = { Text("নতুন মডেল খুঁজুন (যেমন: 4.5, pro, flash)...", fontSize = 12.sp) },
-                                    leadingIcon = {
-                                        Icon(Icons.Rounded.Search, contentDescription = null, modifier = Modifier.size(18.dp))
-                                    },
-                                    trailingIcon = {
-                                        if (modelSearchQuery.isNotEmpty()) {
-                                            IconButton(onClick = { modelSearchQuery = "" }) {
-                                                Icon(Icons.Rounded.Close, contentDescription = "খোঁজ মুছুন", modifier = Modifier.size(16.dp))
-                                            }
-                                        }
-                                    },
-                                    singleLine = true,
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .testTag("settings_live_model_search_input")
-                                )
-                            }
-
-                            val visibleLiveModels = if (showAllLiveModels || modelSearchQuery.isNotBlank()) {
-                                filteredLiveModels
-                            } else {
-                                filteredLiveModels.take(10)
-                            }
-
-                            if (visibleLiveModels.isEmpty()) {
-                                Text(
-                                    text = "\"$modelSearchQuery\"-এর সাথে মিল পাওয়া যায়নি। নিচে সরাসরি কাস্টম নাম লিখে ব্যবহার করতে পারেন।",
-                                    fontSize = 11.5.sp,
-                                    color = SlateMuted
-                                )
-                            } else {
-                                FlowRow(
-                                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                                    verticalArrangement = Arrangement.spacedBy(6.dp)
-                                ) {
-                                    visibleLiveModels.forEach { item ->
-                                        val selected = GeminiApiConfig.normalizeModelId(modelInput) == item.id
-                                        val isNew = item.id in geminiNewModelIds
-                                        FilterChip(
-                                            selected = selected,
-                                            onClick = { modelInput = item.id },
-                                            colors = appFilterChipColors(),
-                                            border = appFilterChipBorder(selected),
-                                            label = {
-                                                Text(
-                                                    text = if (isNew) "নতুন · ${item.id}" else item.id,
-                                                    fontSize = 11.sp,
-                                                    fontWeight = if (isNew || selected) FontWeight.Bold else FontWeight.Normal
-                                                )
-                                            }
-                                        )
-                                    }
-                                }
-
-                                val selectedDiscovered = extraLiveModels.find {
-                                    it.id == GeminiApiConfig.normalizeModelId(modelInput)
-                                }
-                                if (selectedDiscovered != null && (selectedDiscovered.displayName.isNotBlank() || selectedDiscovered.description.isNotBlank())) {
-                                    Surface(
-                                        color = TealSoft,
-                                        shape = RoundedCornerShape(8.dp),
-                                        modifier = Modifier.fillMaxWidth()
-                                    ) {
-                                        Column(Modifier.padding(8.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                                            if (selectedDiscovered.displayName.isNotBlank()) {
-                                                Text(
-                                                    text = "${selectedDiscovered.displayName} (${selectedDiscovered.id})",
-                                                    fontSize = 11.5.sp,
-                                                    fontWeight = FontWeight.SemiBold,
-                                                    color = TealDark
-                                                )
-                                            }
-                                            if (selectedDiscovered.description.isNotBlank()) {
-                                                Text(
-                                                    text = selectedDiscovered.description,
-                                                    fontSize = 11.sp,
-                                                    color = SlateMuted,
-                                                    maxLines = 2,
-                                                    overflow = TextOverflow.Ellipsis
-                                                )
-                                            }
-                                        }
-                                    }
-                                }
-
-                                if (modelSearchQuery.isBlank() && filteredLiveModels.size > 10) {
-                                    TextButton(
-                                        onClick = { showAllLiveModels = !showAllLiveModels },
-                                        contentPadding = PaddingValues(horizontal = 4.dp, vertical = 2.dp),
-                                        modifier = Modifier.testTag("settings_toggle_all_live_models_btn")
-                                    ) {
-                                        Text(
-                                            text = if (showAllLiveModels) "কম দেখুন" else "আরও ${bn((filteredLiveModels.size - 10).toString())}টি নতুন/অন্যান্য মডেল দেখুন",
-                                            fontSize = 11.5.sp
-                                        )
-                                    }
-                                }
-                            }
-                        } else {
-                            Text(
-                                text = if (apiKeyInput.isNotBlank() || geminiApiKey.isNotBlank()) {
-                                    "রিফ্রেশ বা 'পরীক্ষা ও মডেল লোড' চাপলে আপনার API Key-এ চালু থাকা সব নতুন ও অন্যান্য মডেল এখানে তালিকায় দেখাবে।"
-                                } else {
-                                    "উপরে API Key দিলে Google-এ নতুন চালু হওয়া সব মডেল স্বয়ংক্রিয়ভাবে এখানে লোড হবে।"
-                                },
-                                fontSize = 11.sp,
-                                color = SlateMuted,
-                                lineHeight = 15.sp
-                            )
-                        }
-
-                        HorizontalDivider(color = SlateOutline, modifier = Modifier.padding(vertical = 2.dp))
-
-                        if (geminiCustomModels.isNotEmpty()) {
-                            Text(
-                                text = "পূর্বে ব্যবহৃত কাস্টম মডেল:",
-                                fontWeight = FontWeight.SemiBold,
-                                fontSize = 12.sp,
-                                color = SlateText
-                            )
-                            FlowRow(
-                                horizontalArrangement = Arrangement.spacedBy(6.dp),
-                                verticalArrangement = Arrangement.spacedBy(6.dp)
-                            ) {
-                                geminiCustomModels.forEach { customId ->
-                                    val selected = GeminiApiConfig.normalizeModelId(modelInput) == customId
-                                    FilterChip(
-                                        selected = selected,
-                                        onClick = { modelInput = customId },
-                                        colors = appFilterChipColors(),
-                                        border = appFilterChipBorder(selected),
-                                        label = {
-                                            Text(
-                                                customId,
-                                                fontSize = 11.sp,
-                                                fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal
-                                            )
-                                        },
-                                        trailingIcon = {
-                                            Icon(
-                                                imageVector = Icons.Rounded.Close,
-                                                contentDescription = "$customId সরান",
-                                                modifier = Modifier
-                                                    .size(14.dp)
-                                                    .clickable { onRemoveCustomGeminiModel(customId) }
-                                            )
-                                        }
-                                    )
-                                }
-                            }
-                        }
-
-                        OutlinedTextField(
-                            value = modelInput,
-                            onValueChange = { modelInput = it },
-                            label = { Text("কাস্টম বা নতুন মডেলের নাম / আইডি লিখুন") },
-                            placeholder = { Text("যেমন: ${GeminiApiConfig.DEFAULT_MODEL} বা gemini-4.5-pro") },
-                            supportingText = {
-                                Text(
-                                    text = "তালিকার বাইরে যেকোনো কাস্টম মডেলের নাম সরাসরি এখানে লিখে সংরক্ষণ ও ব্যবহার করতে পারবেন।",
-                                    fontSize = 11.sp
-                                )
-                            },
-                            trailingIcon = {
-                                if (modelInput.isNotBlank() && normalizedTypedModel != GeminiApiConfig.DEFAULT_MODEL) {
-                                    IconButton(
-                                        onClick = { modelInput = GeminiApiConfig.DEFAULT_MODEL },
-                                        modifier = Modifier.testTag("settings_reset_default_model_btn")
-                                    ) {
-                                        Icon(
-                                            Icons.Rounded.Close,
-                                            contentDescription = "ডিফল্ট মডেলে ফিরুন",
-                                            modifier = Modifier.size(18.dp)
-                                        )
-                                    }
-                                }
-                            },
-                            singleLine = true,
-                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Ascii),
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .testTag("settings_gemini_model_input")
-                        )
-
-                        if (normalizedTypedModel.isNotBlank() && normalizedTypedModel !in suggestedIds) {
-                            val isSavedActive = normalizedTypedModel == geminiModel
-                            Surface(
-                                color = if (isSavedActive) TealSoft else AmberBg,
-                                border = BorderStroke(
-                                    1.dp,
-                                    if (isSavedActive) TealPrimary.copy(alpha = 0.4f) else AmberBorder
-                                ),
-                                shape = RoundedCornerShape(8.dp),
-                                modifier = Modifier.fillMaxWidth()
-                            ) {
-                                Row(
-                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 7.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.SpaceBetween
-                                ) {
-                                    Text(
-                                        text = if (isSavedActive) {
-                                            "কাস্টম / নির্বাচিত মডেল সক্রিয়: $normalizedTypedModel"
-                                        } else {
-                                            "প্রস্তুত কাস্টম মডেল: $normalizedTypedModel (চালু করতে 'সংরক্ষণ' চাপুন)"
-                                        },
-                                        fontSize = 11.5.sp,
-                                        fontWeight = FontWeight.Medium,
-                                        color = if (isSavedActive) TealDark else AmberNotice,
-                                        modifier = Modifier.weight(1f)
-                                    )
-                                }
-                            }
+                            Icon(Icons.AutoMirrored.Rounded.Logout, contentDescription = null, modifier = Modifier.size(16.dp), tint = RoseDanger)
+                            Spacer(Modifier.size(4.dp))
+                            Text("সাইন আউট", fontSize = 12.sp, color = RoseDanger)
                         }
                     }
                 }
 
                 TreeBranchItem(isLast = true) {
-                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Row(
-                            horizontalArrangement = Arrangement.spacedBy(6.dp),
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Button(
-                                onClick = { onSaveGeminiConfig(apiKeyInput, modelInput) },
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .testTag("settings_gemini_save_btn"),
-                                shape = RoundedCornerShape(8.dp)
-                            ) {
-                                Text("সংরক্ষণ", fontSize = 12.sp)
-                            }
-                            OutlinedButton(
-                                onClick = { onTestGeminiConnection(apiKeyInput, modelInput) },
-                                enabled = !geminiTesting,
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .testTag("settings_gemini_test_btn"),
-                                shape = RoundedCornerShape(8.dp)
-                            ) {
-                                if (geminiTesting) {
-                                    CircularProgressIndicator(
-                                        modifier = Modifier.size(14.dp),
-                                        strokeWidth = 2.dp
-                                    )
-                                } else {
-                                    Text("পরীক্ষা ও মডেল লোড", fontSize = 12.sp)
-                                }
-                            }
-                        }
-
-                        if (!geminiTestStatus.isNullOrBlank()) {
-                            val isSuccess = geminiTestSuccess == true
-                            Surface(
-                                color = if (isSuccess) TealSoft else RoseBg,
-                                border = BorderStroke(
-                                    1.dp,
-                                    if (isSuccess) TealPrimary.copy(alpha = 0.4f) else RoseDanger.copy(alpha = 0.35f)
-                                ),
-                                shape = RoundedCornerShape(8.dp),
-                                modifier = Modifier.fillMaxWidth()
-                            ) {
-                                Row(
-                                    modifier = Modifier.padding(10.dp),
-                                    verticalAlignment = Alignment.Top,
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                                ) {
-                                    if (isSuccess) {
-                                        Icon(
-                                            Icons.Rounded.CheckCircle,
-                                            contentDescription = null,
-                                            tint = TealDark,
-                                            modifier = Modifier.size(16.dp)
-                                        )
-                                    }
-                                    Text(
-                                        text = geminiTestStatus,
-                                        fontSize = 12.sp,
-                                        color = if (isSuccess) TealDark else RoseDanger,
-                                        lineHeight = 17.sp
-                                    )
-                                }
-                            }
-                        }
-
-                        if (geminiApiKey.isNotBlank() || apiKeyInput.isNotBlank()) {
-                            OutlinedButton(
-                                onClick = {
-                                    apiKeyInput = ""
-                                    onClearGeminiApiKey()
-                                },
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .testTag("settings_gemini_clear_btn"),
-                                shape = RoundedCornerShape(8.dp)
-                            ) {
-                                Text("API Key মুছে ফেলুন", fontSize = 12.sp, color = RoseDanger)
-                            }
+                    Surface(
+                        color = SlateBg,
+                        border = BorderStroke(1.dp, SlateOutline),
+                        shape = RoundedCornerShape(10.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                            Text("অ্যাপ্লিকেশন তথ্য", fontWeight = FontWeight.Bold, fontSize = 12.5.sp, color = SlateText)
+                            Text("অ্যাপ আইডি: com.kgps.result · ভার্সন: 1.0.0", fontSize = 11.5.sp, color = SlateMuted)
+                            Text("ফরম্যাট: NCTB প্রাথমিক বিদ্যালয় (১ম–৫ম শ্রেণি) A4 Landscape ভাঁজযোগ্য বুকলেট", fontSize = 11.5.sp, color = SlateMuted)
                         }
                     }
                 }
             }
 
-            Card(
-                colors = CardDefaults.cardColors(containerColor = SlateBg),
-                border = BorderStroke(1.dp, SlateOutline),
-                shape = RoundedCornerShape(12.dp)
-            ) {
-                Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Text("অ্যাপ্লিকেশন তথ্য", fontWeight = FontWeight.Bold, fontSize = 13.5.sp)
-                    Text("অ্যাপ আইডি: com.kgps.result · ভার্সন: 1.0.0", fontSize = 12.sp, color = SlateMuted)
-                    Text("ফরম্যাট: NCTB প্রাথমিক বিদ্যালয় (১ম–৫ম শ্রেণি) A4 Landscape ভাঁজযোগ্য বুকলেট", fontSize = 12.sp, color = SlateMuted)
-                }
-            }
             Spacer(Modifier.height(12.dp))
         }
     }

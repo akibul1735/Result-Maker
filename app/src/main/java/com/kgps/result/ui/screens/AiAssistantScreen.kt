@@ -44,6 +44,7 @@ import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.ArrowDropDown
 import androidx.compose.material.icons.rounded.AutoAwesome
 import androidx.compose.material.icons.rounded.CameraAlt
+import androidx.compose.material.icons.rounded.ChatBubbleOutline
 import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.Close
@@ -53,6 +54,9 @@ import androidx.compose.material.icons.rounded.DocumentScanner
 import androidx.compose.material.icons.rounded.ErrorOutline
 import androidx.compose.material.icons.rounded.Info
 import androidx.compose.material.icons.rounded.PhotoLibrary
+import androidx.compose.material.icons.rounded.Refresh
+import androidx.compose.material.icons.rounded.Search
+import androidx.compose.material.icons.rounded.Tune
 import androidx.compose.material.icons.rounded.UploadFile
 import androidx.compose.material.icons.rounded.WarningAmber
 import androidx.compose.material.icons.rounded.ZoomIn
@@ -75,9 +79,8 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
+import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Surface
-import androidx.compose.material3.Tab
-import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -115,9 +118,11 @@ import com.kgps.result.CLS_SHORT
 import com.kgps.result.RELIGIONS
 import com.kgps.result.Student
 import com.kgps.result.ai.AiModelMode
+import com.kgps.result.ai.DiscoveredGeminiModel
 import com.kgps.result.ai.ExtractedClassSheet
 import com.kgps.result.ai.ExtractedMarksheet
 import com.kgps.result.ai.FieldConfidence
+import com.kgps.result.ai.GeminiApiConfig
 import com.kgps.result.ai.RowValidationReport
 import com.kgps.result.ai.ScannedStudentRow
 import com.kgps.result.ai.validateScannedStudentRow
@@ -159,6 +164,14 @@ fun AiAssistantScreen(
     permissions: TeacherPermissions,
     isGeminiConfigured: Boolean,
     activeModelName: String,
+    availableModels: List<DiscoveredGeminiModel> = emptyList(),
+    customModels: List<String> = emptyList(),
+    newModelIds: Set<String> = emptySet(),
+    refreshingModels: Boolean = false,
+    modelsError: String? = null,
+    onSelectModel: (String) -> Unit = {},
+    onRefreshModels: () -> Unit = {},
+    onRemoveCustomModel: (String) -> Unit = {},
     onOpenAiSettings: () -> Unit,
     onSetActiveTab: (Int) -> Unit,
     onSetModelMode: (AiModelMode) -> Unit,
@@ -188,6 +201,7 @@ fun AiAssistantScreen(
     var contextDropdownOpen by remember { mutableStateOf(false) }
     var askClearChat by remember { mutableStateOf(false) }
     var askClearImage by remember { mutableStateOf(false) }
+    var showModelPicker by remember { mutableStateOf(false) }
 
     // Scanner mode & selectors
     var scanMode by remember { mutableStateOf("class") } // "class" | "single"
@@ -227,232 +241,392 @@ fun AiAssistantScreen(
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         Column(Modifier.widthIn(max = 920.dp).fillMaxSize()) {
-            if (!isGeminiConfigured) {
-                Surface(
-                    color = AmberBg,
-                    border = BorderStroke(1.dp, AmberBorder),
-                    shape = RoundedCornerShape(8.dp),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 12.dp, vertical = 6.dp)
-                ) {
-                    Row(
-                        Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+            // Compact Top Header: Model Selector Bar + Segmented Tabs
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 10.dp, vertical = 4.dp),
+                verticalArrangement = Arrangement.spacedBy(5.dp)
+            ) {
+                if (!isGeminiConfigured) {
+                    Surface(
+                        color = AmberBg,
+                        border = BorderStroke(1.dp, AmberBorder),
+                        shape = RoundedCornerShape(8.dp),
+                        modifier = Modifier.fillMaxWidth()
                     ) {
-                        Icon(
-                            Icons.Rounded.Info,
-                            contentDescription = "সতর্কীকরণ",
-                            tint = AmberNotice,
-                            modifier = Modifier.size(16.dp)
-                        )
-                        Text(
-                            "Gemini API Key সেট করা নেই · সেটিংস থেকে আপনার কী যুক্ত করুন",
-                            fontSize = 11.5.sp,
-                            fontWeight = FontWeight.Medium,
-                            color = AmberNotice,
-                            maxLines = 2,
-                            overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier.weight(1f)
-                        )
-                        TextButton(
-                            onClick = onOpenAiSettings,
-                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
-                            modifier = Modifier.testTag("ai_open_settings_btn")
+                        Row(
+                            Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
                         ) {
-                            Text("সেটিংস", fontSize = 11.5.sp, fontWeight = FontWeight.Bold)
+                            Icon(
+                                Icons.Rounded.Info,
+                                contentDescription = "সতর্কীকরণ",
+                                tint = AmberNotice,
+                                modifier = Modifier.size(14.dp)
+                            )
+                            Text(
+                                "API Key নেই · মডেল: $activeModelName",
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Medium,
+                                color = AmberNotice,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.weight(1f)
+                            )
+                            Surface(
+                                color = Color.White,
+                                border = BorderStroke(1.dp, AmberBorder),
+                                shape = RoundedCornerShape(6.dp),
+                                modifier = Modifier
+                                    .clickable { showModelPicker = true }
+                                    .testTag("ai_change_model_btn")
+                            ) {
+                                Row(
+                                    Modifier.padding(horizontal = 7.dp, vertical = 3.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text("মডেল", fontSize = 10.5.sp, fontWeight = FontWeight.SemiBold, color = AmberNotice)
+                                    Icon(Icons.Rounded.ArrowDropDown, contentDescription = null, tint = AmberNotice, modifier = Modifier.size(14.dp))
+                                }
+                            }
+                            Surface(
+                                color = AmberNotice,
+                                shape = RoundedCornerShape(6.dp),
+                                modifier = Modifier
+                                    .clickable { onOpenAiSettings() }
+                                    .testTag("ai_open_settings_btn")
+                            ) {
+                                Text(
+                                    "কী দিন",
+                                    fontSize = 10.5.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color.White,
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+                                )
+                            }
+                        }
+                    }
+                } else {
+                    Surface(
+                        color = TealSoft,
+                        border = BorderStroke(1.dp, TealPrimary.copy(alpha = 0.25f)),
+                        shape = RoundedCornerShape(8.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { showModelPicker = true }
+                            .testTag("ai_change_model_btn")
+                    ) {
+                        Row(
+                            Modifier.padding(horizontal = 9.dp, vertical = 5.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Icon(
+                                Icons.Rounded.AutoAwesome,
+                                contentDescription = null,
+                                tint = TealPrimary,
+                                modifier = Modifier.size(14.dp)
+                            )
+                            Text(
+                                "মডেল: $activeModelName",
+                                fontSize = 11.5.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = TealDark,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.weight(1f)
+                            )
+                            Surface(
+                                color = TealContainer,
+                                shape = RoundedCornerShape(6.dp)
+                            ) {
+                                Row(
+                                    Modifier.padding(horizontal = 7.dp, vertical = 2.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(2.dp)
+                                ) {
+                                    Text(
+                                        "পরিবর্তন",
+                                        fontSize = 10.5.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = TealDark
+                                    )
+                                    Icon(
+                                        Icons.Rounded.ArrowDropDown,
+                                        contentDescription = "মডেল পরিবর্তন",
+                                        tint = TealDark,
+                                        modifier = Modifier.size(14.dp)
+                                    )
+                                }
+                            }
                         }
                     }
                 }
-            } else {
-                Surface(
-                    color = TealSoft,
-                    border = BorderStroke(1.dp, TealPrimary.copy(alpha = 0.25f)),
-                    shape = RoundedCornerShape(8.dp),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 12.dp, vertical = 4.dp)
-                ) {
-                    Row(
-                        Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
-                        Icon(
-                            Icons.Rounded.AutoAwesome,
-                            contentDescription = null,
-                            tint = TealPrimary,
-                            modifier = Modifier.size(15.dp)
-                        )
-                        Text(
-                            "সক্রিয় Gemini মডেল: $activeModelName",
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.Medium,
-                            color = TealDark,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier.weight(1f)
-                        )
-                        TextButton(
-                            onClick = onOpenAiSettings,
-                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
-                            modifier = Modifier.testTag("ai_change_model_btn")
-                        ) {
-                            Text("পরিবর্তন", fontSize = 11.sp)
-                        }
-                    }
-                }
-            }
 
-            TabRow(selectedTabIndex = state.activeTab) {
-                Tab(
-                    selected = state.activeTab == 0,
-                    onClick = { onSetActiveTab(0) },
-                    modifier = Modifier.testTag("ai_tab_chat"),
-                    text = { Text("শিক্ষক সহায়ক চ্যাট", fontSize = 13.sp) }
-                )
-                Tab(
-                    selected = state.activeTab == 1,
-                    onClick = { onSetActiveTab(1) },
-                    modifier = Modifier.testTag("ai_tab_scanner"),
-                    text = { Text("নম্বরপত্র ছবি স্ক্যান", fontSize = 13.sp) }
-                )
+                // Compact Segmented Tab Bar
+                Surface(
+                    color = SlateSurfaceVariant,
+                    border = BorderStroke(1.dp, SlateOutline),
+                    shape = RoundedCornerShape(9.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(3.dp),
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        val isChatTab = state.activeTab == 0
+                        Surface(
+                            color = if (isChatTab) TealPrimary else Color.Transparent,
+                            shape = RoundedCornerShape(7.dp),
+                            modifier = Modifier
+                                .weight(1f)
+                                .clickable { onSetActiveTab(0) }
+                                .testTag("ai_tab_chat")
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(vertical = 6.dp, horizontal = 8.dp),
+                                horizontalArrangement = Arrangement.Center,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(
+                                    Icons.Rounded.ChatBubbleOutline,
+                                    contentDescription = null,
+                                    tint = if (isChatTab) Color.White else SlateMuted,
+                                    modifier = Modifier.size(14.dp)
+                                )
+                                Spacer(Modifier.width(5.dp))
+                                Text(
+                                    "শিক্ষক চ্যাট",
+                                    fontSize = 12.sp,
+                                    fontWeight = if (isChatTab) FontWeight.Bold else FontWeight.Medium,
+                                    color = if (isChatTab) Color.White else SlateText,
+                                    maxLines = 1
+                                )
+                            }
+                        }
+
+                        val isScanTab = state.activeTab == 1
+                        Surface(
+                            color = if (isScanTab) TealPrimary else Color.Transparent,
+                            shape = RoundedCornerShape(7.dp),
+                            modifier = Modifier
+                                .weight(1f)
+                                .clickable { onSetActiveTab(1) }
+                                .testTag("ai_tab_scanner")
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(vertical = 6.dp, horizontal = 8.dp),
+                                horizontalArrangement = Arrangement.Center,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(
+                                    Icons.Rounded.DocumentScanner,
+                                    contentDescription = null,
+                                    tint = if (isScanTab) Color.White else SlateMuted,
+                                    modifier = Modifier.size(14.dp)
+                                )
+                                Spacer(Modifier.width(5.dp))
+                                Text(
+                                    "নম্বরপত্র স্ক্যান",
+                                    fontSize = 12.sp,
+                                    fontWeight = if (isScanTab) FontWeight.Bold else FontWeight.Medium,
+                                    color = if (isScanTab) Color.White else SlateText,
+                                    maxLines = 1
+                                )
+                            }
+                        }
+                    }
+                }
             }
 
             if (state.activeTab == 0) {
                 Column(
                     Modifier
                         .fillMaxSize()
-                        .padding(horizontal = 12.dp, vertical = 8.dp),
-                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                        .padding(horizontal = 10.dp, vertical = 4.dp),
+                    verticalArrangement = Arrangement.spacedBy(5.dp)
                 ) {
+                    // Single Compact Controls Row: Context Student + Mode Toggle + Clear
                     Row(
                         Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(6.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        val isGeneralMode = state.modelMode == AiModelMode.GENERAL
-                        FilterChip(
-                            selected = isGeneralMode,
-                            onClick = { onSetModelMode(AiModelMode.GENERAL) },
-                            colors = appFilterChipColors(),
-                            border = appFilterChipBorder(isGeneralMode),
-                            modifier = Modifier.testTag("ai_mode_general"),
-                            label = {
-                                Text(
-                                    "বিস্তারিত",
-                                    fontSize = 11.5.sp,
-                                    fontWeight = if (isGeneralMode) FontWeight.Bold else FontWeight.Normal
-                                )
-                            }
-                        )
-                        val isFastMode = state.modelMode == AiModelMode.FAST
-                        FilterChip(
-                            selected = isFastMode,
-                            onClick = { onSetModelMode(AiModelMode.FAST) },
-                            colors = appFilterChipColors(),
-                            border = appFilterChipBorder(isFastMode),
-                            modifier = Modifier.testTag("ai_mode_fast"),
-                            label = {
-                                Text(
-                                    "দ্রুত",
-                                    fontSize = 11.5.sp,
-                                    fontWeight = if (isFastMode) FontWeight.Bold else FontWeight.Normal
-                                )
-                            }
-                        )
-                        Spacer(Modifier.weight(1f))
-                        OutlinedButton(
-                            onClick = {
-                                if (state.chatMessages.size > 1) {
-                                    askClearChat = true
-                                } else {
-                                    onClearChat()
-                                }
-                            },
-                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
-                            shape = RoundedCornerShape(8.dp),
-                            border = BorderStroke(1.dp, SlateOutline),
-                            modifier = Modifier.testTag("ai_clear_chat_btn")
-                        ) {
-                            Icon(Icons.Rounded.DeleteSweep, contentDescription = null, modifier = Modifier.size(15.dp))
-                            Text(" নতুন", fontSize = 11.sp)
-                        }
-                    }
-
-                    Box {
-                        OutlinedButton(
-                            onClick = { contextDropdownOpen = true },
-                            modifier = Modifier.fillMaxWidth().testTag("ai_context_student_btn"),
-                            shape = RoundedCornerShape(8.dp),
-                            border = BorderStroke(1.dp, SlateOutline)
-                        ) {
-                            Text(
-                                selectedStudent?.let {
-                                    "প্রসঙ্গ: ${CLSN[it.cls - 1]} · রোল ${bn(it.roll.toString())} — ${it.name}"
-                                } ?: "শিক্ষার্থী প্রসঙ্গ: সাধারণ (ঐচ্ছিক) ▾",
-                                fontSize = 12.sp,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                        }
-                        DropdownMenu(expanded = contextDropdownOpen, onDismissRequest = { contextDropdownOpen = false }) {
-                            val isNoneSel = state.contextStudentId == null
-                            DropdownMenuItem(
-                                modifier = Modifier.background(if (isNoneSel) TealContainer else Color.Transparent),
-                                text = {
+                        Box(Modifier.weight(1f)) {
+                            Surface(
+                                color = if (selectedStudent != null) TealSoft else Color.White,
+                                border = BorderStroke(1.dp, if (selectedStudent != null) TealPrimary.copy(alpha = 0.5f) else SlateOutline),
+                                shape = RoundedCornerShape(8.dp),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable { contextDropdownOpen = true }
+                                    .testTag("ai_context_student_btn")
+                            ) {
+                                Row(
+                                    Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                ) {
                                     Text(
-                                        "সাধারণ / কোনো নির্দিষ্ট শিক্ষার্থী নয়",
-                                        fontWeight = if (isNoneSel) FontWeight.Bold else FontWeight.Normal,
-                                        color = if (isNoneSel) TealDark else SlateText
+                                        selectedStudent?.let {
+                                            "${CLS_SHORT[it.cls - 1]}·${bn(it.roll.toString())} ${it.name}"
+                                        } ?: "প্রসঙ্গ: সাধারণ",
+                                        fontSize = 11.5.sp,
+                                        fontWeight = if (selectedStudent != null) FontWeight.SemiBold else FontWeight.Normal,
+                                        color = if (selectedStudent != null) TealDark else SlateText,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                        modifier = Modifier.weight(1f)
                                     )
-                                },
-                                trailingIcon = if (isNoneSel) {
-                                    { Icon(Icons.Rounded.Check, contentDescription = null, tint = TealDark, modifier = Modifier.size(16.dp)) }
-                                } else null,
-                                onClick = { onSetContextStudent(null); contextDropdownOpen = false }
-                            )
-                            sortedStudents.forEach { s ->
-                                val isStuSel = state.contextStudentId == s.id
+                                    Icon(
+                                        Icons.Rounded.ArrowDropDown,
+                                        contentDescription = null,
+                                        tint = SlateMuted,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                }
+                            }
+                            DropdownMenu(expanded = contextDropdownOpen, onDismissRequest = { contextDropdownOpen = false }) {
+                                val isNoneSel = state.contextStudentId == null
                                 DropdownMenuItem(
-                                    modifier = Modifier.background(if (isStuSel) TealContainer else Color.Transparent),
+                                    modifier = Modifier.background(if (isNoneSel) TealContainer else Color.Transparent),
                                     text = {
                                         Text(
-                                            "${CLSN[s.cls - 1]} · রোল ${bn(s.roll.toString())} — ${s.name.ifBlank { "(নাম নেই)" }}",
-                                            fontWeight = if (isStuSel) FontWeight.Bold else FontWeight.Normal,
-                                            color = if (isStuSel) TealDark else SlateText
+                                            "সাধারণ / কোনো নির্দিষ্ট শিক্ষার্থী নয়",
+                                            fontWeight = if (isNoneSel) FontWeight.Bold else FontWeight.Normal,
+                                            color = if (isNoneSel) TealDark else SlateText
                                         )
                                     },
-                                    trailingIcon = if (isStuSel) {
+                                    trailingIcon = if (isNoneSel) {
                                         { Icon(Icons.Rounded.Check, contentDescription = null, tint = TealDark, modifier = Modifier.size(16.dp)) }
                                     } else null,
-                                    onClick = { onSetContextStudent(s.id); contextDropdownOpen = false }
+                                    onClick = { onSetContextStudent(null); contextDropdownOpen = false }
                                 )
+                                sortedStudents.forEach { s ->
+                                    val isStuSel = state.contextStudentId == s.id
+                                    DropdownMenuItem(
+                                        modifier = Modifier.background(if (isStuSel) TealContainer else Color.Transparent),
+                                        text = {
+                                            Text(
+                                                "${CLSN[s.cls - 1]} · রোল ${bn(s.roll.toString())} — ${s.name.ifBlank { "(নাম নেই)" }}",
+                                                fontWeight = if (isStuSel) FontWeight.Bold else FontWeight.Normal,
+                                                color = if (isStuSel) TealDark else SlateText
+                                            )
+                                        },
+                                        trailingIcon = if (isStuSel) {
+                                            { Icon(Icons.Rounded.Check, contentDescription = null, tint = TealDark, modifier = Modifier.size(16.dp)) }
+                                        } else null,
+                                        onClick = { onSetContextStudent(s.id); contextDropdownOpen = false }
+                                    )
+                                }
+                            }
+                        }
+
+                        // Compact Mode Switcher
+                        Surface(
+                            color = SlateSurfaceVariant,
+                            border = BorderStroke(1.dp, SlateOutline),
+                            shape = RoundedCornerShape(8.dp)
+                        ) {
+                            Row(Modifier.padding(2.dp), horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+                                val isGeneralMode = state.modelMode == AiModelMode.GENERAL
+                                Surface(
+                                    color = if (isGeneralMode) TealPrimary else Color.Transparent,
+                                    shape = RoundedCornerShape(6.dp),
+                                    modifier = Modifier
+                                        .clickable { onSetModelMode(AiModelMode.GENERAL) }
+                                        .testTag("ai_mode_general")
+                                ) {
+                                    Text(
+                                        "বিস্তারিত",
+                                        fontSize = 10.5.sp,
+                                        fontWeight = if (isGeneralMode) FontWeight.Bold else FontWeight.Normal,
+                                        color = if (isGeneralMode) Color.White else SlateText,
+                                        modifier = Modifier.padding(horizontal = 7.dp, vertical = 5.dp)
+                                    )
+                                }
+                                val isFastMode = state.modelMode == AiModelMode.FAST
+                                Surface(
+                                    color = if (isFastMode) TealPrimary else Color.Transparent,
+                                    shape = RoundedCornerShape(6.dp),
+                                    modifier = Modifier
+                                        .clickable { onSetModelMode(AiModelMode.FAST) }
+                                        .testTag("ai_mode_fast")
+                                ) {
+                                    Text(
+                                        "দ্রুত",
+                                        fontSize = 10.5.sp,
+                                        fontWeight = if (isFastMode) FontWeight.Bold else FontWeight.Normal,
+                                        color = if (isFastMode) Color.White else SlateText,
+                                        modifier = Modifier.padding(horizontal = 7.dp, vertical = 5.dp)
+                                    )
+                                }
+                            }
+                        }
+
+                        // Compact Clear Chat Action
+                        Surface(
+                            color = Color.White,
+                            border = BorderStroke(1.dp, SlateOutline),
+                            shape = RoundedCornerShape(8.dp),
+                            modifier = Modifier
+                                .clickable {
+                                    if (state.chatMessages.size > 1) {
+                                        askClearChat = true
+                                    } else {
+                                        onClearChat()
+                                    }
+                                }
+                                .testTag("ai_clear_chat_btn")
+                        ) {
+                            Row(
+                                Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(3.dp)
+                            ) {
+                                Icon(Icons.Rounded.DeleteSweep, contentDescription = "নতুন চ্যাট", tint = SlateMuted, modifier = Modifier.size(14.dp))
+                                Text("নতুন", fontSize = 10.5.sp, color = SlateText, fontWeight = FontWeight.Medium)
                             }
                         }
                     }
 
+                    // Slim Quick Prompts Row
                     Row(
                         Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        horizontalArrangement = Arrangement.spacedBy(5.dp)
                     ) {
                         listOf(
                             "প্রান্তিক মতামত খসড়া লিখুন" to "মতামত খসড়া",
                             "NCTB প্রাথমিক মূল্যায়ন নম্বর বিভাজন ব্যাখ্যা করুন" to "নম্বর বিভাজন",
                             "অভিভাবক সভার জন্য সংক্ষিপ্ত সারসংক্ষেপ তৈরি করুন" to "অভিভাবক সভা"
                         ).forEachIndexed { idx, (prompt, shortLabel) ->
-                            AssistChip(
-                                onClick = { onSendChat(prompt) },
-                                modifier = Modifier.testTag("ai_quick_prompt_$idx"),
-                                label = { Text(shortLabel, fontSize = 11.5.sp) }
-                            )
+                            Surface(
+                                color = Color.White,
+                                border = BorderStroke(1.dp, SlateOutline),
+                                shape = RoundedCornerShape(16.dp),
+                                modifier = Modifier
+                                    .clickable { onSendChat(prompt) }
+                                    .testTag("ai_quick_prompt_$idx")
+                            ) {
+                                Text(
+                                    shortLabel,
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Medium,
+                                    color = TealDark,
+                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
+                                )
+                            }
                         }
                     }
 
                     LazyColumn(
                         Modifier.weight(1f).fillMaxWidth(),
-                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                        verticalArrangement = Arrangement.spacedBy(6.dp),
+                        contentPadding = PaddingValues(vertical = 2.dp)
                     ) {
                         items(state.chatMessages, key = { it.id }) { msg ->
                             val isBot = !msg.isUser
@@ -462,22 +636,23 @@ fun AiAssistantScreen(
                             ) {
                                 Surface(
                                     color = if (msg.isUser) TealPrimary else MaterialTheme.colorScheme.surface,
-                                    shape = RoundedCornerShape(12.dp),
+                                    shape = RoundedCornerShape(10.dp),
                                     border = if (isBot) BorderStroke(1.dp, SlateOutline) else null,
                                     modifier = Modifier.widthIn(max = 560.dp)
                                 ) {
-                                    Column(Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                    Column(Modifier.padding(horizontal = 10.dp, vertical = 7.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                                         if (isBot && !msg.modelLabel.isNullOrBlank()) {
                                             Text(
                                                 msg.modelLabel,
-                                                fontSize = 10.sp,
+                                                fontSize = 9.5.sp,
                                                 fontWeight = FontWeight.Bold,
                                                 color = TealPrimary
                                             )
                                         }
                                         Text(
                                             msg.text,
-                                            fontSize = 13.sp,
+                                            fontSize = 12.5.sp,
+                                            lineHeight = 18.sp,
                                             color = if (msg.isUser) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface
                                         )
                                     }
@@ -489,11 +664,11 @@ fun AiAssistantScreen(
                             item {
                                 Row(
                                     verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                    modifier = Modifier.padding(4.dp)
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                    modifier = Modifier.padding(2.dp)
                                 ) {
-                                    CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
-                                    Text("উত্তর তৈরি হচ্ছে...", fontSize = 12.sp, color = SlateMuted)
+                                    CircularProgressIndicator(modifier = Modifier.size(14.dp), strokeWidth = 2.dp)
+                                    Text("উত্তর তৈরি হচ্ছে...", fontSize = 11.5.sp, color = SlateMuted)
                                 }
                             }
                         }
@@ -507,17 +682,25 @@ fun AiAssistantScreen(
                             modifier = Modifier.fillMaxWidth()
                         ) {
                             Column(
-                                modifier = Modifier.padding(8.dp),
-                                verticalArrangement = Arrangement.spacedBy(4.dp)
+                                modifier = Modifier.padding(7.dp),
+                                verticalArrangement = Arrangement.spacedBy(3.dp)
                             ) {
-                                Text(err, color = RoseDanger, fontSize = 12.sp, lineHeight = 16.sp)
+                                Text(err, color = RoseDanger, fontSize = 11.5.sp, lineHeight = 15.sp)
                                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                     TextButton(
-                                        onClick = onOpenAiSettings,
-                                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                                        onClick = { showModelPicker = true },
+                                        contentPadding = PaddingValues(horizontal = 6.dp, vertical = 0.dp),
                                         modifier = Modifier.testTag("ai_chat_err_settings_btn")
                                     ) {
-                                        Text("মডেল পরিবর্তন করুন", fontSize = 11.5.sp)
+                                        Text("মডেল পরিবর্তন করুন", fontSize = 11.sp)
+                                    }
+                                    if (!isGeminiConfigured) {
+                                        TextButton(
+                                            onClick = onOpenAiSettings,
+                                            contentPadding = PaddingValues(horizontal = 6.dp, vertical = 0.dp)
+                                        ) {
+                                            Text("API Key দিন", fontSize = 11.sp)
+                                        }
                                     }
                                 }
                             }
@@ -525,15 +708,19 @@ fun AiAssistantScreen(
                     }
 
                     Row(
-                        Modifier.fillMaxWidth(),
+                        Modifier
+                            .fillMaxWidth()
+                            .padding(bottom = 2.dp),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
                         OutlinedTextField(
                             value = chatInput,
                             onValueChange = { chatInput = it },
-                            placeholder = { Text("আপনার প্রশ্ন লিখুন...", fontSize = 13.sp) },
+                            placeholder = { Text("আপনার প্রশ্ন লিখুন...", fontSize = 12.5.sp) },
                             maxLines = 3,
+                            textStyle = TextStyle(fontSize = 13.sp),
+                            shape = RoundedCornerShape(10.dp),
                             modifier = Modifier.weight(1f).testTag("ai_chat_input")
                         )
                         Button(
@@ -544,104 +731,124 @@ fun AiAssistantScreen(
                             },
                             enabled = chatInput.isNotBlank() && !state.chatLoading,
                             shape = RoundedCornerShape(10.dp),
-                            contentPadding = PaddingValues(horizontal = 14.dp, vertical = 14.dp),
+                            contentPadding = PaddingValues(horizontal = 13.dp, vertical = 12.dp),
                             modifier = Modifier.testTag("ai_chat_send_btn")
                         ) {
-                            Icon(Icons.AutoMirrored.Rounded.Send, contentDescription = "পাঠান")
+                            Icon(Icons.AutoMirrored.Rounded.Send, contentDescription = "পাঠান", modifier = Modifier.size(18.dp))
                         }
                     }
                 }
             } else {
-                // Scanner Tab (Class Marksheet Batch Scan + Review Preview + Single Student Scan)
+                // Compact Scanner Tab (Class Marksheet Batch Scan + Review Preview + Single Student Scan)
                 Column(
                     Modifier
                         .fillMaxSize()
                         .verticalScroll(rememberScrollState())
-                        .padding(12.dp),
-                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                        .padding(horizontal = 10.dp, vertical = 6.dp),
+                    verticalArrangement = Arrangement.spacedBy(7.dp)
                 ) {
-                    // Top Mode & CSV Shortcut Bar
+                    // Compact Mode & CSV Shortcut Bar
                     Row(
                         Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(6.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        val isClassMode = scanMode == "class"
-                        FilterChip(
-                            selected = isClassMode,
-                            onClick = { scanMode = "class" },
-                            colors = appFilterChipColors(),
-                            border = appFilterChipBorder(isClassMode),
-                            label = {
-                                Text(
-                                    "শ্রেণি তালিকা (সব শিক্ষার্থী)",
-                                    fontSize = 11.5.sp,
-                                    fontWeight = if (isClassMode) FontWeight.Bold else FontWeight.Normal
-                                )
-                            },
-                            modifier = Modifier.testTag("scan_mode_class_chip")
-                        )
-                        val isSingleMode = scanMode == "single"
-                        FilterChip(
-                            selected = isSingleMode,
-                            onClick = { scanMode = "single" },
-                            colors = appFilterChipColors(),
-                            border = appFilterChipBorder(isSingleMode),
-                            label = {
-                                Text(
-                                    "একক (১ জন)",
-                                    fontSize = 11.5.sp,
-                                    fontWeight = if (isSingleMode) FontWeight.Bold else FontWeight.Normal
-                                )
-                            },
-                            modifier = Modifier.testTag("scan_mode_single_chip")
-                        )
+                        Surface(
+                            color = SlateSurfaceVariant,
+                            border = BorderStroke(1.dp, SlateOutline),
+                            shape = RoundedCornerShape(8.dp)
+                        ) {
+                            Row(Modifier.padding(2.dp), horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+                                val isClassMode = scanMode == "class"
+                                Surface(
+                                    color = if (isClassMode) TealPrimary else Color.Transparent,
+                                    shape = RoundedCornerShape(6.dp),
+                                    modifier = Modifier
+                                        .clickable { scanMode = "class" }
+                                        .testTag("scan_mode_class_chip")
+                                ) {
+                                    Text(
+                                        "শ্রেণি তালিকা",
+                                        fontSize = 11.sp,
+                                        fontWeight = if (isClassMode) FontWeight.Bold else FontWeight.Normal,
+                                        color = if (isClassMode) Color.White else SlateText,
+                                        modifier = Modifier.padding(horizontal = 9.dp, vertical = 5.dp)
+                                    )
+                                }
+                                val isSingleMode = scanMode == "single"
+                                Surface(
+                                    color = if (isSingleMode) TealPrimary else Color.Transparent,
+                                    shape = RoundedCornerShape(6.dp),
+                                    modifier = Modifier
+                                        .clickable { scanMode = "single" }
+                                        .testTag("scan_mode_single_chip")
+                                ) {
+                                    Text(
+                                        "একক (১ জন)",
+                                        fontSize = 11.sp,
+                                        fontWeight = if (isSingleMode) FontWeight.Bold else FontWeight.Normal,
+                                        color = if (isSingleMode) Color.White else SlateText,
+                                        modifier = Modifier.padding(horizontal = 9.dp, vertical = 5.dp)
+                                    )
+                                }
+                            }
+                        }
                         Spacer(Modifier.weight(1f))
                         if (permissions.canManageStudents) {
-                            OutlinedButton(
-                                onClick = onOpenCsvImport,
-                                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
-                                shape = RoundedCornerShape(8.dp),
+                            Surface(
+                                color = Color.White,
                                 border = BorderStroke(1.dp, SlateOutline),
-                                modifier = Modifier.testTag("scanner_open_csv_btn")
+                                shape = RoundedCornerShape(8.dp),
+                                modifier = Modifier
+                                    .clickable { onOpenCsvImport() }
+                                    .testTag("scanner_open_csv_btn")
                             ) {
-                                Icon(Icons.Rounded.UploadFile, contentDescription = null, modifier = Modifier.size(15.dp))
-                                Text(" CSV", fontSize = 11.5.sp)
+                                Row(
+                                    Modifier.padding(horizontal = 9.dp, vertical = 6.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                ) {
+                                    Icon(Icons.Rounded.UploadFile, contentDescription = null, tint = TealPrimary, modifier = Modifier.size(14.dp))
+                                    Text("CSV", fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = SlateText)
+                                }
                             }
                         }
                     }
 
-                    // Capture / Pick Photo Card
+                    // Compact Capture / Pick Photo Card
                     Card(
                         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
                         border = BorderStroke(1.dp, SlateOutline),
-                        shape = RoundedCornerShape(12.dp)
+                        shape = RoundedCornerShape(10.dp)
                     ) {
-                        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Column(Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                             Text(
-                                if (scanMode == "class") "খাতা বা নম্বরপত্রের ছবি তুলে পুরো শ্রেণির নম্বর প্রিভিউ করুন"
-                                else "একজন শিক্ষার্থীর নম্বরপত্রের ছবি নির্বাচন করে তথ্য শনাক্ত করুন",
+                                if (scanMode == "class") "পুরো শ্রেণির নম্বরপত্র ছবি স্ক্যান"
+                                else "একজন শিক্ষার্থীর নম্বরপত্র স্ক্যান",
                                 fontWeight = FontWeight.SemiBold,
-                                fontSize = 14.sp
+                                fontSize = 13.sp,
+                                color = SlateText
                             )
                             Text(
-                                "ডেটা সংরক্ষণের আগে প্রিভিউতে প্রতিটি ঘর যাচাই করতে পারবেন; অস্পষ্ট বা সন্দেহজনক লেখা স্বয়ংক্রিয়ভাবে আলাদা রঙে দেখাবে।",
-                                fontSize = 11.5.sp,
-                                color = SlateMuted
+                                "সংরক্ষণের আগে প্রিভিউতে প্রতিটি ঘর যাচাই করতে পারবেন; সন্দেহযুক্ত লেখা লাল রঙে দেখাবে।",
+                                fontSize = 11.sp,
+                                color = SlateMuted,
+                                lineHeight = 14.5.sp
                             )
 
-                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                            Row(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.fillMaxWidth()) {
                                 OutlinedButton(
                                     onClick = {
                                         val uri = createTempScanImageUri(context)
                                         pendingCameraUri = uri
                                         cameraLauncher.launch(uri)
                                     },
+                                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 6.dp),
                                     modifier = Modifier.weight(1f).testTag("ai_camera_photo_btn"),
                                     shape = RoundedCornerShape(8.dp)
                                 ) {
-                                    Icon(Icons.Rounded.CameraAlt, contentDescription = null, modifier = Modifier.size(16.dp))
-                                    Text(" ক্যামেরা", fontSize = 12.sp)
+                                    Icon(Icons.Rounded.CameraAlt, contentDescription = null, modifier = Modifier.size(15.dp))
+                                    Text(" ক্যামেরা", fontSize = 11.5.sp)
                                 }
                                 Button(
                                     onClick = {
@@ -649,19 +856,21 @@ fun AiAssistantScreen(
                                             PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
                                         )
                                     },
+                                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 6.dp),
                                     modifier = Modifier.weight(1f).testTag("ai_pick_photo_btn"),
                                     shape = RoundedCornerShape(8.dp)
                                 ) {
-                                    Icon(Icons.Rounded.PhotoLibrary, contentDescription = null, modifier = Modifier.size(16.dp))
-                                    Text(" গ্যালারি", fontSize = 12.sp)
+                                    Icon(Icons.Rounded.PhotoLibrary, contentDescription = null, modifier = Modifier.size(15.dp))
+                                    Text(" গ্যালারি", fontSize = 11.5.sp)
                                 }
                                 if (state.selectedImageBitmap != null) {
                                     OutlinedButton(
                                         onClick = { askClearImage = true },
+                                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 6.dp),
                                         shape = RoundedCornerShape(8.dp),
                                         modifier = Modifier.testTag("ai_clear_photo_btn")
                                     ) {
-                                        Icon(Icons.Rounded.Close, contentDescription = "ছবি সরান", modifier = Modifier.size(16.dp))
+                                        Icon(Icons.Rounded.Close, contentDescription = "ছবি সরান", modifier = Modifier.size(15.dp))
                                     }
                                 }
                             }
@@ -677,149 +886,153 @@ fun AiAssistantScreen(
                                         bitmap = bmp.asImageBitmap(),
                                         contentDescription = "নির্বাচিত নম্বরপত্র ছবি",
                                         contentScale = ContentScale.Fit,
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .heightIn(max = 210.dp)
-                                            .background(SlateSurfaceVariant)
-                                    )
-                                    Surface(
-                                        color = Color.Black.copy(alpha = 0.62f),
-                                        shape = RoundedCornerShape(6.dp),
-                                        modifier = Modifier
-                                            .align(Alignment.BottomEnd)
-                                            .padding(6.dp)
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .heightIn(max = 160.dp)
+                                        .background(SlateSurfaceVariant)
+                                )
+                                Surface(
+                                    color = Color.Black.copy(alpha = 0.62f),
+                                    shape = RoundedCornerShape(6.dp),
+                                    modifier = Modifier
+                                        .align(Alignment.BottomEnd)
+                                        .padding(6.dp)
+                                ) {
+                                    Row(
+                                        Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(4.dp)
                                     ) {
-                                        Row(
-                                            Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-                                            verticalAlignment = Alignment.CenterVertically,
-                                            horizontalArrangement = Arrangement.spacedBy(4.dp)
-                                        ) {
-                                            Icon(Icons.Rounded.ZoomIn, contentDescription = null, tint = Color.White, modifier = Modifier.size(14.dp))
-                                            Text("জুম করে দেখুন", color = Color.White, fontSize = 10.5.sp)
-                                        }
+                                        Icon(Icons.Rounded.ZoomIn, contentDescription = null, tint = Color.White, modifier = Modifier.size(13.dp))
+                                        Text("জুম", color = Color.White, fontSize = 10.sp)
                                     }
                                 }
                             }
+                        }
 
-                            if (scanMode == "class") {
-                                ClassSheetHintSelectors(
-                                    clsHint = clsHint,
-                                    termHint = termHint,
-                                    subKeyHint = subKeyHint,
-                                    permissions = permissions,
-                                    onChangeCls = { newCls ->
-                                        clsHint = newCls
-                                        if (newCls != null && subKeyHint != null) {
-                                            val validKeys = subjectsFor(newCls, RELIGIONS.first()).map { it.key }
-                                            if (subKeyHint !in validKeys) subKeyHint = null
-                                        }
-                                    },
-                                    onChangeTerm = { termHint = it },
-                                    onChangeSub = { subKeyHint = it }
-                                )
-                            }
-
-                            OutlinedTextField(
-                                value = teacherNote,
-                                onValueChange = { teacherNote = it },
-                                label = { Text("অতিরিক্ত নির্দেশনা (ঐচ্ছিক, যেমন: রোল ১-৩৬ গণিত)", fontSize = 11.5.sp) },
-                                singleLine = true,
-                                modifier = Modifier.fillMaxWidth().testTag("ai_scanner_note_input")
+                        if (scanMode == "class") {
+                            ClassSheetHintSelectors(
+                                clsHint = clsHint,
+                                termHint = termHint,
+                                subKeyHint = subKeyHint,
+                                permissions = permissions,
+                                onChangeCls = { newCls ->
+                                    clsHint = newCls
+                                    if (newCls != null && subKeyHint != null) {
+                                        val validKeys = subjectsFor(newCls, RELIGIONS.first()).map { it.key }
+                                        if (subKeyHint !in validKeys) subKeyHint = null
+                                    }
+                                },
+                                onChangeTerm = { termHint = it },
+                                onChangeSub = { subKeyHint = it }
                             )
+                        }
 
-                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-                                Button(
+                        OutlinedTextField(
+                            value = teacherNote,
+                            onValueChange = { teacherNote = it },
+                            label = { Text("নির্দেশনা (ঐচ্ছিক, যেমন: রোল ১-৩৬ গণিত)", fontSize = 11.sp) },
+                            singleLine = true,
+                            textStyle = TextStyle(fontSize = 12.5.sp),
+                            shape = RoundedCornerShape(8.dp),
+                            modifier = Modifier.fillMaxWidth().testTag("ai_scanner_note_input")
+                        )
+
+                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.fillMaxWidth()) {
+                            Button(
+                                onClick = {
+                                    showOnlyIssues = false
+                                    if (scanMode == "class") {
+                                        onAnalyzeClassSheet(clsHint, termHint, subKeyHint, teacherNote)
+                                    } else {
+                                        onAnalyzeImage(teacherNote)
+                                    }
+                                },
+                                enabled = state.selectedImageBitmap != null && !state.analyzingImage,
+                                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 8.dp),
+                                modifier = Modifier.weight(1f).testTag("ai_analyze_image_btn"),
+                                shape = RoundedCornerShape(8.dp)
+                            ) {
+                                if (state.analyzingImage) {
+                                    CircularProgressIndicator(
+                                        modifier = Modifier.size(15.dp),
+                                        strokeWidth = 2.dp,
+                                        color = MaterialTheme.colorScheme.onPrimary
+                                    )
+                                    Text(" স্ক্যান হচ্ছে...", fontSize = 11.5.sp)
+                                } else {
+                                    Icon(Icons.Rounded.DocumentScanner, contentDescription = null, modifier = Modifier.size(15.dp))
+                                    Text(
+                                        if (scanMode == "class") " স্ক্যান ও প্রিভিউ" else " নম্বরপত্র বিশ্লেষণ",
+                                        fontSize = 11.5.sp
+                                    )
+                                }
+                            }
+                            if (scanMode == "class") {
+                                OutlinedButton(
                                     onClick = {
                                         showOnlyIssues = false
-                                        if (scanMode == "class") {
-                                            onAnalyzeClassSheet(clsHint, termHint, subKeyHint, teacherNote)
-                                        } else {
-                                            onAnalyzeImage(teacherNote)
-                                        }
+                                        onLoadSampleClassPreview(clsHint, termHint, subKeyHint)
                                     },
-                                    enabled = state.selectedImageBitmap != null && !state.analyzingImage,
-                                    modifier = Modifier.weight(1f).testTag("ai_analyze_image_btn"),
-                                    shape = RoundedCornerShape(8.dp)
+                                    enabled = !state.analyzingImage,
+                                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 8.dp),
+                                    shape = RoundedCornerShape(8.dp),
+                                    modifier = Modifier.testTag("ai_sample_preview_btn")
                                 ) {
-                                    if (state.analyzingImage) {
-                                        CircularProgressIndicator(
-                                            modifier = Modifier.size(16.dp),
-                                            strokeWidth = 2.dp,
-                                            color = MaterialTheme.colorScheme.onPrimary
-                                        )
-                                        Text(" স্ক্যান হচ্ছে...", fontSize = 12.sp)
-                                    } else {
-                                        Icon(Icons.Rounded.DocumentScanner, contentDescription = null, modifier = Modifier.size(16.dp))
-                                        Text(
-                                            if (scanMode == "class") " স্ক্যান ও প্রিভিউ দেখুন" else " নম্বরপত্র বিশ্লেষণ করুন",
-                                            fontSize = 12.sp
-                                        )
-                                    }
+                                    Text("নমুনা", fontSize = 11.5.sp)
                                 }
-                                if (scanMode == "class") {
+                            }
+                        }
+                    }
+                }
+
+                state.analysisError?.let { err ->
+                    Surface(
+                        color = RoseBg,
+                        border = BorderStroke(1.dp, RoseDanger.copy(alpha = 0.35f)),
+                        shape = RoundedCornerShape(8.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(8.dp),
+                            verticalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            Row(
+                                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                verticalAlignment = Alignment.Top
+                            ) {
+                                Icon(Icons.Rounded.ErrorOutline, contentDescription = null, tint = RoseDanger, modifier = Modifier.size(16.dp))
+                                Text(err, color = RoseDanger, fontSize = 11.5.sp, lineHeight = 16.sp)
+                            }
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                if (state.selectedImageBitmap != null && !state.analyzingImage) {
                                     OutlinedButton(
                                         onClick = {
                                             showOnlyIssues = false
-                                            onLoadSampleClassPreview(clsHint, termHint, subKeyHint)
+                                            if (scanMode == "class") {
+                                                onAnalyzeClassSheet(clsHint, termHint, subKeyHint, teacherNote)
+                                            } else {
+                                                onAnalyzeImage(teacherNote)
+                                            }
                                         },
-                                        enabled = !state.analyzingImage,
+                                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 3.dp),
                                         shape = RoundedCornerShape(8.dp),
-                                        modifier = Modifier.testTag("ai_sample_preview_btn")
+                                        modifier = Modifier.testTag("ai_scan_retry_btn")
                                     ) {
-                                        Text("নমুনা", fontSize = 11.5.sp)
+                                        Text("আবার চেষ্টা করুন", fontSize = 11.sp)
                                     }
                                 }
-                            }
-                        }
-                    }
-
-                    state.analysisError?.let { err ->
-                        Surface(
-                            color = RoseBg,
-                            border = BorderStroke(1.dp, RoseDanger.copy(alpha = 0.35f)),
-                            shape = RoundedCornerShape(8.dp),
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Column(
-                                modifier = Modifier.padding(10.dp),
-                                verticalArrangement = Arrangement.spacedBy(6.dp)
-                            ) {
-                                Row(
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                    verticalAlignment = Alignment.Top
+                                TextButton(
+                                    onClick = { showModelPicker = true },
+                                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                                    modifier = Modifier.testTag("ai_scan_err_settings_btn")
                                 ) {
-                                    Icon(Icons.Rounded.ErrorOutline, contentDescription = null, tint = RoseDanger, modifier = Modifier.size(18.dp))
-                                    Text(err, color = RoseDanger, fontSize = 12.sp, lineHeight = 17.sp)
-                                }
-                                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                    if (state.selectedImageBitmap != null && !state.analyzingImage) {
-                                        OutlinedButton(
-                                            onClick = {
-                                                showOnlyIssues = false
-                                                if (scanMode == "class") {
-                                                    onAnalyzeClassSheet(clsHint, termHint, subKeyHint, teacherNote)
-                                                } else {
-                                                    onAnalyzeImage(teacherNote)
-                                                }
-                                            },
-                                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
-                                            shape = RoundedCornerShape(8.dp),
-                                            modifier = Modifier.testTag("ai_scan_retry_btn")
-                                        ) {
-                                            Text("আবার চেষ্টা করুন", fontSize = 11.5.sp)
-                                        }
-                                    }
-                                    TextButton(
-                                        onClick = onOpenAiSettings,
-                                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
-                                        modifier = Modifier.testTag("ai_scan_err_settings_btn")
-                                    ) {
-                                        Text("মডেল পরিবর্তন করুন", fontSize = 11.5.sp)
-                                    }
+                                    Text("মডেল পরিবর্তন করুন", fontSize = 11.sp)
                                 }
                             }
                         }
                     }
+                }
 
                     // Class Sheet Interactive Preview & Manual Correction
                     state.classSheetResult?.let { sheet ->
@@ -982,6 +1195,29 @@ fun AiAssistantScreen(
         )
     }
 
+    if (showModelPicker) {
+        AiModelPickerDialog(
+            activeModelName = activeModelName,
+            isGeminiConfigured = isGeminiConfigured,
+            availableModels = availableModels,
+            customModels = customModels,
+            newModelIds = newModelIds,
+            refreshingModels = refreshingModels,
+            modelsError = modelsError,
+            onSelectModel = { chosen ->
+                onSelectModel(chosen)
+                showModelPicker = false
+            },
+            onRefreshModels = onRefreshModels,
+            onRemoveCustomModel = onRemoveCustomModel,
+            onOpenAiSettings = {
+                showModelPicker = false
+                onOpenAiSettings()
+            },
+            onDismiss = { showModelPicker = false }
+        )
+    }
+
     if (askClearImage) {
         AlertDialog(
             onDismissRequest = { askClearImage = false },
@@ -1002,6 +1238,251 @@ fun AiAssistantScreen(
             }
         )
     }
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun AiModelPickerDialog(
+    activeModelName: String,
+    isGeminiConfigured: Boolean,
+    availableModels: List<DiscoveredGeminiModel>,
+    customModels: List<String>,
+    newModelIds: Set<String>,
+    refreshingModels: Boolean,
+    modelsError: String?,
+    onSelectModel: (String) -> Unit,
+    onRefreshModels: () -> Unit,
+    onRemoveCustomModel: (String) -> Unit,
+    onOpenAiSettings: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    var customInput by remember(activeModelName) { mutableStateOf(activeModelName) }
+    var searchQuery by remember { mutableStateOf("") }
+    val normalizedCurrent = GeminiApiConfig.normalizeModelId(activeModelName)
+    val suggestedIds = remember { GeminiApiConfig.SUGGESTED_MODEL_IDS }
+
+    val extraLiveModels = remember(availableModels, newModelIds) {
+        availableModels
+            .filter { it.id !in suggestedIds }
+            .sortedWith(compareByDescending<DiscoveredGeminiModel> { it.id in newModelIds })
+    }
+    val filteredLiveModels = remember(extraLiveModels, searchQuery) {
+        val q = searchQuery.trim().lowercase()
+        if (q.isBlank()) extraLiveModels
+        else extraLiveModels.filter {
+            it.id.lowercase().contains(q) || it.displayName.lowercase().contains(q)
+        }
+    }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Row(
+                Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text("Gemini মডেল পরিবর্তন", fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                    Text(
+                        "সক্রিয়: $normalizedCurrent",
+                        fontSize = 11.sp,
+                        color = TealPrimary,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+                if (isGeminiConfigured) {
+                    IconButton(
+                        onClick = onRefreshModels,
+                        enabled = !refreshingModels,
+                        modifier = Modifier.size(40.dp).testTag("ai_picker_refresh_btn")
+                    ) {
+                        if (refreshingModels) {
+                            CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+                        } else {
+                            Icon(Icons.Rounded.Refresh, contentDescription = "মডেল তালিকা রিফ্রেশ", tint = TealPrimary, modifier = Modifier.size(20.dp))
+                        }
+                    }
+                }
+            }
+        },
+        text = {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = 420.dp)
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                if (!modelsError.isNullOrBlank()) {
+                    Text(modelsError, fontSize = 11.sp, color = RoseDanger)
+                }
+
+                Text("প্রস্তাবিত মডেল", fontWeight = FontWeight.SemiBold, fontSize = 12.sp, color = SlateText)
+                Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                    GeminiApiConfig.SUGGESTED_MODELS.forEach { preset ->
+                        val selected = normalizedCurrent == preset.id
+                        Surface(
+                            color = if (selected) TealContainer.copy(alpha = 0.7f) else SlateBg,
+                            border = BorderStroke(if (selected) 1.5.dp else 1.dp, if (selected) TealPrimary else SlateOutline),
+                            shape = RoundedCornerShape(9.dp),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { onSelectModel(preset.id) }
+                                .testTag("ai_picker_preset_${preset.id}")
+                        ) {
+                            Row(
+                                Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                RadioButton(
+                                    selected = selected,
+                                    onClick = { onSelectModel(preset.id) },
+                                    modifier = Modifier.size(20.dp)
+                                )
+                                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(1.dp)) {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(5.dp)
+                                    ) {
+                                        Text(preset.title, fontWeight = FontWeight.SemiBold, fontSize = 12.sp, color = SlateText)
+                                        Surface(
+                                            color = if (selected) TealPrimary else MaterialTheme.colorScheme.surface,
+                                            shape = RoundedCornerShape(5.dp)
+                                        ) {
+                                            Text(
+                                                preset.badge,
+                                                fontSize = 9.5.sp,
+                                                fontWeight = FontWeight.SemiBold,
+                                                color = if (selected) Color.White else SlateMuted,
+                                                modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.dp)
+                                            )
+                                        }
+                                    }
+                                    Text(
+                                        "${preset.id} · ${preset.description}",
+                                        fontSize = 10.5.sp,
+                                        color = SlateMuted,
+                                        lineHeight = 13.5.sp
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+
+                if (extraLiveModels.isNotEmpty()) {
+                    HorizontalDivider(color = SlateOutline)
+                    Text(
+                        "API থেকে পাওয়া মডেল (${bn(extraLiveModels.size.toString())}টি)",
+                        fontWeight = FontWeight.SemiBold,
+                        fontSize = 12.sp,
+                        color = SlateText
+                    )
+                    if (extraLiveModels.size > 5) {
+                        OutlinedTextField(
+                            value = searchQuery,
+                            onValueChange = { searchQuery = it },
+                            placeholder = { Text("মডেল খুঁজুন...", fontSize = 11.5.sp) },
+                            leadingIcon = { Icon(Icons.Rounded.Search, contentDescription = null, modifier = Modifier.size(16.dp)) },
+                            singleLine = true,
+                            textStyle = TextStyle(fontSize = 12.sp),
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    }
+                    FlowRow(
+                        horizontalArrangement = Arrangement.spacedBy(5.dp),
+                        verticalArrangement = Arrangement.spacedBy(5.dp)
+                    ) {
+                        filteredLiveModels.take(18).forEach { item ->
+                            val selected = normalizedCurrent == item.id
+                            val isNew = item.id in newModelIds
+                            FilterChip(
+                                selected = selected,
+                                onClick = { onSelectModel(item.id) },
+                                colors = appFilterChipColors(),
+                                border = appFilterChipBorder(selected),
+                                label = {
+                                    Text(
+                                        text = if (isNew) "নতুন · ${item.id}" else item.id,
+                                        fontSize = 10.5.sp,
+                                        fontWeight = if (selected || isNew) FontWeight.Bold else FontWeight.Normal
+                                    )
+                                }
+                            )
+                        }
+                    }
+                }
+
+                if (customModels.isNotEmpty()) {
+                    HorizontalDivider(color = SlateOutline)
+                    Text("কাস্টম মডেল", fontWeight = FontWeight.SemiBold, fontSize = 12.sp, color = SlateText)
+                    FlowRow(
+                        horizontalArrangement = Arrangement.spacedBy(5.dp),
+                        verticalArrangement = Arrangement.spacedBy(5.dp)
+                    ) {
+                        customModels.forEach { customId ->
+                            val selected = normalizedCurrent == customId
+                            FilterChip(
+                                selected = selected,
+                                onClick = { onSelectModel(customId) },
+                                colors = appFilterChipColors(),
+                                border = appFilterChipBorder(selected),
+                                label = { Text(customId, fontSize = 10.5.sp) },
+                                trailingIcon = {
+                                    Icon(
+                                        Icons.Rounded.Close,
+                                        contentDescription = "$customId সরান",
+                                        modifier = Modifier
+                                            .size(14.dp)
+                                            .clickable { onRemoveCustomModel(customId) }
+                                    )
+                                }
+                            )
+                        }
+                    }
+                }
+
+                HorizontalDivider(color = SlateOutline)
+                Text("অন্য কোনো মডেল আইডি লিখুন", fontWeight = FontWeight.SemiBold, fontSize = 11.5.sp, color = SlateText)
+                Row(
+                    Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    OutlinedTextField(
+                        value = customInput,
+                        onValueChange = { customInput = it },
+                        placeholder = { Text(GeminiApiConfig.DEFAULT_MODEL, fontSize = 11.5.sp) },
+                        singleLine = true,
+                        textStyle = TextStyle(fontSize = 12.sp),
+                        modifier = Modifier.weight(1f).testTag("ai_picker_custom_input")
+                    )
+                    Button(
+                        onClick = { onSelectModel(customInput) },
+                        enabled = customInput.isNotBlank(),
+                        shape = RoundedCornerShape(8.dp),
+                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 10.dp),
+                        modifier = Modifier.testTag("ai_picker_apply_custom_btn")
+                    ) {
+                        Text("চালু", fontSize = 11.5.sp)
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) { Text("বন্ধ করুন") }
+        },
+        dismissButton = {
+            TextButton(onClick = onOpenAiSettings, modifier = Modifier.testTag("ai_picker_open_settings_btn")) {
+                Icon(Icons.Rounded.Tune, contentDescription = null, modifier = Modifier.size(15.dp))
+                Spacer(Modifier.width(4.dp))
+                Text("API Key সেটিংস", fontSize = 12.sp)
+            }
+        }
+    )
 }
 
 @Composable
