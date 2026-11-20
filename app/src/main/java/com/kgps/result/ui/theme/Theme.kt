@@ -1,7 +1,10 @@
 package com.kgps.result.ui.theme
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.SelectableChipColors
 import androidx.compose.material3.Shapes
 import androidx.compose.material3.Typography
 import androidx.compose.material3.lightColorScheme
@@ -35,8 +38,8 @@ private val ResultMakerColorScheme = lightColorScheme(
     onPrimaryContainer = TealDark,
     secondary = Color(0xFF334155),
     onSecondary = Color.White,
-    secondaryContainer = SlateSurfaceVariant,
-    onSecondaryContainer = SlateText,
+    secondaryContainer = TealContainer,
+    onSecondaryContainer = TealDark,
     tertiary = AmberNotice,
     onTertiary = Color.White,
     tertiaryContainer = AmberBg,
@@ -110,6 +113,37 @@ private val ResultMakerShapes = Shapes(
     small = RoundedCornerShape(8.dp),
     medium = RoundedCornerShape(12.dp),
     large = RoundedCornerShape(16.dp)
+)
+
+@Composable
+fun appFilterChipColors(): SelectableChipColors = FilterChipDefaults.filterChipColors(
+    containerColor = Color.White,
+    labelColor = SlateText,
+    iconColor = SlateMuted,
+    selectedContainerColor = TealPrimary,
+    selectedLabelColor = Color.White,
+    selectedLeadingIconColor = Color.White,
+    selectedTrailingIconColor = Color.White,
+    disabledContainerColor = SlateBg,
+    disabledLabelColor = SlateMuted,
+    disabledLeadingIconColor = SlateMuted,
+    disabledTrailingIconColor = SlateMuted,
+    disabledSelectedContainerColor = TealContainer
+)
+
+@Composable
+fun appFilterChipBorder(
+    selected: Boolean,
+    enabled: Boolean = true
+): BorderStroke = FilterChipDefaults.filterChipBorder(
+    enabled = enabled,
+    selected = selected,
+    borderColor = SlateOutline,
+    selectedBorderColor = TealPrimary,
+    disabledBorderColor = SlateOutline,
+    disabledSelectedBorderColor = TealPrimary.copy(alpha = 0.6f),
+    borderWidth = 1.dp,
+    selectedBorderWidth = 1.5.dp
 )
 
 @Composable

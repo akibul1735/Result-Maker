@@ -93,8 +93,12 @@ import com.kgps.result.ui.theme.EmeraldGrade
 import com.kgps.result.ui.theme.RoseDanger
 import com.kgps.result.ui.theme.SlateMuted
 import com.kgps.result.ui.theme.SlateOutline
+import com.kgps.result.ui.theme.TealContainer
+import com.kgps.result.ui.theme.TealDark
 import com.kgps.result.ui.theme.TealPrimary
 import com.kgps.result.ui.theme.TealSoft
+import com.kgps.result.ui.theme.appFilterChipBorder
+import com.kgps.result.ui.theme.appFilterChipColors
 
 @Composable
 fun StudentEditorScreen(
@@ -305,11 +309,14 @@ fun StudentEditorScreen(
                                         modifier = Modifier.horizontalScroll(rememberScrollState())
                                     ) {
                                         permissions.effectiveClasses().forEach { c ->
+                                            val isSel = s.cls == c
                                             FilterChip(
-                                                selected = s.cls == c,
+                                                selected = isSel,
                                                 enabled = canEditProfile,
                                                 onClick = { if (canEditProfile) s = s.copy(cls = c) },
-                                                label = { Text(bn(c.toString())) }
+                                                colors = appFilterChipColors(),
+                                                border = appFilterChipBorder(isSel, enabled = canEditProfile),
+                                                label = { Text(bn(c.toString()), fontWeight = if (isSel) FontWeight.Bold else FontWeight.Normal) }
                                             )
                                         }
                                     }
@@ -319,11 +326,14 @@ fun StudentEditorScreen(
                                         modifier = Modifier.horizontalScroll(rememberScrollState())
                                     ) {
                                         RELIGIONS.forEach { r ->
+                                            val isSel = s.religion == r
                                             FilterChip(
-                                                selected = s.religion == r,
+                                                selected = isSel,
                                                 enabled = canEditProfile,
                                                 onClick = { if (canEditProfile) s = s.copy(religion = r) },
-                                                label = { Text(r) }
+                                                colors = appFilterChipColors(),
+                                                border = appFilterChipBorder(isSel, enabled = canEditProfile),
+                                                label = { Text(r, fontWeight = if (isSel) FontWeight.Bold else FontWeight.Normal) }
                                             )
                                         }
                                     }
@@ -632,11 +642,14 @@ fun StudentEditorScreen(
                                             ) {
                                                 Text(label, fontSize = 13.sp, modifier = Modifier.weight(1f))
                                                 listOf("ক", "খ", "গ").forEach { opt ->
+                                                    val isSel = s.x[k] == opt
                                                     FilterChip(
-                                                        selected = s.x[k] == opt,
+                                                        selected = isSel,
                                                         enabled = canEditAtt,
-                                                        onClick = { if (canEditAtt) setX(k, if (s.x[k] == opt) "" else opt) },
-                                                        label = { Text(opt) }
+                                                        onClick = { if (canEditAtt) setX(k, if (isSel) "" else opt) },
+                                                        colors = appFilterChipColors(),
+                                                        border = appFilterChipBorder(isSel, enabled = canEditAtt),
+                                                        label = { Text(opt, fontWeight = if (isSel) FontWeight.Bold else FontWeight.Normal) }
                                                     )
                                                 }
                                             }

@@ -126,6 +126,8 @@ import com.kgps.result.ui.theme.TealContainer
 import com.kgps.result.ui.theme.TealDark
 import com.kgps.result.ui.theme.TealPrimary
 import com.kgps.result.ui.theme.TealSoft
+import com.kgps.result.ui.theme.appFilterChipBorder
+import com.kgps.result.ui.theme.appFilterChipColors
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -652,8 +654,8 @@ fun SettingsScreen(
                                         s = next
                                         onUpdateSettings(next)
                                     },
-                                color = if (selected) TealSoft else SlateBg,
-                                border = BorderStroke(1.dp, if (selected) TealPrimary else SlateOutline),
+                                color = if (selected) TealContainer.copy(alpha = 0.65f) else SlateBg,
+                                border = BorderStroke(if (selected) 2.dp else 1.dp, if (selected) TealPrimary else SlateOutline),
                                 shape = RoundedCornerShape(10.dp)
                             ) {
                                 Row(
@@ -702,8 +704,8 @@ fun SettingsScreen(
                                         s = next
                                         onUpdateSettings(next)
                                     },
-                                color = if (selected) TealSoft else SlateBg,
-                                border = BorderStroke(1.dp, if (selected) TealPrimary else SlateOutline),
+                                color = if (selected) TealContainer.copy(alpha = 0.65f) else SlateBg,
+                                border = BorderStroke(if (selected) 2.dp else 1.dp, if (selected) TealPrimary else SlateOutline),
                                 shape = RoundedCornerShape(10.dp)
                             ) {
                                 Row(
@@ -1125,9 +1127,9 @@ fun SettingsScreen(
                         GeminiApiConfig.SUGGESTED_MODELS.forEach { preset ->
                             val isSelected = GeminiApiConfig.normalizeModelId(modelInput) == preset.id
                             Surface(
-                                color = if (isSelected) TealSoft else SlateBg,
+                                color = if (isSelected) TealContainer.copy(alpha = 0.65f) else SlateBg,
                                 border = BorderStroke(
-                                    1.dp,
+                                    if (isSelected) 2.dp else 1.dp,
                                     if (isSelected) TealPrimary else SlateOutline
                                 ),
                                 shape = RoundedCornerShape(10.dp),
@@ -1336,11 +1338,13 @@ fun SettingsScreen(
                                         FilterChip(
                                             selected = selected,
                                             onClick = { modelInput = item.id },
+                                            colors = appFilterChipColors(),
+                                            border = appFilterChipBorder(selected),
                                             label = {
                                                 Text(
                                                     text = if (isNew) "নতুন · ${item.id}" else item.id,
                                                     fontSize = 11.sp,
-                                                    fontWeight = if (isNew || selected) FontWeight.SemiBold else FontWeight.Normal
+                                                    fontWeight = if (isNew || selected) FontWeight.Bold else FontWeight.Normal
                                                 )
                                             }
                                         )
@@ -1422,7 +1426,15 @@ fun SettingsScreen(
                                     FilterChip(
                                         selected = selected,
                                         onClick = { modelInput = customId },
-                                        label = { Text(customId, fontSize = 11.sp) },
+                                        colors = appFilterChipColors(),
+                                        border = appFilterChipBorder(selected),
+                                        label = {
+                                            Text(
+                                                customId,
+                                                fontSize = 11.sp,
+                                                fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal
+                                            )
+                                        },
                                         trailingIcon = {
                                             Icon(
                                                 imageVector = Icons.Rounded.Close,

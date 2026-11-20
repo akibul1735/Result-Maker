@@ -2,6 +2,7 @@ package com.kgps.result.ui.screens
 
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -23,6 +24,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.ContentPaste
 import androidx.compose.material.icons.rounded.ErrorOutline
@@ -79,6 +81,8 @@ import com.kgps.result.ui.theme.TealContainer
 import com.kgps.result.ui.theme.TealDark
 import com.kgps.result.ui.theme.TealPrimary
 import com.kgps.result.ui.theme.TealSoft
+import com.kgps.result.ui.theme.appFilterChipBorder
+import com.kgps.result.ui.theme.appFilterChipColors
 
 enum class CsvPreviewFilter(val id: String, val labelBn: String) {
     ALL("all", "সব"),
@@ -213,10 +217,19 @@ fun CsvStepInputAndMapping(
                         verticalArrangement = Arrangement.spacedBy(4.dp)
                     ) {
                         (1..5).forEach { c ->
+                            val isFallbackSel = fallbackCls == c
                             FilterChip(
-                                selected = fallbackCls == c,
+                                selected = isFallbackSel,
                                 onClick = { onFallbackClsChange(c) },
-                                label = { Text(CLS_SHORT[c - 1], fontSize = 11.5.sp) },
+                                colors = appFilterChipColors(),
+                                border = appFilterChipBorder(isFallbackSel),
+                                label = {
+                                    Text(
+                                        CLS_SHORT[c - 1],
+                                        fontSize = 11.5.sp,
+                                        fontWeight = if (isFallbackSel) FontWeight.Bold else FontWeight.Normal
+                                    )
+                                },
                                 modifier = Modifier.testTag("csv_fallback_cls_$c")
                             )
                         }
@@ -380,15 +393,39 @@ private fun CsvColumnMappingCard(
                     Text("$targetDesc ▾", fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
                 DropdownMenu(expanded = dropdownOpen, onDismissRequest = { dropdownOpen = false }) {
+                    val isCreateNewSel = col.targetType == "create_new"
                     DropdownMenuItem(
-                        text = { Text("+ নতুন ফিল্ড তৈরি করুন (ডাটাবেসে যোগ হবে)", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = AmberNotice) },
+                        modifier = Modifier.background(if (isCreateNewSel) TealContainer else Color.Transparent),
+                        text = {
+                            Text(
+                                "+ নতুন ফিল্ড তৈরি করুন (ডাটাবেসে যোগ হবে)",
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = if (isCreateNewSel) TealDark else AmberNotice
+                            )
+                        },
+                        trailingIcon = if (isCreateNewSel) {
+                            { Icon(Icons.Rounded.Check, contentDescription = null, tint = TealDark, modifier = Modifier.size(16.dp)) }
+                        } else null,
                         onClick = {
                             onUpdateCol(col.copy(targetType = "create_new", newLabel = col.header))
                             dropdownOpen = false
                         }
                     )
+                    val isSkipSel = col.targetType == "skip"
                     DropdownMenuItem(
-                        text = { Text("✕ বাদ দিন (ইমপোর্ট করবেন না)", fontSize = 12.sp, color = SlateMuted) },
+                        modifier = Modifier.background(if (isSkipSel) TealContainer else Color.Transparent),
+                        text = {
+                            Text(
+                                "✕ বাদ দিন (ইমপোর্ট করবেন না)",
+                                fontSize = 12.sp,
+                                fontWeight = if (isSkipSel) FontWeight.Bold else FontWeight.Normal,
+                                color = if (isSkipSel) TealDark else SlateMuted
+                            )
+                        },
+                        trailingIcon = if (isSkipSel) {
+                            { Icon(Icons.Rounded.Check, contentDescription = null, tint = TealDark, modifier = Modifier.size(16.dp)) }
+                        } else null,
                         onClick = {
                             onUpdateCol(col.copy(targetType = "skip"))
                             dropdownOpen = false
@@ -396,8 +433,20 @@ private fun CsvColumnMappingCard(
                     )
                     HorizontalDivider()
                     Repo.STANDARD_FIELDS.forEach { (fKey, fLabel) ->
+                        val isStdSel = col.targetType == "standard" && col.targetKey == fKey
                         DropdownMenuItem(
-                            text = { Text(fLabel, fontSize = 12.sp) },
+                            modifier = Modifier.background(if (isStdSel) TealContainer else Color.Transparent),
+                            text = {
+                                Text(
+                                    fLabel,
+                                    fontSize = 12.sp,
+                                    fontWeight = if (isStdSel) FontWeight.Bold else FontWeight.Normal,
+                                    color = if (isStdSel) TealDark else SlateText
+                                )
+                            },
+                            trailingIcon = if (isStdSel) {
+                                { Icon(Icons.Rounded.Check, contentDescription = null, tint = TealDark, modifier = Modifier.size(16.dp)) }
+                            } else null,
                             onClick = {
                                 onUpdateCol(col.copy(targetType = "standard", targetKey = fKey))
                                 dropdownOpen = false
@@ -407,8 +456,20 @@ private fun CsvColumnMappingCard(
                     if (settings.customFields.isNotEmpty()) {
                         HorizontalDivider()
                         settings.customFields.forEach { cf ->
+                            val isCustomSel = col.targetType == "custom" && col.targetKey == cf.key
                             DropdownMenuItem(
-                                text = { Text("কাস্টম: ${cf.label}", fontSize = 12.sp) },
+                                modifier = Modifier.background(if (isCustomSel) TealContainer else Color.Transparent),
+                                text = {
+                                    Text(
+                                        "কাস্টম: ${cf.label}",
+                                        fontSize = 12.sp,
+                                        fontWeight = if (isCustomSel) FontWeight.Bold else FontWeight.Normal,
+                                        color = if (isCustomSel) TealDark else SlateText
+                                    )
+                                },
+                                trailingIcon = if (isCustomSel) {
+                                    { Icon(Icons.Rounded.Check, contentDescription = null, tint = TealDark, modifier = Modifier.size(16.dp)) }
+                                } else null,
                                 onClick = {
                                     onUpdateCol(col.copy(targetType = "custom", targetKey = cf.key))
                                     dropdownOpen = false
@@ -526,10 +587,19 @@ fun CsvStepPreviewAndSave(
                 verticalArrangement = Arrangement.spacedBy(4.dp)
             ) {
                 CsvPreviewFilter.entries.forEach { f ->
+                    val isFilterSel = filter == f
                     FilterChip(
-                        selected = filter == f,
+                        selected = isFilterSel,
                         onClick = { onFilterChange(f) },
-                        label = { Text(f.labelBn, fontSize = 11.sp) },
+                        colors = appFilterChipColors(),
+                        border = appFilterChipBorder(isFilterSel),
+                        label = {
+                            Text(
+                                f.labelBn,
+                                fontSize = 11.sp,
+                                fontWeight = if (isFilterSel) FontWeight.Bold else FontWeight.Normal
+                            )
+                        },
                         modifier = Modifier.testTag("csv_preview_filter_${f.id}")
                     )
                 }
@@ -603,12 +673,12 @@ private fun CsvPreviewRowCard(
     val bg = when (row.status) {
         CsvRowStatus.ERROR -> RoseBg
         CsvRowStatus.WARNING -> AmberBg
-        CsvRowStatus.VALID -> Color.White
+        CsvRowStatus.VALID -> if (selected) TealContainer.copy(alpha = 0.4f) else Color.White
     }
     val border = when (row.status) {
         CsvRowStatus.ERROR -> RoseDanger.copy(alpha = 0.4f)
-        CsvRowStatus.WARNING -> AmberBorder
-        CsvRowStatus.VALID -> SlateOutline
+        CsvRowStatus.WARNING -> if (selected) AmberNotice else AmberBorder
+        CsvRowStatus.VALID -> if (selected) TealPrimary else SlateOutline
     }
     val badgeText = when {
         isError -> "ত্রুটি"
@@ -626,7 +696,7 @@ private fun CsvPreviewRowCard(
             .fillMaxWidth()
             .then(if (!isError) Modifier.clickable(onClick = onToggle) else Modifier),
         colors = CardDefaults.cardColors(containerColor = bg),
-        border = BorderStroke(1.dp, border),
+        border = BorderStroke(if (!isError && selected) 1.8.dp else 1.dp, border),
         shape = RoundedCornerShape(10.dp)
     ) {
         Row(

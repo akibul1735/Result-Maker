@@ -77,6 +77,8 @@ import com.kgps.result.ui.theme.TealContainer
 import com.kgps.result.ui.theme.TealDark
 import com.kgps.result.ui.theme.TealPrimary
 import com.kgps.result.ui.theme.TealSoft
+import com.kgps.result.ui.theme.appFilterChipBorder
+import com.kgps.result.ui.theme.appFilterChipColors
 
 data class BatchStudentUpdatePatch(
     val updateUpazila: Boolean = false,
@@ -329,13 +331,18 @@ fun BatchStudentEditDialog(
                             FilterChip(
                                 selected = classFilter == 0,
                                 onClick = { classFilter = 0 },
+                                colors = appFilterChipColors(),
+                                border = appFilterChipBorder(classFilter == 0),
                                 label = { Text("সব শ্রেণি (${bn(accessibleStudents.size.toString())})", fontSize = 11.5.sp) }
                             )
                             allowedClasses.forEach { c ->
                                 val cnt = accessibleStudents.count { it.cls == c }
+                                val isSel = classFilter == c
                                 FilterChip(
-                                    selected = classFilter == c,
+                                    selected = isSel,
                                     onClick = { classFilter = c },
+                                    colors = appFilterChipColors(),
+                                    border = appFilterChipBorder(isSel),
                                     label = { Text("${CLSN[c - 1]} (${bn(cnt.toString())})", fontSize = 11.5.sp) }
                                 )
                             }
@@ -397,8 +404,8 @@ fun BatchStudentEditDialog(
                                 items(filteredStudents, key = { it.id }) { s ->
                                     val checked = s.id in selectedIds
                                     Surface(
-                                        color = if (checked) TealSoft else SlateBg,
-                                        border = BorderStroke(1.dp, if (checked) TealPrimary else SlateOutline),
+                                        color = if (checked) TealContainer.copy(alpha = 0.7f) else SlateBg,
+                                        border = BorderStroke(if (checked) 2.dp else 1.dp, if (checked) TealPrimary else SlateOutline),
                                         shape = RoundedCornerShape(10.dp),
                                         modifier = Modifier
                                             .fillMaxWidth()
@@ -548,9 +555,12 @@ fun BatchStudentEditDialog(
                                 horizontalArrangement = Arrangement.spacedBy(6.dp)
                             ) {
                                 RELIGIONS.forEach { rel ->
+                                    val isSel = religionChoice == rel
                                     FilterChip(
-                                        selected = religionChoice == rel,
+                                        selected = isSel,
                                         onClick = { religionChoice = rel },
+                                        colors = appFilterChipColors(),
+                                        border = appFilterChipBorder(isSel),
                                         label = { Text(rel, fontSize = 12.sp) }
                                     )
                                 }
@@ -677,8 +687,8 @@ private fun BatchToggleFieldCard(
     content: @Composable () -> Unit
 ) {
     Surface(
-        color = if (enabled) TealSoft.copy(alpha = 0.55f) else SlateBg,
-        border = BorderStroke(1.dp, if (enabled) TealPrimary else SlateOutline),
+        color = if (enabled) TealContainer.copy(alpha = 0.55f) else SlateBg,
+        border = BorderStroke(if (enabled) 1.8.dp else 1.dp, if (enabled) TealPrimary else SlateOutline),
         shape = RoundedCornerShape(12.dp),
         modifier = Modifier.fillMaxWidth()
     ) {

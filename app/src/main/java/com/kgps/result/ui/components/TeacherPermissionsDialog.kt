@@ -1,6 +1,7 @@
 package com.kgps.result.ui.components
 
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -33,6 +34,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -45,8 +47,12 @@ import com.kgps.result.ui.theme.SlateBg
 import com.kgps.result.ui.theme.SlateMuted
 import com.kgps.result.ui.theme.SlateOutline
 import com.kgps.result.ui.theme.SlateText
+import com.kgps.result.ui.theme.TealContainer
+import com.kgps.result.ui.theme.TealDark
 import com.kgps.result.ui.theme.TealPrimary
 import com.kgps.result.ui.theme.TealSoft
+import com.kgps.result.ui.theme.appFilterChipBorder
+import com.kgps.result.ui.theme.appFilterChipColors
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
@@ -182,6 +188,8 @@ fun TeacherPermissionsEditorDialog(
                                         onClick = {
                                             selectedClasses = if (isSel) selectedClasses - c else selectedClasses + c
                                         },
+                                        colors = appFilterChipColors(),
+                                        border = appFilterChipBorder(isSel),
                                         label = { Text("${CLSN[c - 1]}", fontSize = 11.5.sp) }
                                     )
                                 }
@@ -218,10 +226,12 @@ fun TeacherPermissionsEditorDialog(
                                     Row(
                                         modifier = Modifier
                                             .fillMaxWidth()
+                                            .clip(RoundedCornerShape(8.dp))
+                                            .background(if (isSel) TealContainer.copy(alpha = 0.6f) else androidx.compose.ui.graphics.Color.Transparent)
                                             .clickable {
                                                 selectedSubjects = if (isSel) selectedSubjects - def.key else selectedSubjects + def.key
                                             }
-                                            .padding(vertical = 2.dp),
+                                            .padding(horizontal = 4.dp, vertical = 2.dp),
                                         verticalAlignment = Alignment.CenterVertically
                                     ) {
                                         Checkbox(
@@ -230,7 +240,12 @@ fun TeacherPermissionsEditorDialog(
                                                 selectedSubjects = if (checked) selectedSubjects + def.key else selectedSubjects - def.key
                                             }
                                         )
-                                        Text(def.labelBn, fontSize = 12.5.sp, color = SlateText)
+                                        Text(
+                                            def.labelBn,
+                                            fontSize = 12.5.sp,
+                                            fontWeight = if (isSel) FontWeight.SemiBold else FontWeight.Normal,
+                                            color = if (isSel) TealDark else SlateText
+                                        )
                                     }
                                 }
                             }

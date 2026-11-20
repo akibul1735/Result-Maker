@@ -71,6 +71,8 @@ import com.kgps.result.ui.theme.TealContainer
 import com.kgps.result.ui.theme.TealDark
 import com.kgps.result.ui.theme.TealPrimary
 import com.kgps.result.ui.theme.TealSoft
+import com.kgps.result.ui.theme.appFilterChipBorder
+import com.kgps.result.ui.theme.appFilterChipColors
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
@@ -129,9 +131,9 @@ fun CsvStepOptions(
                                     onConfigChange(config.copy(module = mod, selectedColumnKeys = nextCols))
                                 },
                             shape = RoundedCornerShape(12.dp),
-                            color = if (selected) TealSoft else Color.White,
+                            color = if (selected) TealContainer.copy(alpha = 0.7f) else Color.White,
                             border = BorderStroke(
-                                width = if (selected) 1.5.dp else 1.dp,
+                                width = if (selected) 2.dp else 1.dp,
                                 color = if (selected) TealPrimary else SlateOutline
                             ),
                             tonalElevation = if (selected) 2.dp else 0.dp
@@ -188,8 +190,9 @@ fun CsvStepOptions(
                     verticalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
                     (1..5).forEach { c ->
+                        val isClsSelected = config.targetCls == c
                         FilterChip(
-                            selected = config.targetCls == c,
+                            selected = isClsSelected,
                             onClick = {
                                 val nextCols = defaultSelectedColumnKeys(
                                     module = config.module,
@@ -200,12 +203,21 @@ fun CsvStepOptions(
                                 )
                                 onConfigChange(config.copy(targetCls = c, selectedColumnKeys = nextCols))
                             },
-                            label = { Text("${CLS_SHORT[c - 1]} শ্রেণি", fontSize = 12.sp) },
+                            colors = appFilterChipColors(),
+                            border = appFilterChipBorder(isClsSelected),
+                            label = {
+                                Text(
+                                    "${CLS_SHORT[c - 1]} শ্রেণি",
+                                    fontSize = 12.sp,
+                                    fontWeight = if (isClsSelected) FontWeight.Bold else FontWeight.Normal
+                                )
+                            },
                             modifier = Modifier.testTag("csv_opt_cls_$c")
                         )
                     }
+                    val isMultiSelected = config.targetCls == 0
                     FilterChip(
-                        selected = config.targetCls == 0,
+                        selected = isMultiSelected,
                         onClick = {
                             val nextCols = defaultSelectedColumnKeys(
                                 module = config.module,
@@ -216,7 +228,15 @@ fun CsvStepOptions(
                             )
                             onConfigChange(config.copy(targetCls = 0, selectedColumnKeys = nextCols))
                         },
-                        label = { Text("একাধিক শ্রেণি", fontSize = 12.sp) },
+                        colors = appFilterChipColors(),
+                        border = appFilterChipBorder(isMultiSelected),
+                        label = {
+                            Text(
+                                "একাধিক শ্রেণি",
+                                fontSize = 12.sp,
+                                fontWeight = if (isMultiSelected) FontWeight.Bold else FontWeight.Normal
+                            )
+                        },
                         modifier = Modifier.testTag("csv_opt_cls_multi")
                     )
                 }
@@ -227,8 +247,9 @@ fun CsvStepOptions(
                         verticalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
                         (1..3).forEach { t ->
+                            val isTermSelected = config.targetTerm == t
                             FilterChip(
-                                selected = config.targetTerm == t,
+                                selected = isTermSelected,
                                 onClick = {
                                     val nextCols = defaultSelectedColumnKeys(
                                         module = config.module,
@@ -239,7 +260,15 @@ fun CsvStepOptions(
                                     )
                                     onConfigChange(config.copy(targetTerm = t, selectedColumnKeys = nextCols))
                                 },
-                                label = { Text("${bn(t.toString())}ম প্রান্তিক", fontSize = 12.sp) },
+                                colors = appFilterChipColors(),
+                                border = appFilterChipBorder(isTermSelected),
+                                label = {
+                                    Text(
+                                        "${bn(t.toString())}ম প্রান্তিক",
+                                        fontSize = 12.sp,
+                                        fontWeight = if (isTermSelected) FontWeight.Bold else FontWeight.Normal
+                                    )
+                                },
                                 modifier = Modifier.testTag("csv_opt_term_$t")
                             )
                         }
@@ -253,8 +282,9 @@ fun CsvStepOptions(
                         horizontalArrangement = Arrangement.spacedBy(6.dp),
                         verticalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
+                        val allSubsSelected = config.selectedSubjectKeys.isEmpty()
                         FilterChip(
-                            selected = config.selectedSubjectKeys.isEmpty(),
+                            selected = allSubsSelected,
                             onClick = {
                                 val nextCols = defaultSelectedColumnKeys(
                                     module = config.module,
@@ -265,7 +295,15 @@ fun CsvStepOptions(
                                 )
                                 onConfigChange(config.copy(selectedSubjectKeys = emptySet(), selectedColumnKeys = nextCols))
                             },
-                            label = { Text("সব বিষয়", fontSize = 11.5.sp) },
+                            colors = appFilterChipColors(),
+                            border = appFilterChipBorder(allSubsSelected),
+                            label = {
+                                Text(
+                                    "সব বিষয়",
+                                    fontSize = 11.5.sp,
+                                    fontWeight = if (allSubsSelected) FontWeight.Bold else FontWeight.Normal
+                                )
+                            },
                             modifier = Modifier.testTag("csv_opt_sub_all")
                         )
                         clsSubjects.forEach { s ->
@@ -287,7 +325,15 @@ fun CsvStepOptions(
                                     )
                                     onConfigChange(config.copy(selectedSubjectKeys = nextSubs, selectedColumnKeys = nextCols))
                                 },
-                                label = { Text(s.bn.substringBefore(" ("), fontSize = 11.5.sp) },
+                                colors = appFilterChipColors(),
+                                border = appFilterChipBorder(isSelected),
+                                label = {
+                                    Text(
+                                        s.bn.substringBefore(" ("),
+                                        fontSize = 11.5.sp,
+                                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
+                                    )
+                                },
                                 modifier = Modifier.testTag("csv_opt_sub_${s.key}")
                             )
                         }
@@ -370,11 +416,23 @@ fun CsvStepOptions(
                                         Icon(Icons.Rounded.Check, contentDescription = null, modifier = Modifier.size(14.dp))
                                     }
                                 },
-                                colors = FilterChipDefaults.filterChipColors(
-                                    selectedContainerColor = if (col.required) TealContainer else TealSoft,
-                                    selectedLabelColor = TealDark
-                                ),
-                                label = { Text(col.labelBn, fontSize = 11.5.sp) },
+                                colors = if (col.required) {
+                                    FilterChipDefaults.filterChipColors(
+                                        selectedContainerColor = TealContainer,
+                                        selectedLabelColor = TealDark,
+                                        selectedLeadingIconColor = TealDark
+                                    )
+                                } else {
+                                    appFilterChipColors()
+                                },
+                                border = appFilterChipBorder(isChecked),
+                                label = {
+                                    Text(
+                                        col.labelBn,
+                                        fontSize = 11.5.sp,
+                                        fontWeight = if (isChecked) FontWeight.SemiBold else FontWeight.Normal
+                                    )
+                                },
                                 modifier = Modifier.testTag("csv_col_toggle_${col.key}")
                             )
                         }
@@ -399,10 +457,19 @@ fun CsvStepOptions(
                     verticalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
                     CsvDelimiterFormat.entries.forEach { fmtOpt ->
+                        val isFmtSelected = config.format == fmtOpt
                         FilterChip(
-                            selected = config.format == fmtOpt,
+                            selected = isFmtSelected,
                             onClick = { onConfigChange(config.copy(format = fmtOpt)) },
-                            label = { Text(fmtOpt.labelBn, fontSize = 12.sp) },
+                            colors = appFilterChipColors(),
+                            border = appFilterChipBorder(isFmtSelected),
+                            label = {
+                                Text(
+                                    fmtOpt.labelBn,
+                                    fontSize = 12.sp,
+                                    fontWeight = if (isFmtSelected) FontWeight.Bold else FontWeight.Normal
+                                )
+                            },
                             modifier = Modifier.testTag("csv_fmt_${fmtOpt.id}")
                         )
                     }
@@ -412,10 +479,19 @@ fun CsvStepOptions(
                     verticalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
                     CsvDigitMode.entries.forEach { digitOpt ->
+                        val isDigitSelected = config.digitMode == digitOpt
                         FilterChip(
-                            selected = config.digitMode == digitOpt,
+                            selected = isDigitSelected,
                             onClick = { onConfigChange(config.copy(digitMode = digitOpt)) },
-                            label = { Text(digitOpt.labelBn, fontSize = 12.sp) },
+                            colors = appFilterChipColors(),
+                            border = appFilterChipBorder(isDigitSelected),
+                            label = {
+                                Text(
+                                    digitOpt.labelBn,
+                                    fontSize = 12.sp,
+                                    fontWeight = if (isDigitSelected) FontWeight.Bold else FontWeight.Normal
+                                )
+                            },
                             modifier = Modifier.testTag("csv_digit_${digitOpt.id}")
                         )
                     }

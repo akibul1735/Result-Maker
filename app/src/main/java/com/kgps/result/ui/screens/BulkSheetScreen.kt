@@ -119,6 +119,7 @@ import com.kgps.result.ui.theme.SlateOutline
 import com.kgps.result.ui.theme.SlateSurfaceVariant
 import com.kgps.result.ui.theme.SlateText
 import com.kgps.result.ui.theme.TealContainer
+import com.kgps.result.ui.theme.TealDark
 import com.kgps.result.ui.theme.TealPrimary
 import com.kgps.result.ui.theme.TealSoft
 
@@ -504,8 +505,19 @@ fun BulkSheetScreen(
                         DropdownMenu(expanded = classMenuOpen, onDismissRequest = { classMenuOpen = false }) {
                             allowedClasses.forEach { c ->
                                 val count = students.count { it.cls == c }
+                                val isSelected = c == activeCls
                                 DropdownMenuItem(
-                                    text = { Text("${CLSN[c - 1]} শ্রেণি (${bn(count.toString())} জন)") },
+                                    modifier = Modifier.background(if (isSelected) TealContainer else Color.Transparent),
+                                    text = {
+                                        Text(
+                                            "${CLSN[c - 1]} শ্রেণি (${bn(count.toString())} জন)",
+                                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+                                            color = if (isSelected) TealDark else SlateText
+                                        )
+                                    },
+                                    trailingIcon = if (isSelected) {
+                                        { Icon(Icons.Rounded.Check, contentDescription = null, tint = TealPrimary, modifier = Modifier.size(16.dp)) }
+                                    } else null,
                                     onClick = { onSelectClass(c); classMenuOpen = false }
                                 )
                             }
@@ -538,8 +550,19 @@ fun BulkSheetScreen(
                             }
                             DropdownMenu(expanded = termMenuOpen, onDismissRequest = { termMenuOpen = false }) {
                                 (1..3).forEach { t ->
+                                    val isSelected = t == term
                                     DropdownMenuItem(
-                                        text = { Text("${bn(t.toString())} প্রান্তিক") },
+                                        modifier = Modifier.background(if (isSelected) TealContainer else Color.Transparent),
+                                        text = {
+                                            Text(
+                                                "${bn(t.toString())} প্রান্তিক",
+                                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+                                                color = if (isSelected) TealDark else SlateText
+                                            )
+                                        },
+                                        trailingIcon = if (isSelected) {
+                                            { Icon(Icons.Rounded.Check, contentDescription = null, tint = TealPrimary, modifier = Modifier.size(16.dp)) }
+                                        } else null,
                                         onClick = { term = t; termMenuOpen = false }
                                     )
                                 }
@@ -684,14 +707,19 @@ fun BulkSheetScreen(
                         }
                         DropdownMenu(expanded = modeMenuOpen, onDismissRequest = { modeMenuOpen = false }) {
                             availableModes.forEach { (id, label) ->
+                                val isSelected = mode == id
                                 DropdownMenuItem(
+                                    modifier = Modifier.background(if (isSelected) TealContainer else Color.Transparent),
                                     text = {
                                         Text(
                                             label,
-                                            fontWeight = if (mode == id) FontWeight.Bold else FontWeight.Normal,
-                                            color = if (mode == id) TealPrimary else SlateText
+                                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+                                            color = if (isSelected) TealDark else SlateText
                                         )
                                     },
+                                    trailingIcon = if (isSelected) {
+                                        { Icon(Icons.Rounded.Check, contentDescription = null, tint = TealPrimary, modifier = Modifier.size(16.dp)) }
+                                    } else null,
                                     onClick = { mode = id; modeMenuOpen = false }
                                 )
                             }
@@ -726,14 +754,19 @@ fun BulkSheetScreen(
                             DropdownMenu(expanded = subjectMenuOpen, onDismissRequest = { subjectMenuOpen = false }) {
                                 visibleSubs.forEach { s ->
                                     val editableSub = permissions.canEditSubject(s.key)
+                                    val isSelected = subKey == s.key
                                     DropdownMenuItem(
+                                        modifier = Modifier.background(if (isSelected) TealContainer else Color.Transparent),
                                         text = {
                                             Text(
                                                 "${s.bn} (${fmtSheetDigits(s.max.toString())})" + if (!editableSub) " · শুধু দেখা" else "",
-                                                fontWeight = if (subKey == s.key) FontWeight.Bold else FontWeight.Normal,
-                                                color = if (subKey == s.key) TealPrimary else if (editableSub) SlateText else SlateMuted
+                                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+                                                color = if (isSelected) TealDark else if (editableSub) SlateText else SlateMuted
                                             )
                                         },
+                                        trailingIcon = if (isSelected) {
+                                            { Icon(Icons.Rounded.Check, contentDescription = null, tint = TealPrimary, modifier = Modifier.size(16.dp)) }
+                                        } else null,
                                         onClick = { subKey = s.key; subjectMenuOpen = false }
                                     )
                                 }
@@ -1342,8 +1375,16 @@ fun BulkSheetScreen(
                             }
                             when (mode) {
                                 "subject" -> {
-                                    SheetComputedHeader("ধারাবাহিক")
-                                    SheetComputedHeader("মোট")
+                                    val contMax = activeSub?.comps?.sumOf { it.max } ?: 0
+                                    val totalMax = activeSub?.max ?: 0
+                                    SheetComputedHeader(
+                                        label = "ধারাবাহিক",
+                                        subLabel = if (contMax > 0) "সর্বোচ্চ ${fmtSheetDigits(contMax.toString())}" else ""
+                                    )
+                                    SheetComputedHeader(
+                                        label = "মোট",
+                                        subLabel = if (totalMax > 0) "সর্বোচ্চ ${fmtSheetDigits(totalMax.toString())}" else ""
+                                    )
                                     SheetComputedHeader("গ্রেড")
                                 }
                                 "all" -> if (permissions.allSubjects || permissions.canViewOtherSubjects) {
@@ -1369,7 +1410,7 @@ fun BulkSheetScreen(
                                         Modifier
                                             .width(136.dp)
                                             .fillMaxHeight()
-                                            .background(if (isRowSelected) TealSoft else Color.Transparent)
+                                            .background(if (isRowSelected) TealContainer else Color.Transparent)
                                             .clickable {
                                                 when {
                                                     mode == "traits" && traitBatchSelectMode && permissions.canEditAttendance -> {
@@ -1405,12 +1446,13 @@ fun BulkSheetScreen(
                                             fmtSheetDigits(s.roll.toString().padStart(2, '0')),
                                             fontWeight = FontWeight.Bold,
                                             fontSize = 12.sp,
-                                            color = TealPrimary
+                                            color = if (isRowSelected) TealDark else TealPrimary
                                         )
                                         Text(
                                             s.name.ifBlank { "(নাম নেই)" },
                                             fontSize = 12.sp,
-                                            fontWeight = FontWeight.Medium,
+                                            fontWeight = if (isRowSelected) FontWeight.Bold else FontWeight.Medium,
+                                            color = if (isRowSelected) TealDark else SlateText,
                                             maxLines = 1,
                                             overflow = TextOverflow.Ellipsis
                                         )
@@ -1425,7 +1467,7 @@ fun BulkSheetScreen(
                                             if (col.isTraitCycle && col.xKey != null) {
                                                 val currentVal = s.x[col.xKey] ?: ""
                                                 val badgeBg = when {
-                                                    isTraitRowSelected -> TealSoft.copy(alpha = 0.55f)
+                                                    isTraitRowSelected -> TealContainer
                                                     currentVal == "ক" -> TealSoft
                                                     currentVal == "খ" -> AmberBg
                                                     currentVal == "গ" -> RoseDanger.copy(alpha = 0.1f)
@@ -1575,6 +1617,7 @@ fun BulkSheetScreen(
                                                             Triple("গ", "গ · অগ্রগতি প্রয়োজন", RoseDanger)
                                                         ).forEach { (optVal, optLabel, optColor) ->
                                                             DropdownMenuItem(
+                                                                modifier = Modifier.background(if (currentVal == optVal) TealContainer.copy(alpha = 0.7f) else Color.Transparent),
                                                                 text = {
                                                                     Text(
                                                                         optLabel,
@@ -1722,9 +1765,10 @@ fun BulkSheetScreen(
                                                     .fillMaxHeight()
                                                     .background(
                                                         when {
-                                                            !colEditable -> SlateBg
                                                             invalid -> RoseDanger.copy(alpha = 0.08f)
-                                                            isFocused -> TealContainer.copy(alpha = 0.25f)
+                                                            isRowSelected -> TealContainer.copy(alpha = 0.7f)
+                                                            !colEditable -> SlateBg
+                                                            isFocused -> TealContainer.copy(alpha = 0.35f)
                                                             else -> MaterialTheme.colorScheme.surface
                                                         }
                                                     )
@@ -1798,7 +1842,12 @@ fun BulkSheetScreen(
                                             val dVal = s.x["DAYS_$term"]?.let { fromBn(it).toDoubleOrNull() }
                                             val pVal = s.x["PRES_$term"]?.let { fromBn(it).toDoubleOrNull() }
                                             val pctStr = if (dVal != null && pVal != null && dVal > 0) "${fmtSheetNum((pVal / dVal) * 100)}%" else "—"
-                                            SheetComputedCell(pctStr, TealContainer.copy(alpha = 0.25f), TealPrimary, bold = true)
+                                            SheetComputedCell(
+                                                pctStr,
+                                                if (isRowSelected) TealContainer else TealContainer.copy(alpha = 0.25f),
+                                                if (isRowSelected) TealDark else TealPrimary,
+                                                bold = true
+                                            )
                                         }
                                     }
                                 }
@@ -1813,9 +1862,29 @@ fun BulkSheetScreen(
 }
 
 @Composable
-private fun SheetComputedHeader(label: String) {
-    Box(Modifier.width(68.dp).height(46.dp), contentAlignment = Alignment.Center) {
-        Text(label, fontWeight = FontWeight.Bold, fontSize = 11.sp)
+private fun SheetComputedHeader(label: String, subLabel: String = "") {
+    Column(
+        Modifier.width(74.dp).height(46.dp).padding(horizontal = 4.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center
+    ) {
+        Text(
+            label,
+            fontWeight = FontWeight.Bold,
+            fontSize = 11.sp,
+            color = SlateText,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+        )
+        if (subLabel.isNotBlank()) {
+            Text(
+                subLabel,
+                fontSize = 10.sp,
+                color = SlateMuted,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
     }
     Box(Modifier.width(1.dp).height(46.dp).background(SlateOutline))
 }
@@ -1827,7 +1896,7 @@ private fun SheetComputedCell(
     fg: Color,
     bold: Boolean = false
 ) {
-    Box(Modifier.width(68.dp).fillMaxHeight().background(bg), contentAlignment = Alignment.Center) {
+    Box(Modifier.width(74.dp).fillMaxHeight().background(bg), contentAlignment = Alignment.Center) {
         Text(text, fontSize = 12.sp, fontWeight = if (bold) FontWeight.Bold else FontWeight.Normal, color = fg)
     }
     Box(Modifier.width(1.dp).fillMaxHeight().background(SlateOutline))

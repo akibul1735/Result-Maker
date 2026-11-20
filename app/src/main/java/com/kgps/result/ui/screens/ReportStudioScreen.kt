@@ -39,6 +39,7 @@ import androidx.compose.material.icons.automirrored.rounded.KeyboardArrowLeft
 import androidx.compose.material.icons.automirrored.rounded.KeyboardArrowRight
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.ArrowDropDown
+import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.Download
 import androidx.compose.material.icons.rounded.Fullscreen
@@ -103,8 +104,11 @@ import com.kgps.result.ui.theme.SlateMuted
 import com.kgps.result.ui.theme.SlateOutline
 import com.kgps.result.ui.theme.SlateText
 import com.kgps.result.ui.theme.TealContainer
+import com.kgps.result.ui.theme.TealDark
 import com.kgps.result.ui.theme.TealPrimary
 import com.kgps.result.ui.theme.TealSoft
+import com.kgps.result.ui.theme.appFilterChipBorder
+import com.kgps.result.ui.theme.appFilterChipColors
 import kotlin.math.roundToInt
 
 private fun clampPanOffset(offset: Offset, scale: Float, size: IntSize): Offset {
@@ -264,14 +268,19 @@ fun ReportStudioScreen(
                             DropdownMenu(expanded = classMenuOpen, onDismissRequest = { classMenuOpen = false }) {
                                 availableClasses.forEach { c ->
                                     val count = sorted.count { it.cls == c }
+                                    val isSel = c == active.cls
                                     DropdownMenuItem(
+                                        modifier = Modifier.background(if (isSel) TealContainer else Color.Transparent),
                                         text = {
                                             Text(
                                                 "${CLSN[c - 1]} শ্রেণি (${bn(count.toString())} জন)",
-                                                fontWeight = if (c == active.cls) FontWeight.Bold else FontWeight.Normal,
-                                                color = if (c == active.cls) TealPrimary else SlateText
+                                                fontWeight = if (isSel) FontWeight.Bold else FontWeight.Normal,
+                                                color = if (isSel) TealDark else SlateText
                                             )
                                         },
+                                        trailingIcon = if (isSel) {
+                                            { Icon(Icons.Rounded.Check, contentDescription = null, tint = TealPrimary, modifier = Modifier.size(16.dp)) }
+                                        } else null,
                                         onClick = {
                                             classMenuOpen = false
                                             sorted.firstOrNull { it.cls == c }?.let { onSelectId(it.id) }
@@ -315,14 +324,19 @@ fun ReportStudioScreen(
                                 modifier = Modifier.heightIn(max = 360.dp)
                             ) {
                                 classStudents.forEach { s ->
+                                    val isSel = s.id == active.id
                                     DropdownMenuItem(
+                                        modifier = Modifier.background(if (isSel) TealContainer else Color.Transparent),
                                         text = {
                                             Text(
                                                 "রোল ${bn(s.roll.toString().padStart(2, '0'))} — ${s.name.ifBlank { "(নাম নেই)" }}",
-                                                fontWeight = if (s.id == active.id) FontWeight.Bold else FontWeight.Normal,
-                                                color = if (s.id == active.id) TealPrimary else SlateText
+                                                fontWeight = if (isSel) FontWeight.Bold else FontWeight.Normal,
+                                                color = if (isSel) TealDark else SlateText
                                             )
                                         },
+                                        trailingIcon = if (isSel) {
+                                            { Icon(Icons.Rounded.Check, contentDescription = null, tint = TealPrimary, modifier = Modifier.size(16.dp)) }
+                                        } else null,
                                         onClick = {
                                             onSelectId(s.id)
                                             rollMenuOpen = false
@@ -803,12 +817,17 @@ fun ReportStudioScreen(
                         FilterChip(
                             selected = filterCls == null,
                             onClick = { filterCls = null },
+                            colors = appFilterChipColors(),
+                            border = appFilterChipBorder(filterCls == null),
                             label = { Text("সব শ্রেণি", fontSize = 11.5.sp) }
                         )
                         availableClasses.forEach { c ->
+                            val isSel = filterCls == c
                             FilterChip(
-                                selected = filterCls == c,
+                                selected = isSel,
                                 onClick = { filterCls = c },
+                                colors = appFilterChipColors(),
+                                border = appFilterChipBorder(isSel),
                                 label = { Text("${CLSN[c - 1]} শ্রেণি", fontSize = 11.5.sp) }
                             )
                         }
@@ -838,8 +857,8 @@ fun ReportStudioScreen(
                                         showSearchDialog = false
                                     },
                                     shape = RoundedCornerShape(8.dp),
-                                    color = if (isCurr) TealSoft else SlateBg,
-                                    border = BorderStroke(1.dp, if (isCurr) TealPrimary else SlateOutline),
+                                    color = if (isCurr) TealContainer.copy(alpha = 0.7f) else SlateBg,
+                                    border = BorderStroke(if (isCurr) 2.dp else 1.dp, if (isCurr) TealPrimary else SlateOutline),
                                     modifier = Modifier.fillMaxWidth()
                                 ) {
                                     Row(
@@ -1088,9 +1107,12 @@ fun ReportStudioScreen(
                     modifier = Modifier.horizontalScroll(rememberScrollState())
                 ) {
                     PDF_FONT_LIST.forEach { font ->
+                        val isSel = settings.pdfFont == font.id
                         FilterChip(
-                            selected = settings.pdfFont == font.id,
+                            selected = isSel,
                             onClick = { onUpdateSettings(settings.copy(pdfFont = font.id)) },
+                            colors = appFilterChipColors(),
+                            border = appFilterChipBorder(isSel),
                             modifier = Modifier.testTag("studio_font_${font.id}"),
                             label = { Text(font.labelBn.substringBefore(" (")) }
                         )
@@ -1103,9 +1125,12 @@ fun ReportStudioScreen(
                     modifier = Modifier.horizontalScroll(rememberScrollState())
                 ) {
                     DPE_LOGO_LIST.forEach { logo ->
+                        val isSel = settings.dpeLogo == logo.id
                         FilterChip(
-                            selected = settings.dpeLogo == logo.id,
+                            selected = isSel,
                             onClick = { onUpdateSettings(settings.copy(dpeLogo = logo.id)) },
+                            colors = appFilterChipColors(),
+                            border = appFilterChipBorder(isSel),
                             modifier = Modifier.testTag("studio_logo_${logo.id}"),
                             label = { Text(logo.labelBn.substringBefore(" (")) }
                         )

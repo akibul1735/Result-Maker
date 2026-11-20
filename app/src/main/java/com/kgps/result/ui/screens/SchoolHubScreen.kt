@@ -356,8 +356,8 @@ fun SchoolHubScreen(
                                         .fillMaxWidth()
                                         .testTag("hub_school_card_${school.id}")
                                         .clickable(enabled = !isBusy) { onSelectSchool(school.id) },
-                                    color = if (isCurrent) TealSoft else SlateBg,
-                                    border = BorderStroke(1.dp, if (isCurrent) TealPrimary else SlateOutline),
+                                    color = if (isCurrent) TealContainer.copy(alpha = 0.7f) else SlateBg,
+                                    border = BorderStroke(if (isCurrent) 2.dp else 1.dp, if (isCurrent) TealPrimary else SlateOutline),
                                     shape = RoundedCornerShape(12.dp)
                                 ) {
                                     Row(

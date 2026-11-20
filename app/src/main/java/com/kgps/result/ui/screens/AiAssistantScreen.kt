@@ -142,6 +142,8 @@ import com.kgps.result.ui.theme.TealContainer
 import com.kgps.result.ui.theme.TealDark
 import com.kgps.result.ui.theme.TealPrimary
 import com.kgps.result.ui.theme.TealSoft
+import com.kgps.result.ui.theme.appFilterChipBorder
+import com.kgps.result.ui.theme.appFilterChipColors
 import java.io.File
 
 private fun createTempScanImageUri(context: Context): Uri {
@@ -330,17 +332,35 @@ fun AiAssistantScreen(
                         horizontalArrangement = Arrangement.spacedBy(6.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
+                        val isGeneralMode = state.modelMode == AiModelMode.GENERAL
                         FilterChip(
-                            selected = state.modelMode == AiModelMode.GENERAL,
+                            selected = isGeneralMode,
                             onClick = { onSetModelMode(AiModelMode.GENERAL) },
+                            colors = appFilterChipColors(),
+                            border = appFilterChipBorder(isGeneralMode),
                             modifier = Modifier.testTag("ai_mode_general"),
-                            label = { Text("বিস্তারিত", fontSize = 11.5.sp) }
+                            label = {
+                                Text(
+                                    "বিস্তারিত",
+                                    fontSize = 11.5.sp,
+                                    fontWeight = if (isGeneralMode) FontWeight.Bold else FontWeight.Normal
+                                )
+                            }
                         )
+                        val isFastMode = state.modelMode == AiModelMode.FAST
                         FilterChip(
-                            selected = state.modelMode == AiModelMode.FAST,
+                            selected = isFastMode,
                             onClick = { onSetModelMode(AiModelMode.FAST) },
+                            colors = appFilterChipColors(),
+                            border = appFilterChipBorder(isFastMode),
                             modifier = Modifier.testTag("ai_mode_fast"),
-                            label = { Text("দ্রুত", fontSize = 11.5.sp) }
+                            label = {
+                                Text(
+                                    "দ্রুত",
+                                    fontSize = 11.5.sp,
+                                    fontWeight = if (isFastMode) FontWeight.Bold else FontWeight.Normal
+                                )
+                            }
                         )
                         Spacer(Modifier.weight(1f))
                         OutlinedButton(
@@ -378,13 +398,35 @@ fun AiAssistantScreen(
                             )
                         }
                         DropdownMenu(expanded = contextDropdownOpen, onDismissRequest = { contextDropdownOpen = false }) {
+                            val isNoneSel = state.contextStudentId == null
                             DropdownMenuItem(
-                                text = { Text("সাধারণ / কোনো নির্দিষ্ট শিক্ষার্থী নয়") },
+                                modifier = Modifier.background(if (isNoneSel) TealContainer else Color.Transparent),
+                                text = {
+                                    Text(
+                                        "সাধারণ / কোনো নির্দিষ্ট শিক্ষার্থী নয়",
+                                        fontWeight = if (isNoneSel) FontWeight.Bold else FontWeight.Normal,
+                                        color = if (isNoneSel) TealDark else SlateText
+                                    )
+                                },
+                                trailingIcon = if (isNoneSel) {
+                                    { Icon(Icons.Rounded.Check, contentDescription = null, tint = TealDark, modifier = Modifier.size(16.dp)) }
+                                } else null,
                                 onClick = { onSetContextStudent(null); contextDropdownOpen = false }
                             )
                             sortedStudents.forEach { s ->
+                                val isStuSel = state.contextStudentId == s.id
                                 DropdownMenuItem(
-                                    text = { Text("${CLSN[s.cls - 1]} · রোল ${bn(s.roll.toString())} — ${s.name.ifBlank { "(নাম নেই)" }}") },
+                                    modifier = Modifier.background(if (isStuSel) TealContainer else Color.Transparent),
+                                    text = {
+                                        Text(
+                                            "${CLSN[s.cls - 1]} · রোল ${bn(s.roll.toString())} — ${s.name.ifBlank { "(নাম নেই)" }}",
+                                            fontWeight = if (isStuSel) FontWeight.Bold else FontWeight.Normal,
+                                            color = if (isStuSel) TealDark else SlateText
+                                        )
+                                    },
+                                    trailingIcon = if (isStuSel) {
+                                        { Icon(Icons.Rounded.Check, contentDescription = null, tint = TealDark, modifier = Modifier.size(16.dp)) }
+                                    } else null,
                                     onClick = { onSetContextStudent(s.id); contextDropdownOpen = false }
                                 )
                             }
@@ -524,16 +566,34 @@ fun AiAssistantScreen(
                         horizontalArrangement = Arrangement.spacedBy(6.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
+                        val isClassMode = scanMode == "class"
                         FilterChip(
-                            selected = scanMode == "class",
+                            selected = isClassMode,
                             onClick = { scanMode = "class" },
-                            label = { Text("শ্রেণি তালিকা (সব শিক্ষার্থী)", fontSize = 11.5.sp) },
+                            colors = appFilterChipColors(),
+                            border = appFilterChipBorder(isClassMode),
+                            label = {
+                                Text(
+                                    "শ্রেণি তালিকা (সব শিক্ষার্থী)",
+                                    fontSize = 11.5.sp,
+                                    fontWeight = if (isClassMode) FontWeight.Bold else FontWeight.Normal
+                                )
+                            },
                             modifier = Modifier.testTag("scan_mode_class_chip")
                         )
+                        val isSingleMode = scanMode == "single"
                         FilterChip(
-                            selected = scanMode == "single",
+                            selected = isSingleMode,
                             onClick = { scanMode = "single" },
-                            label = { Text("একক (১ জন)", fontSize = 11.5.sp) },
+                            colors = appFilterChipColors(),
+                            border = appFilterChipBorder(isSingleMode),
+                            label = {
+                                Text(
+                                    "একক (১ জন)",
+                                    fontSize = 11.5.sp,
+                                    fontWeight = if (isSingleMode) FontWeight.Bold else FontWeight.Normal
+                                )
+                            },
                             modifier = Modifier.testTag("scan_mode_single_chip")
                         )
                         Spacer(Modifier.weight(1f))
@@ -986,13 +1046,35 @@ private fun ClassSheetHintSelectors(
                 Icon(Icons.Rounded.ArrowDropDown, contentDescription = null, modifier = Modifier.size(16.dp))
             }
             DropdownMenu(expanded = clsMenu, onDismissRequest = { clsMenu = false }) {
+                val isClsAuto = clsHint == null
                 DropdownMenuItem(
-                    text = { Text("স্বয়ংক্রিয় শনাক্ত") },
+                    modifier = Modifier.background(if (isClsAuto) TealContainer else Color.Transparent),
+                    text = {
+                        Text(
+                            "স্বয়ংক্রিয় শনাক্ত",
+                            fontWeight = if (isClsAuto) FontWeight.Bold else FontWeight.Normal,
+                            color = if (isClsAuto) TealDark else SlateText
+                        )
+                    },
+                    trailingIcon = if (isClsAuto) {
+                        { Icon(Icons.Rounded.Check, contentDescription = null, tint = TealDark, modifier = Modifier.size(16.dp)) }
+                    } else null,
                     onClick = { onChangeCls(null); clsMenu = false }
                 )
                 allowedClasses.forEach { c ->
+                    val isClsSel = clsHint == c
                     DropdownMenuItem(
-                        text = { Text("${CLSN[c - 1]} শ্রেণি") },
+                        modifier = Modifier.background(if (isClsSel) TealContainer else Color.Transparent),
+                        text = {
+                            Text(
+                                "${CLSN[c - 1]} শ্রেণি",
+                                fontWeight = if (isClsSel) FontWeight.Bold else FontWeight.Normal,
+                                color = if (isClsSel) TealDark else SlateText
+                            )
+                        },
+                        trailingIcon = if (isClsSel) {
+                            { Icon(Icons.Rounded.Check, contentDescription = null, tint = TealDark, modifier = Modifier.size(16.dp)) }
+                        } else null,
                         onClick = { onChangeCls(c); clsMenu = false }
                     )
                 }
@@ -1017,13 +1099,35 @@ private fun ClassSheetHintSelectors(
                 Icon(Icons.Rounded.ArrowDropDown, contentDescription = null, modifier = Modifier.size(16.dp))
             }
             DropdownMenu(expanded = termMenu, onDismissRequest = { termMenu = false }) {
+                val isTermAuto = termHint == null
                 DropdownMenuItem(
-                    text = { Text("স্বয়ংক্রিয় শনাক্ত") },
+                    modifier = Modifier.background(if (isTermAuto) TealContainer else Color.Transparent),
+                    text = {
+                        Text(
+                            "স্বয়ংক্রিয় শনাক্ত",
+                            fontWeight = if (isTermAuto) FontWeight.Bold else FontWeight.Normal,
+                            color = if (isTermAuto) TealDark else SlateText
+                        )
+                    },
+                    trailingIcon = if (isTermAuto) {
+                        { Icon(Icons.Rounded.Check, contentDescription = null, tint = TealDark, modifier = Modifier.size(16.dp)) }
+                    } else null,
                     onClick = { onChangeTerm(null); termMenu = false }
                 )
                 (1..3).forEach { t ->
+                    val isTermSel = termHint == t
                     DropdownMenuItem(
-                        text = { Text("${bn(t.toString())} প্রান্তিক") },
+                        modifier = Modifier.background(if (isTermSel) TealContainer else Color.Transparent),
+                        text = {
+                            Text(
+                                "${bn(t.toString())} প্রান্তিক",
+                                fontWeight = if (isTermSel) FontWeight.Bold else FontWeight.Normal,
+                                color = if (isTermSel) TealDark else SlateText
+                            )
+                        },
+                        trailingIcon = if (isTermSel) {
+                            { Icon(Icons.Rounded.Check, contentDescription = null, tint = TealDark, modifier = Modifier.size(16.dp)) }
+                        } else null,
                         onClick = { onChangeTerm(t); termMenu = false }
                     )
                 }
@@ -1049,13 +1153,35 @@ private fun ClassSheetHintSelectors(
                 Icon(Icons.Rounded.ArrowDropDown, contentDescription = null, modifier = Modifier.size(16.dp))
             }
             DropdownMenu(expanded = subMenu, onDismissRequest = { subMenu = false }) {
+                val isSubAuto = subKeyHint == null
                 DropdownMenuItem(
-                    text = { Text("স্বয়ংক্রিয় শনাক্ত") },
+                    modifier = Modifier.background(if (isSubAuto) TealContainer else Color.Transparent),
+                    text = {
+                        Text(
+                            "স্বয়ংক্রিয় শনাক্ত",
+                            fontWeight = if (isSubAuto) FontWeight.Bold else FontWeight.Normal,
+                            color = if (isSubAuto) TealDark else SlateText
+                        )
+                    },
+                    trailingIcon = if (isSubAuto) {
+                        { Icon(Icons.Rounded.Check, contentDescription = null, tint = TealDark, modifier = Modifier.size(16.dp)) }
+                    } else null,
                     onClick = { onChangeSub(null); subMenu = false }
                 )
                 subs.forEach { s ->
+                    val isSubSel = subKeyHint == s.key
                     DropdownMenuItem(
-                        text = { Text(s.bn) },
+                        modifier = Modifier.background(if (isSubSel) TealContainer else Color.Transparent),
+                        text = {
+                            Text(
+                                s.bn,
+                                fontWeight = if (isSubSel) FontWeight.Bold else FontWeight.Normal,
+                                color = if (isSubSel) TealDark else SlateText
+                            )
+                        },
+                        trailingIcon = if (isSubSel) {
+                            { Icon(Icons.Rounded.Check, contentDescription = null, tint = TealDark, modifier = Modifier.size(16.dp)) }
+                        } else null,
                         onClick = { onChangeSub(s.key); subMenu = false }
                     )
                 }
@@ -1167,8 +1293,19 @@ private fun ClassSheetPreviewSection(
                     }
                     DropdownMenu(expanded = clsDrop, onDismissRequest = { clsDrop = false }) {
                         permissions.effectiveClasses().forEach { c ->
+                            val isClsSel = sheet.cls == c
                             DropdownMenuItem(
-                                text = { Text("${CLSN[c - 1]} শ্রেণি") },
+                                modifier = Modifier.background(if (isClsSel) TealContainer else Color.Transparent),
+                                text = {
+                                    Text(
+                                        "${CLSN[c - 1]} শ্রেণি",
+                                        fontWeight = if (isClsSel) FontWeight.Bold else FontWeight.Normal,
+                                        color = if (isClsSel) TealDark else SlateText
+                                    )
+                                },
+                                trailingIcon = if (isClsSel) {
+                                    { Icon(Icons.Rounded.Check, contentDescription = null, tint = TealDark, modifier = Modifier.size(16.dp)) }
+                                } else null,
                                 onClick = {
                                     val newSubs = subjectsFor(c, RELIGIONS.first())
                                     val nextSub = if (newSubs.any { it.key == sheet.subKey }) sheet.subKey else newSubs.first().key
@@ -1191,8 +1328,19 @@ private fun ClassSheetPreviewSection(
                     }
                     DropdownMenu(expanded = termDrop, onDismissRequest = { termDrop = false }) {
                         (1..3).forEach { t ->
+                            val isTermSel = sheet.term == t
                             DropdownMenuItem(
-                                text = { Text("${bn(t.toString())} প্রান্তিক") },
+                                modifier = Modifier.background(if (isTermSel) TealContainer else Color.Transparent),
+                                text = {
+                                    Text(
+                                        "${bn(t.toString())} প্রান্তিক",
+                                        fontWeight = if (isTermSel) FontWeight.Bold else FontWeight.Normal,
+                                        color = if (isTermSel) TealDark else SlateText
+                                    )
+                                },
+                                trailingIcon = if (isTermSel) {
+                                    { Icon(Icons.Rounded.Check, contentDescription = null, tint = TealDark, modifier = Modifier.size(16.dp)) }
+                                } else null,
                                 onClick = { onUpdateMeta(sheet.cls, t, sheet.subKey); termDrop = false }
                             )
                         }
@@ -1210,8 +1358,19 @@ private fun ClassSheetPreviewSection(
                     }
                     DropdownMenu(expanded = subDrop, onDismissRequest = { subDrop = false }) {
                         subList.forEach { s ->
+                            val isSubSel = sheet.subKey == s.key
                             DropdownMenuItem(
-                                text = { Text(s.bn) },
+                                modifier = Modifier.background(if (isSubSel) TealContainer else Color.Transparent),
+                                text = {
+                                    Text(
+                                        s.bn,
+                                        fontWeight = if (isSubSel) FontWeight.Bold else FontWeight.Normal,
+                                        color = if (isSubSel) TealDark else SlateText
+                                    )
+                                },
+                                trailingIcon = if (isSubSel) {
+                                    { Icon(Icons.Rounded.Check, contentDescription = null, tint = TealDark, modifier = Modifier.size(16.dp)) }
+                                } else null,
                                 onClick = { onUpdateMeta(sheet.cls, sheet.term, s.key); subDrop = false }
                             )
                         }
@@ -1285,14 +1444,30 @@ private fun ClassSheetPreviewSection(
                         FilterChip(
                             selected = !showOnlyIssues,
                             onClick = { if (showOnlyIssues) onToggleShowOnlyIssues() },
-                            label = { Text("সবগুলো (${bn(sheet.rows.size.toString())})", fontSize = 11.sp) }
+                            colors = appFilterChipColors(),
+                            border = appFilterChipBorder(!showOnlyIssues),
+                            label = {
+                                Text(
+                                    "সবগুলো (${bn(sheet.rows.size.toString())})",
+                                    fontSize = 11.sp,
+                                    fontWeight = if (!showOnlyIssues) FontWeight.Bold else FontWeight.Normal
+                                )
+                            }
                         )
                         if (issueRows.isNotEmpty()) {
                             FilterChip(
                                 selected = showOnlyIssues,
                                 onClick = { if (!showOnlyIssues) onToggleShowOnlyIssues() },
+                                colors = appFilterChipColors(),
+                                border = appFilterChipBorder(showOnlyIssues),
                                 modifier = Modifier.testTag("preview_filter_issues_chip"),
-                                label = { Text("শুধু অস্পষ্ট/সমস্যা (${bn(issueRows.size.toString())})", fontSize = 11.sp) }
+                                label = {
+                                    Text(
+                                        "শুধু অস্পষ্ট/সমস্যা (${bn(issueRows.size.toString())})",
+                                        fontSize = 11.sp,
+                                        fontWeight = if (showOnlyIssues) FontWeight.Bold else FontWeight.Normal
+                                    )
+                                }
                             )
                         }
                         AssistChip(
