@@ -112,6 +112,7 @@ import com.kgps.result.ui.theme.TealPrimary
 import com.kgps.result.ui.theme.TealSoft
 import com.kgps.result.ui.theme.appFilterChipBorder
 import com.kgps.result.ui.theme.appFilterChipColors
+import kotlin.math.abs
 import kotlin.math.roundToInt
 
 private fun clampPanOffset(offset: Offset, scale: Float, size: IntSize): Offset {
@@ -149,6 +150,11 @@ fun ReportStudioScreen(
     val active = sorted.getOrNull(activeIdx)
 
     var pageView by remember { mutableStateOf("p1") }
+    var lastSinglePage by remember { mutableStateOf("p1") }
+    val selectPage: (String) -> Unit = { target ->
+        if (target != "both") lastSinglePage = target
+        pageView = target
+    }
     var showFoldGuide by remember { mutableStateOf(true) }
     var classMenuOpen by remember { mutableStateOf(false) }
     var rollMenuOpen by remember { mutableStateOf(false) }
@@ -227,244 +233,197 @@ fun ReportStudioScreen(
             Modifier.widthIn(max = 920.dp).fillMaxSize(),
             verticalArrangement = Arrangement.spacedBy(6.dp)
         ) {
-            // Top Selection Bar: Class + Roll + Name Search + Page Selector
+            // Top Compact Single-Row Selection Bar: Class + Roll + Name(Search) + Prev/Next
             Surface(
                 color = MaterialTheme.colorScheme.surface,
                 border = BorderStroke(1.dp, SlateOutline),
                 shape = RoundedCornerShape(10.dp)
             ) {
-                Column(
-                    Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
-                    verticalArrangement = Arrangement.spacedBy(5.dp)
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 6.dp, vertical = 5.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(5.dp)
                 ) {
-                    // Row 1: Class Dropdown + Roll Dropdown + Prev/Next within Class
-                    Row(
-                        Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(5.dp)
-                    ) {
-                        // Class Selector
-                        Box {
-                            Surface(
-                                onClick = { classMenuOpen = true },
-                                shape = RoundedCornerShape(7.dp),
-                                color = TealSoft,
-                                border = BorderStroke(1.dp, TealContainer),
-                                modifier = Modifier.height(34.dp).testTag("studio_class_dropdown")
-                            ) {
-                                Row(
-                                    modifier = Modifier.padding(start = 8.dp, end = 4.dp),
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Text(
-                                        "${CLSN[active.cls - 1]} শ্রেণি",
-                                        fontSize = 12.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        color = TealPrimary,
-                                        maxLines = 1
-                                    )
-                                    Icon(
-                                        Icons.Rounded.ArrowDropDown,
-                                        contentDescription = null,
-                                        tint = TealPrimary,
-                                        modifier = Modifier.size(18.dp)
-                                    )
-                                }
-                            }
-                            DropdownMenu(expanded = classMenuOpen, onDismissRequest = { classMenuOpen = false }) {
-                                availableClasses.forEach { c ->
-                                    val count = sorted.count { it.cls == c }
-                                    val isSel = c == active.cls
-                                    DropdownMenuItem(
-                                        modifier = Modifier.background(if (isSel) TealContainer else Color.Transparent),
-                                        text = {
-                                            Text(
-                                                "${CLSN[c - 1]} শ্রেণি (${bn(count.toString())} জন)",
-                                                fontWeight = if (isSel) FontWeight.Bold else FontWeight.Normal,
-                                                color = if (isSel) TealDark else SlateText
-                                            )
-                                        },
-                                        trailingIcon = if (isSel) {
-                                            { Icon(Icons.Rounded.Check, contentDescription = null, tint = TealPrimary, modifier = Modifier.size(16.dp)) }
-                                        } else null,
-                                        onClick = {
-                                            classMenuOpen = false
-                                            sorted.firstOrNull { it.cls == c }?.let { onSelectId(it.id) }
-                                        }
-                                    )
-                                }
-                            }
-                        }
-
-                        // Roll Selector (within active class)
-                        Box {
-                            Surface(
-                                onClick = { rollMenuOpen = true },
-                                shape = RoundedCornerShape(7.dp),
-                                color = MaterialTheme.colorScheme.surface,
-                                border = BorderStroke(1.dp, SlateOutline),
-                                modifier = Modifier.height(34.dp).testTag("studio_roll_dropdown")
-                            ) {
-                                Row(
-                                    modifier = Modifier.padding(start = 8.dp, end = 4.dp),
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Text(
-                                        "রোল: ${bn(active.roll.toString().padStart(2, '0'))}",
-                                        fontSize = 12.sp,
-                                        fontWeight = FontWeight.SemiBold,
-                                        color = SlateText,
-                                        maxLines = 1
-                                    )
-                                    Icon(
-                                        Icons.Rounded.ArrowDropDown,
-                                        contentDescription = null,
-                                        tint = SlateMuted,
-                                        modifier = Modifier.size(18.dp)
-                                    )
-                                }
-                            }
-                            DropdownMenu(
-                                expanded = rollMenuOpen,
-                                onDismissRequest = { rollMenuOpen = false },
-                                modifier = Modifier.heightIn(max = 360.dp)
-                            ) {
-                                classStudents.forEach { s ->
-                                    val isSel = s.id == active.id
-                                    DropdownMenuItem(
-                                        modifier = Modifier.background(if (isSel) TealContainer else Color.Transparent),
-                                        text = {
-                                            Text(
-                                                "রোল ${bn(s.roll.toString().padStart(2, '0'))} — ${s.name.ifBlank { "(নাম নেই)" }}",
-                                                fontWeight = if (isSel) FontWeight.Bold else FontWeight.Normal,
-                                                color = if (isSel) TealDark else SlateText
-                                            )
-                                        },
-                                        trailingIcon = if (isSel) {
-                                            { Icon(Icons.Rounded.Check, contentDescription = null, tint = TealPrimary, modifier = Modifier.size(16.dp)) }
-                                        } else null,
-                                        onClick = {
-                                            onSelectId(s.id)
-                                            rollMenuOpen = false
-                                        }
-                                    )
-                                }
-                            }
-                        }
-
-                        Spacer(Modifier.weight(1f))
-
+                    // Class Selector (no prefix/suffix, e.g. ৩য়)
+                    Box {
                         Surface(
-                            onClick = {
-                                if (classActiveIdx > 0) onSelectId(classStudents[classActiveIdx - 1].id)
-                            },
-                            enabled = classActiveIdx > 0,
+                            onClick = { classMenuOpen = true },
                             shape = RoundedCornerShape(7.dp),
-                            color = MaterialTheme.colorScheme.surface,
-                            border = BorderStroke(1.dp, SlateOutline),
-                            modifier = Modifier.size(34.dp).testTag("studio_prev_student_btn")
+                            color = TealSoft,
+                            border = BorderStroke(1.dp, TealContainer),
+                            modifier = Modifier.height(34.dp).testTag("studio_class_dropdown")
                         ) {
-                            Box(contentAlignment = Alignment.Center) {
+                            Row(
+                                modifier = Modifier.padding(start = 7.dp, end = 2.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    CLSN[active.cls - 1],
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = TealPrimary,
+                                    maxLines = 1
+                                )
                                 Icon(
-                                    Icons.AutoMirrored.Rounded.KeyboardArrowLeft,
-                                    contentDescription = "আগের শিক্ষার্থী",
-                                    tint = if (classActiveIdx > 0) SlateText else SlateOutline
+                                    Icons.Rounded.ArrowDropDown,
+                                    contentDescription = "শ্রেণি পরিবর্তন",
+                                    tint = TealPrimary,
+                                    modifier = Modifier.size(17.dp)
                                 )
                             }
                         }
-
-                        Surface(
-                            onClick = {
-                                if (classActiveIdx < classStudents.lastIndex) onSelectId(classStudents[classActiveIdx + 1].id)
-                            },
-                            enabled = classActiveIdx < classStudents.lastIndex,
-                            shape = RoundedCornerShape(7.dp),
-                            color = MaterialTheme.colorScheme.surface,
-                            border = BorderStroke(1.dp, SlateOutline),
-                            modifier = Modifier.size(34.dp).testTag("studio_next_student_btn")
-                        ) {
-                            Box(contentAlignment = Alignment.Center) {
-                                Icon(
-                                    Icons.AutoMirrored.Rounded.KeyboardArrowRight,
-                                    contentDescription = "পরের শিক্ষার্থী",
-                                    tint = if (classActiveIdx < classStudents.lastIndex) SlateText else SlateOutline
+                        DropdownMenu(expanded = classMenuOpen, onDismissRequest = { classMenuOpen = false }) {
+                            availableClasses.forEach { c ->
+                                val count = sorted.count { it.cls == c }
+                                val isSel = c == active.cls
+                                DropdownMenuItem(
+                                    modifier = Modifier.background(if (isSel) TealContainer else Color.Transparent),
+                                    text = {
+                                        Text(
+                                            "${CLSN[c - 1]} শ্রেণি (${bn(count.toString())} জন)",
+                                            fontWeight = if (isSel) FontWeight.Bold else FontWeight.Normal,
+                                            color = if (isSel) TealDark else SlateText
+                                        )
+                                    },
+                                    trailingIcon = if (isSel) {
+                                        { Icon(Icons.Rounded.Check, contentDescription = null, tint = TealPrimary, modifier = Modifier.size(16.dp)) }
+                                    } else null,
+                                    onClick = {
+                                        classMenuOpen = false
+                                        sorted.firstOrNull { it.cls == c }?.let { onSelectId(it.id) }
+                                    }
                                 )
                             }
                         }
                     }
 
-                    // Row 2: Active Student Name + Instant Name/Roll Search Button
+                    // Roll Selector (no prefix, e.g. ০১)
+                    Box {
+                        Surface(
+                            onClick = { rollMenuOpen = true },
+                            shape = RoundedCornerShape(7.dp),
+                            color = MaterialTheme.colorScheme.surface,
+                            border = BorderStroke(1.dp, SlateOutline),
+                            modifier = Modifier.height(34.dp).testTag("studio_roll_dropdown")
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(start = 7.dp, end = 2.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    bn(active.roll.toString().padStart(2, '0')),
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = SlateText,
+                                    maxLines = 1
+                                )
+                                Icon(
+                                    Icons.Rounded.ArrowDropDown,
+                                    contentDescription = "রোল পরিবর্তন",
+                                    tint = SlateMuted,
+                                    modifier = Modifier.size(17.dp)
+                                )
+                            }
+                        }
+                        DropdownMenu(
+                            expanded = rollMenuOpen,
+                            onDismissRequest = { rollMenuOpen = false },
+                            modifier = Modifier.heightIn(max = 360.dp)
+                        ) {
+                            classStudents.forEach { s ->
+                                val isSel = s.id == active.id
+                                DropdownMenuItem(
+                                    modifier = Modifier.background(if (isSel) TealContainer else Color.Transparent),
+                                    text = {
+                                        Text(
+                                            "${bn(s.roll.toString().padStart(2, '0'))} — ${s.name.ifBlank { "(নাম নেই)" }}",
+                                            fontWeight = if (isSel) FontWeight.Bold else FontWeight.Normal,
+                                            color = if (isSel) TealDark else SlateText
+                                        )
+                                    },
+                                    trailingIcon = if (isSel) {
+                                        { Icon(Icons.Rounded.Check, contentDescription = null, tint = TealPrimary, modifier = Modifier.size(16.dp)) }
+                                    } else null,
+                                    onClick = {
+                                        onSelectId(s.id)
+                                        rollMenuOpen = false
+                                    }
+                                )
+                            }
+                        }
+                    }
+
+                    // Student Name + Search Trigger right beside Class & Roll
                     Surface(
                         onClick = { showSearchDialog = true },
                         shape = RoundedCornerShape(7.dp),
                         color = SlateBg,
                         border = BorderStroke(1.dp, SlateOutline),
-                        modifier = Modifier.fillMaxWidth().height(36.dp).testTag("studio_student_selector")
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(34.dp)
+                            .testTag("studio_student_selector")
                     ) {
                         Row(
-                            modifier = Modifier.padding(horizontal = 8.dp),
+                            modifier = Modifier.padding(horizontal = 7.dp),
                             verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
                         ) {
-                            Icon(
-                                Icons.Rounded.Search,
-                                contentDescription = "নাম বা রোল দিয়ে খুঁজুন",
-                                tint = TealPrimary,
-                                modifier = Modifier.size(16.dp)
-                            )
                             Text(
                                 active.name.ifBlank { "(নাম নেই)" },
-                                fontSize = 12.5.sp,
-                                fontWeight = FontWeight.Bold,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.SemiBold,
                                 color = SlateText,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis,
                                 modifier = Modifier.weight(1f)
                             )
-                            Text(
-                                "নাম/রোল খুঁজুন",
-                                fontSize = 10.5.sp,
-                                fontWeight = FontWeight.SemiBold,
-                                color = TealPrimary
+                            Icon(
+                                Icons.Rounded.Search,
+                                contentDescription = "নাম বা রোল দিয়ে খুঁজুন",
+                                tint = TealPrimary,
+                                modifier = Modifier.size(15.dp)
                             )
                         }
                     }
 
-                    // Row 3: 4 Separate Pages + Full Sheet Chips
-                    Row(
-                        horizontalArrangement = Arrangement.spacedBy(5.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())
+                    Surface(
+                        onClick = {
+                            if (classActiveIdx > 0) onSelectId(classStudents[classActiveIdx - 1].id)
+                        },
+                        enabled = classActiveIdx > 0,
+                        shape = RoundedCornerShape(7.dp),
+                        color = MaterialTheme.colorScheme.surface,
+                        border = BorderStroke(1.dp, SlateOutline),
+                        modifier = Modifier.size(34.dp).testTag("studio_prev_student_btn")
                     ) {
-                        listOf(
-                            "p1" to "১. কভার",
-                            "p2" to "২. ১ম-২য় ও গুণাবলি",
-                            "p3" to "৩. ৩য় ও চূড়ান্ত",
-                            "p4" to "৪. ব্যাক কভার",
-                            "both" to "পুরো শিট (২ পাতা)"
-                        ).forEach { (id, label) ->
-                            val selected = pageView == id
-                            Surface(
-                                onClick = { pageView = id },
-                                shape = RoundedCornerShape(7.dp),
-                                color = if (selected) TealPrimary else MaterialTheme.colorScheme.surface,
-                                border = BorderStroke(1.dp, if (selected) TealPrimary else SlateOutline),
-                                modifier = Modifier.height(30.dp).testTag("studio_page_chip_$id")
-                            ) {
-                                Box(
-                                    modifier = Modifier.padding(horizontal = 9.dp),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Text(
-                                        label,
-                                        fontSize = 11.sp,
-                                        fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
-                                        color = if (selected) Color.White else SlateText,
-                                        maxLines = 1,
-                                        softWrap = false
-                                    )
-                                }
-                            }
+                        Box(contentAlignment = Alignment.Center) {
+                            Icon(
+                                Icons.AutoMirrored.Rounded.KeyboardArrowLeft,
+                                contentDescription = "আগের শিক্ষার্থী",
+                                tint = if (classActiveIdx > 0) SlateText else SlateOutline
+                            )
+                        }
+                    }
+
+                    Surface(
+                        onClick = {
+                            if (classActiveIdx < classStudents.lastIndex) onSelectId(classStudents[classActiveIdx + 1].id)
+                        },
+                        enabled = classActiveIdx < classStudents.lastIndex,
+                        shape = RoundedCornerShape(7.dp),
+                        color = MaterialTheme.colorScheme.surface,
+                        border = BorderStroke(1.dp, SlateOutline),
+                        modifier = Modifier.size(34.dp).testTag("studio_next_student_btn")
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Icon(
+                                Icons.AutoMirrored.Rounded.KeyboardArrowRight,
+                                contentDescription = "পরের শিক্ষার্থী",
+                                tint = if (classActiveIdx < classStudents.lastIndex) SlateText else SlateOutline
+                            )
                         }
                     }
                 }
@@ -493,7 +452,7 @@ fun ReportStudioScreen(
                                 "p2" -> "পৃষ্ঠা ২/৪ · ১ম-২য় প্রান্তিক ও গুণাবলি"
                                 "p3" -> "পৃষ্ঠা ৩/৪ · ৩য়, চূড়ান্ত ও উপস্থিতি"
                                 "p4" -> "পৃষ্ঠা ৪/৪ · ব্যাক কভার"
-                                else -> "পুরো শিট (বড় করতে উপরে ১-৪ পেজ চাপুন)"
+                                else -> "পুরো শিট (২ পাতা)"
                             }
                             Text(
                                 pageCaption,
@@ -572,22 +531,20 @@ fun ReportStudioScreen(
                                 }
                             }
 
-                            if (pageView != "both") {
-                                Surface(
-                                    onClick = { showFullscreenPreview = true },
-                                    shape = RoundedCornerShape(6.dp),
-                                    color = TealSoft,
-                                    border = BorderStroke(1.dp, TealContainer),
-                                    modifier = Modifier.size(28.dp).testTag("studio_fullscreen_btn")
-                                ) {
-                                    Box(contentAlignment = Alignment.Center) {
-                                        Icon(
-                                            Icons.Rounded.Fullscreen,
-                                            contentDescription = "ফুলস্ক্রিন বড় করে দেখুন",
-                                            tint = TealPrimary,
-                                            modifier = Modifier.size(17.dp)
-                                        )
-                                    }
+                            Surface(
+                                onClick = { showFullscreenPreview = true },
+                                shape = RoundedCornerShape(6.dp),
+                                color = TealSoft,
+                                border = BorderStroke(1.dp, TealContainer),
+                                modifier = Modifier.size(28.dp).testTag("studio_fullscreen_btn")
+                            ) {
+                                Box(contentAlignment = Alignment.Center) {
+                                    Icon(
+                                        Icons.Rounded.Fullscreen,
+                                        contentDescription = "ফুলস্ক্রিন বড় করে দেখুন",
+                                        tint = TealPrimary,
+                                        modifier = Modifier.size(17.dp)
+                                    )
                                 }
                             }
                         }
@@ -601,12 +558,17 @@ fun ReportStudioScreen(
                             .clipToBounds()
                             .onSizeChanged { previewSize = it }
                             .pointerInput(pageView, active.id, previewSize) {
+                                val pageOrder = listOf("p1", "p2", "p3", "p4")
                                 awaitEachGesture {
                                     awaitFirstDown(requireUnconsumed = false)
+                                    var swipeDx = 0f
+                                    var swipeDy = 0f
+                                    var swipeTriggered = false
                                     do {
                                         val event = awaitPointerEvent()
                                         val pressedCount = event.changes.count { it.pressed }
                                         if (pressedCount >= 2) {
+                                            swipeTriggered = true // suppress swipe on multi-touch
                                             val zoomChange = event.calculateZoom()
                                             val panChange = event.calculatePan()
                                             if (zoomChange != 1f || panChange != Offset.Zero) {
@@ -621,19 +583,44 @@ fun ReportStudioScreen(
                                                 panOffset = clampPanOffset(panOffset + panChange, zoomScale, previewSize)
                                                 event.changes.forEach { it.consume() }
                                             }
+                                        } else if (!swipeTriggered && pressedCount == 1) {
+                                            val panChange = event.calculatePan()
+                                            swipeDx += panChange.x
+                                            swipeDy += panChange.y
+                                            if (abs(swipeDx) > 75f && abs(swipeDx) > abs(swipeDy) * 1.4f) {
+                                                swipeTriggered = true
+                                                event.changes.forEach { it.consume() }
+                                                if (swipeDx < 0f) {
+                                                    // Swipe left -> Next page
+                                                    val nextPage = if (pageView == "both") "p1" else {
+                                                        val idx = pageOrder.indexOf(pageView).coerceAtLeast(0)
+                                                        pageOrder[(idx + 1).coerceAtMost(pageOrder.lastIndex)]
+                                                    }
+                                                    selectPage(nextPage)
+                                                } else {
+                                                    // Swipe right -> Previous page
+                                                    val prevPage = if (pageView == "both") "p4" else {
+                                                        val idx = pageOrder.indexOf(pageView).coerceAtLeast(0)
+                                                        pageOrder[(idx - 1).coerceAtLeast(0)]
+                                                    }
+                                                    selectPage(prevPage)
+                                                }
+                                            }
                                         }
                                     } while (event.changes.any { it.pressed })
                                 }
                             }
                             .pointerInput(pageView, active.id) {
                                 detectTapGestures(
+                                    onTap = {
+                                        showFullscreenPreview = true
+                                    },
                                     onDoubleTap = {
-                                        if (zoomScale > 1.05f) {
-                                            zoomScale = 1f
-                                            panOffset = Offset.Zero
+                                        if (pageView == "both") {
+                                            selectPage(lastSinglePage)
                                         } else {
-                                            zoomScale = 2.2f
-                                            panOffset = Offset.Zero
+                                            lastSinglePage = pageView
+                                            pageView = "both"
                                         }
                                     }
                                 )
@@ -679,21 +666,68 @@ fun ReportStudioScreen(
                                         title = "শিট-১ (বাম: পাতা-৪ ব্যাক কভার · ডান: পাতা-১ ফ্রন্ট কভার)",
                                         bitmap = coverBmp,
                                         ratio = fullSheetRatio,
-                                        onOpenLeft = { pageView = "p4" },
+                                        onOpenLeft = { selectPage("p4") },
                                         leftLabel = "পাতা-৪ বড় করুন",
-                                        onOpenRight = { pageView = "p1" },
+                                        onOpenRight = { selectPage("p1") },
                                         rightLabel = "পাতা-১ বড় করুন"
                                     )
                                     SheetOverviewCard(
                                         title = "শিট-২ (বাম: পাতা-২ নম্বর ও গুণাবলি · ডান: পাতা-৩ চূড়ান্ত ও উপস্থিতি)",
                                         bitmap = marksBmp,
                                         ratio = fullSheetRatio,
-                                        onOpenLeft = { pageView = "p2" },
+                                        onOpenLeft = { selectPage("p2") },
                                         leftLabel = "পাতা-২ বড় করুন",
-                                        onOpenRight = { pageView = "p3" },
+                                        onOpenRight = { selectPage("p3") },
                                         rightLabel = "পাতা-৩ বড় করুন"
                                     )
                                 }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Page Selector Chips Row (placed below preview & right above Print/PDF bar)
+            Surface(
+                color = MaterialTheme.colorScheme.surface,
+                border = BorderStroke(1.dp, SlateOutline),
+                shape = RoundedCornerShape(9.dp)
+            ) {
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(5.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState())
+                        .padding(horizontal = 6.dp, vertical = 5.dp)
+                ) {
+                    listOf(
+                        "p1" to "১. কভার",
+                        "p2" to "২. ১ম-২য় ও গুণাবলি",
+                        "p3" to "৩. ৩য় ও চূড়ান্ত",
+                        "p4" to "৪. ব্যাক কভার",
+                        "both" to "পুরো শিট (২ পাতা)"
+                    ).forEach { (id, label) ->
+                        val selected = pageView == id
+                        Surface(
+                            onClick = { selectPage(id) },
+                            shape = RoundedCornerShape(7.dp),
+                            color = if (selected) TealPrimary else MaterialTheme.colorScheme.surface,
+                            border = BorderStroke(1.dp, if (selected) TealPrimary else SlateOutline),
+                            modifier = Modifier.height(30.dp).testTag("studio_page_chip_$id")
+                        ) {
+                            Box(
+                                modifier = Modifier.padding(horizontal = 9.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    label,
+                                    fontSize = 11.sp,
+                                    fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
+                                    color = if (selected) Color.White else SlateText,
+                                    maxLines = 1,
+                                    softWrap = false
+                                )
                             }
                         }
                     }
@@ -927,15 +961,16 @@ fun ReportStudioScreen(
         }
     }
 
-    // Full-Screen Large Single-Page Zoom Viewer (1..4 pages)
-    if (showFullscreenPreview && pageView != "both") {
+    // Full-Screen Large Zoom Viewer (supports 1..4 pages AND full sheet, plus left/right swipe)
+    if (showFullscreenPreview) {
         val pageOrder = listOf("p1", "p2", "p3", "p4")
         val fsIdx = pageOrder.indexOf(pageView).coerceAtLeast(0)
         val fsTitle = when (pageView) {
             "p1" -> "পৃষ্ঠা ১/৪ · ফ্রন্ট কভার"
             "p2" -> "পৃষ্ঠা ২/৪ · ১ম-২য় প্রান্তিক ও গুণাবলি"
             "p3" -> "পৃষ্ঠা ৩/৪ · ৩য়, চূড়ান্ত ও উপস্থিতি"
-            else -> "পৃষ্ঠা ৪/৪ · ব্যাক কভার"
+            "p4" -> "পৃষ্ঠা ৪/৪ · ব্যাক কভার"
+            else -> "পুরো শিট (২ পাতা)"
         }
         val fsBmp = when (pageView) {
             "p1" -> page1FrontBmp
@@ -1025,10 +1060,14 @@ fun ReportStudioScreen(
                             .pointerInput(pageView, fsBoxSize) {
                                 awaitEachGesture {
                                     awaitFirstDown(requireUnconsumed = false)
+                                    var swipeDx = 0f
+                                    var swipeDy = 0f
+                                    var swipeHandled = false
                                     do {
                                         val event = awaitPointerEvent()
                                         val pressed = event.changes.count { it.pressed }
                                         if (pressed >= 2) {
+                                            swipeHandled = true
                                             val z = event.calculateZoom()
                                             val p = event.calculatePan()
                                             if (z != 1f || p != Offset.Zero) {
@@ -1042,6 +1081,21 @@ fun ReportStudioScreen(
                                             if (p != Offset.Zero) {
                                                 fsPan = clampPanOffset(fsPan + p, fsScale, fsBoxSize)
                                                 event.changes.forEach { it.consume() }
+                                            }
+                                        } else if (!swipeHandled && pressed == 1) {
+                                            val p = event.calculatePan()
+                                            swipeDx += p.x
+                                            swipeDy += p.y
+                                            if (abs(swipeDx) > 75f && abs(swipeDx) > abs(swipeDy) * 1.4f) {
+                                                swipeHandled = true
+                                                event.changes.forEach { it.consume() }
+                                                if (swipeDx < 0f) {
+                                                    val next = if (pageView == "both") "p1" else pageOrder[(fsIdx + 1).coerceAtMost(pageOrder.lastIndex)]
+                                                    selectPage(next)
+                                                } else {
+                                                    val prev = if (pageView == "both") "p4" else pageOrder[(fsIdx - 1).coerceAtLeast(0)]
+                                                    selectPage(prev)
+                                                }
                                             }
                                         }
                                     } while (event.changes.any { it.pressed })
@@ -1062,20 +1116,48 @@ fun ReportStudioScreen(
                             },
                         contentAlignment = Alignment.Center
                     ) {
-                        Image(
-                            bitmap = fsBmp.asImageBitmap(),
-                            contentDescription = fsTitle,
-                            contentScale = ContentScale.Fit,
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .padding(6.dp)
-                                .graphicsLayer {
-                                    scaleX = fsScale
-                                    scaleY = fsScale
-                                    translationX = fsPan.x
-                                    translationY = fsPan.y
-                                }
-                        )
+                        if (pageView == "both") {
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .verticalScroll(rememberScrollState())
+                                    .padding(8.dp)
+                                    .graphicsLayer {
+                                        scaleX = fsScale
+                                        scaleY = fsScale
+                                        translationX = fsPan.x
+                                        translationY = fsPan.y
+                                    },
+                                verticalArrangement = Arrangement.spacedBy(10.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally
+                            ) {
+                                SingleReportPageCard(
+                                    bitmap = coverBmp,
+                                    ratio = fullSheetRatio,
+                                    description = "শিট-১: ব্যাক ও ফ্রন্ট কভার"
+                                )
+                                SingleReportPageCard(
+                                    bitmap = marksBmp,
+                                    ratio = fullSheetRatio,
+                                    description = "শিট-২: নম্বর ও চূড়ান্ত ফলাফল"
+                                )
+                            }
+                        } else {
+                            Image(
+                                bitmap = fsBmp.asImageBitmap(),
+                                contentDescription = fsTitle,
+                                contentScale = ContentScale.Fit,
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .padding(6.dp)
+                                    .graphicsLayer {
+                                        scaleX = fsScale
+                                        scaleY = fsScale
+                                        translationX = fsPan.x
+                                        translationY = fsPan.y
+                                    }
+                            )
+                        }
                     }
 
                     Surface(
@@ -1088,21 +1170,30 @@ fun ReportStudioScreen(
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             OutlinedButton(
-                                onClick = { if (fsIdx > 0) pageView = pageOrder[fsIdx - 1] },
-                                enabled = fsIdx > 0
+                                onClick = {
+                                    if (pageView == "both") selectPage("p4")
+                                    else if (fsIdx > 0) selectPage(pageOrder[fsIdx - 1])
+                                },
+                                enabled = pageView == "both" || fsIdx > 0
                             ) {
                                 Icon(Icons.AutoMirrored.Rounded.KeyboardArrowLeft, contentDescription = null)
                                 Text("আগের পাতা")
                             }
                             Text(
-                                "পৃষ্ঠা ${bn((fsIdx + 1).toString())} / ৪",
+                                if (pageView == "both") "পুরো শিট" else "পৃষ্ঠা ${bn((fsIdx + 1).toString())} / ৪",
                                 fontWeight = FontWeight.Bold,
                                 fontSize = 12.5.sp,
-                                color = TealPrimary
+                                color = TealPrimary,
+                                modifier = Modifier.clickable {
+                                    if (pageView == "both") selectPage(lastSinglePage) else pageView = "both"
+                                }
                             )
                             OutlinedButton(
-                                onClick = { if (fsIdx < pageOrder.lastIndex) pageView = pageOrder[fsIdx + 1] },
-                                enabled = fsIdx < pageOrder.lastIndex
+                                onClick = {
+                                    if (pageView == "both") selectPage("p1")
+                                    else if (fsIdx < pageOrder.lastIndex) selectPage(pageOrder[fsIdx + 1])
+                                },
+                                enabled = pageView == "both" || fsIdx < pageOrder.lastIndex
                             ) {
                                 Text("পরের পাতা")
                                 Icon(Icons.AutoMirrored.Rounded.KeyboardArrowRight, contentDescription = null)
