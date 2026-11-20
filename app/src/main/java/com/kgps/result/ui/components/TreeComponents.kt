@@ -201,34 +201,29 @@ fun TreeBranchItem(
     modifier: Modifier = Modifier,
     content: @Composable () -> Unit
 ) {
-    Row(
-        modifier = modifier.fillMaxWidth().height(IntrinsicSize.Min),
-        verticalAlignment = Alignment.CenterVertically
+    Box(
+        modifier = modifier
+            .fillMaxWidth()
+            .drawBehind {
+                val railW = 10.dp.toPx()
+                val x = railW * 0.4f
+                val midY = size.height * 0.5f
+                val endY = if (isLast) midY else size.height
+                drawLine(
+                    color = lineColor,
+                    start = Offset(x, 0f),
+                    end = Offset(x, endY),
+                    strokeWidth = 2f
+                )
+                drawLine(
+                    color = lineColor,
+                    start = Offset(x, midY),
+                    end = Offset(railW - 1f, midY),
+                    strokeWidth = 2f
+                )
+            }
+            .padding(start = 10.dp)
     ) {
-        Box(
-            modifier = Modifier
-                .width(10.dp)
-                .fillMaxHeight()
-                .drawBehind {
-                    val x = size.width * 0.4f
-                    val midY = size.height * 0.5f
-                    val endY = if (isLast) midY else size.height
-                    drawLine(
-                        color = lineColor,
-                        start = Offset(x, 0f),
-                        end = Offset(x, endY),
-                        strokeWidth = 2f
-                    )
-                    drawLine(
-                        color = lineColor,
-                        start = Offset(x, midY),
-                        end = Offset(size.width - 1f, midY),
-                        strokeWidth = 2f
-                    )
-                }
-        )
-        Box(Modifier.weight(1f)) {
-            content()
-        }
+        content()
     }
 }

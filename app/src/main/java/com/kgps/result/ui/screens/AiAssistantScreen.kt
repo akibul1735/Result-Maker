@@ -48,6 +48,7 @@ import androidx.compose.material.icons.rounded.ChatBubbleOutline
 import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.Close
+import androidx.compose.material.icons.rounded.Crop
 import androidx.compose.material.icons.rounded.DeleteOutline
 import androidx.compose.material.icons.rounded.DeleteSweep
 import androidx.compose.material.icons.rounded.DocumentScanner
@@ -55,6 +56,7 @@ import androidx.compose.material.icons.rounded.ErrorOutline
 import androidx.compose.material.icons.rounded.Info
 import androidx.compose.material.icons.rounded.PhotoLibrary
 import androidx.compose.material.icons.rounded.Refresh
+import androidx.compose.material.icons.rounded.RotateRight
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.Tune
 import androidx.compose.material.icons.rounded.UploadFile
@@ -133,6 +135,7 @@ import com.kgps.result.fmt
 import com.kgps.result.fmtEn
 import com.kgps.result.fromBn
 import com.kgps.result.subjectsFor
+import com.kgps.result.ui.components.ImageCropDialog
 import com.kgps.result.ui.theme.AmberBg
 import com.kgps.result.ui.theme.AmberBorder
 import com.kgps.result.ui.theme.AmberNotice
@@ -182,6 +185,10 @@ fun AiAssistantScreen(
     onOpenCsvImport: () -> Unit,
     onPickMarksheetUri: (Uri) -> Unit,
     onClearImage: () -> Unit,
+    onToggleDocumentEnhance: (Boolean) -> Unit = {},
+    onRotateImage: () -> Unit = {},
+    onCropImage: (Float, Float, Float, Float) -> Unit = { _, _, _, _ -> },
+    onRestoreOriginalImage: () -> Unit = {},
     onAnalyzeImage: (String) -> Unit,
     onApplyExtracted: (ExtractedMarksheet) -> Unit,
     onAnalyzeClassSheet: (clsHint: Int?, termHint: Int?, subKeyHint: String?, teacherNote: String, importScope: ClassSheetImportScope) -> Unit,
@@ -213,6 +220,7 @@ fun AiAssistantScreen(
     var subKeyHint by remember { mutableStateOf<String?>(null) } // null = ছবির উপর থেকে স্বয়ংক্রিয়
 
     var zoomDialogOpen by remember { mutableStateOf(false) }
+    var cropDialogOpen by remember { mutableStateOf(false) }
     var showOnlyIssues by remember { mutableStateOf(false) }
     var askUnreviewedConfirm by remember { mutableStateOf(false) }
     var unreviewedPendingCount by remember { mutableStateOf(0) }
@@ -883,39 +891,121 @@ fun AiAssistantScreen(
                             }
 
                             state.selectedImageBitmap?.let { bmp ->
-                                Box(
-                                    Modifier
-                                        .fillMaxWidth()
-                                        .clip(RoundedCornerShape(8.dp))
-                                        .clickable { zoomDialogOpen = true }
-                                ) {
-                                    Image(
-                                        bitmap = bmp.asImageBitmap(),
-                                        contentDescription = "নির্বাচিত নম্বরপত্র ছবি",
-                                        contentScale = ContentScale.Fit,
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .heightIn(max = 160.dp)
-                                        .background(SlateSurfaceVariant)
-                                )
-                                Surface(
-                                    color = Color.Black.copy(alpha = 0.62f),
-                                    shape = RoundedCornerShape(6.dp),
-                                    modifier = Modifier
-                                        .align(Alignment.BottomEnd)
-                                        .padding(6.dp)
-                                ) {
-                                    Row(
-                                        Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                                    Box(
+                                        Modifier
+                                            .fillMaxWidth()
+                                            .clip(RoundedCornerShape(8.dp))
+                                            .clickable { zoomDialogOpen = true }
                                     ) {
-                                        Icon(Icons.Rounded.ZoomIn, contentDescription = null, tint = Color.White, modifier = Modifier.size(13.dp))
-                                        Text("জুম", color = Color.White, fontSize = 10.sp)
+                                        Image(
+                                            bitmap = bmp.asImageBitmap(),
+                                            contentDescription = "নির্বাচিত নম্বরপত্র ছবি",
+                                            contentScale = ContentScale.Fit,
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .heightIn(max = 160.dp)
+                                                .background(SlateSurfaceVariant)
+                                        )
+                                        Surface(
+                                            color = Color.Black.copy(alpha = 0.62f),
+                                            shape = RoundedCornerShape(6.dp),
+                                            modifier = Modifier
+                                                .align(Alignment.BottomEnd)
+                                                .padding(6.dp)
+                                        ) {
+                                            Row(
+                                                Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                            ) {
+                                                Icon(Icons.Rounded.ZoomIn, contentDescription = null, tint = Color.White, modifier = Modifier.size(13.dp))
+                                                Text("জুম", color = Color.White, fontSize = 10.sp)
+                                            }
+                                        }
+                                    }
+
+                                    // Compact Crop + Rotate + Document Clarity Optimizer Row
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .horizontalScroll(rememberScrollState()),
+                                        horizontalArrangement = Arrangement.spacedBy(5.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Surface(
+                                            color = SlateBg,
+                                            border = BorderStroke(1.dp, SlateOutline),
+                                            shape = RoundedCornerShape(7.dp),
+                                            modifier = Modifier
+                                                .clickable { cropDialogOpen = true }
+                                                .testTag("ai_crop_photo_btn")
+                                        ) {
+                                            Row(
+                                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp),
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                            ) {
+                                                Icon(Icons.Rounded.Crop, contentDescription = "ক্রপ", tint = TealPrimary, modifier = Modifier.size(14.dp))
+                                                Text("ক্রপ করুন", fontSize = 10.5.sp, fontWeight = FontWeight.SemiBold, color = SlateText)
+                                            }
+                                        }
+
+                                        Surface(
+                                            color = SlateBg,
+                                            border = BorderStroke(1.dp, SlateOutline),
+                                            shape = RoundedCornerShape(7.dp),
+                                            modifier = Modifier
+                                                .clickable { onRotateImage() }
+                                                .testTag("ai_rotate_photo_btn")
+                                        ) {
+                                            Row(
+                                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp),
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                            ) {
+                                                Icon(Icons.Rounded.RotateRight, contentDescription = "ঘোরান", tint = TealPrimary, modifier = Modifier.size(14.dp))
+                                                Text("৯০°", fontSize = 10.5.sp, fontWeight = FontWeight.Medium, color = SlateText)
+                                            }
+                                        }
+
+                                        Surface(
+                                            color = if (state.documentEnhance) TealContainer else SlateBg,
+                                            border = BorderStroke(1.dp, if (state.documentEnhance) TealPrimary else SlateOutline),
+                                            shape = RoundedCornerShape(7.dp),
+                                            modifier = Modifier
+                                                .clickable { onToggleDocumentEnhance(!state.documentEnhance) }
+                                                .testTag("ai_doc_enhance_toggle")
+                                        ) {
+                                            Row(
+                                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp),
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                            ) {
+                                                if (state.documentEnhance) {
+                                                    Icon(Icons.Rounded.Check, contentDescription = null, tint = TealDark, modifier = Modifier.size(13.dp))
+                                                }
+                                                Text(
+                                                    if (state.documentEnhance) "ডকুমেন্ট স্পষ্ট (কম সাইজ)" else "মূল রঙিন",
+                                                    fontSize = 10.5.sp,
+                                                    fontWeight = FontWeight.SemiBold,
+                                                    color = if (state.documentEnhance) TealDark else SlateText
+                                                )
+                                            }
+                                        }
+                                    }
+
+                                    state.preparedImageStats?.let { st ->
+                                        val kb = ((st.byteSize + 512) / 1024).coerceAtLeast(1)
+                                        Text(
+                                            text = "প্রস্তুত: ${st.width}×${st.height}px · ~${bn(kb.toString())} KB" +
+                                                if (st.documentEnhanced) " · তীক্ষ্ণ সাদাকালো" else " · রঙিন",
+                                            fontSize = 10.sp,
+                                            color = if (kb <= 650) TealDark else SlateMuted
+                                        )
                                     }
                                 }
                             }
-                        }
 
                         if (scanMode == "class") {
                             Surface(
@@ -1199,6 +1289,20 @@ fun AiAssistantScreen(
         ZoomablePhotoDialog(
             bitmap = state.selectedImageBitmap,
             onDismiss = { zoomDialogOpen = false }
+        )
+    }
+
+    if (cropDialogOpen && state.selectedImageBitmap != null) {
+        ImageCropDialog(
+            bitmap = state.selectedImageBitmap,
+            canRestoreOriginal = state.hasOriginalImageBackup,
+            onRotate90 = onRotateImage,
+            onRestoreOriginal = onRestoreOriginalImage,
+            onApplyCrop = { l, t, r, b ->
+                cropDialogOpen = false
+                onCropImage(l, t, r, b)
+            },
+            onDismiss = { cropDialogOpen = false }
         )
     }
 

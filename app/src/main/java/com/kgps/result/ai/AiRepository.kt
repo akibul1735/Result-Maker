@@ -348,7 +348,8 @@ interface AiRepository {
 
     suspend fun analyzeMarksheetImage(
         bitmap: Bitmap,
-        teacherNote: String
+        teacherNote: String,
+        documentEnhance: Boolean = true
     ): ExtractedMarksheet
 
     suspend fun analyzeClassSheetImage(
@@ -357,7 +358,8 @@ interface AiRepository {
         termHint: Int?,
         subKeyHint: String?,
         teacherNote: String,
-        importScope: ClassSheetImportScope = ClassSheetImportScope.AUTO
+        importScope: ClassSheetImportScope = ClassSheetImportScope.AUTO,
+        documentEnhance: Boolean = true
     ): ExtractedClassSheet
 
     suspend fun draftRemark(
@@ -589,12 +591,6 @@ class DirectGeminiAiRepository(
         }
     }
 
-    private data class EncodedVisionPayload(
-        val base64: String,
-        val byteSize: Int,
-        val sha256Hex: String
-    )
-
     private val modelCooldownUntilMs = ConcurrentHashMap<String, Long>()
     private val cacheLock = Any()
     private val singleSheetCache = object : LinkedHashMap<String, ExtractedMarksheet>(8, 0.75f, true) {
@@ -624,19 +620,6 @@ class DirectGeminiAiRepository(
         modelCooldownUntilMs[clean] = System.currentTimeMillis() + waitSec * 1000L
     }
 
-    private fun encodeFullQualityVisionImage(bitmap: Bitmap): EncodedVisionPayload {
-        val out = ByteArrayOutputStream()
-        bitmap.compress(Bitmap.CompressFormat.JPEG, 92, out)
-        val jpegBytes = out.toByteArray()
-        val digest = MessageDigest.getInstance("SHA-256").digest(jpegBytes)
-        val shaHex = digest.joinToString("") { "%02x".format(it) }
-        return EncodedVisionPayload(
-            base64 = Base64.encodeToString(jpegBytes, Base64.NO_WRAP),
-            byteSize = jpegBytes.size,
-            sha256Hex = shaHex
-        )
-    }
-
     private fun selectFallbackCandidates(
         primaryModel: String,
         cachedModels: List<DiscoveredGeminiModel>,
@@ -646,6 +629,7 @@ class DirectGeminiAiRepository(
             "embedding", "aqa", "attribution", "tts", "image", "imagen",
             "veo", "robotics", "computer-use", "deep-research", "audio", "live"
         )
+        // Prefer standard capable Flash models before Lite models to keep OCR accuracy high
         val discoveredFlashFirst = cachedModels
             .map { it.id }
             .filter { id ->
@@ -654,16 +638,16 @@ class DirectGeminiAiRepository(
                     excludedTokens.none { tok -> id.contains(tok, ignoreCase = true) }
             }
             .sortedWith(
-                compareByDescending<String> { it.contains("lite", ignoreCase = true) }
+                compareBy<String> { it.contains("lite", ignoreCase = true) }
                     .thenByDescending { it.contains("flash", ignoreCase = true) }
             )
 
         val builtinSafetyFallbacks = listOf(
-            GeminiApiConfig.FAST_FALLBACK_MODEL,
             GeminiApiConfig.DEFAULT_MODEL,
-            "gemini-2.5-flash-lite",
             "gemini-2.5-flash",
-            "gemini-2.0-flash"
+            "gemini-2.0-flash",
+            GeminiApiConfig.FAST_FALLBACK_MODEL,
+            "gemini-2.5-flash-lite"
         ).filter { it != primaryModel }
 
         return (discoveredFlashFirst + builtinSafetyFallbacks)
@@ -686,7 +670,7 @@ class DirectGeminiAiRepository(
         }
 
         val serializedBody = body.toString().toByteArray(Charsets.UTF_8)
-        val isLargePayload = serializedBody.size > 100_000
+        val isLargePayload = serializedBody.size > 850_000
         var lastError: Exception? = null
         val primaryCooldown = remainingCooldownSeconds(primaryModelId)
 
@@ -861,15 +845,16 @@ class DirectGeminiAiRepository(
 
     override suspend fun analyzeMarksheetImage(
         bitmap: Bitmap,
-        teacherNote: String
+        teacherNote: String,
+        documentEnhance: Boolean
     ): ExtractedMarksheet {
         val apiKey = requireApiKey()
         val modelId = resolveModelId(null)
         val encoded = withContext(Dispatchers.Default) {
-            encodeFullQualityVisionImage(bitmap)
+            VisionImageOptimizer.prepareForVisionUpload(bitmap, documentEnhance)
         }
         val cleanNote = teacherNote.trim()
-        val cacheKey = "$modelId|${encoded.sha256Hex}|$cleanNote"
+        val cacheKey = "$modelId|${encoded.sha256Hex}|$documentEnhance|$cleanNote"
         synchronized(cacheLock) {
             singleSheetCache[cacheKey]?.let { return it }
         }
@@ -905,15 +890,16 @@ class DirectGeminiAiRepository(
         termHint: Int?,
         subKeyHint: String?,
         teacherNote: String,
-        importScope: ClassSheetImportScope
+        importScope: ClassSheetImportScope,
+        documentEnhance: Boolean
     ): ExtractedClassSheet {
         val apiKey = requireApiKey()
         val modelId = resolveModelId(null)
         val encoded = withContext(Dispatchers.Default) {
-            encodeFullQualityVisionImage(bitmap)
+            VisionImageOptimizer.prepareForVisionUpload(bitmap, documentEnhance)
         }
         val cleanNote = teacherNote.trim()
-        val cacheKey = "$modelId|${encoded.sha256Hex}|$clsHint|$termHint|$subKeyHint|${importScope.name}|$cleanNote"
+        val cacheKey = "$modelId|${encoded.sha256Hex}|$documentEnhance|$clsHint|$termHint|$subKeyHint|${importScope.name}|$cleanNote"
         synchronized(cacheLock) {
             classSheetCache[cacheKey]?.let { return it }
         }
@@ -1317,7 +1303,7 @@ class DirectGeminiAiRepository(
                         userMessage = if (isConnectTimeout) {
                             "Gemini সার্ভারে সংযোগের সময় শেষ হয়েছে। নেটওয়ার্ক স্পিড যাচাই করে আবার চেষ্টা করুন।"
                         } else {
-                            "AI মডেল থেকে উত্তর আসতে অতিরিক্ত সময় লেগে যাওয়ায় সময় শেষ হয়েছে। বড় ছবির ক্ষেত্রে সেটিংস থেকে দ্রুততর Flash / Flash-Lite মডেল ব্যবহার করুন।"
+                            "AI মডেল থেকে উত্তর আসতে অতিরিক্ত সময় লেগেছে। ছবিতে শুধু টেবিল অংশ ক্রপ করুন এবং 'ডকুমেন্ট স্পষ্ট' মোড চালু রাখুন (অথবা বড় পাতা ২ ভাগে স্ক্যান করুন)।"
                         },
                         cause = e
                     )
@@ -1377,7 +1363,8 @@ class PlaceholderAiRepository : AiRepository {
 
     override suspend fun analyzeMarksheetImage(
         bitmap: Bitmap,
-        teacherNote: String
+        teacherNote: String,
+        documentEnhance: Boolean
     ): ExtractedMarksheet {
         delay(450)
         val t = 1
@@ -1401,7 +1388,8 @@ class PlaceholderAiRepository : AiRepository {
         termHint: Int?,
         subKeyHint: String?,
         teacherNote: String,
-        importScope: ClassSheetImportScope
+        importScope: ClassSheetImportScope,
+        documentEnhance: Boolean
     ): ExtractedClassSheet {
         delay(500)
         val cls = (clsHint ?: 3).coerceIn(1, 5)

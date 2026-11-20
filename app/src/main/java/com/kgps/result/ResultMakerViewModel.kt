@@ -22,8 +22,10 @@ import com.kgps.result.ai.ExtractedClassSheet
 import com.kgps.result.ai.ExtractedMarksheet
 import com.kgps.result.ai.GeminiApiConfig
 import com.kgps.result.ai.PlaceholderAiRepository
+import com.kgps.result.ai.PreparedImageStats
 import com.kgps.result.ai.ScanConstraintSolver
 import com.kgps.result.ai.ScannedStudentRow
+import com.kgps.result.ai.VisionImageOptimizer
 import com.kgps.result.ai.validateScannedStudentRow
 import com.kgps.result.backup.AutoBackupManager
 import com.kgps.result.backup.AutoBackupStatus
@@ -98,6 +100,9 @@ data class AiAssistantState(
     val chatLoading: Boolean = false,
     val chatError: String? = null,
     val selectedImageBitmap: Bitmap? = null,
+    val documentEnhance: Boolean = true,
+    val preparedImageStats: PreparedImageStats? = null,
+    val hasOriginalImageBackup: Boolean = false,
     val analyzingImage: Boolean = false,
     val analysisError: String? = null,
     val analysisResult: ExtractedMarksheet? = null,
@@ -120,6 +125,7 @@ class ResultMakerViewModel(
     private val directAiRepository = DirectGeminiAiRepository(appContext)
     private val aiRepository: AiRepository get() = directAiRepository
     private val sampleAiRepository = PlaceholderAiRepository()
+    private var originalMarksheetBitmap: Bitmap? = null
 
     val localSeedCount: Int get() = initialLocalSnapshot?.first?.size ?: 0
     val localSeedSettings: Settings? get() = initialLocalSnapshot?.second
@@ -1697,16 +1703,22 @@ class ResultMakerViewModel(
 
     fun loadMarksheetImage(uri: Uri) {
         viewModelScope.launch {
-            val bmp = withContext(Dispatchers.IO) {
-                decodeAndScaleBitmap(uri, 2200)
+            val loaded = withContext(Dispatchers.IO) {
+                val bmp = decodeAndScaleBitmap(uri, 2200) ?: return@withContext null
+                val stats = VisionImageOptimizer.computeStatsOnly(bmp, _aiState.value.documentEnhance)
+                bmp to stats
             }
-            if (bmp == null) {
+            if (loaded == null) {
                 showMessage("ছবি পড়া যায়নি")
             } else {
+                val (bmp, stats) = loaded
+                originalMarksheetBitmap = bmp
                 _aiState.update {
                     it.copy(
                         activeTab = 1,
                         selectedImageBitmap = bmp,
+                        preparedImageStats = stats,
+                        hasOriginalImageBackup = false,
                         analysisResult = null,
                         classSheetResult = null,
                         analysisError = null
@@ -1716,10 +1728,90 @@ class ResultMakerViewModel(
         }
     }
 
+    fun setDocumentEnhanceMode(enabled: Boolean) {
+        _aiState.update { it.copy(documentEnhance = enabled) }
+        val bmp = _aiState.value.selectedImageBitmap ?: return
+        viewModelScope.launch {
+            val stats = withContext(Dispatchers.Default) {
+                VisionImageOptimizer.computeStatsOnly(bmp, enabled)
+            }
+            _aiState.update {
+                if (it.selectedImageBitmap === bmp && it.documentEnhance == enabled) {
+                    it.copy(preparedImageStats = stats)
+                } else it
+            }
+        }
+    }
+
+    fun rotateMarksheetImage90() {
+        val current = _aiState.value.selectedImageBitmap ?: return
+        val enhance = _aiState.value.documentEnhance
+        viewModelScope.launch {
+            val (rotated, stats) = withContext(Dispatchers.Default) {
+                val r = VisionImageOptimizer.rotate90Clockwise(current)
+                r to VisionImageOptimizer.computeStatsOnly(r, enhance)
+            }
+            _aiState.update {
+                it.copy(
+                    selectedImageBitmap = rotated,
+                    preparedImageStats = stats,
+                    hasOriginalImageBackup = true,
+                    analysisResult = null,
+                    classSheetResult = null,
+                    analysisError = null
+                )
+            }
+        }
+    }
+
+    fun cropMarksheetImage(leftFrac: Float, topFrac: Float, rightFrac: Float, bottomFrac: Float) {
+        val current = _aiState.value.selectedImageBitmap ?: return
+        val enhance = _aiState.value.documentEnhance
+        viewModelScope.launch {
+            val (cropped, stats) = withContext(Dispatchers.Default) {
+                val c = VisionImageOptimizer.cropNormalized(current, leftFrac, topFrac, rightFrac, bottomFrac)
+                c to VisionImageOptimizer.computeStatsOnly(c, enhance)
+            }
+            _aiState.update {
+                it.copy(
+                    selectedImageBitmap = cropped,
+                    preparedImageStats = stats,
+                    hasOriginalImageBackup = true,
+                    analysisResult = null,
+                    classSheetResult = null,
+                    analysisError = null
+                )
+            }
+        }
+    }
+
+    fun restoreOriginalMarksheetImage() {
+        val orig = originalMarksheetBitmap ?: return
+        val enhance = _aiState.value.documentEnhance
+        viewModelScope.launch {
+            val stats = withContext(Dispatchers.Default) {
+                VisionImageOptimizer.computeStatsOnly(orig, enhance)
+            }
+            _aiState.update {
+                it.copy(
+                    selectedImageBitmap = orig,
+                    preparedImageStats = stats,
+                    hasOriginalImageBackup = false,
+                    analysisResult = null,
+                    classSheetResult = null,
+                    analysisError = null
+                )
+            }
+        }
+    }
+
     fun clearMarksheetImage() {
+        originalMarksheetBitmap = null
         _aiState.update {
             it.copy(
                 selectedImageBitmap = null,
+                preparedImageStats = null,
+                hasOriginalImageBackup = false,
                 analysisResult = null,
                 classSheetResult = null,
                 analysisError = null
@@ -1730,10 +1822,11 @@ class ResultMakerViewModel(
     fun analyzeSelectedMarksheet(teacherNote: String) {
         val bmp = _aiState.value.selectedImageBitmap ?: return
         if (_aiState.value.analyzingImage) return
+        val enhance = _aiState.value.documentEnhance
         _aiState.update { it.copy(analyzingImage = true, analysisError = null, classSheetResult = null) }
         viewModelScope.launch {
             try {
-                val result = aiRepository.analyzeMarksheetImage(bmp, teacherNote)
+                val result = aiRepository.analyzeMarksheetImage(bmp, teacherNote, enhance)
                 _aiState.update { it.copy(analyzingImage = false, analysisResult = result) }
             } catch (e: CancellationException) {
                 throw e
@@ -1757,11 +1850,12 @@ class ResultMakerViewModel(
     ) {
         val bmp = _aiState.value.selectedImageBitmap ?: return
         if (_aiState.value.analyzingImage) return
+        val enhance = _aiState.value.documentEnhance
         _aiState.update { it.copy(analyzingImage = true, analysisError = null, analysisResult = null) }
         viewModelScope.launch {
             try {
                 val result = aiRepository.analyzeClassSheetImage(
-                    bmp, clsHint, termHint, subKeyHint, teacherNote, importScope
+                    bmp, clsHint, termHint, subKeyHint, teacherNote, importScope, enhance
                 )
                 _aiState.update { it.copy(analyzingImage = false, classSheetResult = result) }
             } catch (e: CancellationException) {
