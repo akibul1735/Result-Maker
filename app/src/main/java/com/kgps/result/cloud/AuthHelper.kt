@@ -1,6 +1,5 @@
 package com.kgps.result.cloud
 
-import android.annotation.SuppressLint
 import android.app.Activity
 import android.content.Context
 import android.content.pm.PackageManager
@@ -21,6 +20,7 @@ import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.auth.FirebaseUser
 import com.google.firebase.auth.GoogleAuthProvider
 import com.google.firebase.auth.auth
+import com.kgps.result.R
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.channels.awaitClose
@@ -32,12 +32,9 @@ import kotlinx.coroutines.withContext
 
 private const val AUTH_TAG = "Auth"
 
-@SuppressLint("DiscouragedApi")
 private fun resolveWebClientId(context: Context): String? {
-    val resId = context.resources.getIdentifier("default_web_client_id", "string", context.packageName)
-    if (resId == 0) return null
     return try {
-        context.getString(resId).trim().takeIf { it.isNotEmpty() }
+        context.getString(R.string.default_web_client_id).trim().takeIf { it.isNotEmpty() }
     } catch (_: Exception) {
         null
     }

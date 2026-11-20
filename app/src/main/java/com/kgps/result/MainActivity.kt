@@ -232,11 +232,7 @@ private fun AppRoot() {
             factory = viewModelFactory {
                 initializer {
                     val dbId = appContext.getString(R.string.firestore_database_id).trim()
-                    val db = if (dbId.isBlank() || dbId == "(default)") {
-                        FirebaseFirestore.getInstance()
-                    } else {
-                        FirebaseFirestore.getInstance(dbId)
-                    }
+                    val db = FirebaseFirestore.getInstance(dbId)
                     val cloudRepo = SchoolCloudRepository(db)
                     val autoBackupManager = AutoBackupManager(appContext, user.uid)
                     val localSeed = Repo.load(appContext)

@@ -45,42 +45,27 @@ service cloud.firestore {
              get(/databases/$(database)/documents/users/$(uid)).data.activeSchoolId == '';
     }
 
-    function memberProfile(schoolId) {
-      return schoolData(schoolId).memberProfiles[request.auth.uid];
+    function classAllowedInProfile(mp, cls) {
+      return !('allClasses' in mp) ||
+             mp.allClasses == true ||
+             ('allowedClasses' in mp && mp.allowedClasses is list && cls in mp.allowedClasses);
     }
 
-    function isStudentClassAllowed(schoolId, cls) {
-      return isSchoolAdmin(schoolId) ||
-             !(request.auth.uid in schoolData(schoolId).memberProfiles) ||
-             !('allClasses' in memberProfile(schoolId)) ||
-             memberProfile(schoolId).allClasses == true ||
-             ('allowedClasses' in memberProfile(schoolId) && memberProfile(schoolId).allowedClasses is list && cls in memberProfile(schoolId).allowedClasses);
+    function canManageInProfile(mp) {
+      return !('canManageStudents' in mp) || mp.canManageStudents == true;
     }
 
-    function canTeacherManageStudents(schoolId) {
-      return isSchoolAdmin(schoolId) ||
-             !(request.auth.uid in schoolData(schoolId).memberProfiles) ||
-             !('canManageStudents' in memberProfile(schoolId)) ||
-             memberProfile(schoolId).canManageStudents == true;
+    function canAttendanceInProfile(mp) {
+      return !('canEditAttendance' in mp) || mp.canEditAttendance == true;
     }
 
-    function canTeacherEditAttendance(schoolId) {
-      return isSchoolAdmin(schoolId) ||
-             !(request.auth.uid in schoolData(schoolId).memberProfiles) ||
-             !('canEditAttendance' in memberProfile(schoolId)) ||
-             memberProfile(schoolId).canEditAttendance == true;
+    function allSubjectsInProfile(mp) {
+      return !('allSubjects' in mp) || mp.allSubjects == true;
     }
 
-    function hasAllSubjectsAccess(schoolId) {
-      return isSchoolAdmin(schoolId) ||
-             !(request.auth.uid in schoolData(schoolId).memberProfiles) ||
-             !('allSubjects' in memberProfile(schoolId)) ||
-             memberProfile(schoolId).allSubjects == true;
-    }
-
-    function allowedTeacherSubjects(schoolId) {
-      return ('allowedSubjects' in memberProfile(schoolId) && memberProfile(schoolId).allowedSubjects is list)
-        ? memberProfile(schoolId).allowedSubjects
+    function allowedSubjectsInProfile(mp) {
+      return ('allowedSubjects' in mp && mp.allowedSubjects is list)
+        ? mp.allowedSubjects
         : [];
     }
 
@@ -117,35 +102,70 @@ service cloud.firestore {
       ];
     }
 
-    function areMarksAllowedOnCreate(schoolId, newM) {
-      return hasAllSubjectsAccess(schoolId) ||
-             newM.keys().hasOnly(allowedSubjectKeysFor(allowedTeacherSubjects(schoolId)));
+    function canTeacherCreateWithProfile(mp, newDoc) {
+      return canManageInProfile(mp) &&
+             classAllowedInProfile(mp, newDoc.cls) &&
+             (allSubjectsInProfile(mp) || newDoc.m.keys().hasOnly(allowedSubjectKeysFor(allowedSubjectsInProfile(mp)))) &&
+             (canAttendanceInProfile(mp) || !newDoc.x.keys().hasAny(attendanceXKeys()));
     }
 
-    function areMarksAllowedOnUpdate(schoolId, newM, oldM) {
-      return hasAllSubjectsAccess(schoolId) ||
-             newM.diff(oldM).affectedKeys().hasOnly(allowedSubjectKeysFor(allowedTeacherSubjects(schoolId)));
+    function canCreateStudentDoc(s, newDoc) {
+      return isSignedIn() &&
+             (request.auth.uid in s.memberUids) &&
+             (
+               (request.auth.uid in s.adminUids) ||
+               !(request.auth.uid in s.memberProfiles) ||
+               canTeacherCreateWithProfile(s.memberProfiles[request.auth.uid], newDoc)
+             );
     }
 
-    function areXAllowedOnCreate(schoolId, newX) {
-      return (canTeacherEditAttendance(schoolId) && canTeacherManageStudents(schoolId)) ||
-             (canTeacherEditAttendance(schoolId) && newX.keys().hasOnly(attendanceXKeys())) ||
-             (!canTeacherEditAttendance(schoolId) && canTeacherManageStudents(schoolId) && !newX.keys().hasAny(attendanceXKeys())) ||
-             newX.size() == 0;
+    function canTeacherUpdateMarks(mp, newM, oldM) {
+      return newM == oldM ||
+             allSubjectsInProfile(mp) ||
+             newM.diff(oldM).affectedKeys().hasOnly(allowedSubjectKeysFor(allowedSubjectsInProfile(mp)));
     }
 
-    function areXAllowedOnUpdate(schoolId, newX, oldX) {
-      return (canTeacherEditAttendance(schoolId) && canTeacherManageStudents(schoolId)) ||
-             (canTeacherEditAttendance(schoolId) && newX.diff(oldX).affectedKeys().hasOnly(attendanceXKeys())) ||
-             (!canTeacherEditAttendance(schoolId) && canTeacherManageStudents(schoolId) && !newX.diff(oldX).affectedKeys().hasAny(attendanceXKeys())) ||
-             newX == oldX;
+    function canTeacherUpdateX(mp, newX, oldX) {
+      return newX == oldX ||
+             (canAttendanceInProfile(mp) && canManageInProfile(mp)) ||
+             (canAttendanceInProfile(mp) && newX.diff(oldX).affectedKeys().hasOnly(attendanceXKeys())) ||
+             (canManageInProfile(mp) && !newX.diff(oldX).affectedKeys().hasAny(attendanceXKeys()));
     }
 
-    function areProfileFieldsAllowedOnUpdate(schoolId, newDoc, oldDoc) {
-      return canTeacherManageStudents(schoolId) ||
-             !newDoc.diff(oldDoc).affectedKeys().hasAny([
-               'cls', 'roll', 'name', 'guardian', 'village', 'post', 'upazila', 'district', 'mobile', 'religion'
-             ]);
+    function canTeacherUpdateWithProfile(mp, newDoc, oldDoc) {
+      return classAllowedInProfile(mp, oldDoc.cls) &&
+             classAllowedInProfile(mp, newDoc.cls) &&
+             (
+               canManageInProfile(mp) ||
+               !newDoc.diff(oldDoc).affectedKeys().hasAny([
+                 'cls', 'roll', 'name', 'guardian', 'village', 'post', 'upazila', 'district', 'mobile', 'religion'
+               ])
+             ) &&
+             canTeacherUpdateMarks(mp, newDoc.m, oldDoc.m) &&
+             canTeacherUpdateX(mp, newDoc.x, oldDoc.x);
+    }
+
+    function canUpdateStudentDoc(s, newDoc, oldDoc) {
+      return isSignedIn() &&
+             (request.auth.uid in s.memberUids) &&
+             (
+               (request.auth.uid in s.adminUids) ||
+               !(request.auth.uid in s.memberProfiles) ||
+               canTeacherUpdateWithProfile(s.memberProfiles[request.auth.uid], newDoc, oldDoc)
+             );
+    }
+
+    function canDeleteStudentDoc(s, oldDoc) {
+      return isSignedIn() &&
+             (request.auth.uid in s.memberUids) &&
+             (
+               (request.auth.uid in s.adminUids) ||
+               !(request.auth.uid in s.memberProfiles) ||
+               (
+                 canManageInProfile(s.memberProfiles[request.auth.uid]) &&
+                 classAllowedInProfile(s.memberProfiles[request.auth.uid], oldDoc.cls)
+               )
+             );
     }
 
     // 3. Entity Validation Blueprints
@@ -372,37 +392,29 @@ service cloud.firestore {
 
         allow create: if isValidId(schoolId) &&
                          isValidId(studentId) &&
-                         isSchoolMember(schoolId) &&
-                         canTeacherManageStudents(schoolId) &&
-                         isStudentClassAllowed(schoolId, incoming().cls) &&
+                         isSignedIn() &&
                          incoming().updatedByUid == request.auth.uid &&
                          incoming().keys().hasAll(['cls', 'roll', 'name', 'guardian', 'village', 'post', 'upazila', 'district', 'mobile', 'religion', 'm', 'x', 'updatedByUid', 'updatedByName', 'createdAt', 'updatedAt']) &&
                          incoming().keys().hasOnly(['cls', 'roll', 'name', 'guardian', 'village', 'post', 'upazila', 'district', 'mobile', 'religion', 'm', 'x', 'updatedByUid', 'updatedByName', 'createdAt', 'updatedAt']) &&
                          isValidStudent(incoming()) &&
-                         areMarksAllowedOnCreate(schoolId, incoming().m) &&
-                         areXAllowedOnCreate(schoolId, incoming().x);
+                         canCreateStudentDoc(schoolData(schoolId), incoming());
 
         allow update: if isValidId(schoolId) &&
                          isValidId(studentId) &&
-                         isSchoolMember(schoolId) &&
+                         isSignedIn() &&
                          isValidStudent(incoming()) &&
                          incoming().updatedByUid == request.auth.uid &&
                          incoming().createdAt == existing().createdAt &&
-                         isStudentClassAllowed(schoolId, existing().cls) &&
-                         isStudentClassAllowed(schoolId, incoming().cls) &&
-                         areProfileFieldsAllowedOnUpdate(schoolId, incoming(), existing()) &&
-                         areMarksAllowedOnUpdate(schoolId, incoming().m, existing().m) &&
-                         areXAllowedOnUpdate(schoolId, incoming().x, existing().x) &&
                          incoming().diff(existing()).affectedKeys().hasOnly([
                            'cls', 'roll', 'name', 'guardian', 'village', 'post', 'upazila', 'district',
                            'mobile', 'religion', 'm', 'x', 'updatedByUid', 'updatedByName', 'updatedAt'
-                         ]);
+                         ]) &&
+                         canUpdateStudentDoc(schoolData(schoolId), incoming(), existing());
 
         allow delete: if isValidId(schoolId) &&
                          isValidId(studentId) &&
-                         isSchoolMember(schoolId) &&
-                         canTeacherManageStudents(schoolId) &&
-                         isStudentClassAllowed(schoolId, existing().cls);
+                         isSignedIn() &&
+                         canDeleteStudentDoc(schoolData(schoolId), existing());
       }
     }
   }
