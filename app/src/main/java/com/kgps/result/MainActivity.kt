@@ -722,6 +722,7 @@ fun ResultMakerWorkspace(
                                     onAnalyzeClassSheet = vm::analyzeClassSheet,
                                     onLoadSampleClassPreview = vm::loadSampleClassSheetPreview,
                                     onUpdateClassSheetMeta = vm::updateClassSheetMeta,
+                                    onUpdateClassSheetScope = vm::updateClassSheetScope,
                                     onToggleScannedRowSelected = vm::toggleScannedRowSelected,
                                     onSetAllScannedRowsSelected = vm::setAllScannedRowsSelected,
                                     onUpdateScannedRowField = vm::updateScannedRowField,

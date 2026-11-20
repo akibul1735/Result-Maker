@@ -118,6 +118,7 @@ import com.kgps.result.CLS_SHORT
 import com.kgps.result.RELIGIONS
 import com.kgps.result.Student
 import com.kgps.result.ai.AiModelMode
+import com.kgps.result.ai.ClassSheetImportScope
 import com.kgps.result.ai.DiscoveredGeminiModel
 import com.kgps.result.ai.ExtractedClassSheet
 import com.kgps.result.ai.ExtractedMarksheet
@@ -183,9 +184,10 @@ fun AiAssistantScreen(
     onClearImage: () -> Unit,
     onAnalyzeImage: (String) -> Unit,
     onApplyExtracted: (ExtractedMarksheet) -> Unit,
-    onAnalyzeClassSheet: (clsHint: Int?, termHint: Int?, subKeyHint: String?, teacherNote: String) -> Unit,
-    onLoadSampleClassPreview: (clsHint: Int?, termHint: Int?, subKeyHint: String?) -> Unit,
+    onAnalyzeClassSheet: (clsHint: Int?, termHint: Int?, subKeyHint: String?, teacherNote: String, importScope: ClassSheetImportScope) -> Unit,
+    onLoadSampleClassPreview: (clsHint: Int?, termHint: Int?, subKeyHint: String?, importScope: ClassSheetImportScope) -> Unit,
     onUpdateClassSheetMeta: (cls: Int, term: Int, subKey: String) -> Unit,
+    onUpdateClassSheetScope: (ClassSheetImportScope) -> Unit = {},
     onToggleScannedRowSelected: (rowId: String) -> Unit,
     onSetAllScannedRowsSelected: (Boolean) -> Unit,
     onUpdateScannedRowField: (rowId: String, rollText: String?, name: String?, markEntry: Pair<String, String>?, verifyField: String?) -> Unit,
@@ -205,9 +207,10 @@ fun AiAssistantScreen(
 
     // Scanner mode & selectors
     var scanMode by remember { mutableStateOf("class") } // "class" | "single"
+    var importScope by remember { mutableStateOf(ClassSheetImportScope.AUTO) }
     var clsHint by remember(selectedClass) { mutableStateOf<Int?>(selectedClass) }
     var termHint by remember { mutableStateOf<Int?>(1) }
-    var subKeyHint by remember { mutableStateOf<String?>(null) } // null = auto-detect
+    var subKeyHint by remember { mutableStateOf<String?>(null) } // null = ছবির উপর থেকে স্বয়ংক্রিয়
 
     var zoomDialogOpen by remember { mutableStateOf(false) }
     var showOnlyIssues by remember { mutableStateOf(false) }
@@ -830,7 +833,11 @@ fun AiAssistantScreen(
                                 color = SlateText
                             )
                             Text(
-                                "সংরক্ষণের আগে প্রিভিউতে প্রতিটি ঘর যাচাই করতে পারবেন; সন্দেহযুক্ত লেখা লাল রঙে দেখাবে।",
+                                if (scanMode == "class") {
+                                    "রোল বা রোল+নামসহ পূর্ণাঙ্গ, সংক্ষিপ্ত, শুধু ধারাবাহিক বা শুধু সামষ্টিক — যেকোনো ছবি তুললেই কাজ করবে।"
+                                } else {
+                                    "সংরক্ষণের আগে প্রিভিউতে প্রতিটি ঘর যাচাই করতে পারবেন; সন্দেহযুক্ত লেখা লাল রঙে দেখাবে।"
+                                },
                                 fontSize = 11.sp,
                                 color = SlateMuted,
                                 lineHeight = 14.5.sp
@@ -911,6 +918,52 @@ fun AiAssistantScreen(
                         }
 
                         if (scanMode == "class") {
+                            Surface(
+                                color = SlateSurfaceVariant,
+                                border = BorderStroke(1.dp, SlateOutline),
+                                shape = RoundedCornerShape(8.dp),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Row(
+                                    Modifier.fillMaxWidth().padding(2.dp),
+                                    horizontalArrangement = Arrangement.spacedBy(2.dp)
+                                ) {
+                                    listOf(
+                                        ClassSheetImportScope.AUTO to "স্বয়ংক্রিয়",
+                                        ClassSheetImportScope.BOTH to "ধারাবাহিক+সামষ্টিক",
+                                        ClassSheetImportScope.CONT_ONLY to "শুধু ধারাবাহিক",
+                                        ClassSheetImportScope.WR_ONLY to "শুধু সামষ্টিক"
+                                    ).forEach { (scopeOpt, label) ->
+                                        val isSel = importScope == scopeOpt
+                                        Surface(
+                                            color = if (isSel) TealPrimary else Color.Transparent,
+                                            shape = RoundedCornerShape(6.dp),
+                                            modifier = Modifier
+                                                .weight(if (scopeOpt == ClassSheetImportScope.BOTH) 1.25f else 1f)
+                                                .clickable { importScope = scopeOpt }
+                                                .testTag("scan_scope_${scopeOpt.name.lowercase()}_btn")
+                                        ) {
+                                            Text(
+                                                label,
+                                                fontSize = 10.sp,
+                                                fontWeight = if (isSel) FontWeight.Bold else FontWeight.Medium,
+                                                color = if (isSel) Color.White else SlateText,
+                                                textAlign = TextAlign.Center,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis,
+                                                modifier = Modifier.padding(horizontal = 3.dp, vertical = 5.dp)
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+
+                            Text(
+                                "শ্রেণি, প্রান্তিক ও বিষয় বাছুন (অথবা ছবির উপরে স্পষ্ট লেখা থাকলে 'স্বয়ংক্রিয়' রাখুন)",
+                                fontSize = 10.5.sp,
+                                color = SlateMuted
+                            )
+
                             ClassSheetHintSelectors(
                                 clsHint = clsHint,
                                 termHint = termHint,
@@ -931,7 +984,12 @@ fun AiAssistantScreen(
                         OutlinedTextField(
                             value = teacherNote,
                             onValueChange = { teacherNote = it },
-                            label = { Text("নির্দেশনা (ঐচ্ছিক, যেমন: রোল ১-৩৬ গণিত)", fontSize = 11.sp) },
+                            label = {
+                                Text(
+                                    "নির্দেশনা (ঐচ্ছিক, যেমন: রোল ১-৩৬ শুধু ধারাবাহিক)",
+                                    fontSize = 11.sp
+                                )
+                            },
                             singleLine = true,
                             textStyle = TextStyle(fontSize = 12.5.sp),
                             shape = RoundedCornerShape(8.dp),
@@ -943,7 +1001,7 @@ fun AiAssistantScreen(
                                 onClick = {
                                     showOnlyIssues = false
                                     if (scanMode == "class") {
-                                        onAnalyzeClassSheet(clsHint, termHint, subKeyHint, teacherNote)
+                                        onAnalyzeClassSheet(clsHint, termHint, subKeyHint, teacherNote, importScope)
                                     } else {
                                         onAnalyzeImage(teacherNote)
                                     }
@@ -972,7 +1030,7 @@ fun AiAssistantScreen(
                                 OutlinedButton(
                                     onClick = {
                                         showOnlyIssues = false
-                                        onLoadSampleClassPreview(clsHint, termHint, subKeyHint)
+                                        onLoadSampleClassPreview(clsHint, termHint, subKeyHint, importScope)
                                     },
                                     enabled = !state.analyzingImage,
                                     contentPadding = PaddingValues(horizontal = 10.dp, vertical = 8.dp),
@@ -1010,7 +1068,7 @@ fun AiAssistantScreen(
                                         onClick = {
                                             showOnlyIssues = false
                                             if (scanMode == "class") {
-                                                onAnalyzeClassSheet(clsHint, termHint, subKeyHint, teacherNote)
+                                                onAnalyzeClassSheet(clsHint, termHint, subKeyHint, teacherNote, importScope)
                                             } else {
                                                 onAnalyzeImage(teacherNote)
                                             }
@@ -1046,6 +1104,7 @@ fun AiAssistantScreen(
                             onToggleShowOnlyIssues = { showOnlyIssues = !showOnlyIssues },
                             onOpenZoomImage = { zoomDialogOpen = true },
                             onUpdateMeta = onUpdateClassSheetMeta,
+                            onUpdateScope = onUpdateClassSheetScope,
                             onToggleRowSelected = onToggleScannedRowSelected,
                             onSetAllSelected = onSetAllScannedRowsSelected,
                             onUpdateRowField = onUpdateScannedRowField,
@@ -1682,6 +1741,7 @@ private fun ClassSheetPreviewSection(
     onToggleShowOnlyIssues: () -> Unit,
     onOpenZoomImage: () -> Unit,
     onUpdateMeta: (cls: Int, term: Int, subKey: String) -> Unit,
+    onUpdateScope: (ClassSheetImportScope) -> Unit,
     onToggleRowSelected: (rowId: String) -> Unit,
     onSetAllSelected: (Boolean) -> Unit,
     onUpdateRowField: (rowId: String, rollText: String?, name: String?, markEntry: Pair<String, String>?, verifyField: String?) -> Unit,
@@ -1703,13 +1763,13 @@ private fun ClassSheetPreviewSection(
             .keys
     }
 
-    val reportsByRowId = remember(sheet.rows, sheet.cls, sheet.subKey, rollDuplicates, existingStudents) {
+    val reportsByRowId = remember(sheet.rows, sheet.cls, sheet.subKey, sheet.scope, rollDuplicates, existingStudents) {
         sheet.rows.associate { r ->
             val rInt = fromBn(r.rollText.trim()).toIntOrNull()
             val hasDbName = rInt != null && existingStudents.any {
                 it.cls == sheet.cls && it.roll == rInt && it.name.isNotBlank()
             }
-            r.id to validateScannedStudentRow(r, sheet.cls, sheet.subKey, rollDuplicates, hasDbName)
+            r.id to validateScannedStudentRow(r, sheet.cls, sheet.subKey, rollDuplicates, hasDbName, sheet.scope)
         }
     }
 
@@ -1859,6 +1919,46 @@ private fun ClassSheetPreviewSection(
                 }
             }
 
+            if (activeSub.written > 0) {
+                Surface(
+                    color = SlateSurfaceVariant,
+                    border = BorderStroke(1.dp, SlateOutline),
+                    shape = RoundedCornerShape(8.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        Modifier.fillMaxWidth().padding(2.dp),
+                        horizontalArrangement = Arrangement.spacedBy(3.dp)
+                    ) {
+                        listOf(
+                            ClassSheetImportScope.BOTH to "ধারাবাহিক + সামষ্টিক",
+                            ClassSheetImportScope.CONT_ONLY to "শুধু ধারাবাহিক",
+                            ClassSheetImportScope.WR_ONLY to "শুধু সামষ্টিক"
+                        ).forEach { (scOpt, scLabel) ->
+                            val selectedSc = sheet.scope == scOpt
+                            Surface(
+                                color = if (selectedSc) TealPrimary else Color.Transparent,
+                                shape = RoundedCornerShape(6.dp),
+                                modifier = Modifier
+                                    .weight(if (scOpt == ClassSheetImportScope.BOTH) 1.25f else 1f)
+                                    .clickable { onUpdateScope(scOpt) }
+                            ) {
+                                Text(
+                                    scLabel,
+                                    fontSize = 10.sp,
+                                    fontWeight = if (selectedSc) FontWeight.Bold else FontWeight.Medium,
+                                    color = if (selectedSc) Color.White else SlateText,
+                                    textAlign = TextAlign.Center,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    modifier = Modifier.padding(horizontal = 4.dp, vertical = 4.dp)
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+
             if (sheet.warnings.isNotEmpty()) {
                 Surface(
                     color = AmberBg,
@@ -1993,6 +2093,7 @@ private fun ClassSheetPreviewSection(
                     ScannedStudentPreviewCard(
                         row = row,
                         activeSub = activeSub,
+                        scope = sheet.scope,
                         report = report,
                         isExistingStudent = matchedExisting != null,
                         existingName = matchedExisting?.name,
@@ -2054,6 +2155,7 @@ private fun ClassSheetPreviewSection(
 private fun ScannedStudentPreviewCard(
     row: ScannedStudentRow,
     activeSub: com.kgps.result.Sub,
+    scope: ClassSheetImportScope,
     report: RowValidationReport,
     isExistingStudent: Boolean,
     existingName: String?,
@@ -2194,6 +2296,17 @@ private fun ScannedStudentPreviewCard(
 
             val isArt = activeSub.comps.size == 1 && activeSub.comps.first().key == "TOTAL" && activeSub.written == 0
             val maxCont = activeSub.comps.sumOf { it.max }
+            val showContinuous = scope != ClassSheetImportScope.WR_ONLY
+            val showWritten = activeSub.written > 0 && scope != ClassSheetImportScope.CONT_ONLY
+            val showGrand = scope == ClassSheetImportScope.BOTH
+
+            var showBreakdownOverride by remember(row.id) { mutableStateOf(false) }
+            val hasBreakdownContent = showContinuous && activeSub.comps.any { c ->
+                !row.marksText[c.key].isNullOrBlank() ||
+                    report.hardErrors[c.key] != null ||
+                    report.uncertainWarnings[c.key] != null
+            }
+            val showBreakdownRow = showContinuous && (!report.isSummaryOnlyMode || hasBreakdownContent || showBreakdownOverride)
 
             if (isArt) {
                 // শিল্পকলা: TOTAL এবং সর্বমোট এক সারিতে
@@ -2210,60 +2323,66 @@ private fun ScannedStudentPreviewCard(
                         isNumeric = true,
                         modifier = Modifier.weight(1f)
                     )
-                    EditableCellField(
-                        value = row.sheetGrandTotal ?: "",
-                        onValueChange = { onUpdateMark("GRAND", it) },
-                        label = "মোট (${bn(activeSub.max.toString())})",
-                        confidence = report.fieldConfidences["GRAND"] ?: FieldConfidence.SURE,
-                        hardError = report.hardErrors["GRAND"],
-                        uncertainWarning = report.uncertainWarnings["GRAND"],
-                        deducedHint = row.deducedFields["GRAND"],
-                        onVerify = { onVerifyField("GRAND") },
-                        isNumeric = true,
-                        modifier = Modifier.weight(1f)
-                    )
-                }
-            } else {
-                // ১ম সারি: পাঠ্যবই, সক্রিয়তা, ভাষা, ক্লাস টেস্ট (এক সারিতে ৪টি)
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(5.dp)) {
-                    activeSub.comps.forEach { c ->
-                        val shortLabel = when (c.key) {
-                            "TB" -> "পাঠ্যবই"
-                            "ACT" -> "সক্রিয়তা"
-                            "LANG" -> "ভাষা"
-                            "CT" -> "ক্লাস টেস্ট"
-                            else -> "মোট"
-                        }
+                    if (showGrand) {
                         EditableCellField(
-                            value = row.marksText[c.key] ?: "",
-                            onValueChange = { onUpdateMark(c.key, it) },
-                            label = "$shortLabel (${bn(c.max.toString())})",
-                            confidence = report.fieldConfidences[c.key] ?: FieldConfidence.SURE,
-                            hardError = report.hardErrors[c.key],
-                            uncertainWarning = report.uncertainWarnings[c.key],
-                            deducedHint = row.deducedFields[c.key],
-                            onVerify = { onVerifyField(c.key) },
+                            value = row.sheetGrandTotal ?: "",
+                            onValueChange = { onUpdateMark("GRAND", it) },
+                            label = "মোট (${bn(activeSub.max.toString())})",
+                            confidence = report.fieldConfidences["GRAND"] ?: FieldConfidence.SURE,
+                            hardError = report.hardErrors["GRAND"],
+                            uncertainWarning = report.uncertainWarnings["GRAND"],
+                            deducedHint = row.deducedFields["GRAND"],
+                            onVerify = { onVerifyField("GRAND") },
                             isNumeric = true,
                             modifier = Modifier.weight(1f)
                         )
                     }
                 }
+            } else {
+                if (showBreakdownRow) {
+                    // ১ম সারি: পাঠ্যবই, সক্রিয়তা, ভাষা, ক্লাস টেস্ট (এক সারিতে ৪টি)
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+                        activeSub.comps.forEach { c ->
+                            val shortLabel = when (c.key) {
+                                "TB" -> "পাঠ্যবই"
+                                "ACT" -> "সক্রিয়তা"
+                                "LANG" -> "ভাষা"
+                                "CT" -> "ক্লাস টেস্ট"
+                                else -> "মোট"
+                            }
+                            EditableCellField(
+                                value = row.marksText[c.key] ?: "",
+                                onValueChange = { onUpdateMark(c.key, it) },
+                                label = "$shortLabel (${bn(c.max.toString())})",
+                                confidence = report.fieldConfidences[c.key] ?: FieldConfidence.SURE,
+                                hardError = report.hardErrors[c.key],
+                                uncertainWarning = report.uncertainWarnings[c.key],
+                                deducedHint = row.deducedFields[c.key],
+                                onVerify = { onVerifyField(c.key) },
+                                isNumeric = true,
+                                modifier = Modifier.weight(1f)
+                            )
+                        }
+                    }
+                }
 
-                // ২য় সারি: ধারাবাহিক মোট, সামষ্টিক (থাকলে), এবং মোট
+                // ২য় সারি: সক্রিয় অংশ অনুযায়ী ধারাবাহিক মোট, সামষ্টিক, মোট
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    EditableCellField(
-                        value = row.sheetContinuousTotal ?: "",
-                        onValueChange = { onUpdateMark("CONT", it) },
-                        label = "ধারাবাহিক মোট (${bn(maxCont.toString())})",
-                        confidence = report.fieldConfidences["CONT"] ?: FieldConfidence.SURE,
-                        hardError = report.hardErrors["CONT"],
-                        uncertainWarning = report.uncertainWarnings["CONT"],
-                        deducedHint = row.deducedFields["CONT"],
-                        onVerify = { onVerifyField("CONT") },
-                        isNumeric = true,
-                        modifier = Modifier.weight(1f)
-                    )
-                    if (activeSub.written > 0) {
+                    if (showContinuous) {
+                        EditableCellField(
+                            value = row.sheetContinuousTotal ?: "",
+                            onValueChange = { onUpdateMark("CONT", it) },
+                            label = "ধারাবাহিক মোট (${bn(maxCont.toString())})",
+                            confidence = report.fieldConfidences["CONT"] ?: FieldConfidence.SURE,
+                            hardError = report.hardErrors["CONT"],
+                            uncertainWarning = report.uncertainWarnings["CONT"],
+                            deducedHint = row.deducedFields["CONT"],
+                            onVerify = { onVerifyField("CONT") },
+                            isNumeric = true,
+                            modifier = Modifier.weight(1f)
+                        )
+                    }
+                    if (showWritten) {
                         EditableCellField(
                             value = row.marksText["WR"] ?: "",
                             onValueChange = { onUpdateMark("WR", it) },
@@ -2277,22 +2396,24 @@ private fun ScannedStudentPreviewCard(
                             modifier = Modifier.weight(1f)
                         )
                     }
-                    EditableCellField(
-                        value = row.sheetGrandTotal ?: "",
-                        onValueChange = { onUpdateMark("GRAND", it) },
-                        label = "মোট (${bn(activeSub.max.toString())})",
-                        confidence = report.fieldConfidences["GRAND"] ?: FieldConfidence.SURE,
-                        hardError = report.hardErrors["GRAND"],
-                        uncertainWarning = report.uncertainWarnings["GRAND"],
-                        deducedHint = row.deducedFields["GRAND"],
-                        onVerify = { onVerifyField("GRAND") },
-                        isNumeric = true,
-                        modifier = Modifier.weight(1f)
-                    )
+                    if (showGrand) {
+                        EditableCellField(
+                            value = row.sheetGrandTotal ?: "",
+                            onValueChange = { onUpdateMark("GRAND", it) },
+                            label = "মোট (${bn(activeSub.max.toString())})",
+                            confidence = report.fieldConfidences["GRAND"] ?: FieldConfidence.SURE,
+                            hardError = report.hardErrors["GRAND"],
+                            uncertainWarning = report.uncertainWarnings["GRAND"],
+                            deducedHint = row.deducedFields["GRAND"],
+                            onVerify = { onVerifyField("GRAND") },
+                            isNumeric = true,
+                            modifier = Modifier.weight(1f)
+                        )
+                    }
                 }
             }
 
-            // Calculated Totals & Raw Notes Footer
+            // Calculated Totals, Optional Breakdown Toggle & Raw Notes Footer
             Row(
                 Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -2300,25 +2421,43 @@ private fun ScannedStudentPreviewCard(
             ) {
                 val contStr = report.calculatedContinuous?.let { bn(fmtEn(it)) } ?: "—"
                 val grandStr = report.calculatedGrandTotal?.let { bn(fmtEn(it)) } ?: "—"
+                val wrStr = row.marksText["WR"]?.trim()?.takeIf { it.isNotEmpty() }?.let { bn(it) } ?: "—"
                 Text(
-                    buildString {
-                        if (activeSub.written > 0) append("হিসাব: ধারাবাহিক $contStr · মোট $grandStr")
-                        else append("হিসাব: মোট $contStr")
-                        if (report.isSummaryOnlyMode) append(" · রেজাল্ট কার্ড মোড")
+                    when (scope) {
+                        ClassSheetImportScope.CONT_ONLY -> "শুধু ধারাবাহিক: $contStr (সামষ্টিক অক্ষত)"
+                        ClassSheetImportScope.WR_ONLY -> "শুধু সামষ্টিক: $wrStr (ধারাবাহিক অক্ষত)"
+                        else -> buildString {
+                            if (activeSub.written > 0) append("হিসাব: ধারাবাহিক $contStr · মোট $grandStr")
+                            else append("হিসাব: মোট $contStr")
+                        }
                     },
                     fontSize = 11.sp,
                     fontWeight = FontWeight.Medium,
-                    color = if (report.isSummaryOnlyMode) TealDark else SlateText
+                    color = if (scope != ClassSheetImportScope.BOTH || report.isSummaryOnlyMode) TealDark else SlateText,
+                    modifier = Modifier.weight(1f, fill = false)
                 )
-                if (row.rawNotes.isNotBlank()) {
-                    Text(
-                        row.rawNotes,
-                        fontSize = 10.5.sp,
-                        color = SlateMuted,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.padding(start = 8.dp)
-                    )
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    if (!isArt && showContinuous && report.isSummaryOnlyMode && !hasBreakdownContent) {
+                        Text(
+                            if (showBreakdownOverride) "সংক্ষিপ্ত করুন" else "+ ৪ অংশ",
+                            fontSize = 10.5.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = TealPrimary,
+                            modifier = Modifier.clickable { showBreakdownOverride = !showBreakdownOverride }
+                        )
+                    }
+                    if (row.rawNotes.isNotBlank()) {
+                        Text(
+                            row.rawNotes,
+                            fontSize = 10.5.sp,
+                            color = SlateMuted,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
                 }
             }
 

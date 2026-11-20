@@ -44,8 +44,10 @@ object ScanConstraintSolver {
     fun reconcileInterdependencies(
         row: ScannedStudentRow,
         cls: Int,
-        subKey: String
+        subKey: String,
+        scope: ClassSheetImportScope = ClassSheetImportScope.BOTH
     ): ScannedStudentRow {
+        if (scope == ClassSheetImportScope.WR_ONLY) return row
         val subDef = subjectsFor(cls.coerceIn(1, 5), RELIGIONS.first()).find { it.key == subKey }
             ?: return row
 
@@ -152,53 +154,55 @@ object ScanConstraintSolver {
                     }
                 }
 
-                // ২. সর্বমোট সমীকরণ: CONT + WR = GRAND (অথবা written=0 হলে CONT = GRAND)
-                val contNow = sureVal("CONT")
-                val grandNow = sureVal("GRAND")
+                // ২. সর্বমোট সমীকরণ: কেবল BOTH মোডে (CONT_ONLY মোডে WR বা GRAND অনুমান করবে না)
+                if (scope == ClassSheetImportScope.BOTH) {
+                    val contNow = sureVal("CONT")
+                    val grandNow = sureVal("GRAND")
 
-                if (hasWritten) {
-                    val wrNow = sureVal("WR")
-                    if (contNow != null && wrNow != null && canDeduce("GRAND")) {
-                        val g = contNow + wrNow
-                        if (fitsRange(g, maxGrand)) {
-                            val clamped = g.coerceIn(0.0, maxGrand.toDouble())
-                            setDeduced(
-                                "GRAND",
-                                clamped,
-                                "ধারাবাহিক (${bn(fmtEn(contNow))}) + সামষ্টিক (${bn(fmtEn(wrNow))}) = ${bn(fmtEn(clamped))}"
-                            )
+                    if (hasWritten) {
+                        val wrNow = sureVal("WR")
+                        if (contNow != null && wrNow != null && canDeduce("GRAND")) {
+                            val g = contNow + wrNow
+                            if (fitsRange(g, maxGrand)) {
+                                val clamped = g.coerceIn(0.0, maxGrand.toDouble())
+                                setDeduced(
+                                    "GRAND",
+                                    clamped,
+                                    "ধারাবাহিক (${bn(fmtEn(contNow))}) + সামষ্টিক (${bn(fmtEn(wrNow))}) = ${bn(fmtEn(clamped))}"
+                                )
+                                changed = true
+                            }
+                        } else if (grandNow != null && contNow != null && canDeduce("WR")) {
+                            val w = grandNow - contNow
+                            if (fitsRange(w, maxWr)) {
+                                val clamped = w.coerceIn(0.0, maxWr.toDouble())
+                                setDeduced(
+                                    "WR",
+                                    clamped,
+                                    "মোট (${bn(fmtEn(grandNow))}) − ধারাবাহিক (${bn(fmtEn(contNow))}) = ${bn(fmtEn(clamped))}"
+                                )
+                                changed = true
+                            }
+                        } else if (grandNow != null && wrNow != null && canDeduce("CONT")) {
+                            val c = grandNow - wrNow
+                            if (fitsRange(c, maxCont)) {
+                                val clamped = c.coerceIn(0.0, maxCont.toDouble())
+                                setDeduced(
+                                    "CONT",
+                                    clamped,
+                                    "মোট (${bn(fmtEn(grandNow))}) − সামষ্টিক (${bn(fmtEn(wrNow))}) = ${bn(fmtEn(clamped))}"
+                                )
+                                changed = true
+                            }
+                        }
+                    } else {
+                        if (contNow != null && canDeduce("GRAND")) {
+                            setDeduced("GRAND", contNow, "ধারাবাহিক মোট (${bn(fmtEn(contNow))}) সমান")
+                            changed = true
+                        } else if (grandNow != null && canDeduce("CONT")) {
+                            setDeduced("CONT", grandNow, "মোট (${bn(fmtEn(grandNow))}) সমান")
                             changed = true
                         }
-                    } else if (grandNow != null && contNow != null && canDeduce("WR")) {
-                        val w = grandNow - contNow
-                        if (fitsRange(w, maxWr)) {
-                            val clamped = w.coerceIn(0.0, maxWr.toDouble())
-                            setDeduced(
-                                "WR",
-                                clamped,
-                                "মোট (${bn(fmtEn(grandNow))}) − ধারাবাহিক (${bn(fmtEn(contNow))}) = ${bn(fmtEn(clamped))}"
-                            )
-                            changed = true
-                        }
-                    } else if (grandNow != null && wrNow != null && canDeduce("CONT")) {
-                        val c = grandNow - wrNow
-                        if (fitsRange(c, maxCont)) {
-                            val clamped = c.coerceIn(0.0, maxCont.toDouble())
-                            setDeduced(
-                                "CONT",
-                                clamped,
-                                "মোট (${bn(fmtEn(grandNow))}) − সামষ্টিক (${bn(fmtEn(wrNow))}) = ${bn(fmtEn(clamped))}"
-                            )
-                            changed = true
-                        }
-                    }
-                } else {
-                    if (contNow != null && canDeduce("GRAND")) {
-                        setDeduced("GRAND", contNow, "ধারাবাহিক মোট (${bn(fmtEn(contNow))}) সমান")
-                        changed = true
-                    } else if (grandNow != null && canDeduce("CONT")) {
-                        setDeduced("CONT", grandNow, "মোট (${bn(fmtEn(grandNow))}) সমান")
-                        changed = true
                     }
                 }
             }
@@ -220,15 +224,43 @@ object ScanConstraintSolver {
         cls: Int,
         subKey: String,
         duplicateRolls: Set<Int>,
-        hasExistingDbName: Boolean = false
+        hasExistingDbName: Boolean = false,
+        scope: ClassSheetImportScope = ClassSheetImportScope.BOTH
     ): RowValidationReport {
         val hard = mutableMapOf<String, String>()
         val warn = mutableMapOf<String, String>()
         val aiNorm = row.aiIssues.entries.associate { (k, v) -> normalizeIssueKey(k) to v }
         val dbNameActive = hasExistingDbName && !row.useScannedNameForExisting
 
+        val subDef = subjectsFor(cls.coerceIn(1, 5), RELIGIONS.first()).find { it.key == subKey }
+        val compSpecs = subDef?.comps ?: emptyList()
+        val compKeys = compSpecs.map { it.key }
+        val hasWritten = (subDef?.written ?: 0) > 0
+        val maxCont = compSpecs.sumOf { it.max }
+        val maxWr = subDef?.written ?: 0
+        val maxGrand = subDef?.max ?: 100
+        val isArt = compKeys == listOf("TOTAL") && !hasWritten
+
+        val expectCont = scope != ClassSheetImportScope.WR_ONLY
+        val expectWr = hasWritten && scope != ClassSheetImportScope.CONT_ONLY
+        val expectGrand = scope == ClassSheetImportScope.BOTH
+
+        val rawCont = row.sheetContinuousTotal?.trim().orEmpty()
+        val rawGrand = row.sheetGrandTotal?.trim().orEmpty()
+        val rawWr = row.marksText["WR"]?.trim().orEmpty()
+        val compKeysSet = compKeys.toSet()
+
+        // সহজ / সারসংক্ষেপ মোড: পাঠ্যবই–ক্লাস টেস্ট নেই, কেবল ধারাবাহিক মোট এবং/অথবা সামষ্টিক আছে
+        val isSummaryOnlyMode = !isArt &&
+            compKeys.all { row.marksText[it]?.trim().isNullOrEmpty() } &&
+            (rawCont.isNotEmpty() || rawGrand.isNotEmpty() || rawWr.isNotEmpty() || scope != ClassSheetImportScope.BOTH)
+
         aiNorm.forEach { (field, reason) ->
-            if (field == "name" && dbNameActive) return@forEach
+            if (field == "name" && (dbNameActive || row.name.isBlank())) return@forEach
+            if (!expectCont && (field in compKeysSet || field == "CONT")) return@forEach
+            if (!expectWr && field == "WR") return@forEach
+            if (!expectGrand && field == "GRAND") return@forEach
+            if (isSummaryOnlyMode && field in compKeysSet) return@forEach
             if (field !in row.resolvedFields) {
                 warn[field] = reason.ifBlank { "লেখা অস্পষ্ট — যাচাই করুন" }
             }
@@ -242,43 +274,21 @@ object ScanConstraintSolver {
             hard["roll"] = "রোল ${bn(rollNum.toString())} একাধিক সারিতে আছে"
         }
 
-        if (!dbNameActive && row.name.isBlank() && "name" !in row.resolvedFields && "name" !in warn) {
-            warn["name"] = "নাম পড়া যায়নি — প্রয়োজনে লিখে দিন"
-        }
-
-        val subDef = subjectsFor(cls.coerceIn(1, 5), RELIGIONS.first()).find { it.key == subKey }
-        val compSpecs = subDef?.comps ?: emptyList()
-        val compKeys = compSpecs.map { it.key }
-        val hasWritten = (subDef?.written ?: 0) > 0
-        val maxCont = compSpecs.sumOf { it.max }
-        val maxWr = subDef?.written ?: 0
-        val maxGrand = subDef?.max ?: 100
-        val isArt = compKeys == listOf("TOTAL") && !hasWritten
-
-        val rawCont = row.sheetContinuousTotal?.trim().orEmpty()
-        val rawGrand = row.sheetGrandTotal?.trim().orEmpty()
-        val rawWr = row.marksText["WR"]?.trim().orEmpty()
-
-        // রেজাল্ট কার্ড মোড: পাঠ্যবই–ক্লাস টেস্ট নেই, কেবল ধারাবাহিক মোট / সামষ্টিক / মোট আছে
-        val isSummaryOnlyMode = !isArt &&
-            compKeys.all { row.marksText[it]?.trim().isNullOrEmpty() && !aiNorm.containsKey(it) } &&
-            (rawCont.isNotEmpty() || rawGrand.isNotEmpty() || rawWr.isNotEmpty())
-
         val expectedMarkKeys = buildList {
-            compSpecs.forEach { add(it.key to it.max) }
-            if (hasWritten) add("WR" to maxWr)
+            if (expectCont) compSpecs.forEach { add(it.key to it.max) }
+            if (expectWr) add("WR" to maxWr)
         }
 
         val parsedMarks = mutableMapOf<String, Double>()
         var contSum = 0.0
-        var hasAllComps = compKeys.isNotEmpty()
+        var hasAllComps = expectCont && compKeys.isNotEmpty()
         var hasAnyComp = false
 
         expectedMarkKeys.forEach { (cKey, maxVal) ->
             val raw = row.marksText[cKey]?.trim().orEmpty()
             if (raw.isEmpty()) {
                 if (cKey != "WR") hasAllComps = false
-                val isOptionalSummaryComp = isSummaryOnlyMode && cKey in compKeys
+                val isOptionalSummaryComp = isSummaryOnlyMode && cKey in compKeysSet
                 if (!isOptionalSummaryComp && cKey !in row.resolvedFields && cKey !in warn) {
                     warn[cKey] = "মান ফাঁকা — যাচাই করুন"
                 }
@@ -300,8 +310,8 @@ object ScanConstraintSolver {
             }
         }
 
-        // ধারাবাহিক মোট (CONT) ও সর্বমোট (GRAND) পার্সিং
-        val sheetCont = if (rawCont.isEmpty()) null else fromBn(rawCont).toDoubleOrNull()?.also {
+        // ধারাবাহিক মোট (CONT) পার্সিং
+        val sheetCont = if (!expectCont || rawCont.isEmpty()) null else fromBn(rawCont).toDoubleOrNull()?.also {
             if (it < 0.0 || it > maxCont.toDouble()) {
                 hard["CONT"] = "সর্বোচ্চ ${bn(maxCont.toString())}-এর মধ্যে হতে হবে"
             }
@@ -309,11 +319,12 @@ object ScanConstraintSolver {
             hard["CONT"] = "\"$rawCont\" সঠিক সংখ্যা নয়"
             null
         }
-        if (!isArt && rawCont.isEmpty() && "CONT" !in row.resolvedFields && "CONT" !in warn) {
+        if (expectCont && !isArt && rawCont.isEmpty() && "CONT" !in row.resolvedFields && "CONT" !in warn) {
             warn["CONT"] = "ধারাবাহিক মোট ফাঁকা"
         }
 
-        val sheetGrand = if (rawGrand.isEmpty()) null else fromBn(rawGrand).toDoubleOrNull()?.also {
+        // সর্বমোট (GRAND) পার্সিং (কেবল BOTH মোডে)
+        val sheetGrand = if (!expectGrand || rawGrand.isEmpty()) null else fromBn(rawGrand).toDoubleOrNull()?.also {
             if (it < 0.0 || it > maxGrand.toDouble()) {
                 hard["GRAND"] = "সর্বোচ্চ ${bn(maxGrand.toString())}-এর মধ্যে হতে হবে"
             }
@@ -321,13 +332,14 @@ object ScanConstraintSolver {
             hard["GRAND"] = "\"$rawGrand\" সঠিক সংখ্যা নয়"
             null
         }
-        if (rawGrand.isEmpty() && "GRAND" !in row.resolvedFields && "GRAND" !in warn) {
+        if (expectGrand && rawGrand.isEmpty() && "GRAND" !in row.resolvedFields && "GRAND" !in warn) {
             warn["GRAND"] = "মোট নম্বর ফাঁকা"
         }
 
-        val effectiveCont = if (hasAnyComp) contSum else sheetCont
+        val effectiveCont = if (!expectCont) null else if (hasAnyComp) contSum else sheetCont
         val wrVal = parsedMarks["WR"]
         val calcGrand = when {
+            !expectGrand -> null
             isArt -> parsedMarks["TOTAL"] ?: sheetGrand
             hasWritten && effectiveCont != null && wrVal != null -> effectiveCont + wrVal
             !hasWritten && effectiveCont != null -> effectiveCont
@@ -339,7 +351,7 @@ object ScanConstraintSolver {
         val mismatchFields = mutableSetOf<String>()
         val fixes = mutableListOf<ArithFixSuggestion>()
 
-        if ("arithmetic" !in row.resolvedFields) {
+        if ("arithmetic" !in row.resolvedFields && expectCont) {
             if (isArt) {
                 val totalVal = parsedMarks["TOTAL"]
                 if (totalVal != null && sheetGrand != null && abs(totalVal - sheetGrand) > 0.01) {
@@ -350,7 +362,7 @@ object ScanConstraintSolver {
             } else {
                 val contMismatch = hasAllComps && sheetCont != null && abs(contSum - sheetCont) > 0.01
                 val contRefForGrand = sheetCont ?: if (hasAllComps) contSum else null
-                val grandMismatch = if (hasWritten) {
+                val grandMismatch = if (!expectGrand) false else if (hasWritten) {
                     contRefForGrand != null && wrVal != null && sheetGrand != null &&
                         abs((contRefForGrand + wrVal) - sheetGrand) > 0.01
                 } else {
@@ -442,19 +454,22 @@ object ScanConstraintSolver {
         val allFieldKeys = buildList {
             add("roll")
             add("name")
-            addAll(compKeys)
-            if (hasWritten) add("WR")
-            if (!isArt) add("CONT")
-            add("GRAND")
+            if (expectCont) {
+                addAll(compKeys)
+                if (!isArt) add("CONT")
+            }
+            if (expectWr) add("WR")
+            if (expectGrand) add("GRAND")
         }
 
         val confidences = mutableMapOf<String, FieldConfidence>()
         allFieldKeys.forEach { key ->
             val isSuspect = key in hard || key in warn || key in mismatchFields
-            val isOptionalSummaryCell = isSummaryOnlyMode && key in compKeys && !isSuspect
+            val isOptionalCell = (isSummaryOnlyMode && key in compKeysSet) ||
+                (key == "name" && !dbNameActive && row.name.isBlank())
             confidences[key] = when {
                 isSuspect -> FieldConfidence.SUSPECT
-                isOptionalSummaryCell -> FieldConfidence.NEUTRAL
+                isOptionalCell -> FieldConfidence.NEUTRAL
                 else -> FieldConfidence.SURE
             }
         }

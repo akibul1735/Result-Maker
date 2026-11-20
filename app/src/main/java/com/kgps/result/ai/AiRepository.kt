@@ -284,6 +284,13 @@ data class ScannedStudentRow(
     val useScannedNameForExisting: Boolean = false
 )
 
+enum class ClassSheetImportScope {
+    AUTO,
+    BOTH,
+    CONT_ONLY,
+    WR_ONLY
+}
+
 data class ExtractedClassSheet(
     val cls: Int,
     val term: Int,
@@ -291,7 +298,8 @@ data class ExtractedClassSheet(
     val summary: String,
     val warnings: List<String> = emptyList(),
     val rows: List<ScannedStudentRow>,
-    val isSample: Boolean = false
+    val isSample: Boolean = false,
+    val scope: ClassSheetImportScope = ClassSheetImportScope.BOTH
 )
 
 data class RowValidationReport(
@@ -314,8 +322,9 @@ fun validateScannedStudentRow(
     cls: Int,
     subKey: String,
     duplicateRolls: Set<Int>,
-    hasExistingDbName: Boolean = false
-): RowValidationReport = ScanConstraintSolver.validateRow(row, cls, subKey, duplicateRolls, hasExistingDbName)
+    hasExistingDbName: Boolean = false,
+    scope: ClassSheetImportScope = ClassSheetImportScope.BOTH
+): RowValidationReport = ScanConstraintSolver.validateRow(row, cls, subKey, duplicateRolls, hasExistingDbName, scope)
 
 data class AiChatReply(
     val text: String,
@@ -347,7 +356,8 @@ interface AiRepository {
         clsHint: Int?,
         termHint: Int?,
         subKeyHint: String?,
-        teacherNote: String
+        teacherNote: String,
+        importScope: ClassSheetImportScope = ClassSheetImportScope.AUTO
     ): ExtractedClassSheet
 
     suspend fun draftRemark(
@@ -418,7 +428,8 @@ internal fun parseExtractedClassSheetJson(
     json: JSONObject,
     clsHint: Int?,
     termHint: Int?,
-    subKeyHint: String?
+    subKeyHint: String?,
+    requestedScope: ClassSheetImportScope = ClassSheetImportScope.AUTO
 ): ExtractedClassSheet {
     val detectedCls = (clsHint ?: json.optInt("cls", 3)).coerceIn(1, 5)
     val detectedTerm = (termHint ?: json.optInt("term", 1)).coerceIn(1, 3)
@@ -429,14 +440,29 @@ internal fun parseExtractedClassSheetJson(
         rawSub in validSubs -> rawSub
         else -> validSubs.first()
     }
+    val activeSub = subjectsFor(detectedCls, RELIGIONS.first()).find { it.key == detectedSub }
+    val hasWritten = (activeSub?.written ?: 0) > 0
 
     val warningsArr = json.optJSONArray("warnings") ?: JSONArray()
     val warnings = (0 until warningsArr.length()).mapNotNull { i ->
         warningsArr.optString(i)?.trim()?.takeIf { it.isNotBlank() }
+    }.toMutableList()
+
+    val metaFound = json.optJSONObject("metaFound")
+    val missingMeta = mutableListOf<String>()
+    if (clsHint == null && metaFound != null && !metaFound.optBoolean("cls", true)) missingMeta.add("শ্রেণি")
+    if (termHint == null && metaFound != null && !metaFound.optBoolean("term", true)) missingMeta.add("প্রান্তিক")
+    if (subKeyHint.isNullOrBlank() && (metaFound != null && !metaFound.optBoolean("sub", true) || rawSub !in validSubs)) {
+        missingMeta.add("বিষয়")
+    }
+    if (missingMeta.isNotEmpty()) {
+        warnings.add(
+            "ছবির উপরে ${missingMeta.joinToString(", ")} স্পষ্ট লেখা না থাকায় নিচ থেকে সঠিকটি যাচাই করে নিন।"
+        )
     }
 
     val rowsArr = json.optJSONArray("rows") ?: JSONArray()
-    val parsedRows = (0 until rowsArr.length()).mapNotNull { idx ->
+    val rawParsed = (0 until rowsArr.length()).mapNotNull { idx ->
         val obj = rowsArr.optJSONObject(idx) ?: return@mapNotNull null
         val rollStr = fromBn(obj.optString("roll", "").trim())
         val nameStr = obj.optString("name", "").trim()
@@ -469,7 +495,7 @@ internal fun parseExtractedClassSheetJson(
             .takeIf { it.isNotEmpty() && !it.equals("null", ignoreCase = true) }
             ?.let { fromBn(it) }
 
-        val rawRow = ScannedStudentRow(
+        ScannedStudentRow(
             id = UUID.randomUUID().toString(),
             selected = true,
             rollText = rollStr,
@@ -480,7 +506,43 @@ internal fun parseExtractedClassSheetJson(
             rawNotes = obj.optString("rawNotes", "").trim(),
             aiIssues = aiIssues
         )
-        ScanConstraintSolver.reconcileInterdependencies(rawRow, detectedCls, detectedSub)
+    }
+
+    val compKeysSet = setOf("TB", "ACT", "LANG", "CT")
+    val sheetHasAnyName = rawParsed.any { it.name.isNotBlank() }
+    val sheetHasAnyBreakdown = rawParsed.any { r -> compKeysSet.any { !r.marksText[it].isNullOrBlank() } }
+    val sheetHasAnyCont = sheetHasAnyBreakdown || rawParsed.any { !it.sheetContinuousTotal.isNullOrBlank() }
+    val sheetHasAnyWr = rawParsed.any { !it.marksText["WR"].isNullOrBlank() }
+    val sheetHasAnyGrand = rawParsed.any { !it.sheetGrandTotal.isNullOrBlank() }
+
+    val resolvedScope = when (requestedScope) {
+        ClassSheetImportScope.CONT_ONLY -> ClassSheetImportScope.CONT_ONLY
+        ClassSheetImportScope.WR_ONLY -> if (hasWritten) ClassSheetImportScope.WR_ONLY else ClassSheetImportScope.BOTH
+        ClassSheetImportScope.BOTH -> ClassSheetImportScope.BOTH
+        ClassSheetImportScope.AUTO -> when {
+            hasWritten && sheetHasAnyCont && !sheetHasAnyWr -> ClassSheetImportScope.CONT_ONLY
+            hasWritten && sheetHasAnyWr && !sheetHasAnyCont -> ClassSheetImportScope.WR_ONLY
+            else -> ClassSheetImportScope.BOTH
+        }
+    }
+
+    val parsedRows = rawParsed.map { row ->
+        val cleanedIssues = row.aiIssues.filterKeys { key ->
+            when {
+                key in compKeysSet && !sheetHasAnyBreakdown && row.marksText[key].isNullOrBlank() -> false
+                key == "name" && !sheetHasAnyName && row.name.isBlank() -> false
+                key == "GRAND" && !sheetHasAnyGrand && row.sheetGrandTotal.isNullOrBlank() -> false
+                resolvedScope == ClassSheetImportScope.CONT_ONLY && (key == "WR" || key == "GRAND") -> false
+                resolvedScope == ClassSheetImportScope.WR_ONLY && (key in compKeysSet || key == "CONT" || key == "GRAND") -> false
+                else -> true
+            }
+        }
+        ScanConstraintSolver.reconcileInterdependencies(
+            row.copy(aiIssues = cleanedIssues),
+            detectedCls,
+            detectedSub,
+            resolvedScope
+        )
     }
 
     return ExtractedClassSheet(
@@ -488,11 +550,17 @@ internal fun parseExtractedClassSheetJson(
         term = detectedTerm,
         subKey = detectedSub,
         summary = json.optString("summary", "").ifBlank {
-            "${CLSN[detectedCls - 1]} শ্রেণি · ${bn(detectedTerm.toString())} প্রান্তিক — ${bn(parsedRows.size.toString())} জন শিক্ষার্থী শনাক্ত হয়েছে।"
+            val scopeNote = when (resolvedScope) {
+                ClassSheetImportScope.CONT_ONLY -> " · শুধু ধারাবাহিক"
+                ClassSheetImportScope.WR_ONLY -> " · শুধু সামষ্টিক"
+                else -> ""
+            }
+            "${CLSN[detectedCls - 1]} শ্রেণি · ${bn(detectedTerm.toString())} প্রান্তিক$scopeNote — ${bn(parsedRows.size.toString())} জন শনাক্ত।"
         },
-        warnings = warnings,
+        warnings = warnings.distinct(),
         rows = parsedRows,
-        isSample = false
+        isSample = false,
+        scope = resolvedScope
     )
 }
 
@@ -836,7 +904,8 @@ class DirectGeminiAiRepository(
         clsHint: Int?,
         termHint: Int?,
         subKeyHint: String?,
-        teacherNote: String
+        teacherNote: String,
+        importScope: ClassSheetImportScope
     ): ExtractedClassSheet {
         val apiKey = requireApiKey()
         val modelId = resolveModelId(null)
@@ -844,7 +913,7 @@ class DirectGeminiAiRepository(
             encodeFullQualityVisionImage(bitmap)
         }
         val cleanNote = teacherNote.trim()
-        val cacheKey = "$modelId|${encoded.sha256Hex}|$clsHint|$termHint|$subKeyHint|$cleanNote"
+        val cacheKey = "$modelId|${encoded.sha256Hex}|$clsHint|$termHint|$subKeyHint|${importScope.name}|$cleanNote"
         synchronized(cacheLock) {
             classSheetCache[cacheKey]?.let { return it }
         }
@@ -862,24 +931,47 @@ class DirectGeminiAiRepository(
             "${s.key}(${s.bn}):$compDesc$wrDesc"
         }
 
+        val scopeRule = when (importScope) {
+            ClassSheetImportScope.CONT_ONLY ->
+                "4. এই ছবিতে কেবল রোল (ও থাকলে নাম) এবং ধারাবাহিক নম্বর (`sheetContinuousTotal` অথবা থাকলে `TB`/`ACT`/`LANG`/`CT`) আছে — সামষ্টিক (`WR`) ও `sheetGrandTotal` ফাঁকা রাখুন।"
+            ClassSheetImportScope.WR_ONLY ->
+                "4. এই ছবিতে কেবল রোল (ও থাকলে নাম) এবং সামষ্টিক/লিখিত নম্বর (`WR`) আছে — `TB`/`ACT`/`LANG`/`CT`, `sheetContinuousTotal` ও `sheetGrandTotal` ফাঁকা রাখুন।"
+            ClassSheetImportScope.BOTH ->
+                "4. ছবিতে থাকা ধারাবাহিক (`TB`,`ACT`,`LANG`,`CT` অথবা `sheetContinuousTotal`), সামষ্টিক (`WR`) ও থাকলে মোট (`sheetGrandTotal`) পড়ুন।"
+            ClassSheetImportScope.AUTO ->
+                """
+                4. ছবির কলাম অনুযায়ী যেকোনো ফরম্যাট বুঝুন:
+                   (ক) পূর্ণাঙ্গ: নাম + TB,ACT,LANG,CT + ধারাবাহিক মোট + সামষ্টিক + মোট
+                   (খ) সংক্ষিপ্ত উভয়: ধারাবাহিক মোট + সামষ্টিক (+ থাকলে মোট)
+                   (গ) শুধু ধারাবাহিক: কেবল ধারাবাহিক মোট (বা TB,ACT,LANG,CT)
+                   (ঘ) শুধু সামষ্টিক: কেবল সামষ্টিক (`WR`)
+                """.trimIndent()
+        }
+
         val prompt = """
-            বাংলাদেশ প্রাথমিক শ্রেণি-নম্বরপত্র OCR। সব সারির রোল, নাম ও নম্বর পড়ে শুধু JSON দিন।
-            ইঙ্গিত: শ্রেণি=${clsHint ?: "শনাক্ত(1-5)"}, প্রান্তিক=${termHint ?: "শনাক্ত(1-3)"}, বিষয়=${subKeyHint ?: "শনাক্ত"}, নোট=${cleanNote.ifBlank { "নেই" }}
+            বাংলাদেশ প্রাথমিক শ্রেণি-নম্বরপত্র OCR। সব সারির রোল ও থাকা নম্বর পড়ে শুধু JSON দিন।
+            ইঙ্গিত: শ্রেণি=${clsHint ?: "ছবির_উপরে_থেকে_শনাক্ত(1-5)"}, প্রান্তিক=${termHint ?: "ছবির_উপরে_থেকে_শনাক্ত(1-3)"}, বিষয়=${subKeyHint ?: "ছবির_উপরে_থেকে_শনাক্ত"}, নোট=${cleanNote.ifBlank { "নেই" }}
             কাঠামো: $subsInfo
             নিয়ম:
-            1. সব সংখ্যা ইংরেজি অঙ্কে (০৭->"7"); নাম বাংলায়।
+            1. সব সংখ্যা ইংরেজি অঙ্কে (০৭->"7"); নাম থাকলে বাংলায়, না থাকলে ""।
             2. CT ঘরে "০৬+০৭=১৩/২=০৭" থাকলে "=" পরের গড় মানটি ("7") `CT`-তে এবং `rawNotes`-এ সংক্ষেপে লিখুন।
             3. `A`/`অনু` থাকলে "0" ও `rawNotes`-এ "অনুপস্থিত (A)"; ফাঁকা ঘর ""।
-            4. "ধারাবাহিক মোট" -> `sheetContinuousTotal`, "সামষ্টিক" -> `WR`, "সর্বমোট/মোট" -> `sheetGrandTotal` (এগুলো সবসময় খাতা থেকে পড়ুন)।
-            5. রেজাল্ট কার্ড/ছবিতে কেবল ধারাবাহিক মোট, সামষ্টিক এবং মোট থাকলে (`TB`,`ACT`,`LANG`,`CT` আলাদা না থাকলে) অনুমান করে ভাগ করবেন না — `TB`,`ACT`,`LANG`,`CT` ফাঁকা ("") রেখে কেবল `sheetContinuousTotal`, `WR`, `sheetGrandTotal` দিন।
-            6. কেবল স্পষ্ট ও নিশ্চিত মানগুলো স্বাভাবিক রাখুন; অস্পষ্ট/কাটা-ছেঁড়া বা অনুমান করা মান হলে `uncertainFields`-এ কী ("roll","name","TB","ACT","LANG","CT","WR","TOTAL","CONT","GRAND") দিয়ে বাংলায় কারণ লিখুন; পড়া না গেলে "" দিন।
-            JSON: {"cls":${clsHint ?: 3},"term":${termHint ?: 1},"subKey":"${subKeyHint ?: "MATH"}","summary":"","warnings":[],"rows":[{"roll":"1","name":"","marks":{"TB":"","ACT":"","LANG":"","CT":"","WR":""},"sheetContinuousTotal":"","sheetGrandTotal":"","rawNotes":"","uncertainFields":{}}]}
+            $scopeRule
+            5. যে কলামগুলো ছবিতে নেই (`name`, `TB`, `ACT`, `LANG`, `CT`, `sheetContinuousTotal`, `WR`, `sheetGrandTotal`) সেগুলো কখনোই অনুমান করে ভাগ বা হিসাব করবেন না — ফাঁকা (`""`) রাখুন এবং অনুপস্থিত কলামের জন্য `uncertainFields`-এ সতর্কতা দেবেন না।
+            6. ছবিতে আসলে কোনো সংখ্যা/লেখা অস্পষ্ট হলে তবেই `uncertainFields`-এ কারণ দিন। `metaFound`-এ ছবির উপরে শ্রেণি/প্রান্তিক/বিষয় লেখা পেলে true দিন, না পেলে false।
+            JSON: {"cls":${clsHint ?: 3},"term":${termHint ?: 1},"subKey":"${subKeyHint ?: "MATH"}","metaFound":{"cls":${clsHint != null},"term":${termHint != null},"sub":${!subKeyHint.isNullOrBlank()}},"summary":"","warnings":[],"rows":[{"roll":"1","name":"","marks":{"TB":"","ACT":"","LANG":"","CT":"","WR":""},"sheetContinuousTotal":"","sheetGrandTotal":"","rawNotes":"","uncertainFields":{}}]}
         """.trimIndent()
 
         val payload = buildVisionJsonPayload(encoded.base64, prompt, maxOutputTokens = 4096)
         val (raw, usedModel) = callGenerateContentResilient(apiKey, modelId, payload)
         return try {
-            val parsed = parseExtractedClassSheetJson(JSONObject(stripJsonFences(raw)), clsHint, termHint, subKeyHint)
+            val parsed = parseExtractedClassSheetJson(
+                JSONObject(stripJsonFences(raw)),
+                clsHint,
+                termHint,
+                subKeyHint,
+                importScope
+            )
             val withFallbackWarning = if (usedModel != modelId) {
                 parsed.copy(
                     warnings = parsed.warnings +
@@ -1308,52 +1400,67 @@ class PlaceholderAiRepository : AiRepository {
         clsHint: Int?,
         termHint: Int?,
         subKeyHint: String?,
-        teacherNote: String
+        teacherNote: String,
+        importScope: ClassSheetImportScope
     ): ExtractedClassSheet {
         delay(500)
         val cls = (clsHint ?: 3).coerceIn(1, 5)
         val term = (termHint ?: 1).coerceIn(1, 3)
         val sub = subKeyHint ?: "MATH"
-        return ExtractedClassSheet(
-            cls = cls,
-            term = term,
-            subKey = sub,
-            summary = "[নমুনা প্রিভিউ] অস্পষ্ট ঘরগুলো কীভাবে হাইলাইট হয় ও ঠিক করতে হয় তা দেখার জন্য নমুনা তালিকা।",
-            warnings = listOf("এটি একটি নমুনা স্ক্যান — প্রকৃত ছবির জন্য 'স্ক্যান ও প্রিভিউ দেখুন' ব্যবহার করুন।"),
-            rows = listOf(
+        val hasWritten = (subjectsFor(cls, RELIGIONS.first()).find { it.key == sub }?.written ?: 0) > 0
+        val resolvedScope = when (importScope) {
+            ClassSheetImportScope.CONT_ONLY -> ClassSheetImportScope.CONT_ONLY
+            ClassSheetImportScope.WR_ONLY -> if (hasWritten) ClassSheetImportScope.WR_ONLY else ClassSheetImportScope.BOTH
+            else -> ClassSheetImportScope.BOTH
+        }
+        val sampleRows = when (resolvedScope) {
+            ClassSheetImportScope.CONT_ONLY -> listOf(
+                ScannedStudentRow(rollText = "1", name = "", marksText = emptyMap(), sheetContinuousTotal = "26"),
+                ScannedStudentRow(rollText = "2", name = "", marksText = emptyMap(), sheetContinuousTotal = "24", aiIssues = mapOf("CONT" to "লেখা কিছুটা অস্পষ্ট")),
+                ScannedStudentRow(rollText = "3", name = "", marksText = emptyMap(), sheetContinuousTotal = "28")
+            )
+            ClassSheetImportScope.WR_ONLY -> listOf(
+                ScannedStudentRow(rollText = "1", name = "", marksText = mapOf("WR" to "58")),
+                ScannedStudentRow(rollText = "2", name = "", marksText = mapOf("WR" to "46"), aiIssues = mapOf("WR" to "সামষ্টিক নম্বর কিছুটা অস্পষ্ট")),
+                ScannedStudentRow(rollText = "3", name = "", marksText = mapOf("WR" to "62"))
+            )
+            else -> listOf(
                 ScannedStudentRow(
                     rollText = "1",
                     name = "আরিয়ান ইসলাম খালিদ",
-                    marksText = mapOf("TB" to "9", "ACT" to "5", "LANG" to "5", "CT" to "7", "WR" to "50"),
+                    marksText = mapOf("WR" to "58"),
                     sheetContinuousTotal = "26",
-                    sheetGrandTotal = "76",
-                    rawNotes = "CT: ০৬+০৭=১৩/২=০৭"
+                    rawNotes = "রোল + ধারাবাহিক + সামষ্টিক"
                 ),
                 ScannedStudentRow(
                     rollText = "2",
-                    name = "মোঃ ইয়ামিন মোল্যা",
-                    marksText = mapOf("TB" to "", "ACT" to "5", "LANG" to "5", "CT" to "7", "WR" to ""),
-                    sheetContinuousTotal = "26",
-                    sheetGrandTotal = "72",
-                    aiIssues = mapOf("TB" to "লেখা কিছুটা অস্পষ্ট", "WR" to "অস্পষ্ট")
+                    name = "",
+                    marksText = mapOf("WR" to "46"),
+                    sheetContinuousTotal = "24",
+                    aiIssues = mapOf("WR" to "সামষ্টিক নম্বর কিছুটা অস্পষ্ট")
                 ),
                 ScannedStudentRow(
                     rollText = "3",
                     name = "খাদিজা তুল কুবরা",
                     marksText = mapOf("TB" to "7", "ACT" to "5", "LANG" to "5", "CT" to "5", "WR" to "34"),
                     sheetContinuousTotal = "25",
-                    sheetGrandTotal = "56",
-                    aiIssues = mapOf("name" to "বানান যাচাই করুন")
-                ),
-                ScannedStudentRow(
-                    rollText = "4",
-                    name = "মোঃ সোয়াইব মোল্যা",
-                    marksText = mapOf("TB" to "7", "ACT" to "4", "LANG" to "3", "CT" to "5", "WR" to ""),
-                    sheetContinuousTotal = "19",
-                    rawNotes = "সামষ্টিক ঘর খাতায় ফাঁকা"
+                    sheetGrandTotal = "56"
                 )
-            ).map { ScanConstraintSolver.reconcileInterdependencies(it, cls, sub) },
-            isSample = true
+            )
+        }
+        return ExtractedClassSheet(
+            cls = cls,
+            term = term,
+            subKey = sub,
+            summary = when (resolvedScope) {
+                ClassSheetImportScope.CONT_ONLY -> "[নমুনা] শুধু ধারাবাহিক মোড (বিদ্যমান সামষ্টিক অক্ষত থাকবে)।"
+                ClassSheetImportScope.WR_ONLY -> "[নমুনা] শুধু সামষ্টিক মোড (বিদ্যমান ধারাবাহিক অক্ষত থাকবে)।"
+                else -> "[নমুনা] পূর্ণাঙ্গ ও সংক্ষিপ্ত উভয় ফরম্যাটের নমুনা প্রিভিউ।"
+            },
+            warnings = listOf("এটি একটি নমুনা স্ক্যান — প্রকৃত ছবির জন্য 'স্ক্যান ও প্রিভিউ' ব্যবহার করুন।"),
+            rows = sampleRows.map { ScanConstraintSolver.reconcileInterdependencies(it, cls, sub, resolvedScope) },
+            isSample = true,
+            scope = resolvedScope
         )
     }
 

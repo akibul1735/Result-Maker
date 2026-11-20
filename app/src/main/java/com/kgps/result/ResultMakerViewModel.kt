@@ -15,6 +15,7 @@ import com.google.firebase.firestore.FirebaseFirestoreException
 import com.kgps.result.ai.AiChatMessage
 import com.kgps.result.ai.AiModelMode
 import com.kgps.result.ai.AiRepository
+import com.kgps.result.ai.ClassSheetImportScope
 import com.kgps.result.ai.DirectGeminiAiRepository
 import com.kgps.result.ai.DiscoveredGeminiModel
 import com.kgps.result.ai.ExtractedClassSheet
@@ -1751,14 +1752,17 @@ class ResultMakerViewModel(
         clsHint: Int?,
         termHint: Int?,
         subKeyHint: String?,
-        teacherNote: String
+        teacherNote: String,
+        importScope: ClassSheetImportScope = ClassSheetImportScope.AUTO
     ) {
         val bmp = _aiState.value.selectedImageBitmap ?: return
         if (_aiState.value.analyzingImage) return
         _aiState.update { it.copy(analyzingImage = true, analysisError = null, analysisResult = null) }
         viewModelScope.launch {
             try {
-                val result = aiRepository.analyzeClassSheetImage(bmp, clsHint, termHint, subKeyHint, teacherNote)
+                val result = aiRepository.analyzeClassSheetImage(
+                    bmp, clsHint, termHint, subKeyHint, teacherNote, importScope
+                )
                 _aiState.update { it.copy(analyzingImage = false, classSheetResult = result) }
             } catch (e: CancellationException) {
                 throw e
@@ -1773,13 +1777,20 @@ class ResultMakerViewModel(
         }
     }
 
-    fun loadSampleClassSheetPreview(clsHint: Int?, termHint: Int?, subKeyHint: String?) {
+    fun loadSampleClassSheetPreview(
+        clsHint: Int?,
+        termHint: Int?,
+        subKeyHint: String?,
+        importScope: ClassSheetImportScope = ClassSheetImportScope.AUTO
+    ) {
         if (_aiState.value.analyzingImage) return
         _aiState.update { it.copy(analyzingImage = true, analysisError = null, analysisResult = null) }
         viewModelScope.launch {
             try {
                 val bmp = _aiState.value.selectedImageBitmap ?: Bitmap.createBitmap(1, 1, Bitmap.Config.ARGB_8888)
-                val result = sampleAiRepository.analyzeClassSheetImage(bmp, clsHint, termHint, subKeyHint, "")
+                val result = sampleAiRepository.analyzeClassSheetImage(
+                    bmp, clsHint, termHint, subKeyHint, "", importScope
+                )
                 _aiState.update { it.copy(analyzingImage = false, classSheetResult = result) }
             } catch (e: CancellationException) {
                 throw e
@@ -1794,7 +1805,45 @@ class ResultMakerViewModel(
     fun updateClassSheetMeta(cls: Int, term: Int, subKey: String) {
         _aiState.update { st ->
             val current = st.classSheetResult ?: return@update st
-            st.copy(classSheetResult = current.copy(cls = cls.coerceIn(1, 5), term = term.coerceIn(1, 3), subKey = subKey))
+            val safeCls = cls.coerceIn(1, 5)
+            val safeTerm = term.coerceIn(1, 3)
+            val hasWritten = (subjectsFor(safeCls, RELIGIONS.first()).find { it.key == subKey }?.written ?: 0) > 0
+            val nextScope = if (!hasWritten && current.scope == ClassSheetImportScope.WR_ONLY) {
+                ClassSheetImportScope.BOTH
+            } else {
+                current.scope
+            }
+            val nextRows = if (safeCls != current.cls || subKey != current.subKey || nextScope != current.scope) {
+                current.rows.map { r -> ScanConstraintSolver.reconcileInterdependencies(r, safeCls, subKey, nextScope) }
+            } else {
+                current.rows
+            }
+            st.copy(
+                classSheetResult = current.copy(
+                    cls = safeCls,
+                    term = safeTerm,
+                    subKey = subKey,
+                    scope = nextScope,
+                    rows = nextRows
+                )
+            )
+        }
+    }
+
+    fun updateClassSheetScope(newScope: ClassSheetImportScope) {
+        _aiState.update { st ->
+            val current = st.classSheetResult ?: return@update st
+            val hasWritten = (subjectsFor(current.cls.coerceIn(1, 5), RELIGIONS.first())
+                .find { it.key == current.subKey }?.written ?: 0) > 0
+            val safeScope = when (newScope) {
+                ClassSheetImportScope.WR_ONLY -> if (hasWritten) ClassSheetImportScope.WR_ONLY else ClassSheetImportScope.BOTH
+                ClassSheetImportScope.AUTO -> ClassSheetImportScope.BOTH
+                else -> newScope
+            }
+            val nextRows = current.rows.map { r ->
+                ScanConstraintSolver.reconcileInterdependencies(r, current.cls, current.subKey, safeScope)
+            }
+            st.copy(classSheetResult = current.copy(scope = safeScope, rows = nextRows))
         }
     }
 
@@ -1896,7 +1945,7 @@ class ResultMakerViewModel(
                         useScannedNameForExisting = nextUseScannedName
                     )
                     if (editedKey != null) {
-                        ScanConstraintSolver.reconcileInterdependencies(updatedRow, current.cls, current.subKey)
+                        ScanConstraintSolver.reconcileInterdependencies(updatedRow, current.cls, current.subKey, current.scope)
                     } else {
                         updatedRow
                     }
@@ -1974,7 +2023,7 @@ class ResultMakerViewModel(
         val hasHardError = selectedRows.any { row ->
             val rInt = fromBn(row.rollText.trim()).toIntOrNull()
             val hasDbName = rInt != null && prevList.any { it.cls == cls && it.roll == rInt && it.name.isNotBlank() }
-            validateScannedStudentRow(row, cls, subKey, duplicates, hasDbName).hasHardError
+            validateScannedStudentRow(row, cls, subKey, duplicates, hasDbName, sheet.scope).hasHardError
         }
         if (hasHardError) {
             showMessage("লাল চিহ্নিত ত্রুটিপূর্ণ ঘরগুলো ঠিক করে আবার সংরক্ষণ করুন")
@@ -1985,6 +2034,9 @@ class ResultMakerViewModel(
         var addedCount = 0
         var updatedCount = 0
         var skippedNoPerm = 0
+
+        val saveContinuous = sheet.scope != ClassSheetImportScope.WR_ONLY
+        val saveWritten = sheet.scope != ClassSheetImportScope.CONT_ONLY
 
         selectedRows.forEach { row ->
             val roll = fromBn(row.rollText.trim()).toIntOrNull() ?: return@forEach
@@ -2001,37 +2053,39 @@ class ResultMakerViewModel(
             val isArt = compKeys == listOf("TOTAL") && !hasWritten
             val hasBreakdown = compKeys.any { !row.marksText[it]?.trim().isNullOrEmpty() }
 
-            if (isArt) {
-                val totalRaw = row.marksText["TOTAL"]?.trim().takeIf { !it.isNullOrEmpty() }
-                    ?: row.sheetGrandTotal?.trim().orEmpty()
-                val fullKey = mk(subKey, term, "TOTAL")
-                if (totalRaw.isEmpty()) nextM.remove(fullKey)
-                else fromBn(totalRaw).toDoubleOrNull()?.let { nextM[fullKey] = it }
-            } else if (hasBreakdown) {
-                nextM.remove(mk(subKey, term, "CONT"))
-                compKeys.forEach { compKey ->
-                    val raw = row.marksText[compKey]?.trim().orEmpty()
-                    val fullKey = mk(subKey, term, compKey)
-                    if (raw.isEmpty()) {
-                        nextM.remove(fullKey)
-                    } else {
-                        fromBn(raw).toDoubleOrNull()?.let { d -> nextM[fullKey] = d }
+            if (saveContinuous) {
+                if (isArt) {
+                    val totalRaw = row.marksText["TOTAL"]?.trim().takeIf { !it.isNullOrEmpty() }
+                        ?: row.sheetGrandTotal?.trim().orEmpty()
+                    val fullKey = mk(subKey, term, "TOTAL")
+                    if (totalRaw.isEmpty()) nextM.remove(fullKey)
+                    else fromBn(totalRaw).toDoubleOrNull()?.let { nextM[fullKey] = it }
+                } else if (hasBreakdown) {
+                    nextM.remove(mk(subKey, term, "CONT"))
+                    compKeys.forEach { compKey ->
+                        val raw = row.marksText[compKey]?.trim().orEmpty()
+                        val fullKey = mk(subKey, term, compKey)
+                        if (raw.isEmpty()) {
+                            nextM.remove(fullKey)
+                        } else {
+                            fromBn(raw).toDoubleOrNull()?.let { d -> nextM[fullKey] = d }
+                        }
                     }
-                }
-            } else {
-                // রেজাল্ট কার্ড মোড (কেবল ধারাবাহিক মোট, সামষ্টিক ও মোট দিয়ে সংরক্ষণ)
-                compKeys.forEach { nextM.remove(mk(subKey, term, it)) }
-                val rawCont = row.sheetContinuousTotal?.trim().takeIf { !it.isNullOrEmpty() }
-                    ?: if (!hasWritten) row.sheetGrandTotal?.trim().orEmpty() else ""
-                val contKey = mk(subKey, term, "CONT")
-                if (rawCont.isEmpty()) {
-                    nextM.remove(contKey)
                 } else {
-                    fromBn(rawCont).toDoubleOrNull()?.let { d -> nextM[contKey] = d }
+                    // রেজাল্ট কার্ড / শুধু ধারাবাহিক মোট মোড
+                    compKeys.forEach { nextM.remove(mk(subKey, term, it)) }
+                    val rawCont = row.sheetContinuousTotal?.trim().takeIf { !it.isNullOrEmpty() }
+                        ?: if (!hasWritten) row.sheetGrandTotal?.trim().orEmpty() else ""
+                    val contKey = mk(subKey, term, "CONT")
+                    if (rawCont.isEmpty()) {
+                        nextM.remove(contKey)
+                    } else {
+                        fromBn(rawCont).toDoubleOrNull()?.let { d -> nextM[contKey] = d }
+                    }
                 }
             }
 
-            if (hasWritten) {
+            if (hasWritten && saveWritten) {
                 val rawWr = row.marksText["WR"]?.trim().orEmpty()
                 val wrKey = mk(subKey, term, "WR")
                 if (rawWr.isEmpty()) {
