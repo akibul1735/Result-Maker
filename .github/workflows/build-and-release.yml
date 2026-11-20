@@ -74,26 +74,32 @@ jobs:
         with:
           gradle-version: '8.11.1'
 
-      - name: Restore Firebase config from GitHub Secret (if not committed)
+      - name: Restore canonical Firebase config from GitHub Secret (fallback to committed)
         id: gs_prep
         env:
           GOOGLE_SERVICES_JSON_BASE64: ${{ secrets.GOOGLE_SERVICES_JSON_BASE64 }}
           GOOGLE_SERVICES_JSON: ${{ secrets.GOOGLE_SERVICES_JSON }}
+          FIRESTORE_DATABASE_ID: ${{ secrets.FIRESTORE_DATABASE_ID }}
         run: |
-          if [ -s app/google-services.json ]; then
-            echo "from_secret=false" >> "$GITHUB_OUTPUT"
-            echo "Using committed app/google-services.json."
-          elif [ -n "$GOOGLE_SERVICES_JSON_BASE64" ]; then
+          if [ -n "$GOOGLE_SERVICES_JSON_BASE64" ]; then
             printf '%s' "$GOOGLE_SERVICES_JSON_BASE64" | tr -d '[:space:]' | base64 -d > app/google-services.json
             echo "from_secret=true" >> "$GITHUB_OUTPUT"
-            echo "Restored app/google-services.json from GOOGLE_SERVICES_JSON_BASE64 secret."
+            echo "Restored canonical app/google-services.json from GOOGLE_SERVICES_JSON_BASE64 secret."
           elif [ -n "$GOOGLE_SERVICES_JSON" ]; then
             printf '%s' "$GOOGLE_SERVICES_JSON" > app/google-services.json
             echo "from_secret=true" >> "$GITHUB_OUTPUT"
-            echo "Restored app/google-services.json from GOOGLE_SERVICES_JSON secret."
+            echo "Restored canonical app/google-services.json from GOOGLE_SERVICES_JSON secret."
+          elif [ -s app/google-services.json ]; then
+            echo "from_secret=false" >> "$GITHUB_OUTPUT"
+            echo "Using committed app/google-services.json."
           else
             echo "from_secret=false" >> "$GITHUB_OUTPUT"
-            echo "No committed app/google-services.json and no GOOGLE_SERVICES_JSON(_BASE64) secret found."
+            echo "No GOOGLE_SERVICES_JSON(_BASE64) secret and no committed app/google-services.json found."
+          fi
+
+          if [ -n "$FIRESTORE_DATABASE_ID" ]; then
+            python3 -c 'import os, xml.sax.saxutils as sx; db_id = os.environ["FIRESTORE_DATABASE_ID"].strip(); open("app/src/main/res/values/firebase_applet_config.xml", "w", encoding="utf-8").write(f"<?xml version=\"1.0\" encoding=\"utf-8\" standalone=\"no\"?>\n<resources>\n    <string name=\"firestore_database_id\" translatable=\"false\">{sx.escape(db_id)}</string>\n</resources>\n")'
+            echo "Applied FIRESTORE_DATABASE_ID secret to firebase_applet_config.xml."
           fi
 
       - name: Pre-flight environment & config check
@@ -136,11 +142,19 @@ jobs:
               else
                 echo "google-services.json Web OAuth client (client_type 3): MISSING (Google Sign-In requires enabling Google provider in Firebase Auth)"
               fi
+              if command -v python3 >/dev/null 2>&1; then
+                PROJECT_ID=$(python3 -c 'import json; d=json.load(open("app/google-services.json")); print(d.get("project_info", {}).get("project_id", "unknown"))' 2>/dev/null || echo "unknown")
+                echo "google-services.json project_id: $PROJECT_ID"
+              fi
             else
               echo "app/google-services.json: MISSING"
             fi
             if [ -s app/src/main/res/values/firebase_applet_config.xml ]; then
               echo "firebase_applet_config.xml: PRESENT"
+              if command -v python3 >/dev/null 2>&1; then
+                DB_ID=$(python3 -c 'import xml.etree.ElementTree as ET; r=ET.parse("app/src/main/res/values/firebase_applet_config.xml").getroot(); print(next((e.text for e in r.findall("string") if e.attrib.get("name")=="firestore_database_id"), "unknown"))' 2>/dev/null || echo "unknown")
+                echo "firestore_database_id: $DB_ID"
+              fi
             else
               echo "firebase_applet_config.xml: MISSING"
             fi
