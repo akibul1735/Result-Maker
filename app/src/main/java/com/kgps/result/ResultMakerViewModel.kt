@@ -30,6 +30,7 @@ import com.kgps.result.backup.BackupScheduleConfig
 import com.kgps.result.backup.BackupScheduleMode
 import com.kgps.result.backup.BackupSystemKind
 import com.kgps.result.backup.BackupWorkScheduler
+import com.kgps.result.backup.CsvBackupFormat
 import com.kgps.result.backup.DriveAuthOutcome
 import com.kgps.result.backup.DriveBackupFile
 import com.kgps.result.backup.GoogleDriveBackupClient
@@ -1382,6 +1383,11 @@ class ResultMakerViewModel(
         }
     }
 
+    fun setCsvBackupFormat(format: CsvBackupFormat) {
+        autoBackupManager.setCsvBackupFormat(format)
+        showMessage("অটো ব্যাকআপ ফরম্যাট: ${format.labelBn}")
+    }
+
     fun updateBackupSchedule(kind: BackupSystemKind, config: BackupScheduleConfig) {
         when (kind) {
             BackupSystemKind.LOCAL -> autoBackupManager.setLocalSchedule(config)
@@ -1444,19 +1450,25 @@ class ResultMakerViewModel(
         }
     }
 
-    fun backupCsvNow() {
+    fun backupCsvNow(formatOverride: CsvBackupFormat? = null) {
         val school = activeSchool.value ?: return
+        val usedFormat = formatOverride ?: autoBackupManager.status.value.csvBackupFormat
         viewModelScope.launch {
             autoBackupManager.runCsvBackupIfNeeded(
                 schoolId = school.id,
                 schoolCode = school.joinCode,
                 students = students.value,
                 settings = settings.value,
-                force = true
+                force = true,
+                formatOverride = usedFormat
             ).onSuccess {
-                showMessage("CSV ব্যাকআপ সম্পন্ন হয়েছে")
+                val msg = when (usedFormat) {
+                    CsvBackupFormat.CSV -> "১টি CSV ফাইলে সকল শ্রেণির এক্সপোর্ট সম্পন্ন হয়েছে (Downloads/ResultMaker)"
+                    CsvBackupFormat.EXCEL -> "১টি Excel (.xlsx) ফাইলে আলাদা আলাদা শিটে এক্সপোর্ট সম্পন্ন হয়েছে"
+                }
+                showMessage(msg)
             }.onFailure { e ->
-                showMessage(e.localizedMessage ?: "CSV ব্যাকআপ ব্যর্থ")
+                showMessage(e.localizedMessage ?: "এক্সপোর্ট ব্যর্থ হয়েছে")
             }
         }
     }

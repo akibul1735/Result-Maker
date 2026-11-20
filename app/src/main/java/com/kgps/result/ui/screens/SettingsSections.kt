@@ -85,6 +85,7 @@ import com.kgps.result.backup.BackupScheduleCalculator
 import com.kgps.result.backup.BackupScheduleConfig
 import com.kgps.result.backup.BackupScheduleMode
 import com.kgps.result.backup.BackupSystemKind
+import com.kgps.result.backup.CsvBackupFormat
 import com.kgps.result.bn
 import com.kgps.result.cloud.SchoolWorkspace
 import com.kgps.result.cloud.TeacherPermissions
@@ -640,6 +641,7 @@ internal fun SettingsAutoBackupContent(
     onPickCsvFolder: () -> Unit,
     onShowCsvSnapshots: () -> Unit,
     onSelectCsvHeaderStyle: (CsvHeaderStyle) -> Unit,
+    onSelectCsvBackupFormat: (CsvBackupFormat) -> Unit,
     onUpdateBackupSchedule: (BackupSystemKind, BackupScheduleConfig) -> Unit,
     formatTime: (Long) -> String
 ) {
@@ -665,7 +667,12 @@ internal fun SettingsAutoBackupContent(
                     Icon(Icons.Rounded.Backup, contentDescription = null, modifier = Modifier.size(17.dp))
                     Spacer(Modifier.size(6.dp))
                 }
-                Text("এখনই ৩টি সিস্টেমে ব্যাকআপ নিন (লোকাল · Drive · CSV)", fontSize = 11.5.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(
+                    text = "এখনই ৩টি সিস্টেমে ব্যাকআপ (লোকাল · Drive · ${backupStatus.csvBackupFormat.shortBn})",
+                    fontSize = 11.5.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
             }
             Text(
                 text = "প্রতিটি সিস্টেমে ১টি নিয়ম বেছে নিন: \"তাৎক্ষণিক\" (ডাটা বদলালেই) অথবা নির্ধারিত সময়।",
@@ -847,7 +854,7 @@ internal fun SettingsAutoBackupContent(
         }
     }
 
-    // 3. CSV & Multi-Tab Excel Auto Backup
+    // 3. CSV or Multi-Sheet Excel Auto Backup (1 single file per backup)
     TreeBranchItem(isLast = true) {
         Surface(
             color = SlateBg,
@@ -862,7 +869,7 @@ internal fun SettingsAutoBackupContent(
                 ) {
                     Icon(Icons.Rounded.TableChart, contentDescription = null, tint = TealPrimary, modifier = Modifier.size(19.dp))
                     Column(Modifier.weight(1f)) {
-                        Text("৩. CSV (Excel) অটো ব্যাকআপ", fontWeight = FontWeight.SemiBold, fontSize = 12.5.sp)
+                        Text("৩. CSV / Excel অটো ব্যাকআপ", fontWeight = FontWeight.SemiBold, fontSize = 12.5.sp)
                         Text(backupStatus.csvFolderLabel, fontSize = 10.sp, color = SlateMuted, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     }
                     Switch(
@@ -885,9 +892,67 @@ internal fun SettingsAutoBackupContent(
                     Text("ত্রুটি: ${backupStatus.lastCsvError}", fontSize = 10.sp, color = RoseDanger)
                 }
 
+                // Auto backup output format choice: single CSV (all classes) vs single Excel (per-class sheets)
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    HorizontalDivider(color = SlateOutline.copy(alpha = 0.65f))
+                    Text(
+                        text = "অটো ব্যাকআপ ফরম্যাট (যেকোনো ১টি):",
+                        fontSize = 10.5.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = SlateText
+                    )
+                    Surface(
+                        color = Color.White,
+                        border = BorderStroke(1.dp, SlateOutline),
+                        shape = RoundedCornerShape(9.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(2.dp),
+                            horizontalArrangement = Arrangement.spacedBy(2.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            CsvBackupFormat.entries.forEach { fmt ->
+                                val selected = backupStatus.csvBackupFormat == fmt
+                                Box(
+                                    contentAlignment = Alignment.Center,
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .heightIn(min = 38.dp)
+                                        .clip(RoundedCornerShape(7.dp))
+                                        .background(if (selected) TealPrimary else Color.Transparent)
+                                        .clickable { onSelectCsvBackupFormat(fmt) }
+                                        .testTag("settings_csv_auto_fmt_${fmt.id}")
+                                        .padding(horizontal = 4.dp, vertical = 4.dp)
+                                ) {
+                                    Text(
+                                        text = fmt.shortBn,
+                                        fontSize = 10.5.sp,
+                                        fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
+                                        color = if (selected) Color.White else SlateText,
+                                        maxLines = 1,
+                                        softWrap = false,
+                                        overflow = TextOverflow.Ellipsis,
+                                        textAlign = TextAlign.Center
+                                    )
+                                }
+                            }
+                        }
+                    }
+                    Text(
+                        text = backupStatus.csvBackupFormat.descBn,
+                        fontSize = 9.5.sp,
+                        color = TealDark,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+
                 BackupScheduleControl(
                     kind = BackupSystemKind.CSV,
-                    titleBn = "CSV অটো ব্যাকআপ",
+                    titleBn = "CSV / Excel অটো ব্যাকআপ",
                     schedule = backupStatus.csvSchedule,
                     enabled = backupStatus.csvEnabled,
                     segmentBackgroundColor = Color.White,
@@ -948,6 +1013,7 @@ internal fun SettingsCsvJsonContent(
     onSelectCsvHeaderStyle: (CsvHeaderStyle) -> Unit,
     onInstantCsvExport: () -> Unit,
     onExportAllPdf: () -> Unit,
+    onExportAllCsvSingleFile: () -> Unit,
     onExportExcelMultiTab: () -> Unit,
     onExportCsvForClass: (Int) -> Unit,
     onExportCsvTemplateForClass: (Int) -> Unit,
@@ -992,7 +1058,7 @@ internal fun SettingsCsvJsonContent(
                     HorizontalDivider(color = SlateOutline.copy(alpha = 0.65f))
 
                     Text(
-                        text = "তাৎক্ষণিক ও শ্রেণিভিত্তিক CSV / Excel এক্সপোর্ট",
+                        text = "CSV ও Excel এক্সপোর্ট (১টি ফাইলে সব শ্রেণি)",
                         fontSize = 11.sp,
                         fontWeight = FontWeight.SemiBold,
                         color = TealDark
@@ -1008,20 +1074,30 @@ internal fun SettingsCsvJsonContent(
                     ) {
                         Icon(Icons.Rounded.Bolt, contentDescription = null, modifier = Modifier.size(16.dp))
                         Spacer(Modifier.size(5.dp))
-                        Text("তাৎক্ষণিক CSV এক্সপোর্ট (১ ক্লিকে Downloads-এ সেভ)", fontSize = 11.5.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Text("তাৎক্ষণিক এক্সপোর্ট (CSV / Excel বেছে নিন)", fontSize = 11.5.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     }
 
-                    OutlinedButton(
-                        onClick = onExportExcelMultiTab,
-                        shape = RoundedCornerShape(8.dp),
-                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .testTag("settings_xlsx_multitab_export_btn")
-                    ) {
-                        Icon(Icons.Rounded.TableChart, contentDescription = null, modifier = Modifier.size(16.dp))
-                        Spacer(Modifier.size(5.dp))
-                        Text("সব শ্রেণি আলাদা ট্যাবে Excel (.xlsx) সেভ করুন", fontSize = 11.5.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.fillMaxWidth()) {
+                        OutlinedButton(
+                            onClick = onExportAllCsvSingleFile,
+                            shape = RoundedCornerShape(8.dp),
+                            contentPadding = PaddingValues(horizontal = 6.dp, vertical = 5.dp),
+                            modifier = Modifier
+                                .weight(1f)
+                                .testTag("settings_csv_all_single_btn")
+                        ) {
+                            Text("সব শ্রেণি ১টি CSV", fontSize = 11.sp, maxLines = 1)
+                        }
+                        OutlinedButton(
+                            onClick = onExportExcelMultiTab,
+                            shape = RoundedCornerShape(8.dp),
+                            contentPadding = PaddingValues(horizontal = 6.dp, vertical = 5.dp),
+                            modifier = Modifier
+                                .weight(1.1f)
+                                .testTag("settings_xlsx_multitab_export_btn")
+                        ) {
+                            Text("Excel (আলাদা শিট)", fontSize = 11.sp, maxLines = 1)
+                        }
                     }
 
                     // Single-row compact class selector pills

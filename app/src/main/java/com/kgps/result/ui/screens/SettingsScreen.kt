@@ -96,6 +96,7 @@ import com.kgps.result.ai.DiscoveredGeminiModel
 import com.kgps.result.backup.AutoBackupStatus
 import com.kgps.result.backup.BackupScheduleConfig
 import com.kgps.result.backup.BackupSystemKind
+import com.kgps.result.backup.CsvBackupFormat
 import com.kgps.result.backup.DriveBackupFile
 import com.kgps.result.backup.LocalBackupEntry
 import com.kgps.result.backup.XlsxExporter
@@ -169,11 +170,12 @@ fun SettingsScreen(
     onToggleCsvAutoBackup: (Boolean) -> Unit,
     onSetCsvBackupFolder: (Uri?) -> Unit,
     onSelectCsvHeaderStyle: (CsvHeaderStyle) -> Unit,
+    onSelectCsvBackupFormat: (CsvBackupFormat) -> Unit,
     onUpdateBackupSchedule: (BackupSystemKind, BackupScheduleConfig) -> Unit,
     onBackupNowAll: () -> Unit,
     onBackupLocalNow: () -> Unit,
     onBackupDriveNow: () -> Unit,
-    onBackupCsvNow: () -> Unit,
+    onBackupCsvNow: (CsvBackupFormat?) -> Unit,
     onRestoreLocalSnapshot: (String) -> Unit,
     onLoadDriveBackups: () -> Unit,
     onRestoreFromDriveFile: (String) -> Unit,
@@ -221,28 +223,37 @@ fun SettingsScreen(
 
     var showLocalSnapshotsDialog by remember { mutableStateOf(false) }
     var showCsvSnapshotsDialog by remember { mutableStateOf(false) }
+    var showInstantExportDialog by remember { mutableStateOf(false) }
     var showDriveBackupsDialog by remember { mutableStateOf(false) }
     var confirmLocalRestore by remember { mutableStateOf<LocalBackupEntry?>(null) }
     var confirmDriveRestore by remember { mutableStateOf<DriveBackupFile?>(null) }
     var pendingManualJsonRestore by remember { mutableStateOf<String?>(null) }
 
-    var pendingCsvExportCls by remember { mutableStateOf(1) }
+    var pendingCsvExportCls by remember { mutableStateOf<Int?>(null) }
     var pendingCsvTemplateCls by remember { mutableStateOf(1) }
 
     val csvExportLauncher = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("text/csv")) { uri ->
         if (uri != null) {
             try {
+                val allowed = permissions.effectiveClasses().ifEmpty { (1..5).toList() }
+                val target = pendingCsvExportCls
+                val listToExport = if (target == null) students.filter { it.cls in allowed } else students
                 ctx.contentResolver.openOutputStream(uri)?.use {
                     it.write(
                         Repo.toCsv(
-                            list = students,
+                            list = listToExport,
                             customFields = settings.customFields,
                             style = backupStatus.csvHeaderStyle,
-                            targetCls = pendingCsvExportCls
+                            targetCls = target
                         ).toByteArray(Charsets.UTF_8)
                     )
                 }
-                onShowMessage("${CLSN[pendingCsvExportCls - 1]} শ্রেণির CSV ফাইল সংরক্ষিত হয়েছে")
+                val msg = if (target == null) {
+                    "১টি CSV ফাইলে সকল শ্রেণির ডাটা সংরক্ষিত হয়েছে"
+                } else {
+                    "${CLSN[target - 1]} শ্রেণির CSV ফাইল সংরক্ষিত হয়েছে"
+                }
+                onShowMessage(msg)
             } catch (e: Exception) {
                 onShowMessage("CSV তৈরি হয়নি: ${e.message ?: "ত্রুটি"}")
             }
@@ -926,9 +937,10 @@ fun SettingsScreen(
             SettingsCategoryHeader(title = "ব্যাকআপ, ইমপোর্ট ও ডাটা", icon = Icons.Rounded.Backup)
 
             val autoBackupActive = backupStatus.localEnabled || backupStatus.driveEnabled || backupStatus.csvEnabled
+            val thirdFmt = if (backupStatus.csvBackupFormat == CsvBackupFormat.CSV) "CSV" else "Excel"
             TreeGroupCard(
-                title = "অটো ব্যাকআপ (লোকাল · Drive · CSV)",
-                subtitle = "লোকাল: ${if (backupStatus.localEnabled) "চালু" else "বন্ধ"} · Drive: ${if (backupStatus.driveEnabled) "চালু" else "বন্ধ"} · CSV: ${if (backupStatus.csvEnabled) "চালু" else "বন্ধ"}",
+                title = "অটো ব্যাকআপ (লোকাল · Drive · $thirdFmt)",
+                subtitle = "লোকাল: ${if (backupStatus.localEnabled) "চালু" else "বন্ধ"} · Drive: ${if (backupStatus.driveEnabled) "চালু" else "বন্ধ"} · $thirdFmt: ${if (backupStatus.csvEnabled) "চালু" else "বন্ধ"}",
                 badgeText = if (autoBackupActive) "চালু" else "বন্ধ",
                 badgeColor = if (autoBackupActive) EmeraldGrade else SlateMuted,
                 badgeContainerColor = if (autoBackupActive) TealSoft else MaterialTheme.colorScheme.surfaceVariant,
@@ -942,7 +954,7 @@ fun SettingsScreen(
                     onBackupNowAll = onBackupNowAll,
                     onBackupLocalNow = onBackupLocalNow,
                     onBackupDriveNow = onBackupDriveNow,
-                    onBackupCsvNow = onBackupCsvNow,
+                    onBackupCsvNow = { showInstantExportDialog = true },
                     onToggleLocalAutoBackup = onToggleLocalAutoBackup,
                     onPickLocalFolder = { folderPickerLauncher.launch(null) },
                     onShowLocalSnapshots = { showLocalSnapshotsDialog = true },
@@ -955,6 +967,7 @@ fun SettingsScreen(
                     onPickCsvFolder = { csvFolderPickerLauncher.launch(null) },
                     onShowCsvSnapshots = { showCsvSnapshotsDialog = true },
                     onSelectCsvHeaderStyle = onSelectCsvHeaderStyle,
+                    onSelectCsvBackupFormat = onSelectCsvBackupFormat,
                     onUpdateBackupSchedule = onUpdateBackupSchedule,
                     formatTime = ::formatTimeBn
                 )
@@ -978,8 +991,12 @@ fun SettingsScreen(
                     studentCountByClass = countByClass,
                     csvHeaderStyle = backupStatus.csvHeaderStyle,
                     onSelectCsvHeaderStyle = onSelectCsvHeaderStyle,
-                    onInstantCsvExport = onBackupCsvNow,
+                    onInstantCsvExport = { showInstantExportDialog = true },
                     onExportAllPdf = onExportAllPdf,
+                    onExportAllCsvSingleFile = {
+                        pendingCsvExportCls = null
+                        csvExportLauncher.launch("ResultMaker_AllClasses.csv")
+                    },
                     onExportExcelMultiTab = { xlsxExportLauncher.launch("ResultMaker_AllClasses.xlsx") },
                     onExportCsvForClass = { c ->
                         pendingCsvExportCls = c
@@ -1226,6 +1243,60 @@ fun SettingsScreen(
             confirmButton = {
                 TextButton(onClick = { showLocalSnapshotsDialog = false }) { Text("বন্ধ করুন") }
             }
+        )
+    }
+
+    // Dialog: Ask CSV vs Excel on Instant Export
+    if (showInstantExportDialog) {
+        AlertDialog(
+            onDismissRequest = { showInstantExportDialog = false },
+            title = { Text("তাৎক্ষণিক এক্সপোর্ট — ফরম্যাট বেছে নিন", fontSize = 16.sp, fontWeight = FontWeight.Bold) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(
+                        text = "আপনি কোন ধরনের ১টি ফাইল হিসেবে সকল শ্রেণির তথ্য এক্সপোর্ট করতে চান?",
+                        fontSize = 12.sp,
+                        color = SlateMuted
+                    )
+                    CsvBackupFormat.entries.forEach { fmt ->
+                        val isPreferred = backupStatus.csvBackupFormat == fmt
+                        Surface(
+                            color = if (isPreferred) TealSoft else SlateBg,
+                            border = BorderStroke(if (isPreferred) 1.5.dp else 1.dp, if (isPreferred) TealPrimary else SlateOutline),
+                            shape = RoundedCornerShape(10.dp),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .testTag("instant_export_choice_${fmt.id}")
+                                .clickable {
+                                    showInstantExportDialog = false
+                                    onBackupCsvNow(fmt)
+                                }
+                        ) {
+                            Column(
+                                modifier = Modifier.padding(12.dp),
+                                verticalArrangement = Arrangement.spacedBy(3.dp)
+                            ) {
+                                Text(
+                                    text = fmt.labelBn,
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 13.sp,
+                                    color = TealDark
+                                )
+                                Text(
+                                    text = fmt.descBn,
+                                    fontSize = 11.sp,
+                                    color = SlateMuted,
+                                    lineHeight = 15.sp
+                                )
+                            }
+                        }
+                    }
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showInstantExportDialog = false }) { Text("বাতিল") }
+            },
+            confirmButton = {}
         )
     }
 

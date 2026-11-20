@@ -32,6 +32,31 @@ enum class BackupSystemKind {
     CSV
 }
 
+enum class CsvBackupFormat(
+    val id: String,
+    val labelBn: String,
+    val shortBn: String,
+    val descBn: String
+) {
+    CSV(
+        id = "csv",
+        labelBn = "CSV ফাইল (১টি ফাইলে সব শ্রেণি)",
+        shortBn = "CSV (১ ফাইল)",
+        descBn = "একটি .csv ফাইলে সকল শ্রেণির শিক্ষার্থী ও নম্বর থাকবে"
+    ),
+    EXCEL(
+        id = "excel",
+        labelBn = "Excel (.xlsx · আলাদা আলাদা শিট)",
+        shortBn = "Excel (আলাদা শিট)",
+        descBn = "একটি .xlsx ফাইলের ভেতর প্রতিটি শ্রেণি আলাদা আলাদা শিটে থাকবে"
+    );
+
+    companion object {
+        fun fromId(id: String?): CsvBackupFormat =
+            entries.firstOrNull { it.id == id } ?: CSV
+    }
+}
+
 enum class BackupScheduleMode(
     val id: String,
     val labelBn: String,
@@ -234,11 +259,12 @@ data class AutoBackupStatus(
     val lastDriveFileName: String = "",
     val lastDriveError: String? = null,
 
-    // 3. CSV Auto Backup
+    // 3. CSV / Excel Auto Backup
     val csvEnabled: Boolean = true,
     val csvFolderUri: String? = null,
     val csvFolderLabel: String = "অ্যাপ স্টোরেজ + Downloads/ResultMaker",
     val csvHeaderStyle: CsvHeaderStyle = CsvHeaderStyle.FRIENDLY_BN,
+    val csvBackupFormat: CsvBackupFormat = CsvBackupFormat.CSV,
     val csvSchedule: BackupScheduleConfig = BackupScheduleConfig(
         mode = BackupScheduleMode.DAILY,
         hour = 21,
@@ -287,6 +313,7 @@ class AutoBackupManager(
         val localFolderUri = prefs.getString(KEY_LOCAL_FOLDER_URI, null)
         val csvFolderUri = prefs.getString(KEY_CSV_FOLDER_URI, null)
         val csvHeaderStyle = CsvHeaderStyle.fromId(prefs.getString(KEY_CSV_HEADER_STYLE, CsvHeaderStyle.FRIENDLY_BN.id))
+        val csvBackupFormat = CsvBackupFormat.fromId(prefs.getString(KEY_CSV_BACKUP_FORMAT, CsvBackupFormat.CSV.id))
 
         return AutoBackupStatus(
             localEnabled = prefs.getBoolean(KEY_LOCAL_ENABLED, true),
@@ -305,6 +332,7 @@ class AutoBackupManager(
             csvFolderUri = csvFolderUri,
             csvFolderLabel = buildFolderLabel(csvFolderUri),
             csvHeaderStyle = csvHeaderStyle,
+            csvBackupFormat = csvBackupFormat,
             csvSchedule = loadSchedule(KEY_CSV_SCHED_PREFIX, BackupScheduleMode.DAILY, 21, 30),
             lastCsvBackupMs = prefs.getLong(KEY_LAST_CSV_MS, 0L),
             lastCsvFileName = prefs.getString(KEY_LAST_CSV_NAME, "").orEmpty()
@@ -383,6 +411,11 @@ class AutoBackupManager(
     fun setCsvHeaderStyle(style: CsvHeaderStyle) {
         prefs.edit().putString(KEY_CSV_HEADER_STYLE, style.id).apply()
         _status.update { it.copy(csvHeaderStyle = style) }
+    }
+
+    fun setCsvBackupFormat(format: CsvBackupFormat) {
+        prefs.edit().putString(KEY_CSV_BACKUP_FORMAT, format.id).apply()
+        _status.update { it.copy(csvBackupFormat = format) }
     }
 
     fun setCsvFolderUri(uri: Uri?) {
@@ -523,18 +556,21 @@ class AutoBackupManager(
         schoolCode: String,
         students: List<Student>,
         settings: Settings,
-        force: Boolean = false
+        force: Boolean = false,
+        formatOverride: CsvBackupFormat? = null
     ): Result<String> = withContext(Dispatchers.IO) {
         val st = _status.value
         if (!force && !st.csvEnabled) {
             return@withContext Result.success("skipped")
         }
-        val activeClasses = (1..5).filter { c -> students.any { it.cls == c } }.ifEmpty { (1..5).toList() }
-        val perClassCsv = activeClasses.associateWith { c ->
-            Repo.toCsv(students, settings.customFields, st.csvHeaderStyle, targetCls = c)
-        }
-        val signatureSource = perClassCsv.entries.joinToString("\n") { "${it.key}:${it.value}" }
-        val hash = sha256("${st.csvHeaderStyle.id}:$signatureSource")
+        val activeFormat = formatOverride ?: st.csvBackupFormat
+        val combinedCsv = Repo.toCsv(
+            list = students,
+            customFields = settings.customFields,
+            style = st.csvHeaderStyle,
+            targetCls = null
+        )
+        val hash = sha256("${activeFormat.id}:${st.csvHeaderStyle.id}:$combinedCsv")
         val nowMs = System.currentTimeMillis()
         if (!force) {
             if (st.csvSchedule.mode == BackupScheduleMode.ON_CHANGE) {
@@ -555,76 +591,80 @@ class AutoBackupManager(
         runCatching {
             val dateTag = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date(nowMs))
             val safeCode = schoolCode.replace(Regex("[^A-Za-z0-9]"), "").ifBlank { "SCHOOL" }
-            val xlsxBytes = XlsxExporter.exportAllClassesWorkbook(
-                students = students,
-                customFields = settings.customFields,
-                style = st.csvHeaderStyle,
-                classes = activeClasses
-            )
-            val xlsxDailyName = "ResultMaker_${safeCode}_MultiTab_$dateTag.xlsx"
-            val xlsxMime = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-
             val dir = schoolCsvBackupDir(schoolId)
             val folderUriStr = _status.value.csvFolderUri
 
-            // 1. Save Multi-Tab Excel Workbook (.xlsx) with one sheet per class
-            File(dir, "latest_all_classes.xlsx").writeBytes(xlsxBytes)
-            File(dir, xlsxDailyName).writeBytes(xlsxBytes)
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                writeToMediaStoreDownloads(
-                    fileName = "ResultMaker_${safeCode}_AllClasses_latest.xlsx",
-                    mimeType = xlsxMime,
-                    bytes = xlsxBytes
-                )
-            }
-            if (!folderUriStr.isNullOrBlank()) {
-                writeToSafFolder(Uri.parse(folderUriStr), xlsxDailyName, xlsxMime, xlsxBytes)
-            }
+            // Remove any legacy per-class split files from earlier versions so only single clean files remain
+            dir.listFiles { f ->
+                f.isFile && (f.name.startsWith("latest_class_") || f.name.contains("_Class"))
+            }?.forEach { runCatching { it.delete() } }
 
-            // 2. Save separate per-class CSV files (no mixed classes in a single tab)
-            perClassCsv.forEach { (clsNum, csvText) ->
-                val csvBytes = csvText.toByteArray(Charsets.UTF_8)
-                val dailyCsvName = "ResultMaker_${safeCode}_Class${clsNum}_$dateTag.csv"
-                File(dir, "latest_class_${clsNum}.csv").writeBytes(csvBytes)
-                File(dir, dailyCsvName).writeBytes(csvBytes)
-
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                    writeToMediaStoreDownloads(
-                        fileName = "ResultMaker_${safeCode}_Class${clsNum}_latest.csv",
-                        mimeType = "text/csv",
-                        bytes = csvBytes
+            val outputName: String
+            when (activeFormat) {
+                CsvBackupFormat.CSV -> {
+                    val csvBytes = combinedCsv.toByteArray(Charsets.UTF_8)
+                    val dailyName = "ResultMaker_${safeCode}_$dateTag.csv"
+                    File(dir, "latest_backup.csv").writeBytes(csvBytes)
+                    File(dir, dailyName).writeBytes(csvBytes)
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                        writeToMediaStoreDownloads(
+                            fileName = "ResultMaker_${safeCode}_latest.csv",
+                            mimeType = "text/csv",
+                            bytes = csvBytes
+                        )
+                    }
+                    if (!folderUriStr.isNullOrBlank()) {
+                        writeToSafFolder(Uri.parse(folderUriStr), dailyName, "text/csv", csvBytes)
+                    }
+                    pruneOldSnapshots(dir, prefix = "ResultMaker_", ext = ".csv", keepDailyCount = 14)
+                    outputName = dailyName
+                }
+                CsvBackupFormat.EXCEL -> {
+                    val activeClasses = (1..5).filter { c -> students.any { it.cls == c } }.ifEmpty { (1..5).toList() }
+                    val xlsxBytes = XlsxExporter.exportAllClassesWorkbook(
+                        students = students,
+                        customFields = settings.customFields,
+                        style = st.csvHeaderStyle,
+                        classes = activeClasses
                     )
-                }
-                if (!folderUriStr.isNullOrBlank()) {
-                    writeToSafFolder(Uri.parse(folderUriStr), dailyCsvName, "text/csv", csvBytes)
+                    val dailyName = "ResultMaker_${safeCode}_$dateTag.xlsx"
+                    val xlsxMime = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                    File(dir, "latest_all_classes.xlsx").writeBytes(xlsxBytes)
+                    File(dir, dailyName).writeBytes(xlsxBytes)
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                        writeToMediaStoreDownloads(
+                            fileName = "ResultMaker_${safeCode}_latest.xlsx",
+                            mimeType = xlsxMime,
+                            bytes = xlsxBytes
+                        )
+                    }
+                    if (!folderUriStr.isNullOrBlank()) {
+                        writeToSafFolder(Uri.parse(folderUriStr), dailyName, xlsxMime, xlsxBytes)
+                    }
+                    pruneOldSnapshots(dir, prefix = "ResultMaker_", ext = ".xlsx", keepDailyCount = 14)
+                    outputName = dailyName
                 }
             }
 
-            // Remove old combined file if present & prune rolling daily snapshots
-            runCatching { File(dir, "latest_backup.csv").delete() }
-            pruneOldSnapshots(dir, prefix = "ResultMaker_", ext = ".csv", keepDailyCount = 60)
-            pruneOldSnapshots(dir, prefix = "ResultMaker_", ext = ".xlsx", keepDailyCount = 14)
-
-            val summaryName = "Class ${activeClasses.joinToString(",")} CSV + .xlsx"
             prefs.edit()
                 .putString(KEY_LAST_CSV_HASH, hash)
                 .putLong(KEY_LAST_CSV_MS, nowMs)
                 .putLong(KEY_LAST_CSV_SLOT_MS, nowMs)
-                .putString(KEY_LAST_CSV_NAME, summaryName)
+                .putString(KEY_LAST_CSV_NAME, outputName)
                 .apply()
 
             refreshCsvSnapshots(schoolId)
             _status.update {
                 it.copy(
                     lastCsvBackupMs = nowMs,
-                    lastCsvFileName = summaryName,
+                    lastCsvFileName = outputName,
                     lastCsvError = null
                 )
             }
-            summaryName
+            outputName
         }.onFailure { err ->
             _status.update {
-                it.copy(lastCsvError = err.localizedMessage ?: "CSV ব্যাকআপ ত্রুটি")
+                it.copy(lastCsvError = err.localizedMessage ?: "ব্যাকআপ ত্রুটি")
             }
         }
     }
@@ -811,6 +851,7 @@ class AutoBackupManager(
         private const val KEY_CSV_ENABLED = "csv_enabled"
         private const val KEY_CSV_FOLDER_URI = "csv_folder_uri"
         private const val KEY_CSV_HEADER_STYLE = "csv_header_style"
+        private const val KEY_CSV_BACKUP_FORMAT = "csv_backup_format"
         private const val KEY_CSV_SCHED_PREFIX = "csv_sched"
         private const val KEY_LAST_CSV_HASH = "last_csv_hash"
         private const val KEY_LAST_CSV_MS = "last_csv_ms"
