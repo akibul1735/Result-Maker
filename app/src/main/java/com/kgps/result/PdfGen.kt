@@ -204,13 +204,13 @@ object PdfGen {
         if (t.isEmpty()) return
         val p = tp(ctx, size, false, fontId)
         var lines = wrap(t, p, w - 7f)
-        while (lines.size * (p.textSize * 1.25f) > h - 4f && p.textSize > 5.2f) {
+        while (lines.size * (p.textSize * 1.25f) > h - 5f && p.textSize > 5.2f) {
             p.textSize -= 0.3f
             lines = wrap(t, p, w - 7f)
         }
         val lh = p.textSize * 1.25f
         val totalH = lines.size * lh
-        var y = top + max(p.textSize + 2f, (h - totalH) / 2 + p.textSize * 0.9f)
+        var y = top + max(p.textSize + 2f, (h - totalH) / 2 + p.textSize * 0.88f)
         lines.forEach {
             if (y < top + h - 2f) c.drawText(it, l + 3.5f, y, p)
             y += lh
@@ -625,28 +625,36 @@ object PdfGen {
         }
 
         // ---- নিচে বামে: ব্যক্তিগত ও সামাজিক গুণাবলি (width = 371) ----
-        val by = ty + totalH + 14f
-        val qw = floatArrayOf(52f, 187f, 44f, 44f, 44f)
-        val qTopH = 16f
-        val qSub1H = 13f
-        val qSub2H = 19f
-        val qHdrH = qTopH + qSub1H + qSub2H // 48
-        val qRowH = 42f
+        val by = ty + totalH + 12f
+        val qw = floatArrayOf(50f, 189f, 44f, 44f, 44f)
+        val qTop1H = 16f
+        val qTop2H = 14f
+        val qLegendH = qTop1H + qTop2H // 30
+        val qGap = 7f
+        val qMainY = by + qLegendH + qGap // 37
+        val qMainHdrH = 22f
+        val qRowsY = qMainY + qMainHdrH // 59
+        val qRowH = 44f
 
-        cell(ctx, c, "ব্যক্তিগত ও সামাজিক গুণাবলি", lx, by, 177f, qTopH, 7.5f, true, true, f)
-        cell(ctx, c, "অবস্থান", lx + 177f, by, 62f, qTopH, 7.5f, true, true, f)
-        cell(ctx, c, "উত্তম", lx + 239f, by, qw[2], qTopH, 7.2f, true, true, f)
-        cell(ctx, c, "সন্তোষজনক", lx + 239f + qw[2], by, qw[3], qTopH, 6.8f, true, true, f)
-        cell(ctx, c, "উন্নতি প্রয়োজন", lx + 239f + qw[2] + qw[3], by, qw[4], qTopH, 6.4f, true, true, f)
+        // ১. উপরের নির্দেশনামূলক ছক (আলাদা ছক)
+        cell(ctx, c, "ব্যক্তিগত ও সামাজিক গুণাবলি", lx, by, 177f, qLegendH, 8f, true, true, f)
+        cell(ctx, c, "অবস্থান", lx + 177f, by, 62f, qLegendH, 8f, true, true, f)
+        val kkgLabels = listOf("উত্তম", "সন্তোষজনক", "উন্নতি প্রয়োজন")
+        val kkgCodes = listOf("ক", "খ", "গ")
+        val kkgSizes = floatArrayOf(7.5f, 7.0f, 6.8f)
+        for (i in 0..2) {
+            val cx = lx + 239f + i * qw[2 + i]
+            cell(ctx, c, kkgLabels[i], cx, by, qw[2 + i], qTop1H, kkgSizes[i], true, true, f)
+            cell(ctx, c, kkgCodes[i], cx, by + qTop1H, qw[2 + i], qTop2H, 8f, true, true, f)
+        }
 
-        cell(ctx, c, "গুণাবলি", lx, by + qTopH, qw[0], qSub1H + qSub2H, 8f, true, true, f)
-        cell(ctx, c, "বর্ণনা", lx + qw[0], by + qTopH, qw[1], qSub1H + qSub2H, 8f, true, true, f)
-        val kkg = listOf("ক", "খ", "গ")
+        // ২. মূল গুণাবলি ছক (মাঝখানে 7pt ফাঁকা জায়গা রেখে)
+        cell(ctx, c, "গুণাবলি", lx, qMainY, qw[0], qMainHdrH, 8.5f, true, true, f)
+        cell(ctx, c, "বর্ণনা", lx + qw[0], qMainY, qw[1], qMainHdrH, 8.5f, true, true, f)
         val termShort = listOf("১ম প্রান্তিক", "২য় প্রান্তিক", "৩য় প্রান্তিক")
         for (i in 0..2) {
             val cx = lx + qw[0] + qw[1] + i * qw[2 + i]
-            cell(ctx, c, kkg[i], cx, by + qTopH, qw[2 + i], qSub1H, 7.5f, true, true, f)
-            cell(ctx, c, termShort[i], cx, by + qTopH + qSub1H, qw[2 + i], qSub2H, 6.8f, true, true, f)
+            cell(ctx, c, termShort[i], cx, qMainY, qw[2 + i], qMainHdrH, 7.4f, true, true, f)
         }
 
         val traits = listOf(
@@ -655,17 +663,18 @@ object PdfGen {
             Triple("আচরণ", "COND", "শিক্ষক ও বড়দের সম্মান করা; ছোটদের স্নেহ করা; সহযোগিতা করা; ভুল হলে তা স্বীকার করা; অন্যকে কষ্ট না দেওয়া ইত্যাদি")
         )
         traits.forEachIndexed { r, (lab, k, d) ->
-            val yy = by + qHdrH + r * qRowH
+            val yy = qRowsY + r * qRowH
             var cx = lx
-            cell(ctx, c, lab, cx, yy, qw[0], qRowH, 8.5f, true, false, f); cx += qw[0]
-            box(ctx, c, d, cx, yy, qw[1], qRowH, 6.8f, f); cx += qw[1]
+            cell(ctx, c, lab, cx, yy, qw[0], qRowH, 9f, true, false, f); cx += qw[0]
+            box(ctx, c, d, cx, yy, qw[1], qRowH, 9.2f, f); cx += qw[1]
             for (t in 1..3) {
-                cell(ctx, c, s.x["${k}_$t"] ?: "", cx, yy, qw[1 + t], qRowH, 10f, true, false, f)
+                cell(ctx, c, s.x["${k}_$t"] ?: "", cx, yy, qw[1 + t], qRowH, 10.5f, true, false, f)
                 cx += qw[1 + t]
             }
         }
         val lg = tp(ctx, 7.5f, false, f, 0xFF334155.toInt())
-        c.drawText("ক = উত্তম,  খ = সন্তোষজনক,  গ = উন্নতি প্রয়োজন", lx, by + qHdrH + 3 * qRowH + 11f, lg)
+        val footerY = qRowsY + 3 * qRowH + 11f
+        c.drawText("ক = উত্তম,  খ = সন্তোষজনক,  গ = উন্নতি প্রয়োজন", lx, footerY, lg)
 
         // ---- ডান ভেতরের অর্ধেক (x: 443..814) ----
         val rx = 443f
@@ -745,18 +754,18 @@ object PdfGen {
 
         // ---- নিচে ডানে: উপস্থিতি (গুণাবলির সাথে সারিবদ্ধ) ----
         val aw = floatArrayOf(125f, 82f, 82f, 82f)
-        val attTopH = 20f
-        val attSubH = 28f
-        cell(ctx, c, "উপস্থিতি", rx, by, rW, attTopH, 9f, true, true, f)
+        val attTopH = 27f
+        val attSubH = 32f
+        cell(ctx, c, "উপস্থিতি", rx, by, rW, attTopH, 9.5f, true, true, f)
         var ax = rx
         listOf("বিবরণ", "১ম প্রান্তিক", "২য় প্রান্তিক", "৩য় প্রান্তিক").forEachIndexed { i, h ->
-            cell(ctx, c, h, ax, by + attTopH, aw[i], attSubH, 8f, true, true, f)
+            cell(ctx, c, h, ax, by + attTopH, aw[i], attSubH, 8.5f, true, true, f)
             ax += aw[i]
         }
 
         val attLabels = listOf("মোট কার্যদিবস", "শিক্ষার্থীর উপস্থিতি", "উপস্থিতির হার")
         attLabels.forEachIndexed { r, lab ->
-            val yy = by + qHdrH + r * qRowH
+            val yy = qRowsY + r * qRowH
             ax = rx
             cell(ctx, c, lab, ax, yy, aw[0], qRowH, 8.5f, true, false, f)
             ax += aw[0]
@@ -772,6 +781,6 @@ object PdfGen {
                 ax += aw[t]
             }
         }
-        c.drawText("উপস্থিতির হার = (শিক্ষার্থীর উপস্থিতি ÷ মোট কার্যদিবস) × ১০০%", rx, by + qHdrH + 3 * qRowH + 11f, lg)
+        c.drawText("উপস্থিতির হার = (শিক্ষার্থীর উপস্থিতি ÷ মোট কার্যদিবস) × ১০০%", rx, footerY, lg)
     }
 }
