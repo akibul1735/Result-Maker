@@ -311,17 +311,26 @@ object PdfGen {
         s: Student,
         st: Settings,
         showFoldGuide: Boolean = true,
-        scale: Float = 2f
+        scale: Float = 2f,
+        allStudents: List<Student> = listOf(s),
+        showClassHighest: Boolean = false
     ): Bitmap {
         val bmp = Bitmap.createBitmap((W * scale).toInt(), (H * scale).toInt(), Bitmap.Config.ARGB_8888)
         val c = Canvas(bmp)
         c.drawColor(Color.WHITE)
         c.scale(scale, scale)
-        marks(ctx, c, s, st.pdfFont, showFoldGuide)
+        marks(ctx, c, s, st.pdfFont, showFoldGuide, allStudents, showClassHighest)
         return bmp
     }
 
-    fun write(ctx: Context, students: List<Student>, st: Settings, out: OutputStream) {
+    fun write(
+        ctx: Context,
+        students: List<Student>,
+        st: Settings,
+        out: OutputStream,
+        allStudents: List<Student> = students,
+        showClassHighest: Boolean = false
+    ) {
         val doc = PdfDocument()
         try {
             var n = 1
@@ -331,7 +340,7 @@ object PdfGen {
                 doc.finishPage(p1)
 
                 val p2 = doc.startPage(PdfDocument.PageInfo.Builder(W, H, n++).create())
-                marks(ctx, p2.canvas, s, st.pdfFont, showFoldGuide = false)
+                marks(ctx, p2.canvas, s, st.pdfFont, showFoldGuide = false, allStudents = allStudents, showClassHighest = showClassHighest)
                 doc.finishPage(p2)
             }
             doc.writeTo(out)
@@ -340,7 +349,14 @@ object PdfGen {
         }
     }
 
-    fun printStudents(ctx: Context, students: List<Student>, st: Settings, jobName: String) {
+    fun printStudents(
+        ctx: Context,
+        students: List<Student>,
+        st: Settings,
+        jobName: String,
+        allStudents: List<Student> = students,
+        showClassHighest: Boolean = false
+    ) {
         if (students.isEmpty()) return
         val printManager = ctx.getSystemService(Context.PRINT_SERVICE) as? PrintManager ?: return
         val adapter = object : PrintDocumentAdapter() {
@@ -374,7 +390,7 @@ object PdfGen {
                 }
                 try {
                     FileOutputStream(destination.fileDescriptor).use { fos ->
-                        write(ctx, students, st, fos)
+                        write(ctx, students, st, fos, allStudents = allStudents, showClassHighest = showClassHighest)
                     }
                     callback.onWriteFinished(arrayOf(PageRange.ALL_PAGES))
                 } catch (e: Exception) {
@@ -547,7 +563,15 @@ object PdfGen {
     }
 
     // ================= পাতা-২: ভেতরের পাশ (বাম = ১ম+২য় ও গুণাবলি, ডান = ৩য়+চূড়ান্ত ও উপস্থিতি) =================
-    private fun marks(ctx: Context?, c: Canvas, s: Student, f: String, showFoldGuide: Boolean) {
+    private fun marks(
+        ctx: Context?,
+        c: Canvas,
+        s: Student,
+        f: String,
+        showFoldGuide: Boolean,
+        allStudents: List<Student>,
+        showClassHighest: Boolean
+    ) {
         drawPanelFrames(c, showFoldGuide)
 
         val subs = s.subs()
@@ -658,9 +682,9 @@ object PdfGen {
         }
 
         val traits = listOf(
-            Triple("সক্রিয়তা", "ACT", "শিক্ষকের নির্দেশনামতো পাঠ্যপুস্তকের কাজ সম্পন্ন করা; বাড়ির কাজ সময়মতো করা; জোড়ায় বা দলগত কাজে অংশ নেওয়া; প্রশ্নোত্তরে অংশগ্রহণ ইত্যাদি"),
-            Triple("শৃঙ্খলা", "DISC", "বিদ্যালয়ে নিয়মিত উপস্থিত থাকা; বিদ্যালয়ের নিয়ম-শৃঙ্খলা মেনে চলা; পরিষ্কার-পরিচ্ছন্ন থাকা ইত্যাদি"),
-            Triple("আচরণ", "COND", "শিক্ষক ও বড়দের সম্মান করা; ছোটদের স্নেহ করা; সহযোগিতা করা; ভুল হলে তা স্বীকার করা; অন্যকে কষ্ট না দেওয়া ইত্যাদি")
+            Triple("সক্রিয়তা", "ACT", "শিক্ষকের নির্দেশনামতো পাঠ্যপুস্তকের কাজ/ওয়ার্কশিট সম্পন্ন করা; বাড়ির কাজ সময়মতো সম্পন্ন করা; জোড়ায়/দলগত কাজে কার্যকরভাবে অংশগ্রহণ করা; প্রশ্নোত্তরে অংশ নেওয়া ইত্যাদি"),
+            Triple("শৃঙ্খলা", "DISC", "বিদ্যালয়ে নিয়মিত উপস্থিত থাকা; বিদ্যালয়ের সকল নিয়ম-শৃঙ্খলা মেনে চলা; পরিষ্কার-পরিচ্ছন্ন থাকা ইত্যাদি"),
+            Triple("আচরণ", "COND", "শিক্ষক/বড়োদের সম্মান করা; ছোটদের স্নেহ করা; অন্যের প্রতি সমানুভূতিশীল হওয়া; সহযোগিতা করা; ভুল হলে স্বীকার করা; অন্যকে কষ্ট না দেওয়া; মিলেমিশে থাকা ইত্যাদি")
         )
         traits.forEachIndexed { r, (lab, k, d) ->
             val yy = qRowsY + r * qRowH
@@ -679,78 +703,205 @@ object PdfGen {
         // ---- ডান ভেতরের অর্ধেক (x: 443..814) ----
         val rx = 443f
         val rW = 371f
-        val rcw = rW / 6f
 
-        cell(ctx, c, "৩য় প্রান্তিক", rx, ty0, 3 * rcw, hdr1H, 8.5f, true, true, f)
-        cell(ctx, c, "চূড়ান্ত ফলাফল", rx + 3 * rcw, ty0, 3 * rcw, hdr1H, 8.5f, true, true, f)
+        if (!showClassHighest) {
+            val rcw = rW / 6f
 
-        val finalSubHdr = listOf("প্রান্তিকের\nগড় নম্বর", "বিষয়\nগ্রেড", "সমন্বিত\nগ্রেড")
-        for (i in 0..2) {
-            cell(ctx, c, termSubHdr[i], rx + i * rcw, ty0 + hdr1H, rcw, hdr2H, 7f, true, true, f)
-            cell(ctx, c, finalSubHdr[i], rx + (3 + i) * rcw, ty0 + hdr1H, rcw, hdr2H, 7f, true, true, f)
+            cell(ctx, c, "৩য় প্রান্তিক", rx, ty0, 3 * rcw, hdr1H, 8.5f, true, true, f)
+            cell(ctx, c, "চূড়ান্ত ফলাফল", rx + 3 * rcw, ty0, 3 * rcw, hdr1H, 8.5f, true, true, f)
+
+            val finalSubHdr = listOf("প্রান্তিকের\nগড় নম্বর", "বিষয়\nগ্রেড", "সমন্বিত\nগ্রেড")
+            for (i in 0..2) {
+                cell(ctx, c, termSubHdr[i], rx + i * rcw, ty0 + hdr1H, rcw, hdr2H, 7f, true, true, f)
+                cell(ctx, c, finalSubHdr[i], rx + (3 + i) * rcw, ty0 + hdr1H, rcw, hdr2H, 7f, true, true, f)
+            }
+
+            subs.forEachIndexed { i, sub ->
+                val ry = rowsStartY + i * rh
+                val has3 = s.hasSub(sub, 3)
+                val cont3 = if (sub.key == "ART") "......" else if (has3) fmt(s.cont(sub, 3)) else ""
+                val wr3 = if (sub.written == 0) "......" else if (has3) fmt(s.wr(sub, 3)) else ""
+                val tot3 = if (has3) fmt(s.total(sub, 3)) else ""
+
+                cell(ctx, c, cont3, rx, ry, rcw, rh, 8f, false, false, f)
+                cell(ctx, c, wr3, rx + rcw, ry, rcw, rh, 8f, false, false, f)
+                cell(ctx, c, tot3, rx + 2 * rcw, ry, rcw, rh, 8.5f, true, false, f)
+
+                val a = s.avg(sub)
+                cell(ctx, c, if (anyData) fmt(a) else "", rx + 3 * rcw, ry, rcw, rh, 8.5f, true, false, f)
+                cell(ctx, c, if (anyData) gradeOf(a / sub.max * 100) else "", rx + 4 * rcw, ry, rcw, rh, 9.5f, true, false, f)
+            }
+
+            val pct = s.overallPct()
+            cell(
+                ctx,
+                c,
+                if (anyData) "${gradeOf(pct)}\n${fmt(pct)}%" else "",
+                rx + 5 * rcw,
+                rowsStartY,
+                rcw,
+                rh * subs.size,
+                11.5f,
+                true,
+                false,
+                f
+            )
+
+            val has3Term = s.hasTerm(3)
+            cell(ctx, c, "৩য় প্রান্তিকে মোট", rx, ty, 2 * rcw, totalH, 7.5f, true, true, f)
+            cell(
+                ctx,
+                c,
+                if (has3Term) fmt(subs.sumOf { s.total(it, 3) }) else "",
+                rx + 2 * rcw,
+                ty,
+                rcw,
+                totalH,
+                8.5f,
+                true,
+                true,
+                f
+            )
+            cell(ctx, c, "প্রান্তিকের গড় মোট", rx + 3 * rcw, ty, rcw, totalH, 7f, true, true, f)
+            cell(
+                ctx,
+                c,
+                if (anyData) fmt(subs.sumOf { s.avg(it) }) else "",
+                rx + 4 * rcw,
+                ty,
+                rcw,
+                totalH,
+                8.5f,
+                true,
+                true,
+                f
+            )
+            cell(ctx, c, "", rx + 5 * rcw, ty, rcw, totalH, 8f, false, true, f)
+        } else {
+            // 7 columns: 3 for ৩য় প্রান্তিক (49x3 = 147) + 4 for চূড়ান্ত ফলাফল (54+60+52+58 = 224) = 371
+            val rw = floatArrayOf(49f, 49f, 49f, 54f, 60f, 52f, 58f)
+            val rxCols = FloatArray(7).apply {
+                var acc = rx
+                for (i in 0..6) {
+                    this[i] = acc
+                    acc += rw[i]
+                }
+            }
+            val term3W = rw[0] + rw[1] + rw[2] // 147
+            val finalW = rw[3] + rw[4] + rw[5] + rw[6] // 224
+
+            cell(ctx, c, "৩য় প্রান্তিক", rx, ty0, term3W, hdr1H, 8.5f, true, true, f)
+            cell(ctx, c, "চূড়ান্ত ফলাফল", rxCols[3], ty0, finalW, hdr1H, 8.5f, true, true, f)
+
+            for (i in 0..2) {
+                cell(ctx, c, termSubHdr[i], rxCols[i], ty0 + hdr1H, rw[i], hdr2H, 6.8f, true, true, f)
+            }
+            val finalSubHdr4 = listOf(
+                "প্রান্তিকের\nগড় নম্বর",
+                "শ্রেণিতে\nসর্বোচ্চ নম্বর",
+                "বিষয়\nগ্রেড",
+                "সমন্বিত\nগ্রেড"
+            )
+            for (i in 0..3) {
+                cell(
+                    ctx,
+                    c,
+                    finalSubHdr4[i],
+                    rxCols[3 + i],
+                    ty0 + hdr1H,
+                    rw[3 + i],
+                    hdr2H,
+                    if (i == 1) 6.5f else 6.8f,
+                    true,
+                    true,
+                    f
+                )
+            }
+
+            val classPeers = (allStudents + s).distinctBy { it.id }.filter { it.cls == s.cls }
+            val classHighestTotal = classPeers
+                .filter { peer -> (1..3).any { peer.hasTerm(it) } }
+                .maxOfOrNull { peer -> peer.subs().sumOf { peer.avg(it) } }
+
+            subs.forEachIndexed { i, sub ->
+                val ry = rowsStartY + i * rh
+                val has3 = s.hasSub(sub, 3)
+                val cont3 = if (sub.key == "ART") "......" else if (has3) fmt(s.cont(sub, 3)) else ""
+                val wr3 = if (sub.written == 0) "......" else if (has3) fmt(s.wr(sub, 3)) else ""
+                val tot3 = if (has3) fmt(s.total(sub, 3)) else ""
+
+                cell(ctx, c, cont3, rxCols[0], ry, rw[0], rh, 7.8f, false, false, f)
+                cell(ctx, c, wr3, rxCols[1], ry, rw[1], rh, 7.8f, false, false, f)
+                cell(ctx, c, tot3, rxCols[2], ry, rw[2], rh, 8.2f, true, false, f)
+
+                val a = s.avg(sub)
+                val classMaxSub = classPeers
+                    .filter { peer -> (1..3).any { peer.hasSub(sub, it) } }
+                    .maxOfOrNull { peer -> peer.avg(sub) }
+
+                cell(ctx, c, if (anyData) fmt(a) else "", rxCols[3], ry, rw[3], rh, 8.2f, true, false, f)
+                cell(ctx, c, if (classMaxSub != null) fmt(classMaxSub) else "", rxCols[4], ry, rw[4], rh, 8.2f, true, false, f)
+                cell(ctx, c, if (anyData) gradeOf(a / sub.max * 100) else "", rxCols[5], ry, rw[5], rh, 9f, true, false, f)
+            }
+
+            val pct = s.overallPct()
+            cell(
+                ctx,
+                c,
+                if (anyData) "${gradeOf(pct)}\n${fmt(pct)}%" else "",
+                rxCols[6],
+                rowsStartY,
+                rw[6],
+                rh * subs.size,
+                11f,
+                true,
+                false,
+                f
+            )
+
+            val has3Term = s.hasTerm(3)
+            cell(ctx, c, "৩য় প্রান্তিকে মোট", rxCols[0], ty, rw[0] + rw[1], totalH, 7.2f, true, true, f)
+            cell(
+                ctx,
+                c,
+                if (has3Term) fmt(subs.sumOf { s.total(it, 3) }) else "",
+                rxCols[2],
+                ty,
+                rw[2],
+                totalH,
+                8.2f,
+                true,
+                true,
+                f
+            )
+            cell(
+                ctx,
+                c,
+                if (anyData) "গড় মোট\n${fmt(subs.sumOf { s.avg(it) })}" else "গড় মোট",
+                rxCols[3],
+                ty,
+                rw[3],
+                totalH,
+                6.8f,
+                true,
+                true,
+                f
+            )
+            cell(
+                ctx,
+                c,
+                if (classHighestTotal != null) "সর্বোচ্চ মোট\n${fmt(classHighestTotal)}" else "সর্বোচ্চ মোট",
+                rxCols[4],
+                ty,
+                rw[4],
+                totalH,
+                6.6f,
+                true,
+                true,
+                f
+            )
+            cell(ctx, c, "", rxCols[5], ty, rw[5] + rw[6], totalH, 7f, false, true, f)
         }
-
-        subs.forEachIndexed { i, sub ->
-            val ry = rowsStartY + i * rh
-            val has3 = s.hasSub(sub, 3)
-            val cont3 = if (sub.key == "ART") "......" else if (has3) fmt(s.cont(sub, 3)) else ""
-            val wr3 = if (sub.written == 0) "......" else if (has3) fmt(s.wr(sub, 3)) else ""
-            val tot3 = if (has3) fmt(s.total(sub, 3)) else ""
-
-            cell(ctx, c, cont3, rx, ry, rcw, rh, 8f, false, false, f)
-            cell(ctx, c, wr3, rx + rcw, ry, rcw, rh, 8f, false, false, f)
-            cell(ctx, c, tot3, rx + 2 * rcw, ry, rcw, rh, 8.5f, true, false, f)
-
-            val a = s.avg(sub)
-            cell(ctx, c, if (anyData) fmt(a) else "", rx + 3 * rcw, ry, rcw, rh, 8.5f, true, false, f)
-            cell(ctx, c, if (anyData) gradeOf(a / sub.max * 100) else "", rx + 4 * rcw, ry, rcw, rh, 9.5f, true, false, f)
-        }
-
-        val pct = s.overallPct()
-        cell(
-            ctx,
-            c,
-            if (anyData) "${gradeOf(pct)}\n${fmt(pct)}%" else "",
-            rx + 5 * rcw,
-            rowsStartY,
-            rcw,
-            rh * subs.size,
-            11.5f,
-            true,
-            false,
-            f
-        )
-
-        val has3Term = s.hasTerm(3)
-        cell(ctx, c, "৩য় প্রান্তিকে মোট", rx, ty, 2 * rcw, totalH, 7.5f, true, true, f)
-        cell(
-            ctx,
-            c,
-            if (has3Term) fmt(subs.sumOf { s.total(it, 3) }) else "",
-            rx + 2 * rcw,
-            ty,
-            rcw,
-            totalH,
-            8.5f,
-            true,
-            true,
-            f
-        )
-        cell(ctx, c, "প্রান্তিকের গড় মোট", rx + 3 * rcw, ty, rcw, totalH, 7f, true, true, f)
-        cell(
-            ctx,
-            c,
-            if (anyData) fmt(subs.sumOf { s.avg(it) }) else "",
-            rx + 4 * rcw,
-            ty,
-            rcw,
-            totalH,
-            8.5f,
-            true,
-            true,
-            f
-        )
-        cell(ctx, c, "", rx + 5 * rcw, ty, rcw, totalH, 8f, false, true, f)
 
         // ---- নিচে ডানে: উপস্থিতি (গুণাবলির সাথে সারিবদ্ধ) ----
         val aw = floatArrayOf(125f, 82f, 82f, 82f)

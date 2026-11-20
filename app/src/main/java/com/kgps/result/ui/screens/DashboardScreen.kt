@@ -88,6 +88,8 @@ fun DashboardScreen(
     isAdmin: Boolean,
     pendingRequestCount: Int,
     backupStatus: AutoBackupStatus,
+    includeClassHighest: Boolean = false,
+    onToggleClassHighest: (Boolean) -> Unit = {},
     onOpenApprovals: () -> Unit,
     onOpenSettings: () -> Unit,
     onCsvImport: () -> Unit,
@@ -552,6 +554,8 @@ fun DashboardScreen(
         BatchReportDialog(
             sortedStudents = sortedAllowedStudents,
             initialClass = classFilter ?: selectedClass,
+            includeClassHighest = includeClassHighest,
+            onToggleClassHighest = onToggleClassHighest,
             onPrintBatch = onPrintBatch,
             onExportBatchPdf = onExportBatchPdf,
             onDismiss = { showBatchDialog = false }

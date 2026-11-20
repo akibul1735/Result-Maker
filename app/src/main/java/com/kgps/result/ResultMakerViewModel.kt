@@ -324,6 +324,12 @@ class ResultMakerViewModel(
     private val _batchEditInitialClass = MutableStateFlow<Int?>(null)
     val batchEditInitialClass: StateFlow<Int?> = _batchEditInitialClass.asStateFlow()
 
+    private val reportPrefs = appContext.getSharedPreferences("kgps_report_prefs", Context.MODE_PRIVATE)
+    private val _includeClassHighestInReport = MutableStateFlow(
+        reportPrefs.getBoolean("include_class_highest", false)
+    )
+    val includeClassHighestInReport: StateFlow<Boolean> = _includeClassHighestInReport.asStateFlow()
+
     private val _snackbarMessage = MutableStateFlow<String?>(null)
     val snackbarMessage: StateFlow<String?> = _snackbarMessage.asStateFlow()
 
@@ -819,6 +825,11 @@ class ResultMakerViewModel(
 
     fun selectStudioStudent(studentId: String) {
         _studioStudentId.value = studentId
+    }
+
+    fun setIncludeClassHighestInReport(enabled: Boolean) {
+        _includeClassHighestInReport.value = enabled
+        reportPrefs.edit().putBoolean("include_class_highest", enabled).apply()
     }
 
     fun openCsvImport(initialText: String = "") {

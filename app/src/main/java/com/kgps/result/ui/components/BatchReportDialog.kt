@@ -90,6 +90,8 @@ enum class BatchReportScope(val labelBn: String) {
 fun BatchReportDialog(
     sortedStudents: List<Student>,
     initialClass: Int,
+    includeClassHighest: Boolean = false,
+    onToggleClassHighest: (Boolean) -> Unit = {},
     onPrintBatch: (students: List<Student>, jobName: String) -> Unit,
     onExportBatchPdf: (students: List<Student>, fileName: String) -> Unit,
     onDismiss: () -> Unit
@@ -608,6 +610,43 @@ fun BatchReportDialog(
                             fontWeight = FontWeight.SemiBold,
                             color = if (targetStudents.isNotEmpty()) TealDark else SlateMuted
                         )
+                    }
+                }
+
+                // Optional Class Highest Column Toggle
+                Surface(
+                    color = if (includeClassHighest) TealSoft else SlateBg,
+                    border = BorderStroke(1.dp, if (includeClassHighest) TealPrimary.copy(alpha = 0.45f) else SlateOutline),
+                    shape = RoundedCornerShape(9.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { onToggleClassHighest(!includeClassHighest) }
+                        .testTag("batch_class_highest_row")
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Checkbox(
+                            checked = includeClassHighest,
+                            onCheckedChange = onToggleClassHighest,
+                            modifier = Modifier.testTag("batch_class_highest_checkbox")
+                        )
+                        Column(Modifier.weight(1f).padding(end = 6.dp)) {
+                            Text(
+                                "৩য় পৃষ্ঠায় 'শ্রেণিতে সর্বোচ্চ নম্বর' কলাম যোগ করুন",
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = SlateText
+                            )
+                            Text(
+                                "চূড়ান্ত ফলাফলের অধীনে বিষয়ভিত্তিক শ্রেণির সর্বোচ্চ নম্বর দেখাবে",
+                                fontSize = 10.5.sp,
+                                color = SlateMuted,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
                     }
                 }
 

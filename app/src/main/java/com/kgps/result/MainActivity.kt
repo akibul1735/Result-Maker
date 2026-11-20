@@ -14,6 +14,7 @@ import androidx.activity.result.IntentSenderRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -41,6 +42,7 @@ import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -450,11 +452,13 @@ fun ResultMakerWorkspace(
     val geminiTestStatus by vm.geminiTestStatus.collectAsStateWithLifecycle()
     val geminiTestSuccess by vm.geminiTestSuccess.collectAsStateWithLifecycle()
     val isGeminiConfigured by vm.isGeminiConfigured.collectAsStateWithLifecycle()
+    val includeClassHighest by vm.includeClassHighestInReport.collectAsStateWithLifecycle()
 
     val workspaceScope = rememberCoroutineScope()
     var askSignOut by remember { mutableStateOf(false) }
 
     var pendingPdfStudents by remember { mutableStateOf<List<Student>>(emptyList()) }
+    var pendingPdfOptionPrompt by remember { mutableStateOf<Pair<List<Student>, String>?>(null) }
     var pdfExportingCount by remember { mutableStateOf<Int?>(null) }
     val pdfLauncher = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/pdf")) { uri ->
         val listToWrite = pendingPdfStudents
@@ -464,7 +468,14 @@ fun ResultMakerWorkspace(
                 val result = runCatching {
                     withContext(Dispatchers.IO) {
                         ctx.contentResolver.openOutputStream(uri)?.use { out ->
-                            PdfGen.write(ctx, listToWrite, settings, out)
+                            PdfGen.write(
+                                ctx = ctx,
+                                students = listToWrite,
+                                st = settings,
+                                out = out,
+                                allStudents = students,
+                                showClassHighest = includeClassHighest
+                            )
                         }
                     }
                 }
@@ -486,6 +497,16 @@ fun ResultMakerWorkspace(
         } else {
             pendingPdfStudents = list
             pdfLauncher.launch(fileName)
+        }
+    }
+
+    val requestPdfWithOption: (List<Student>, String) -> Unit = { list, fileName ->
+        if (!permissions.canExportPdf) {
+            vm.showMessage("PDF তৈরি করার অনুমতি আপনার নেই")
+        } else if (list.isEmpty()) {
+            vm.showMessage("PDF তৈরির জন্য কোনো শিক্ষার্থী নেই")
+        } else {
+            pendingPdfOptionPrompt = list to fileName
         }
     }
 
@@ -519,7 +540,7 @@ fun ResultMakerWorkspace(
                         onAiScan = vm::openAiScanner,
                         onAllPdf = {
                             val allowedCls = permissions.effectiveClasses().toSet()
-                            makePdf(
+                            requestPdfWithOption(
                                 students.filter { it.cls in allowedCls }.sortedWith(compareBy({ it.cls }, { it.roll })),
                                 "সব-শ্রেণির-প্রতিবেদন.pdf"
                             )
@@ -609,7 +630,7 @@ fun ResultMakerWorkspace(
                                 onDeleteStudent = vm::deleteStudent,
                                 onBack = vm::closeEditor,
                                 onPreview = { saved -> vm.openStudio(saved.id) },
-                                onPdf = { s -> makePdf(listOf(s), "${s.name.ifBlank { "student" }}.pdf") },
+                                onPdf = { s -> requestPdfWithOption(listOf(s), "${s.name.ifBlank { "student" }}.pdf") },
                                 onDraftRemark = vm::draftRemark,
                                 onShowMessage = vm::showMessage
                             )
@@ -623,6 +644,8 @@ fun ResultMakerWorkspace(
                                     isAdmin = isAdmin,
                                     pendingRequestCount = joinRequests.size,
                                     backupStatus = backupStatus,
+                                    includeClassHighest = includeClassHighest,
+                                    onToggleClassHighest = vm::setIncludeClassHighestInReport,
                                     onOpenApprovals = { vm.navigate(NavSection.SETTINGS) },
                                     onOpenSettings = { vm.navigate(NavSection.SETTINGS) },
                                     onCsvImport = { vm.openCsvImport("") },
@@ -630,7 +653,7 @@ fun ResultMakerWorkspace(
                                     onAiScan = vm::openAiScanner,
                                     onAllPdf = {
                                         val allowedCls = permissions.effectiveClasses().toSet()
-                                        makePdf(
+                                        requestPdfWithOption(
                                             students.filter { it.cls in allowedCls }.sortedWith(compareBy({ it.cls }, { it.roll })),
                                             "সব-শ্রেণির-প্রতিবেদন.pdf"
                                         )
@@ -641,7 +664,14 @@ fun ResultMakerWorkspace(
                                         } else if (batchList.isEmpty()) {
                                             vm.showMessage("প্রিন্ট করার জন্য কোনো শিক্ষার্থী নির্বাচিত নেই")
                                         } else {
-                                            PdfGen.printStudents(ctx, batchList, settings, jobName)
+                                            PdfGen.printStudents(
+                                                ctx = ctx,
+                                                students = batchList,
+                                                st = settings,
+                                                jobName = jobName,
+                                                allStudents = students,
+                                                showClassHighest = includeClassHighest
+                                            )
                                         }
                                     },
                                     onExportBatchPdf = { batchList, fileName ->
@@ -676,7 +706,7 @@ fun ResultMakerWorkspace(
                                     onPatchStudentField = vm::patchStudentField,
                                     onOpenStudent = { vm.openEditor(it, NavSection.SHEET) },
                                     onClassPdf = {
-                                        makePdf(
+                                        requestPdfWithOption(
                                             students.filter { it.cls == cls }.sortedBy { it.roll },
                                             "শ্রেণি-$cls-প্রতিবেদন.pdf"
                                         )
@@ -716,16 +746,21 @@ fun ResultMakerWorkspace(
                                     val allowedStudents = students.filter { it.cls in allowedCls }
                                     ReportStudioScreen(
                                         students = allowedStudents,
+                                        allSchoolStudents = students,
                                         settings = settings,
                                         selectedId = studioStudentId,
+                                        includeClassHighest = includeClassHighest,
+                                        onToggleClassHighest = vm::setIncludeClassHighestInReport,
                                         onSelectId = vm::selectStudioStudent,
                                         onUpdateSettings = vm::updateSettings,
                                         onPrintStudent = { s ->
                                             PdfGen.printStudents(
-                                                ctx,
-                                                listOf(s),
-                                                settings,
-                                                "${s.name.ifBlank { "Report" }}_${s.roll}"
+                                                ctx = ctx,
+                                                students = listOf(s),
+                                                st = settings,
+                                                jobName = "${s.name.ifBlank { "Report" }}_${s.roll}",
+                                                allStudents = students,
+                                                showClassHighest = includeClassHighest
                                             )
                                         },
                                         onExportPdf = { s -> makePdf(listOf(s), "${s.name.ifBlank { "student" }}-report.pdf") },
@@ -733,7 +768,14 @@ fun ResultMakerWorkspace(
                                             if (batchList.isEmpty()) {
                                                 vm.showMessage("প্রিন্ট করার জন্য কোনো শিক্ষার্থী নির্বাচিত নেই")
                                             } else {
-                                                PdfGen.printStudents(ctx, batchList, settings, jobName)
+                                                PdfGen.printStudents(
+                                                    ctx = ctx,
+                                                    students = batchList,
+                                                    st = settings,
+                                                    jobName = jobName,
+                                                    allStudents = students,
+                                                    showClassHighest = includeClassHighest
+                                                )
                                             }
                                         },
                                         onExportBatchPdf = { batchList, fileName ->
@@ -814,7 +856,7 @@ fun ResultMakerWorkspace(
                                     onRestoreBackupJson = vm::restoreBackupJson,
                                     onExportAllPdf = {
                                         val allowedCls = permissions.effectiveClasses().toSet()
-                                        makePdf(
+                                        requestPdfWithOption(
                                             students.filter { it.cls in allowedCls }.sortedWith(compareBy({ it.cls }, { it.roll })),
                                             "সব-শ্রেণির-প্রতিবেদন.pdf"
                                         )
@@ -900,6 +942,68 @@ fun ResultMakerWorkspace(
             },
             dismissButton = {
                 TextButton(onClick = { askSignOut = false }) { Text("বাতিল") }
+            }
+        )
+    }
+
+    pendingPdfOptionPrompt?.let { (targetList, targetFileName) ->
+        AlertDialog(
+            onDismissRequest = { pendingPdfOptionPrompt = null },
+            title = { Text("রিপোর্ট PDF অপশন", fontWeight = FontWeight.Bold, fontSize = 16.sp) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text(
+                        "${bn(targetList.size.toString())} জন শিক্ষার্থীর (${bn((targetList.size * 2).toString())} পৃষ্ঠা) PDF তৈরি হবে।",
+                        fontSize = 13.sp,
+                        color = SlateText
+                    )
+                    Surface(
+                        color = if (includeClassHighest) TealSoft else SlateBg,
+                        border = BorderStroke(1.dp, if (includeClassHighest) TealPrimary.copy(alpha = 0.45f) else SlateMuted.copy(alpha = 0.25f)),
+                        shape = RoundedCornerShape(9.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { vm.setIncludeClassHighestInReport(!includeClassHighest) }
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Checkbox(
+                                checked = includeClassHighest,
+                                onCheckedChange = vm::setIncludeClassHighestInReport,
+                                modifier = Modifier.testTag("pdf_prompt_class_highest_checkbox")
+                            )
+                            Column(Modifier.weight(1f).padding(end = 6.dp)) {
+                                Text(
+                                    "৩য় পৃষ্ঠায় 'শ্রেণিতে সর্বোচ্চ নম্বর' কলাম যোগ করুন",
+                                    fontSize = 12.5.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = SlateText
+                                )
+                                Text(
+                                    "চূড়ান্ত ফলাফলের অধীনে শ্রেণির সর্বোচ্চ নম্বর দেখাবে",
+                                    fontSize = 11.sp,
+                                    color = SlateMuted
+                                )
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        pendingPdfOptionPrompt = null
+                        makePdf(targetList, targetFileName)
+                    },
+                    modifier = Modifier.testTag("pdf_prompt_confirm_btn")
+                ) {
+                    Text("PDF তৈরি করুন")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { pendingPdfOptionPrompt = null }) { Text("বাতিল") }
             }
         )
     }

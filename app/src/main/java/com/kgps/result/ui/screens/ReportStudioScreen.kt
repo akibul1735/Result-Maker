@@ -128,8 +128,11 @@ private fun clampPanOffset(offset: Offset, scale: Float, size: IntSize): Offset 
 @Composable
 fun ReportStudioScreen(
     students: List<Student>,
+    allSchoolStudents: List<Student> = students,
     settings: Settings,
     selectedId: String?,
+    includeClassHighest: Boolean = false,
+    onToggleClassHighest: (Boolean) -> Unit = {},
     onSelectId: (String) -> Unit,
     onUpdateSettings: (Settings) -> Unit,
     onPrintStudent: (Student) -> Unit,
@@ -200,8 +203,16 @@ fun ReportStudioScreen(
     val coverBmp = remember(active, settings, showFoldGuide) {
         PdfGen.renderCoverBitmap(ctx, active, settings, showFoldGuide = showFoldGuide, scale = 2.4f)
     }
-    val marksBmp = remember(active, settings, showFoldGuide) {
-        PdfGen.renderMarksBitmap(ctx, active, settings, showFoldGuide = showFoldGuide, scale = 2.4f)
+    val marksBmp = remember(active, settings, showFoldGuide, allSchoolStudents, includeClassHighest) {
+        PdfGen.renderMarksBitmap(
+            ctx,
+            active,
+            settings,
+            showFoldGuide = showFoldGuide,
+            scale = 2.4f,
+            allStudents = allSchoolStudents,
+            showClassHighest = includeClassHighest
+        )
     }
 
     // Crop the two landscape A4 sheets into the 4 individual A5 pages
@@ -463,6 +474,27 @@ fun ReportStudioScreen(
                                 overflow = TextOverflow.Ellipsis,
                                 modifier = Modifier.weight(1f)
                             )
+
+                            Surface(
+                                onClick = { onToggleClassHighest(!includeClassHighest) },
+                                shape = RoundedCornerShape(6.dp),
+                                color = if (includeClassHighest) TealPrimary else SlateBg,
+                                border = BorderStroke(1.dp, if (includeClassHighest) TealPrimary else SlateOutline),
+                                modifier = Modifier.height(28.dp).testTag("studio_toggle_class_highest_chip")
+                            ) {
+                                Box(
+                                    modifier = Modifier.padding(horizontal = 7.dp),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Text(
+                                        if (includeClassHighest) "✓ সর্বোচ্চ" else "+ সর্বোচ্চ",
+                                        fontSize = 10.5.sp,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = if (includeClassHighest) Color.White else SlateText,
+                                        maxLines = 1
+                                    )
+                                }
+                            }
 
                             Surface(
                                 onClick = {
@@ -791,6 +823,8 @@ fun ReportStudioScreen(
         BatchReportDialog(
             sortedStudents = sorted,
             initialClass = active.cls,
+            includeClassHighest = includeClassHighest,
+            onToggleClassHighest = onToggleClassHighest,
             onPrintBatch = onPrintBatch,
             onExportBatchPdf = onExportBatchPdf,
             onDismiss = { showBatchDialog = false }
@@ -1259,6 +1293,25 @@ fun ReportStudioScreen(
                         modifier = Modifier.testTag("studio_fold_guide_checkbox")
                     )
                     Text("মাঝখানের ভাঁজ-রেখা দেখান (A4 → A5)", fontSize = 13.sp)
+                }
+
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.fillMaxWidth().clickable { onToggleClassHighest(!includeClassHighest) }
+                ) {
+                    Checkbox(
+                        checked = includeClassHighest,
+                        onCheckedChange = onToggleClassHighest,
+                        modifier = Modifier.testTag("studio_class_highest_checkbox")
+                    )
+                    Column(Modifier.weight(1f)) {
+                        Text("৩য় পৃষ্ঠায় 'শ্রেণিতে সর্বোচ্চ নম্বর' কলাম যোগ করুন", fontSize = 13.sp, fontWeight = FontWeight.Medium)
+                        Text(
+                            "চূড়ান্ত ফলাফলের অধীনে শ্রেণির সর্বোচ্চ নম্বর দেখাবে",
+                            fontSize = 11.sp,
+                            color = SlateMuted
+                        )
+                    }
                 }
             }
         }
