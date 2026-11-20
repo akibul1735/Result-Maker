@@ -8,9 +8,11 @@ import android.os.Build
 import android.os.Environment
 import android.provider.MediaStore
 import androidx.documentfile.provider.DocumentFile
+import com.kgps.result.CsvHeaderStyle
 import com.kgps.result.Repo
 import com.kgps.result.Settings
 import com.kgps.result.Student
+import com.kgps.result.bn
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -20,8 +22,180 @@ import kotlinx.coroutines.withContext
 import java.io.File
 import java.security.MessageDigest
 import java.text.SimpleDateFormat
+import java.util.Calendar
 import java.util.Date
 import java.util.Locale
+
+enum class BackupSystemKind {
+    LOCAL,
+    DRIVE,
+    CSV
+}
+
+enum class BackupScheduleMode(
+    val id: String,
+    val labelBn: String,
+    val shortBn: String
+) {
+    ON_CHANGE("on_change", "ডাটা পরিবর্তনে (তাৎক্ষণিক)", "তাৎক্ষণিক"),
+    EVERY_6_HOURS("every_6h", "প্রতি ৬ ঘণ্টায়", "৬ ঘণ্টা"),
+    EVERY_12_HOURS("every_12h", "প্রতি ১২ ঘণ্টায়", "১২ ঘণ্টা"),
+    DAILY("daily", "প্রতিদিন নির্ধারিত সময়ে", "প্রতিদিন"),
+    WEEKLY("weekly", "সাপ্তাহিক নির্ধারিত সময়ে", "সাপ্তাহিক");
+
+    companion object {
+        fun fromId(id: String?): BackupScheduleMode =
+            entries.firstOrNull { it.id == id } ?: DAILY
+    }
+}
+
+data class BackupScheduleConfig(
+    val mode: BackupScheduleMode = BackupScheduleMode.ON_CHANGE,
+    val hour: Int = 21,
+    val minute: Int = 0,
+    val dayOfWeek: Int = Calendar.FRIDAY
+)
+
+object BackupScheduleCalculator {
+    private const val HOUR_MS = 3_600_000L
+
+    private fun anchorCalendar(hour: Int, minute: Int, nowMs: Long): Calendar {
+        return Calendar.getInstance().apply {
+            timeInMillis = nowMs
+            set(Calendar.HOUR_OF_DAY, hour.coerceIn(0, 23))
+            set(Calendar.MINUTE, minute.coerceIn(0, 59))
+            set(Calendar.SECOND, 0)
+            set(Calendar.MILLISECOND, 0)
+        }
+    }
+
+    fun latestScheduledSlotMs(cfg: BackupScheduleConfig, nowMs: Long = System.currentTimeMillis()): Long {
+        return when (cfg.mode) {
+            BackupScheduleMode.ON_CHANGE -> nowMs
+            BackupScheduleMode.EVERY_6_HOURS -> {
+                val base = anchorCalendar(cfg.hour, cfg.minute, nowMs).timeInMillis
+                val candidates = (-4..4).map { base + it * 6L * HOUR_MS }
+                candidates.filter { it <= nowMs }.maxOrNull() ?: base
+            }
+            BackupScheduleMode.EVERY_12_HOURS -> {
+                val base = anchorCalendar(cfg.hour, cfg.minute, nowMs).timeInMillis
+                val candidates = (-3..3).map { base + it * 12L * HOUR_MS }
+                candidates.filter { it <= nowMs }.maxOrNull() ?: base
+            }
+            BackupScheduleMode.DAILY -> {
+                val cal = anchorCalendar(cfg.hour, cfg.minute, nowMs)
+                if (cal.timeInMillis > nowMs) cal.add(Calendar.DAY_OF_YEAR, -1)
+                cal.timeInMillis
+            }
+            BackupScheduleMode.WEEKLY -> {
+                val cal = anchorCalendar(cfg.hour, cfg.minute, nowMs)
+                cal.set(Calendar.DAY_OF_WEEK, cfg.dayOfWeek.coerceIn(Calendar.SUNDAY, Calendar.SATURDAY))
+                if (cal.timeInMillis > nowMs) cal.add(Calendar.WEEK_OF_YEAR, -1)
+                cal.timeInMillis
+            }
+        }
+    }
+
+    fun nextScheduledSlotMs(cfg: BackupScheduleConfig, nowMs: Long = System.currentTimeMillis()): Long {
+        return when (cfg.mode) {
+            BackupScheduleMode.ON_CHANGE -> nowMs
+            BackupScheduleMode.EVERY_6_HOURS -> {
+                val base = anchorCalendar(cfg.hour, cfg.minute, nowMs).timeInMillis
+                val candidates = (-4..5).map { base + it * 6L * HOUR_MS }
+                candidates.filter { it > nowMs }.minOrNull() ?: (nowMs + 6L * HOUR_MS)
+            }
+            BackupScheduleMode.EVERY_12_HOURS -> {
+                val base = anchorCalendar(cfg.hour, cfg.minute, nowMs).timeInMillis
+                val candidates = (-3..4).map { base + it * 12L * HOUR_MS }
+                candidates.filter { it > nowMs }.minOrNull() ?: (nowMs + 12L * HOUR_MS)
+            }
+            BackupScheduleMode.DAILY -> {
+                val cal = anchorCalendar(cfg.hour, cfg.minute, nowMs)
+                if (cal.timeInMillis <= nowMs) cal.add(Calendar.DAY_OF_YEAR, 1)
+                cal.timeInMillis
+            }
+            BackupScheduleMode.WEEKLY -> {
+                val cal = anchorCalendar(cfg.hour, cfg.minute, nowMs)
+                cal.set(Calendar.DAY_OF_WEEK, cfg.dayOfWeek.coerceIn(Calendar.SUNDAY, Calendar.SATURDAY))
+                if (cal.timeInMillis <= nowMs) cal.add(Calendar.WEEK_OF_YEAR, 1)
+                cal.timeInMillis
+            }
+        }
+    }
+
+    fun isScheduledDue(
+        cfg: BackupScheduleConfig,
+        lastSlotHandledMs: Long,
+        nowMs: Long = System.currentTimeMillis()
+    ): Boolean {
+        if (cfg.mode == BackupScheduleMode.ON_CHANGE) return true
+        val latestSlot = latestScheduledSlotMs(cfg, nowMs)
+        return lastSlotHandledMs < latestSlot
+    }
+
+    fun formatTime12hBn(hour: Int, minute: Int): String {
+        val h24 = hour.coerceIn(0, 23)
+        val m = minute.coerceIn(0, 59)
+        val period = when {
+            h24 in 5..11 -> "সকাল"
+            h24 in 12..15 -> "দুপুর"
+            h24 in 16..18 -> "বিকাল"
+            else -> "রাত"
+        }
+        val h12 = when {
+            h24 == 0 -> 12
+            h24 > 12 -> h24 - 12
+            else -> h24
+        }
+        val amPm = if (h24 < 12) "AM" else "PM"
+        val hh = h12.toString().padStart(2, '0')
+        val mm = m.toString().padStart(2, '0')
+        return "$period ${bn("$hh:$mm")} $amPm"
+    }
+
+    fun formatWeekdayShortBn(dayOfWeek: Int): String = when (dayOfWeek) {
+        Calendar.SATURDAY -> "শনি"
+        Calendar.SUNDAY -> "রবি"
+        Calendar.MONDAY -> "সোম"
+        Calendar.TUESDAY -> "মঙ্গল"
+        Calendar.WEDNESDAY -> "বুধ"
+        Calendar.THURSDAY -> "বৃহঃ"
+        else -> "শুক্র"
+    }
+
+    fun formatWeekdayFullBn(dayOfWeek: Int): String = when (dayOfWeek) {
+        Calendar.SATURDAY -> "শনিবার"
+        Calendar.SUNDAY -> "রবিবার"
+        Calendar.MONDAY -> "সোমবার"
+        Calendar.TUESDAY -> "মঙ্গলবার"
+        Calendar.WEDNESDAY -> "বুধবার"
+        Calendar.THURSDAY -> "বৃহস্পতিবার"
+        else -> "শুক্রবার"
+    }
+
+    fun formatNextRunBn(cfg: BackupScheduleConfig, nowMs: Long = System.currentTimeMillis()): String {
+        if (cfg.mode == BackupScheduleMode.ON_CHANGE) {
+            return "ডাটা পরিবর্তনের সাথে সাথে"
+        }
+        val nextMs = nextScheduledSlotMs(cfg, nowMs)
+        val calNow = Calendar.getInstance().apply { timeInMillis = nowMs }
+        val calNext = Calendar.getInstance().apply { timeInMillis = nextMs }
+        val sameDay = calNow.get(Calendar.YEAR) == calNext.get(Calendar.YEAR) &&
+            calNow.get(Calendar.DAY_OF_YEAR) == calNext.get(Calendar.DAY_OF_YEAR)
+        val calTomorrow = Calendar.getInstance().apply {
+            timeInMillis = nowMs
+            add(Calendar.DAY_OF_YEAR, 1)
+        }
+        val isTomorrow = calTomorrow.get(Calendar.YEAR) == calNext.get(Calendar.YEAR) &&
+            calTomorrow.get(Calendar.DAY_OF_YEAR) == calNext.get(Calendar.DAY_OF_YEAR)
+        val dayPrefix = when {
+            sameDay -> "আজ"
+            isTomorrow -> "আগামীকাল"
+            else -> bn(SimpleDateFormat("dd MMM", Locale.getDefault()).format(Date(nextMs)))
+        }
+        return "$dayPrefix ${formatTime12hBn(calNext.get(Calendar.HOUR_OF_DAY), calNext.get(Calendar.MINUTE))}"
+    }
+}
 
 data class LocalBackupEntry(
     val fileName: String,
@@ -31,19 +205,50 @@ data class LocalBackupEntry(
 )
 
 data class AutoBackupStatus(
+    // 1. Local JSON Auto Backup
     val localEnabled: Boolean = true,
     val localFolderUri: String? = null,
     val localFolderLabel: String = "অ্যাপ স্টোরেজ + Downloads/ResultMaker",
+    val localSchedule: BackupScheduleConfig = BackupScheduleConfig(
+        mode = BackupScheduleMode.ON_CHANGE,
+        hour = 21,
+        minute = 0,
+        dayOfWeek = Calendar.FRIDAY
+    ),
     val lastLocalBackupMs: Long = 0L,
     val lastLocalFileName: String = "",
     val lastLocalError: String? = null,
     val localSnapshots: List<LocalBackupEntry> = emptyList(),
+
+    // 2. Google Drive Auto Backup
     val driveEnabled: Boolean = false,
     val driveNeedsConsent: Boolean = false,
     val driveBusy: Boolean = false,
+    val driveSchedule: BackupScheduleConfig = BackupScheduleConfig(
+        mode = BackupScheduleMode.DAILY,
+        hour = 22,
+        minute = 0,
+        dayOfWeek = Calendar.FRIDAY
+    ),
     val lastDriveBackupMs: Long = 0L,
     val lastDriveFileName: String = "",
-    val lastDriveError: String? = null
+    val lastDriveError: String? = null,
+
+    // 3. CSV Auto Backup
+    val csvEnabled: Boolean = true,
+    val csvFolderUri: String? = null,
+    val csvFolderLabel: String = "অ্যাপ স্টোরেজ + Downloads/ResultMaker",
+    val csvHeaderStyle: CsvHeaderStyle = CsvHeaderStyle.FRIENDLY_BN,
+    val csvSchedule: BackupScheduleConfig = BackupScheduleConfig(
+        mode = BackupScheduleMode.DAILY,
+        hour = 21,
+        minute = 30,
+        dayOfWeek = Calendar.FRIDAY
+    ),
+    val lastCsvBackupMs: Long = 0L,
+    val lastCsvFileName: String = "",
+    val lastCsvError: String? = null,
+    val csvSnapshots: List<LocalBackupEntry> = emptyList()
 )
 
 class AutoBackupManager(
@@ -56,17 +261,53 @@ class AutoBackupManager(
     private val _status = MutableStateFlow(loadInitialStatus())
     val status: StateFlow<AutoBackupStatus> = _status.asStateFlow()
 
+    private fun loadSchedule(
+        prefix: String,
+        defaultMode: BackupScheduleMode,
+        defaultHour: Int,
+        defaultMinute: Int
+    ): BackupScheduleConfig {
+        val mode = BackupScheduleMode.fromId(prefs.getString("${prefix}_mode", defaultMode.id))
+        val hour = prefs.getInt("${prefix}_hour", defaultHour).coerceIn(0, 23)
+        val minute = prefs.getInt("${prefix}_minute", defaultMinute).coerceIn(0, 59)
+        val dow = prefs.getInt("${prefix}_dow", Calendar.FRIDAY).coerceIn(Calendar.SUNDAY, Calendar.SATURDAY)
+        return BackupScheduleConfig(mode = mode, hour = hour, minute = minute, dayOfWeek = dow)
+    }
+
+    private fun saveSchedule(prefix: String, cfg: BackupScheduleConfig) {
+        prefs.edit()
+            .putString("${prefix}_mode", cfg.mode.id)
+            .putInt("${prefix}_hour", cfg.hour.coerceIn(0, 23))
+            .putInt("${prefix}_minute", cfg.minute.coerceIn(0, 59))
+            .putInt("${prefix}_dow", cfg.dayOfWeek.coerceIn(Calendar.SUNDAY, Calendar.SATURDAY))
+            .apply()
+    }
+
     private fun loadInitialStatus(): AutoBackupStatus {
-        val folderUri = prefs.getString(KEY_LOCAL_FOLDER_URI, null)
+        val localFolderUri = prefs.getString(KEY_LOCAL_FOLDER_URI, null)
+        val csvFolderUri = prefs.getString(KEY_CSV_FOLDER_URI, null)
+        val csvHeaderStyle = CsvHeaderStyle.fromId(prefs.getString(KEY_CSV_HEADER_STYLE, CsvHeaderStyle.FRIENDLY_BN.id))
+
         return AutoBackupStatus(
             localEnabled = prefs.getBoolean(KEY_LOCAL_ENABLED, true),
-            localFolderUri = folderUri,
-            localFolderLabel = buildFolderLabel(folderUri),
+            localFolderUri = localFolderUri,
+            localFolderLabel = buildFolderLabel(localFolderUri),
+            localSchedule = loadSchedule(KEY_LOCAL_SCHED_PREFIX, BackupScheduleMode.ON_CHANGE, 21, 0),
             lastLocalBackupMs = prefs.getLong(KEY_LAST_LOCAL_MS, 0L),
             lastLocalFileName = prefs.getString(KEY_LAST_LOCAL_NAME, "").orEmpty(),
+
             driveEnabled = prefs.getBoolean(KEY_DRIVE_ENABLED, false),
+            driveSchedule = loadSchedule(KEY_DRIVE_SCHED_PREFIX, BackupScheduleMode.DAILY, 22, 0),
             lastDriveBackupMs = prefs.getLong(KEY_LAST_DRIVE_MS, 0L),
-            lastDriveFileName = prefs.getString(KEY_LAST_DRIVE_NAME, "").orEmpty()
+            lastDriveFileName = prefs.getString(KEY_LAST_DRIVE_NAME, "").orEmpty(),
+
+            csvEnabled = prefs.getBoolean(KEY_CSV_ENABLED, true),
+            csvFolderUri = csvFolderUri,
+            csvFolderLabel = buildFolderLabel(csvFolderUri),
+            csvHeaderStyle = csvHeaderStyle,
+            csvSchedule = loadSchedule(KEY_CSV_SCHED_PREFIX, BackupScheduleMode.DAILY, 21, 30),
+            lastCsvBackupMs = prefs.getLong(KEY_LAST_CSV_MS, 0L),
+            lastCsvFileName = prefs.getString(KEY_LAST_CSV_NAME, "").orEmpty()
         )
     }
 
@@ -87,6 +328,11 @@ class AutoBackupManager(
     fun setLocalAutoBackupEnabled(enabled: Boolean) {
         prefs.edit().putBoolean(KEY_LOCAL_ENABLED, enabled).apply()
         _status.update { it.copy(localEnabled = enabled, lastLocalError = null) }
+    }
+
+    fun setLocalSchedule(config: BackupScheduleConfig) {
+        saveSchedule(KEY_LOCAL_SCHED_PREFIX, config)
+        _status.update { it.copy(localSchedule = config) }
     }
 
     fun setLocalFolderUri(uri: Uri?) {
@@ -119,6 +365,46 @@ class AutoBackupManager(
         }
     }
 
+    fun setDriveSchedule(config: BackupScheduleConfig) {
+        saveSchedule(KEY_DRIVE_SCHED_PREFIX, config)
+        _status.update { it.copy(driveSchedule = config) }
+    }
+
+    fun setCsvAutoBackupEnabled(enabled: Boolean) {
+        prefs.edit().putBoolean(KEY_CSV_ENABLED, enabled).apply()
+        _status.update { it.copy(csvEnabled = enabled, lastCsvError = null) }
+    }
+
+    fun setCsvSchedule(config: BackupScheduleConfig) {
+        saveSchedule(KEY_CSV_SCHED_PREFIX, config)
+        _status.update { it.copy(csvSchedule = config) }
+    }
+
+    fun setCsvHeaderStyle(style: CsvHeaderStyle) {
+        prefs.edit().putString(KEY_CSV_HEADER_STYLE, style.id).apply()
+        _status.update { it.copy(csvHeaderStyle = style) }
+    }
+
+    fun setCsvFolderUri(uri: Uri?) {
+        val raw = uri?.toString()
+        if (uri != null) {
+            runCatching {
+                appContext.contentResolver.takePersistableUriPermission(
+                    uri,
+                    Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+                )
+            }
+        }
+        prefs.edit().putString(KEY_CSV_FOLDER_URI, raw).apply()
+        _status.update {
+            it.copy(
+                csvFolderUri = raw,
+                csvFolderLabel = buildFolderLabel(raw),
+                lastCsvError = null
+            )
+        }
+    }
+
     fun refreshLocalSnapshots(schoolId: String) {
         val dir = schoolBackupDir(schoolId)
         val entries = dir.listFiles { f -> f.isFile && f.name.endsWith(".json") }
@@ -134,6 +420,21 @@ class AutoBackupManager(
         _status.update { it.copy(localSnapshots = entries) }
     }
 
+    fun refreshCsvSnapshots(schoolId: String) {
+        val dir = schoolCsvBackupDir(schoolId)
+        val entries = dir.listFiles { f -> f.isFile && (f.name.endsWith(".csv") || f.name.endsWith(".xlsx")) }
+            ?.sortedByDescending { it.lastModified() }
+            ?.map { f ->
+                LocalBackupEntry(
+                    fileName = f.name,
+                    path = f.absolutePath,
+                    modifiedMs = f.lastModified(),
+                    sizeBytes = f.length()
+                )
+            } ?: emptyList()
+        _status.update { it.copy(csvSnapshots = entries) }
+    }
+
     suspend fun runLocalBackupIfNeeded(
         schoolId: String,
         schoolCode: String,
@@ -141,20 +442,32 @@ class AutoBackupManager(
         settings: Settings,
         force: Boolean = false
     ): Result<String> = withContext(Dispatchers.IO) {
-        if (!force && !_status.value.localEnabled) {
+        val st = _status.value
+        if (!force && !st.localEnabled) {
             return@withContext Result.success("skipped")
         }
         val json = Repo.toJson(students, settings)
         val hash = sha256(json)
-        val prevHash = prefs.getString(KEY_LAST_LOCAL_HASH, "")
-        if (!force && hash == prevHash) {
-            refreshLocalSnapshots(schoolId)
-            return@withContext Result.success("unchanged")
+        val nowMs = System.currentTimeMillis()
+        if (!force) {
+            if (st.localSchedule.mode == BackupScheduleMode.ON_CHANGE) {
+                val prevHash = prefs.getString(KEY_LAST_LOCAL_HASH, "")
+                if (hash == prevHash) {
+                    refreshLocalSnapshots(schoolId)
+                    return@withContext Result.success("unchanged")
+                }
+            } else {
+                val lastSlotMs = prefs.getLong(KEY_LAST_LOCAL_SLOT_MS, 0L)
+                if (!BackupScheduleCalculator.isScheduledDue(st.localSchedule, lastSlotMs, nowMs)) {
+                    refreshLocalSnapshots(schoolId)
+                    return@withContext Result.success("not_due")
+                }
+            }
         }
 
         runCatching {
             val bytes = json.toByteArray(Charsets.UTF_8)
-            val dateTag = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date())
+            val dateTag = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date(nowMs))
             val safeCode = schoolCode.replace(Regex("[^A-Za-z0-9]"), "").ifBlank { "SCHOOL" }
             val dailyName = "ResultMaker_${safeCode}_$dateTag.json"
 
@@ -162,26 +475,30 @@ class AutoBackupManager(
             val dir = schoolBackupDir(schoolId)
             File(dir, "latest_backup.json").writeBytes(bytes)
             File(dir, dailyName).writeBytes(bytes)
-            pruneOldSnapshots(dir, keepDailyCount = 14)
+            pruneOldSnapshots(dir, prefix = "ResultMaker_", ext = ".json", keepDailyCount = 14)
 
             // Also keep standard local Repo snapshot synchronized
             Repo.save(appContext, students, settings)
 
             // 2. Android 10+ Downloads/ResultMaker folder (user-accessible without permissions)
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                writeToMediaStoreDownloads("ResultMaker_${safeCode}_latest.json", bytes)
+                writeToMediaStoreDownloads(
+                    fileName = "ResultMaker_${safeCode}_latest.json",
+                    mimeType = "application/json",
+                    bytes = bytes
+                )
             }
 
             // 3. Optional user-picked SAF folder
             val folderUriStr = _status.value.localFolderUri
             if (!folderUriStr.isNullOrBlank()) {
-                writeToSafFolder(Uri.parse(folderUriStr), dailyName, bytes)
+                writeToSafFolder(Uri.parse(folderUriStr), dailyName, "application/json", bytes)
             }
 
-            val nowMs = System.currentTimeMillis()
             prefs.edit()
                 .putString(KEY_LAST_LOCAL_HASH, hash)
                 .putLong(KEY_LAST_LOCAL_MS, nowMs)
+                .putLong(KEY_LAST_LOCAL_SLOT_MS, nowMs)
                 .putString(KEY_LAST_LOCAL_NAME, dailyName)
                 .apply()
 
@@ -201,6 +518,117 @@ class AutoBackupManager(
         }
     }
 
+    suspend fun runCsvBackupIfNeeded(
+        schoolId: String,
+        schoolCode: String,
+        students: List<Student>,
+        settings: Settings,
+        force: Boolean = false
+    ): Result<String> = withContext(Dispatchers.IO) {
+        val st = _status.value
+        if (!force && !st.csvEnabled) {
+            return@withContext Result.success("skipped")
+        }
+        val activeClasses = (1..5).filter { c -> students.any { it.cls == c } }.ifEmpty { (1..5).toList() }
+        val perClassCsv = activeClasses.associateWith { c ->
+            Repo.toCsv(students, settings.customFields, st.csvHeaderStyle, targetCls = c)
+        }
+        val signatureSource = perClassCsv.entries.joinToString("\n") { "${it.key}:${it.value}" }
+        val hash = sha256("${st.csvHeaderStyle.id}:$signatureSource")
+        val nowMs = System.currentTimeMillis()
+        if (!force) {
+            if (st.csvSchedule.mode == BackupScheduleMode.ON_CHANGE) {
+                val prevHash = prefs.getString(KEY_LAST_CSV_HASH, "")
+                if (hash == prevHash) {
+                    refreshCsvSnapshots(schoolId)
+                    return@withContext Result.success("unchanged")
+                }
+            } else {
+                val lastSlotMs = prefs.getLong(KEY_LAST_CSV_SLOT_MS, 0L)
+                if (!BackupScheduleCalculator.isScheduledDue(st.csvSchedule, lastSlotMs, nowMs)) {
+                    refreshCsvSnapshots(schoolId)
+                    return@withContext Result.success("not_due")
+                }
+            }
+        }
+
+        runCatching {
+            val dateTag = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date(nowMs))
+            val safeCode = schoolCode.replace(Regex("[^A-Za-z0-9]"), "").ifBlank { "SCHOOL" }
+            val xlsxBytes = XlsxExporter.exportAllClassesWorkbook(
+                students = students,
+                customFields = settings.customFields,
+                style = st.csvHeaderStyle,
+                classes = activeClasses
+            )
+            val xlsxDailyName = "ResultMaker_${safeCode}_MultiTab_$dateTag.xlsx"
+            val xlsxMime = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+
+            val dir = schoolCsvBackupDir(schoolId)
+            val folderUriStr = _status.value.csvFolderUri
+
+            // 1. Save Multi-Tab Excel Workbook (.xlsx) with one sheet per class
+            File(dir, "latest_all_classes.xlsx").writeBytes(xlsxBytes)
+            File(dir, xlsxDailyName).writeBytes(xlsxBytes)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                writeToMediaStoreDownloads(
+                    fileName = "ResultMaker_${safeCode}_AllClasses_latest.xlsx",
+                    mimeType = xlsxMime,
+                    bytes = xlsxBytes
+                )
+            }
+            if (!folderUriStr.isNullOrBlank()) {
+                writeToSafFolder(Uri.parse(folderUriStr), xlsxDailyName, xlsxMime, xlsxBytes)
+            }
+
+            // 2. Save separate per-class CSV files (no mixed classes in a single tab)
+            perClassCsv.forEach { (clsNum, csvText) ->
+                val csvBytes = csvText.toByteArray(Charsets.UTF_8)
+                val dailyCsvName = "ResultMaker_${safeCode}_Class${clsNum}_$dateTag.csv"
+                File(dir, "latest_class_${clsNum}.csv").writeBytes(csvBytes)
+                File(dir, dailyCsvName).writeBytes(csvBytes)
+
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    writeToMediaStoreDownloads(
+                        fileName = "ResultMaker_${safeCode}_Class${clsNum}_latest.csv",
+                        mimeType = "text/csv",
+                        bytes = csvBytes
+                    )
+                }
+                if (!folderUriStr.isNullOrBlank()) {
+                    writeToSafFolder(Uri.parse(folderUriStr), dailyCsvName, "text/csv", csvBytes)
+                }
+            }
+
+            // Remove old combined file if present & prune rolling daily snapshots
+            runCatching { File(dir, "latest_backup.csv").delete() }
+            pruneOldSnapshots(dir, prefix = "ResultMaker_", ext = ".csv", keepDailyCount = 60)
+            pruneOldSnapshots(dir, prefix = "ResultMaker_", ext = ".xlsx", keepDailyCount = 14)
+
+            val summaryName = "Class ${activeClasses.joinToString(",")} CSV + .xlsx"
+            prefs.edit()
+                .putString(KEY_LAST_CSV_HASH, hash)
+                .putLong(KEY_LAST_CSV_MS, nowMs)
+                .putLong(KEY_LAST_CSV_SLOT_MS, nowMs)
+                .putString(KEY_LAST_CSV_NAME, summaryName)
+                .apply()
+
+            refreshCsvSnapshots(schoolId)
+            _status.update {
+                it.copy(
+                    lastCsvBackupMs = nowMs,
+                    lastCsvFileName = summaryName,
+                    lastCsvError = null
+                )
+            }
+            summaryName
+        }.onFailure { err ->
+            _status.update {
+                it.copy(lastCsvError = err.localizedMessage ?: "CSV ব্যাকআপ ত্রুটি")
+            }
+        }
+    }
+
     suspend fun readLocalSnapshot(path: String): Result<String> = withContext(Dispatchers.IO) {
         runCatching { File(path).readText(Charsets.UTF_8) }
     }
@@ -211,19 +639,35 @@ class AutoBackupManager(
         settings: Settings,
         force: Boolean = false
     ): DriveAuthOutcome {
-        if (!force && !_status.value.driveEnabled) {
+        val st = _status.value
+        if (!force && !st.driveEnabled) {
             return DriveAuthOutcome.Failed("disabled")
         }
         val json = Repo.toJson(students, settings)
         val hash = sha256(json)
         val prevHash = prefs.getString(KEY_LAST_DRIVE_HASH, "")
         val lastMs = prefs.getLong(KEY_LAST_DRIVE_MS, 0L)
-        val elapsedMs = System.currentTimeMillis() - lastMs
-        if (!force && hash == prevHash) {
-            return DriveAuthOutcome.Authorized("unchanged")
-        }
-        if (!force && elapsedMs < MIN_AUTO_DRIVE_INTERVAL_MS) {
-            return DriveAuthOutcome.Authorized("throttled")
+        val nowMs = System.currentTimeMillis()
+        val elapsedMs = nowMs - lastMs
+
+        if (!force) {
+            if (st.driveSchedule.mode == BackupScheduleMode.ON_CHANGE) {
+                if (hash == prevHash) {
+                    return DriveAuthOutcome.Authorized("unchanged")
+                }
+                if (elapsedMs < MIN_AUTO_DRIVE_INTERVAL_MS) {
+                    return DriveAuthOutcome.Authorized("throttled")
+                }
+            } else {
+                val lastSlotMs = prefs.getLong(KEY_LAST_DRIVE_SLOT_MS, 0L)
+                if (!BackupScheduleCalculator.isScheduledDue(st.driveSchedule, lastSlotMs, nowMs)) {
+                    return DriveAuthOutcome.Authorized("not_due")
+                }
+                if (hash == prevHash && lastMs > 0L) {
+                    prefs.edit().putLong(KEY_LAST_DRIVE_SLOT_MS, nowMs).apply()
+                    return DriveAuthOutcome.Authorized("unchanged")
+                }
+            }
         }
 
         _status.update { it.copy(driveBusy = true, lastDriveError = null) }
@@ -260,6 +704,7 @@ class AutoBackupManager(
             prefs.edit()
                 .putString(KEY_LAST_DRIVE_HASH, hash)
                 .putLong(KEY_LAST_DRIVE_MS, nowMs)
+                .putLong(KEY_LAST_DRIVE_SLOT_MS, nowMs)
                 .putString(KEY_LAST_DRIVE_NAME, uploaded.name)
                 .putBoolean(KEY_DRIVE_ENABLED, true)
                 .apply()
@@ -291,14 +736,20 @@ class AutoBackupManager(
         return dir
     }
 
-    private fun pruneOldSnapshots(dir: File, keepDailyCount: Int) {
+    private fun schoolCsvBackupDir(schoolId: String): File {
+        val dir = File(schoolBackupDir(schoolId), "csv")
+        if (!dir.exists()) dir.mkdirs()
+        return dir
+    }
+
+    private fun pruneOldSnapshots(dir: File, prefix: String, ext: String, keepDailyCount: Int) {
         val dailyFiles = dir.listFiles { f ->
-            f.isFile && f.name.startsWith("ResultMaker_") && f.name.endsWith(".json")
+            f.isFile && f.name.startsWith(prefix) && f.name.endsWith(ext)
         }?.sortedByDescending { it.lastModified() } ?: return
         dailyFiles.drop(keepDailyCount).forEach { runCatching { it.delete() } }
     }
 
-    private fun writeToMediaStoreDownloads(fileName: String, bytes: ByteArray) {
+    private fun writeToMediaStoreDownloads(fileName: String, mimeType: String, bytes: ByteArray) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return
         val resolver = appContext.contentResolver
         val relPath = "${Environment.DIRECTORY_DOWNLOADS}/ResultMaker"
@@ -312,7 +763,7 @@ class AutoBackupManager(
 
         val values = ContentValues().apply {
             put(MediaStore.MediaColumns.DISPLAY_NAME, fileName)
-            put(MediaStore.MediaColumns.MIME_TYPE, "application/json")
+            put(MediaStore.MediaColumns.MIME_TYPE, mimeType)
             put(MediaStore.MediaColumns.RELATIVE_PATH, relPath)
             put(MediaStore.MediaColumns.IS_PENDING, 1)
         }
@@ -327,10 +778,10 @@ class AutoBackupManager(
         }
     }
 
-    private fun writeToSafFolder(treeUri: Uri, fileName: String, bytes: ByteArray) {
+    private fun writeToSafFolder(treeUri: Uri, fileName: String, mimeType: String, bytes: ByteArray) {
         val dirDoc = DocumentFile.fromTreeUri(appContext, treeUri) ?: return
         val existing = dirDoc.findFile(fileName)
-        val target = existing ?: dirDoc.createFile("application/json", fileName) ?: return
+        val target = existing ?: dirDoc.createFile(mimeType, fileName) ?: return
         appContext.contentResolver.openOutputStream(target.uri, "wt")?.use { out ->
             out.write(bytes)
         }
@@ -344,14 +795,27 @@ class AutoBackupManager(
     companion object {
         private const val KEY_LOCAL_ENABLED = "local_enabled"
         private const val KEY_LOCAL_FOLDER_URI = "local_folder_uri"
+        private const val KEY_LOCAL_SCHED_PREFIX = "local_sched"
         private const val KEY_LAST_LOCAL_HASH = "last_local_hash"
         private const val KEY_LAST_LOCAL_MS = "last_local_ms"
+        private const val KEY_LAST_LOCAL_SLOT_MS = "last_local_slot_ms"
         private const val KEY_LAST_LOCAL_NAME = "last_local_name"
 
         private const val KEY_DRIVE_ENABLED = "drive_enabled"
+        private const val KEY_DRIVE_SCHED_PREFIX = "drive_sched"
         private const val KEY_LAST_DRIVE_HASH = "last_drive_hash"
         private const val KEY_LAST_DRIVE_MS = "last_drive_ms"
+        private const val KEY_LAST_DRIVE_SLOT_MS = "last_drive_slot_ms"
         private const val KEY_LAST_DRIVE_NAME = "last_drive_name"
+
+        private const val KEY_CSV_ENABLED = "csv_enabled"
+        private const val KEY_CSV_FOLDER_URI = "csv_folder_uri"
+        private const val KEY_CSV_HEADER_STYLE = "csv_header_style"
+        private const val KEY_CSV_SCHED_PREFIX = "csv_sched"
+        private const val KEY_LAST_CSV_HASH = "last_csv_hash"
+        private const val KEY_LAST_CSV_MS = "last_csv_ms"
+        private const val KEY_LAST_CSV_SLOT_MS = "last_csv_slot_ms"
+        private const val KEY_LAST_CSV_NAME = "last_csv_name"
 
         private const val MIN_AUTO_DRIVE_INTERVAL_MS = 60_000L
     }

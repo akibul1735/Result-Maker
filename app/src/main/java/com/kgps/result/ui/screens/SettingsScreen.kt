@@ -1,9 +1,12 @@
 package com.kgps.result.ui.screens
 
+import android.content.Intent
 import android.net.Uri
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.content.FileProvider
+import java.io.File
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.clickable
@@ -81,6 +84,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.kgps.result.CLSN
+import com.kgps.result.CsvHeaderStyle
 import com.kgps.result.CustomFieldDef
 import com.kgps.result.DPE_LOGO_LIST
 import com.kgps.result.PDF_FONT_LIST
@@ -90,8 +94,11 @@ import com.kgps.result.Settings
 import com.kgps.result.Student
 import com.kgps.result.ai.DiscoveredGeminiModel
 import com.kgps.result.backup.AutoBackupStatus
+import com.kgps.result.backup.BackupScheduleConfig
+import com.kgps.result.backup.BackupSystemKind
 import com.kgps.result.backup.DriveBackupFile
 import com.kgps.result.backup.LocalBackupEntry
+import com.kgps.result.backup.XlsxExporter
 import com.kgps.result.bn
 import com.kgps.result.cloud.JoinRequestItem
 import com.kgps.result.cloud.MemberRole
@@ -159,7 +166,14 @@ fun SettingsScreen(
     onToggleLocalAutoBackup: (Boolean) -> Unit,
     onSetLocalBackupFolder: (Uri?) -> Unit,
     onToggleDriveAutoBackup: (Boolean) -> Unit,
-    onBackupNowBoth: () -> Unit,
+    onToggleCsvAutoBackup: (Boolean) -> Unit,
+    onSetCsvBackupFolder: (Uri?) -> Unit,
+    onSelectCsvHeaderStyle: (CsvHeaderStyle) -> Unit,
+    onUpdateBackupSchedule: (BackupSystemKind, BackupScheduleConfig) -> Unit,
+    onBackupNowAll: () -> Unit,
+    onBackupLocalNow: () -> Unit,
+    onBackupDriveNow: () -> Unit,
+    onBackupCsvNow: () -> Unit,
     onRestoreLocalSnapshot: (String) -> Unit,
     onLoadDriveBackups: () -> Unit,
     onRestoreFromDriveFile: (String) -> Unit,
@@ -206,18 +220,29 @@ fun SettingsScreen(
     var pendingEditMember by remember { mutableStateOf<SchoolMemberProfile?>(null) }
 
     var showLocalSnapshotsDialog by remember { mutableStateOf(false) }
+    var showCsvSnapshotsDialog by remember { mutableStateOf(false) }
     var showDriveBackupsDialog by remember { mutableStateOf(false) }
     var confirmLocalRestore by remember { mutableStateOf<LocalBackupEntry?>(null) }
     var confirmDriveRestore by remember { mutableStateOf<DriveBackupFile?>(null) }
     var pendingManualJsonRestore by remember { mutableStateOf<String?>(null) }
 
+    var pendingCsvExportCls by remember { mutableStateOf(1) }
+    var pendingCsvTemplateCls by remember { mutableStateOf(1) }
+
     val csvExportLauncher = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("text/csv")) { uri ->
         if (uri != null) {
             try {
                 ctx.contentResolver.openOutputStream(uri)?.use {
-                    it.write(Repo.toCsv(students, settings.customFields).toByteArray(Charsets.UTF_8))
+                    it.write(
+                        Repo.toCsv(
+                            list = students,
+                            customFields = settings.customFields,
+                            style = backupStatus.csvHeaderStyle,
+                            targetCls = pendingCsvExportCls
+                        ).toByteArray(Charsets.UTF_8)
+                    )
                 }
-                onShowMessage("CSV ফাইল সংরক্ষিত হয়েছে")
+                onShowMessage("${CLSN[pendingCsvExportCls - 1]} শ্রেণির CSV ফাইল সংরক্ষিত হয়েছে")
             } catch (e: Exception) {
                 onShowMessage("CSV তৈরি হয়নি: ${e.message ?: "ত্রুটি"}")
             }
@@ -227,11 +252,53 @@ fun SettingsScreen(
     val csvTemplateLauncher = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("text/csv")) { uri ->
         if (uri != null) {
             try {
-                val hdr = "\uFEFF" + Repo.header(settings.customFields).joinToString(",") + "\n"
+                val hdr = Repo.toCsvTemplate(
+                    customFields = settings.customFields,
+                    style = backupStatus.csvHeaderStyle,
+                    targetCls = pendingCsvTemplateCls
+                )
                 ctx.contentResolver.openOutputStream(uri)?.use { it.write(hdr.toByteArray(Charsets.UTF_8)) }
-                onShowMessage("খালি CSV টেমপ্লেট তৈরি হয়েছে")
+                onShowMessage("${CLSN[pendingCsvTemplateCls - 1]} শ্রেণির খালি CSV টেমপ্লেট তৈরি হয়েছে")
             } catch (e: Exception) {
                 onShowMessage("টেমপ্লেট তৈরি হয়নি: ${e.message ?: "ত্রুটি"}")
+            }
+        }
+    }
+
+    val xlsxExportLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.CreateDocument("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+    ) { uri ->
+        if (uri != null) {
+            try {
+                val allowed = permissions.effectiveClasses().ifEmpty { (1..5).toList() }
+                val bytes = XlsxExporter.exportAllClassesWorkbook(
+                    students = students.filter { it.cls in allowed },
+                    customFields = settings.customFields,
+                    style = backupStatus.csvHeaderStyle,
+                    classes = allowed
+                )
+                ctx.contentResolver.openOutputStream(uri)?.use { it.write(bytes) }
+                onShowMessage("প্রতিটি শ্রেণি আলাদা ট্যাবে Excel (.xlsx) সংরক্ষিত হয়েছে")
+            } catch (e: Exception) {
+                onShowMessage("Excel ফাইল তৈরি হয়নি: ${e.message ?: "ত্রুটি"}")
+            }
+        }
+    }
+
+    val csvZipExportLauncher = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/zip")) { uri ->
+        if (uri != null) {
+            try {
+                val allowed = permissions.effectiveClasses().ifEmpty { (1..5).toList() }
+                val bytes = Repo.toPerClassCsvZip(
+                    list = students.filter { it.cls in allowed },
+                    customFields = settings.customFields,
+                    style = backupStatus.csvHeaderStyle,
+                    classes = allowed
+                )
+                ctx.contentResolver.openOutputStream(uri)?.use { it.write(bytes) }
+                onShowMessage("প্রতিটি শ্রেণির আলাদা CSV (ZIP) সংরক্ষিত হয়েছে")
+            } catch (e: Exception) {
+                onShowMessage("ZIP ফাইল তৈরি হয়নি: ${e.message ?: "ত্রুটি"}")
             }
         }
     }
@@ -274,6 +341,12 @@ fun SettingsScreen(
     val folderPickerLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
         if (uri != null) {
             onSetLocalBackupFolder(uri)
+        }
+    }
+
+    val csvFolderPickerLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
+        if (uri != null) {
+            onSetCsvBackupFolder(uri)
         }
     }
 
@@ -852,10 +925,10 @@ fun SettingsScreen(
             // Category 3: Data, Backup & Import/Export
             SettingsCategoryHeader(title = "ব্যাকআপ, ইমপোর্ট ও ডাটা", icon = Icons.Rounded.Backup)
 
-            val autoBackupActive = backupStatus.localEnabled || backupStatus.driveEnabled
+            val autoBackupActive = backupStatus.localEnabled || backupStatus.driveEnabled || backupStatus.csvEnabled
             TreeGroupCard(
-                title = "অটো ব্যাকআপ (লোকাল ও Drive)",
-                subtitle = "লোকাল: ${if (backupStatus.localEnabled) "চালু" else "বন্ধ"} · Drive: ${if (backupStatus.driveEnabled) "চালু" else "বন্ধ"}",
+                title = "অটো ব্যাকআপ (লোকাল · Drive · CSV)",
+                subtitle = "লোকাল: ${if (backupStatus.localEnabled) "চালু" else "বন্ধ"} · Drive: ${if (backupStatus.driveEnabled) "চালু" else "বন্ধ"} · CSV: ${if (backupStatus.csvEnabled) "চালু" else "বন্ধ"}",
                 badgeText = if (autoBackupActive) "চালু" else "বন্ধ",
                 badgeColor = if (autoBackupActive) EmeraldGrade else SlateMuted,
                 badgeContainerColor = if (autoBackupActive) TealSoft else MaterialTheme.colorScheme.surfaceVariant,
@@ -866,7 +939,10 @@ fun SettingsScreen(
             ) {
                 SettingsAutoBackupContent(
                     backupStatus = backupStatus,
-                    onBackupNowBoth = onBackupNowBoth,
+                    onBackupNowAll = onBackupNowAll,
+                    onBackupLocalNow = onBackupLocalNow,
+                    onBackupDriveNow = onBackupDriveNow,
+                    onBackupCsvNow = onBackupCsvNow,
                     onToggleLocalAutoBackup = onToggleLocalAutoBackup,
                     onPickLocalFolder = { folderPickerLauncher.launch(null) },
                     onShowLocalSnapshots = { showLocalSnapshotsDialog = true },
@@ -875,6 +951,11 @@ fun SettingsScreen(
                         onLoadDriveBackups()
                         showDriveBackupsDialog = true
                     },
+                    onToggleCsvAutoBackup = onToggleCsvAutoBackup,
+                    onPickCsvFolder = { csvFolderPickerLauncher.launch(null) },
+                    onShowCsvSnapshots = { showCsvSnapshotsDialog = true },
+                    onSelectCsvHeaderStyle = onSelectCsvHeaderStyle,
+                    onUpdateBackupSchedule = onUpdateBackupSchedule,
                     formatTime = ::formatTimeBn
                 )
             }
@@ -888,12 +969,26 @@ fun SettingsScreen(
                 headerTestTag = "settings_group_csv_json",
                 onToggle = { expandedGroup = if (expandedGroup == "csv_json") "" else "csv_json" }
             ) {
+                val countByClass = remember(students) {
+                    (1..5).associateWith { c -> students.count { it.cls == c } }
+                }
                 SettingsCsvJsonContent(
                     permissions = permissions,
                     isAdmin = isAdmin,
+                    studentCountByClass = countByClass,
+                    csvHeaderStyle = backupStatus.csvHeaderStyle,
+                    onSelectCsvHeaderStyle = onSelectCsvHeaderStyle,
                     onExportAllPdf = onExportAllPdf,
-                    onExportCsv = { csvExportLauncher.launch("students.csv") },
-                    onExportCsvTemplate = { csvTemplateLauncher.launch("students_template.csv") },
+                    onExportExcelMultiTab = { xlsxExportLauncher.launch("ResultMaker_AllClasses.xlsx") },
+                    onExportCsvForClass = { c ->
+                        pendingCsvExportCls = c
+                        csvExportLauncher.launch("students_class_$c.csv")
+                    },
+                    onExportCsvTemplateForClass = { c ->
+                        pendingCsvTemplateCls = c
+                        csvTemplateLauncher.launch("template_class_$c.csv")
+                    },
+                    onExportPerClassCsvZip = { csvZipExportLauncher.launch("students_per_class_csv.zip") },
                     onOpenSmartCsvImport = { onOpenCsvImport("") },
                     onPickCsvFile = { csvFilePickLauncher.launch(arrayOf("*/*")) },
                     onExportJson = { jsonExportLauncher.launch("result_maker_backup.json") },
@@ -1129,6 +1224,77 @@ fun SettingsScreen(
             },
             confirmButton = {
                 TextButton(onClick = { showLocalSnapshotsDialog = false }) { Text("বন্ধ করুন") }
+            }
+        )
+    }
+
+    // Dialog: CSV / Excel Auto Backup Files List (Share / Open in Excel/Sheets)
+    if (showCsvSnapshotsDialog) {
+        AlertDialog(
+            onDismissRequest = { showCsvSnapshotsDialog = false },
+            title = { Text("CSV ও Excel অটো ব্যাকআপ ফাইল") },
+            text = {
+                if (backupStatus.csvSnapshots.isEmpty()) {
+                    Text("এখনো কোনো CSV বা Excel অটো ব্যাকআপ ফাইল তৈরি হয়নি।", fontSize = 13.sp, color = SlateMuted)
+                } else {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(max = 360.dp)
+                            .verticalScroll(rememberScrollState()),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        backupStatus.csvSnapshots.forEach { entry ->
+                            Surface(
+                                color = SlateBg,
+                                border = BorderStroke(1.dp, SlateOutline),
+                                shape = RoundedCornerShape(10.dp),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable {
+                                        runCatching {
+                                            val fileUri = FileProvider.getUriForFile(
+                                                ctx,
+                                                "${ctx.packageName}.fileprovider",
+                                                File(entry.path)
+                                            )
+                                            val shareIntent = Intent(Intent.ACTION_SEND).apply {
+                                                type = if (entry.fileName.endsWith(".xlsx", ignoreCase = true)) {
+                                                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                                                } else {
+                                                    "text/csv"
+                                                }
+                                                putExtra(Intent.EXTRA_STREAM, fileUri)
+                                                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                                            }
+                                            ctx.startActivity(Intent.createChooser(shareIntent, entry.fileName))
+                                        }.onFailure { err ->
+                                            onShowMessage(err.localizedMessage ?: "ফাইল খোলা যায়নি")
+                                        }
+                                    }
+                            ) {
+                                Row(
+                                    Modifier.padding(10.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    Column(Modifier.weight(1f)) {
+                                        Text(entry.fileName, fontWeight = FontWeight.SemiBold, fontSize = 12.5.sp)
+                                        Text(
+                                            "${formatTimeBn(entry.modifiedMs)} · ${bn((entry.sizeBytes / 1024).coerceAtLeast(1).toString())} KB",
+                                            fontSize = 11.sp,
+                                            color = SlateMuted
+                                        )
+                                    }
+                                    Text("শেয়ার / খুলুন", fontSize = 11.5.sp, fontWeight = FontWeight.SemiBold, color = TealPrimary)
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showCsvSnapshotsDialog = false }) { Text("বন্ধ করুন") }
             }
         )
     }

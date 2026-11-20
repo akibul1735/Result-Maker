@@ -26,6 +26,10 @@ import com.kgps.result.ai.ScannedStudentRow
 import com.kgps.result.ai.validateScannedStudentRow
 import com.kgps.result.backup.AutoBackupManager
 import com.kgps.result.backup.AutoBackupStatus
+import com.kgps.result.backup.BackupScheduleConfig
+import com.kgps.result.backup.BackupScheduleMode
+import com.kgps.result.backup.BackupSystemKind
+import com.kgps.result.backup.BackupWorkScheduler
 import com.kgps.result.backup.DriveAuthOutcome
 import com.kgps.result.backup.DriveBackupFile
 import com.kgps.result.backup.GoogleDriveBackupClient
@@ -58,6 +62,7 @@ import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.util.UUID
@@ -379,6 +384,7 @@ class ResultMakerViewModel(
                     }
                     if (school != null) {
                         autoBackupManager.refreshLocalSnapshots(school.id)
+                        autoBackupManager.refreshCsvSnapshots(school.id)
                     }
                 }
         }
@@ -393,7 +399,23 @@ class ResultMakerViewModel(
             }
         }
 
-        // Side-by-side Auto Backup to Local Storage & Google Drive whenever Firestore data updates
+        // Sync WorkManager schedules whenever active school or backup configuration changes
+        viewModelScope.launch {
+            combine(activeSchool, backupStatus) { school, status -> school to status }
+                .collectLatest { (school, status) ->
+                    if (school != null) {
+                        BackupWorkScheduler.syncAllSchedules(
+                            context = appContext,
+                            userId = currentUserId,
+                            schoolId = school.id,
+                            schoolCode = school.joinCode,
+                            status = status
+                        )
+                    }
+                }
+        }
+
+        // Three-way Auto Backup (Local JSON, Google Drive, CSV) when Firestore data updates
         viewModelScope.launch {
             combine(activeSchool, students, settings) { school, studentList, st ->
                 Triple(school, studentList, st)
@@ -403,7 +425,18 @@ class ResultMakerViewModel(
                     if (school == null) return@collectLatest
                     if (studentList.isEmpty() && st == DEFAULT_SETTINGS) return@collectLatest
 
+                    Repo.save(appContext, studentList, st)
+                    BackupWorkScheduler.saveActiveMeta(appContext, currentUserId, school.id, school.joinCode)
+
                     autoBackupManager.runLocalBackupIfNeeded(
+                        schoolId = school.id,
+                        schoolCode = school.joinCode,
+                        students = studentList,
+                        settings = st,
+                        force = false
+                    )
+
+                    autoBackupManager.runCsvBackupIfNeeded(
                         schoolId = school.id,
                         schoolCode = school.joinCode,
                         students = studentList,
@@ -421,6 +454,40 @@ class ResultMakerViewModel(
                         )
                     }
                 }
+        }
+
+        // Foreground minute ticker so scheduled backups also fire promptly while the app stays open
+        viewModelScope.launch {
+            while (isActive) {
+                delay(60_000L)
+                val school = activeSchool.value ?: continue
+                val studentList = students.value
+                val st = settings.value
+                if (studentList.isEmpty() && st == DEFAULT_SETTINGS) continue
+
+                autoBackupManager.runLocalBackupIfNeeded(
+                    schoolId = school.id,
+                    schoolCode = school.joinCode,
+                    students = studentList,
+                    settings = st,
+                    force = false
+                )
+                autoBackupManager.runCsvBackupIfNeeded(
+                    schoolId = school.id,
+                    schoolCode = school.joinCode,
+                    students = studentList,
+                    settings = st,
+                    force = false
+                )
+                if (autoBackupManager.status.value.driveEnabled) {
+                    autoBackupManager.runDriveBackupIfNeeded(
+                        schoolCode = school.joinCode,
+                        students = studentList,
+                        settings = st,
+                        force = false
+                    )
+                }
+            }
         }
 
         if (GeminiApiConfig.isConfigured(appContext)) {
@@ -1194,7 +1261,7 @@ class ResultMakerViewModel(
         }
     }
 
-    // ---------- Local + Google Drive Auto Backup ----------
+    // ---------- 3-System Auto Backup (Local JSON + Google Drive + CSV) ----------
 
     fun toggleLocalAutoBackup(enabled: Boolean) {
         autoBackupManager.setLocalAutoBackupEnabled(enabled)
@@ -1226,7 +1293,7 @@ class ResultMakerViewModel(
                 settings = settings.value,
                 force = true
             ).onSuccess {
-                showMessage("নির্বাচিত ফোল্ডারে ব্যাকআপ সংরক্ষিত হয়েছে")
+                showMessage("নির্বাচিত ফোল্ডারে লোকাল ব্যাকআপ সংরক্ষিত হয়েছে")
             }.onFailure { e ->
                 showMessage(e.localizedMessage ?: "ফোল্ডারে ব্যাকআপ লেখা যায়নি")
             }
@@ -1261,10 +1328,150 @@ class ResultMakerViewModel(
         }
     }
 
-    fun backupNowBoth() {
+    fun toggleCsvAutoBackup(enabled: Boolean) {
+        autoBackupManager.setCsvAutoBackupEnabled(enabled)
+        if (enabled) {
+            val school = activeSchool.value ?: return
+            viewModelScope.launch {
+                autoBackupManager.runCsvBackupIfNeeded(
+                    schoolId = school.id,
+                    schoolCode = school.joinCode,
+                    students = students.value,
+                    settings = settings.value,
+                    force = true
+                )
+            }
+            showMessage("CSV অটো ব্যাকআপ চালু হয়েছে")
+        } else {
+            showMessage("CSV অটো ব্যাকআপ বন্ধ করা হয়েছে")
+        }
+    }
+
+    fun setCsvBackupFolder(uri: Uri?) {
+        autoBackupManager.setCsvFolderUri(uri)
+        val school = activeSchool.value ?: return
+        viewModelScope.launch {
+            autoBackupManager.runCsvBackupIfNeeded(
+                schoolId = school.id,
+                schoolCode = school.joinCode,
+                students = students.value,
+                settings = settings.value,
+                force = true
+            ).onSuccess {
+                showMessage("নির্বাচিত ফোল্ডারে CSV ব্যাকআপ সংরক্ষিত হয়েছে")
+            }.onFailure { e ->
+                showMessage(e.localizedMessage ?: "ফোল্ডারে CSV ব্যাকআপ লেখা যায়নি")
+            }
+        }
+    }
+
+    fun setCsvHeaderStyle(style: CsvHeaderStyle) {
+        autoBackupManager.setCsvHeaderStyle(style)
+        showMessage("CSV হেডার ফরম্যাট: ${style.labelBn}")
+        val school = activeSchool.value ?: return
+        if (autoBackupManager.status.value.csvEnabled) {
+            viewModelScope.launch {
+                autoBackupManager.runCsvBackupIfNeeded(
+                    schoolId = school.id,
+                    schoolCode = school.joinCode,
+                    students = students.value,
+                    settings = settings.value,
+                    force = true
+                )
+            }
+        }
+    }
+
+    fun updateBackupSchedule(kind: BackupSystemKind, config: BackupScheduleConfig) {
+        when (kind) {
+            BackupSystemKind.LOCAL -> autoBackupManager.setLocalSchedule(config)
+            BackupSystemKind.DRIVE -> autoBackupManager.setDriveSchedule(config)
+            BackupSystemKind.CSV -> autoBackupManager.setCsvSchedule(config)
+        }
+        val school = activeSchool.value
+        if (school != null) {
+            BackupWorkScheduler.syncAllSchedules(
+                context = appContext,
+                userId = currentUserId,
+                schoolId = school.id,
+                schoolCode = school.joinCode,
+                status = autoBackupManager.status.value
+            )
+        }
+        val kindLabel = when (kind) {
+            BackupSystemKind.LOCAL -> "লোকাল JSON"
+            BackupSystemKind.DRIVE -> "Google Drive"
+            BackupSystemKind.CSV -> "CSV"
+        }
+        val scheduleDesc = if (config.mode == BackupScheduleMode.ON_CHANGE) {
+            config.mode.labelBn
+        } else {
+            "${config.mode.shortBn} · ${com.kgps.result.backup.BackupScheduleCalculator.formatTime12hBn(config.hour, config.minute)}"
+        }
+        showMessage("$kindLabel সময়সূচি: $scheduleDesc")
+    }
+
+    fun backupLocalNow() {
+        val school = activeSchool.value ?: return
+        viewModelScope.launch {
+            autoBackupManager.runLocalBackupIfNeeded(
+                schoolId = school.id,
+                schoolCode = school.joinCode,
+                students = students.value,
+                settings = settings.value,
+                force = true
+            ).onSuccess {
+                showMessage("লোকাল JSON ব্যাকআপ সম্পন্ন হয়েছে")
+            }.onFailure { e ->
+                showMessage(e.localizedMessage ?: "লোকাল ব্যাকআপ ব্যর্থ")
+            }
+        }
+    }
+
+    fun backupDriveNow() {
+        val school = activeSchool.value ?: return
+        viewModelScope.launch {
+            when (val driveRes = autoBackupManager.runDriveBackupIfNeeded(
+                schoolCode = school.joinCode,
+                students = students.value,
+                settings = settings.value,
+                force = true
+            )) {
+                is DriveAuthOutcome.Authorized -> showMessage("Google Drive ব্যাকআপ সম্পন্ন হয়েছে")
+                is DriveAuthOutcome.NeedsConsent -> _pendingDriveConsent.value = driveRes.intentSender
+                is DriveAuthOutcome.Failed -> showMessage(driveRes.message)
+            }
+        }
+    }
+
+    fun backupCsvNow() {
+        val school = activeSchool.value ?: return
+        viewModelScope.launch {
+            autoBackupManager.runCsvBackupIfNeeded(
+                schoolId = school.id,
+                schoolCode = school.joinCode,
+                students = students.value,
+                settings = settings.value,
+                force = true
+            ).onSuccess {
+                showMessage("CSV ব্যাকআপ সম্পন্ন হয়েছে")
+            }.onFailure { e ->
+                showMessage(e.localizedMessage ?: "CSV ব্যাকআপ ব্যর্থ")
+            }
+        }
+    }
+
+    fun backupNowAll() {
         val school = activeSchool.value ?: return
         viewModelScope.launch {
             val localRes = autoBackupManager.runLocalBackupIfNeeded(
+                schoolId = school.id,
+                schoolCode = school.joinCode,
+                students = students.value,
+                settings = settings.value,
+                force = true
+            )
+            val csvRes = autoBackupManager.runCsvBackupIfNeeded(
                 schoolId = school.id,
                 schoolCode = school.joinCode,
                 students = students.value,
@@ -1279,10 +1486,10 @@ class ResultMakerViewModel(
             )) {
                 is DriveAuthOutcome.Authorized -> {
                     val localOk = localRes.isSuccess
-                    val msg = if (localOk) {
-                        "লোকাল ও Google Drive উভয় ব্যাকআপ সম্পন্ন হয়েছে"
-                    } else {
-                        "Google Drive ব্যাকআপ সম্পন্ন; লোকাল ত্রুটি: ${localRes.exceptionOrNull()?.localizedMessage}"
+                    val csvOk = csvRes.isSuccess
+                    val msg = when {
+                        localOk && csvOk -> "লোকাল, Google Drive ও CSV — ৩টি ব্যাকআপ সম্পন্ন হয়েছে"
+                        else -> "Drive সম্পন্ন (লোকাল: ${if (localOk) "সফল" else "ত্রুটি"}, CSV: ${if (csvOk) "সফল" else "ত্রুটি"})"
                     }
                     showMessage(msg)
                 }
@@ -1290,8 +1497,12 @@ class ResultMakerViewModel(
                     _pendingDriveConsent.value = driveRes.intentSender
                 }
                 is DriveAuthOutcome.Failed -> {
-                    if (localRes.isSuccess) {
-                        showMessage("লোকাল ব্যাকআপ হয়েছে। Drive ত্রুটি: ${driveRes.message}")
+                    val done = buildList {
+                        if (localRes.isSuccess) add("লোকাল")
+                        if (csvRes.isSuccess) add("CSV")
+                    }
+                    if (done.isNotEmpty()) {
+                        showMessage("${done.joinToString(" ও ")} ব্যাকআপ হয়েছে। Drive ত্রুটি: ${driveRes.message}")
                     } else {
                         showMessage(driveRes.message)
                     }

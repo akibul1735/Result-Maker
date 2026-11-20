@@ -115,5 +115,6 @@ dependencies {
     implementation("com.google.android.libraries.identity.googleid:googleid:1.1.1")
     implementation("com.google.android.gms:play-services-auth:21.3.0")
     implementation("androidx.documentfile:documentfile:1.0.1")
+    implementation("androidx.work:work-runtime-ktx:2.10.0")
     debugImplementation("androidx.compose.ui:ui-tooling")
 }

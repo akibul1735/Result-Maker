@@ -3,15 +3,63 @@ package com.kgps.result
 import android.content.Context
 import org.json.JSONArray
 import org.json.JSONObject
+import java.io.ByteArrayOutputStream
 import java.io.File
 import java.util.UUID
+import java.util.zip.ZipEntry
+import java.util.zip.ZipOutputStream
+
+enum class CsvHeaderStyle(
+    val id: String,
+    val labelBn: String,
+    val previewBn: String
+) {
+    FRIENDLY_BN(
+        id = "friendly_bn",
+        labelBn = "সহজ বাংলা হেডার",
+        previewBn = "শ্রেণি, রোল নম্বর, শিক্ষার্থীর নাম, বাংলা (১ম প্রান্তিক) - লিখিত"
+    ),
+    FRIENDLY_EN(
+        id = "friendly_en",
+        labelBn = "সহজ ইংরেজি হেডার",
+        previewBn = "Class, Roll No, Student Name, Bangla (Term 1) - Written"
+    ),
+    SYSTEM_KEYS(
+        id = "system_keys",
+        labelBn = "সিস্টেম কোড (Raw)",
+        previewBn = "cls, roll, name, BAN_1_WR"
+    );
+
+    companion object {
+        fun fromId(id: String?): CsvHeaderStyle =
+            entries.firstOrNull { it.id == id } ?: FRIENDLY_BN
+    }
+}
 
 object Repo {
     private val BASE = listOf("cls", "roll", "name", "guardian", "village", "union", "upazila", "district", "mobile", "religion")
     val MARK_KEYS: List<String> = listOf("BAN", "ENG", "MATH", "SOC", "SCI", "BGW", "REL", "PE", "ART").flatMap { s ->
         (1..3).flatMap { t -> listOf("TB", "ACT", "LANG", "CT", "WR", "CONT", "TOTAL").map { c -> mk(s, t, c) } }
     }
+    val EXPORT_MARK_KEYS: List<String> = exportMarkKeysForClass(null)
     val TEXT_KEYS: List<String> = (1..3).flatMap { t -> listOf("DAYS", "PRES", "ACT", "DISC", "COND", "REM").map { "${it}_$t" } }
+
+    fun exportMarkKeysForClass(cls: Int?): List<String> {
+        val subs = when {
+            cls == null -> listOf("BAN", "ENG", "MATH", "SOC", "SCI", "BGW", "REL", "PE", "ART")
+            cls <= 2 -> listOf("BAN", "ENG", "MATH", "SOC", "REL", "PE", "ART")
+            else -> listOf("BAN", "ENG", "MATH", "SCI", "BGW", "REL", "PE", "ART")
+        }
+        return subs.flatMap { s ->
+            val comps = when {
+                s == "ART" -> listOf("TOTAL")
+                s == "SOC" || s == "PE" -> listOf("TB", "ACT", "LANG", "CT", "CONT", "TOTAL")
+                s == "REL" && cls != null && cls <= 2 -> listOf("TB", "ACT", "LANG", "CT", "CONT", "TOTAL")
+                else -> listOf("TB", "ACT", "LANG", "CT", "WR", "CONT", "TOTAL")
+            }
+            (1..3).flatMap { t -> comps.map { c -> mk(s, t, c) } }
+        }
+    }
 
     // ---------- JSON (ব্যাকআপ/রিস্টোর) ----------
     fun toJson(list: List<Student>, st: Settings): String {
@@ -99,15 +147,210 @@ object Repo {
     // ---------- CSV ----------
     private fun q(s: String) = if (s.any { it == ',' || it == '"' || it == '\n' || it == '\r' }) "\"" + s.replace("\"", "\"\"") + "\"" else s
 
-    fun header(customFields: List<CustomFieldDef> = emptyList()): List<String> =
-        BASE + customFields.map { it.label } + MARK_KEYS + TEXT_KEYS
+    private val BASE_BN = mapOf(
+        "cls" to "শ্রেণি",
+        "roll" to "রোল নম্বর",
+        "name" to "শিক্ষার্থীর নাম",
+        "guardian" to "পিতা/অভিভাবকের নাম",
+        "village" to "গ্রাম",
+        "union" to "ইউনিয়ন",
+        "upazila" to "উপজেলা",
+        "district" to "জেলা",
+        "mobile" to "মোবাইল নম্বর",
+        "religion" to "ধর্ম"
+    )
 
-    fun toCsv(list: List<Student>, customFields: List<CustomFieldDef> = emptyList()): String {
-        val sb = StringBuilder("\uFEFF")
-        sb.append(header(customFields).joinToString(",") { q(it) }).append("\n")
-        list.sortedWith(compareBy({ it.cls }, { it.roll })).forEach { s ->
-            val row = listOf(
-                s.cls.toString(),
+    private val BASE_EN = mapOf(
+        "cls" to "Class",
+        "roll" to "Roll No",
+        "name" to "Student Name",
+        "guardian" to "Guardian Name",
+        "village" to "Village",
+        "union" to "Union",
+        "upazila" to "Upazila",
+        "district" to "District",
+        "mobile" to "Mobile No",
+        "religion" to "Religion"
+    )
+
+    private val SUB_BN = mapOf(
+        "BAN" to "বাংলা",
+        "ENG" to "ইংরেজি",
+        "MATH" to "গণিত",
+        "SOC" to "সামাজিক ও বিজ্ঞান",
+        "SCI" to "বিজ্ঞান",
+        "BGW" to "বাংলাদেশ ও বিশ্বপরিচয়",
+        "REL" to "ধর্মশিক্ষা",
+        "PE" to "শারীরিক ও স্বাস্থ্য",
+        "ART" to "শিল্পকলা"
+    )
+
+    private val SUB_EN = mapOf(
+        "BAN" to "Bangla",
+        "ENG" to "English",
+        "MATH" to "Math",
+        "SOC" to "Social & Science",
+        "SCI" to "Science",
+        "BGW" to "Bangladesh & Global",
+        "REL" to "Religion",
+        "PE" to "Physical & Health",
+        "ART" to "Art"
+    )
+
+    private val COMP_BN = mapOf(
+        "TB" to "পাঠ্যপুস্তক",
+        "ACT" to "সক্রিয়তা",
+        "LANG" to "ভাষাদক্ষতা",
+        "CT" to "ক্লাস টেস্ট",
+        "WR" to "লিখিত",
+        "CONT" to "ধারাবাহিক মোট",
+        "TOTAL" to "বিষয় মোট"
+    )
+
+    private val COMP_EN = mapOf(
+        "TB" to "Textbook",
+        "ACT" to "Activity",
+        "LANG" to "Language",
+        "CT" to "Class Test",
+        "WR" to "Written",
+        "CONT" to "Continuous Total",
+        "TOTAL" to "Subject Total"
+    )
+
+    private val TEXT_BN = mapOf(
+        "DAYS" to "মোট কার্যদিবস",
+        "PRES" to "মোট উপস্থিতি",
+        "ACT" to "সহপাঠক্রমিক",
+        "DISC" to "শৃঙ্খলাবোধ",
+        "COND" to "আচরণ",
+        "REM" to "শিক্ষকের মন্তব্য"
+    )
+
+    private val TEXT_EN = mapOf(
+        "DAYS" to "Working Days",
+        "PRES" to "Attendance",
+        "ACT" to "Co-curricular",
+        "DISC" to "Discipline",
+        "COND" to "Conduct",
+        "REM" to "Teacher Remark"
+    )
+
+    private fun termBn(t: Int) = when (t) {
+        1 -> "১ম প্রান্তিক"
+        2 -> "২য় প্রান্তিক"
+        else -> "৩য় প্রান্তিক"
+    }
+
+    private fun friendlyMarkHeader(key: String, style: CsvHeaderStyle): String {
+        if (style == CsvHeaderStyle.SYSTEM_KEYS) return key
+        val parts = key.split('_')
+        if (parts.size != 3) return key
+        val sub = parts[0]
+        val term = parts[1].toIntOrNull() ?: 1
+        val comp = parts[2]
+        return when (style) {
+            CsvHeaderStyle.FRIENDLY_BN -> {
+                val subLabel = SUB_BN[sub] ?: sub
+                val compLabel = if (sub == "ART" && comp == "TOTAL") "মোট নম্বর" else (COMP_BN[comp] ?: comp)
+                "$subLabel (${termBn(term)}) - $compLabel"
+            }
+            CsvHeaderStyle.FRIENDLY_EN -> {
+                val subLabel = SUB_EN[sub] ?: sub
+                val compLabel = if (sub == "ART" && comp == "TOTAL") "Total" else (COMP_EN[comp] ?: comp)
+                "$subLabel (Term $term) - $compLabel"
+            }
+            CsvHeaderStyle.SYSTEM_KEYS -> key
+        }
+    }
+
+    private fun friendlyTextHeader(key: String, style: CsvHeaderStyle): String {
+        if (style == CsvHeaderStyle.SYSTEM_KEYS) return key
+        val parts = key.split('_')
+        if (parts.size != 2) return key
+        val field = parts[0]
+        val term = parts[1].toIntOrNull() ?: 1
+        return when (style) {
+            CsvHeaderStyle.FRIENDLY_BN -> "${termBn(term)} - ${TEXT_BN[field] ?: field}"
+            CsvHeaderStyle.FRIENDLY_EN -> "Term $term - ${TEXT_EN[field] ?: field}"
+            CsvHeaderStyle.SYSTEM_KEYS -> key
+        }
+    }
+
+    private fun summaryHeaders(style: CsvHeaderStyle): List<String> = when (style) {
+        CsvHeaderStyle.FRIENDLY_BN -> listOf("বার্ষিক গড় (%)", "সামগ্রিক গ্রেড")
+        CsvHeaderStyle.FRIENDLY_EN -> listOf("Overall Avg (%)", "Overall Grade")
+        CsvHeaderStyle.SYSTEM_KEYS -> emptyList()
+    }
+
+    fun header(
+        customFields: List<CustomFieldDef> = emptyList(),
+        style: CsvHeaderStyle = CsvHeaderStyle.FRIENDLY_BN,
+        includeSummary: Boolean = false,
+        targetCls: Int? = null
+    ): List<String> {
+        val baseHeaders = BASE.map { key ->
+            when (style) {
+                CsvHeaderStyle.FRIENDLY_BN -> BASE_BN[key] ?: key
+                CsvHeaderStyle.FRIENDLY_EN -> BASE_EN[key] ?: key
+                CsvHeaderStyle.SYSTEM_KEYS -> key
+            }
+        }
+        val markKeys = if (style == CsvHeaderStyle.SYSTEM_KEYS && targetCls == null) {
+            MARK_KEYS
+        } else {
+            exportMarkKeysForClass(targetCls)
+        }
+        val markHeaders = markKeys.map { friendlyMarkHeader(it, style) }
+        val textHeaders = TEXT_KEYS.map { friendlyTextHeader(it, style) }
+        val summary = if (includeSummary) summaryHeaders(style) else emptyList()
+        return baseHeaders + customFields.map { it.label } + summary + markHeaders + textHeaders
+    }
+
+    fun toCsvTemplate(
+        customFields: List<CustomFieldDef> = emptyList(),
+        style: CsvHeaderStyle = CsvHeaderStyle.FRIENDLY_BN,
+        targetCls: Int? = null
+    ): String {
+        return "\uFEFF" + header(customFields, style, includeSummary = false, targetCls = targetCls)
+            .joinToString(",") { q(it) } + "\n"
+    }
+
+    fun toCsvTable(
+        list: List<Student>,
+        customFields: List<CustomFieldDef> = emptyList(),
+        style: CsvHeaderStyle = CsvHeaderStyle.FRIENDLY_BN,
+        targetCls: Int? = null
+    ): Pair<List<String>, List<List<String>>> {
+        val includeSummary = style != CsvHeaderStyle.SYSTEM_KEYS
+        val headers = header(customFields, style, includeSummary = includeSummary, targetCls = targetCls)
+        val markKeyList = if (style == CsvHeaderStyle.SYSTEM_KEYS && targetCls == null) {
+            MARK_KEYS
+        } else {
+            exportMarkKeysForClass(targetCls)
+        }
+        val filtered = if (targetCls != null) list.filter { it.cls == targetCls } else list
+        val rows = filtered.sortedWith(compareBy({ it.cls }, { it.roll })).map { s ->
+            val clsCell = when (style) {
+                CsvHeaderStyle.FRIENDLY_BN -> if (s.cls in 1..5) "${CLS_SHORT[s.cls - 1]} শ্রেণি" else s.cls.toString()
+                CsvHeaderStyle.FRIENDLY_EN -> "Class ${s.cls}"
+                CsvHeaderStyle.SYSTEM_KEYS -> s.cls.toString()
+            }
+            val summaryCells = if (includeSummary) {
+                val hasEval = (1..3).any { s.hasTerm(it) }
+                if (hasEval) {
+                    val pct = s.overallPct()
+                    val g = gradeOf(pct)
+                    val gText = if (style == CsvHeaderStyle.FRIENDLY_BN) "$g (${gradeLabelBn(g)})" else g
+                    listOf(fmtEn(pct), gText)
+                } else {
+                    listOf("", "")
+                }
+            } else {
+                emptyList()
+            }
+            val subs = s.subs()
+            listOf(
+                clsCell,
                 s.roll.toString(),
                 s.name,
                 s.guardian,
@@ -119,11 +362,63 @@ object Repo {
                 s.religion
             ) +
                 customFields.map { cf -> s.x[cf.key] ?: "" } +
-                MARK_KEYS.map { k -> s.m[k]?.let { fmtEn(it) } ?: "" } +
+                summaryCells +
+                markKeyList.map { k ->
+                    val explicit = s.m[k]
+                    if (explicit != null) {
+                        fmtEn(explicit)
+                    } else if (style != CsvHeaderStyle.SYSTEM_KEYS) {
+                        val parts = k.split('_')
+                        val subKey = parts.getOrNull(0)
+                        val term = parts.getOrNull(1)?.toIntOrNull()
+                        val comp = parts.getOrNull(2)
+                        val subObj = if (subKey != null) subs.firstOrNull { it.key == subKey } else null
+                        if (subObj != null && term != null && s.hasSub(subObj, term)) {
+                            when (comp) {
+                                "CONT" -> fmtEn(s.cont(subObj, term))
+                                "TOTAL" -> fmtEn(s.total(subObj, term))
+                                else -> ""
+                            }
+                        } else ""
+                    } else ""
+                } +
                 TEXT_KEYS.map { k -> s.x[k] ?: "" }
+        }
+        return headers to rows
+    }
+
+    fun toCsv(
+        list: List<Student>,
+        customFields: List<CustomFieldDef> = emptyList(),
+        style: CsvHeaderStyle = CsvHeaderStyle.FRIENDLY_BN,
+        targetCls: Int? = null
+    ): String {
+        val (headers, rows) = toCsvTable(list, customFields, style, targetCls)
+        val sb = StringBuilder("\uFEFF")
+        sb.append(headers.joinToString(",") { q(it) }).append("\n")
+        rows.forEach { row ->
             sb.append(row.joinToString(",") { q(it) }).append("\n")
         }
         return sb.toString()
+    }
+
+    fun toPerClassCsvZip(
+        list: List<Student>,
+        customFields: List<CustomFieldDef> = emptyList(),
+        style: CsvHeaderStyle = CsvHeaderStyle.FRIENDLY_BN,
+        prefix: String = "Class",
+        classes: List<Int> = (1..5).toList()
+    ): ByteArray {
+        val baos = ByteArrayOutputStream()
+        ZipOutputStream(baos).use { zos ->
+            classes.forEach { c ->
+                val csv = toCsv(list, customFields, style, targetCls = c)
+                zos.putNextEntry(ZipEntry("${prefix}_$c.csv"))
+                zos.write(csv.toByteArray(Charsets.UTF_8))
+                zos.closeEntry()
+            }
+        }
+        return baos.toByteArray()
     }
 
     private fun detectDelimiter(t: String): Char {
@@ -215,7 +510,7 @@ object Repo {
         "cls" to listOf("cls", "class", "class name", "শ্রেণি", "শ্রেণী", "শ্রেণি নাম"),
         "roll" to listOf("roll", "roll no", "roll number", "রোল", "রোল নম্বর", "রোল নং"),
         "name" to listOf("name", "student name", "শিক্ষার্থীর নাম", "নাম", "ছাত্র ছাত্রীর নাম"),
-        "guardian" to listOf("guardian", "guardian name", "father", "father name", "fathers name", "father's name", "অভিভাবক", "অভিভাবকের নাম", "পিতার নাম", "পিতা অভিভাবক"),
+        "guardian" to listOf("guardian", "guardian name", "father", "father name", "fathers name", "father's name", "অভিভাবক", "অভিভাবকের নাম", "পিতার নাম", "পিতা অভিভাবক", "পিতা/অভিভাবকের নাম", "পিতা অভিভাবকের নাম"),
         "mobile" to listOf("mobile", "mobile no", "mobile number", "phone", "phone number", "contact", "মোবাইল", "মোবাইল নম্বর", "মোবাইল নং", "ফোন", "অভিভাবকের মোবাইল"),
         "village" to listOf("village", "গ্রাম", "গ্রাম মহল্লা", "মহল্লা"),
         "union" to listOf("union", "union parishad", "up", "ইউনিয়ন", "ইউনিয়ন", "ইউপি"),
@@ -223,6 +518,22 @@ object Repo {
         "district" to listOf("district", "zilla", "জেলা"),
         "religion" to listOf("religion", "ধর্ম")
     )
+
+    private val FRIENDLY_HEADER_REVERSE: Map<String, Pair<String, String>> by lazy {
+        val map = mutableMapOf<String, Pair<String, String>>()
+        listOf(CsvHeaderStyle.FRIENDLY_BN, CsvHeaderStyle.FRIENDLY_EN).forEach { st ->
+            MARK_KEYS.forEach { key ->
+                map[normHeader(friendlyMarkHeader(key, st))] = "mark" to key
+            }
+            TEXT_KEYS.forEach { key ->
+                map[normHeader(friendlyTextHeader(key, st))] = "text" to key
+            }
+            summaryHeaders(st).forEach { sumHdr ->
+                map[normHeader(sumHdr)] = "skip" to ""
+            }
+        }
+        map
+    }
 
     fun makeCustomFieldKey(label: String, existingKeys: Set<String>): String {
         val ascii = label.lowercase().replace(Regex("[^a-z0-9]+"), "_").trim('_')
@@ -266,19 +577,29 @@ object Repo {
             val matchedStd = FIELD_ALIASES.entries.firstOrNull { (_, aliases) ->
                 aliases.any { normHeader(it) == norm }
             }?.key
+            val friendlyMatch = FRIENDLY_HEADER_REVERSE[norm]
 
-            if (matchedStd != null) {
-                CsvColMapping(colIndex, header, samples, isNew = false, targetType = "standard", targetKey = matchedStd, newLabel = header)
-            } else if (markSet.contains(header)) {
-                CsvColMapping(colIndex, header, samples, isNew = false, targetType = "mark", targetKey = header, newLabel = header)
-            } else if (textSet.contains(header)) {
-                CsvColMapping(colIndex, header, samples, isNew = false, targetType = "text", targetKey = header, newLabel = header)
-            } else {
-                val existingCf = existingCustomFields.find { it.key == header || normHeader(it.label) == norm }
-                if (existingCf != null) {
-                    CsvColMapping(colIndex, header, samples, isNew = false, targetType = "custom", targetKey = existingCf.key, newLabel = existingCf.label)
-                } else {
-                    CsvColMapping(colIndex, header, samples, isNew = true, targetType = "create_new", targetKey = "", newLabel = header)
+            when {
+                matchedStd != null -> {
+                    CsvColMapping(colIndex, header, samples, isNew = false, targetType = "standard", targetKey = matchedStd, newLabel = header)
+                }
+                markSet.contains(header) -> {
+                    CsvColMapping(colIndex, header, samples, isNew = false, targetType = "mark", targetKey = header, newLabel = header)
+                }
+                textSet.contains(header) -> {
+                    CsvColMapping(colIndex, header, samples, isNew = false, targetType = "text", targetKey = header, newLabel = header)
+                }
+                friendlyMatch != null -> {
+                    val (tType, tKey) = friendlyMatch
+                    CsvColMapping(colIndex, header, samples, isNew = false, targetType = tType, targetKey = tKey, newLabel = header)
+                }
+                else -> {
+                    val existingCf = existingCustomFields.find { it.key == header || normHeader(it.label) == norm }
+                    if (existingCf != null) {
+                        CsvColMapping(colIndex, header, samples, isNew = false, targetType = "custom", targetKey = existingCf.key, newLabel = existingCf.label)
+                    } else {
+                        CsvColMapping(colIndex, header, samples, isNew = true, targetType = "create_new", targetKey = "", newLabel = header)
+                    }
                 }
             }
         }

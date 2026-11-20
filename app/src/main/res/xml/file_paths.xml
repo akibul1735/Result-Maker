@@ -3,4 +3,7 @@
     <cache-path
         name="scan_photos"
         path="." />
+    <files-path
+        name="auto_backups"
+        path="auto_backups/" />
 </paths>
