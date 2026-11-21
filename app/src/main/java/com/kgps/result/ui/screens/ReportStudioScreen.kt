@@ -14,8 +14,10 @@ import androidx.compose.foundation.gestures.calculatePan
 import androidx.compose.foundation.gestures.calculateZoom
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -25,6 +27,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -61,12 +64,12 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedIconButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -1281,90 +1284,155 @@ fun ReportStudioScreen(
     }
 
     if (showCustomizeSheet) {
-        ModalBottomSheet(onDismissRequest = { showCustomizeSheet = false }) {
-            Column(
-                Modifier
-                    .fillMaxWidth()
-                    .verticalScroll(rememberScrollState())
-                    .padding(horizontal = 16.dp, vertical = 8.dp)
-                    .padding(bottom = 24.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp)
+        val customizeScrollState = rememberScrollState()
+        Dialog(
+            onDismissRequest = { showCustomizeSheet = false },
+            properties = DialogProperties(usePlatformDefaultWidth = false)
+        ) {
+            BoxWithConstraints(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(Color.Black.copy(alpha = 0.45f))
+                    .clickable(
+                        interactionSource = remember { MutableInteractionSource() },
+                        indication = null,
+                        onClick = { showCustomizeSheet = false }
+                    ),
+                contentAlignment = Alignment.BottomCenter
             ) {
-                Text("রিপোর্ট কার্ড ফন্ট, লোগো ও টেবিল সেটিংস", fontWeight = FontWeight.Bold, fontSize = 16.sp)
-
-                Text("অফিসিয়াল বাংলা ফন্ট (PDF)", fontSize = 12.sp, color = SlateMuted)
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                    modifier = Modifier.horizontalScroll(rememberScrollState())
-                ) {
-                    PDF_FONT_LIST.forEach { font ->
-                        val isSel = settings.pdfFont == font.id
-                        FilterChip(
-                            selected = isSel,
-                            onClick = { onUpdateSettings(settings.copy(pdfFont = font.id)) },
-                            colors = appFilterChipColors(),
-                            border = appFilterChipBorder(isSel),
-                            modifier = Modifier.testTag("studio_font_${font.id}"),
-                            label = { Text(font.labelBn.substringBefore(" (")) }
+                val sheetMaxHeight = maxHeight * 0.88f
+                Surface(
+                    color = MaterialTheme.colorScheme.surface,
+                    shape = RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp),
+                    tonalElevation = 4.dp,
+                    shadowElevation = 12.dp,
+                    modifier = Modifier
+                        .widthIn(max = 600.dp)
+                        .fillMaxWidth()
+                        .heightIn(max = sheetMaxHeight)
+                        .clickable(
+                            interactionSource = remember { MutableInteractionSource() },
+                            indication = null,
+                            onClick = {}
                         )
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .navigationBarsPadding()
+                    ) {
+                        // Fixed header bar so panel stays anchored and always has a 1-tap Done button
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(start = 16.dp, end = 8.dp, top = 10.dp, bottom = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text(
+                                "রিপোর্ট কার্ড ফন্ট, লোগো ও টেবিল সেটিংস",
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 15.sp,
+                                color = SlateText,
+                                modifier = Modifier.weight(1f)
+                            )
+                            TextButton(
+                                onClick = { showCustomizeSheet = false },
+                                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                                modifier = Modifier.testTag("studio_customize_done_btn")
+                            ) {
+                                Text("সম্পন্ন", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = TealPrimary)
+                            }
+                        }
+                        HorizontalDivider(color = SlateOutline.copy(alpha = 0.7f))
+
+                        Column(
+                            Modifier
+                                .fillMaxWidth()
+                                .verticalScroll(customizeScrollState)
+                                .padding(horizontal = 16.dp, vertical = 10.dp)
+                                .padding(bottom = 16.dp),
+                            verticalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            Text("অফিসিয়াল বাংলা ফন্ট (PDF)", fontSize = 12.sp, color = SlateMuted)
+                            Row(
+                                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                modifier = Modifier.horizontalScroll(rememberScrollState())
+                            ) {
+                                PDF_FONT_LIST.forEach { font ->
+                                    val isSel = settings.pdfFont == font.id
+                                    FilterChip(
+                                        selected = isSel,
+                                        onClick = { onUpdateSettings(settings.copy(pdfFont = font.id)) },
+                                        colors = appFilterChipColors(),
+                                        border = appFilterChipBorder(isSel),
+                                        modifier = Modifier.testTag("studio_font_${font.id}"),
+                                        label = { Text(font.labelBn.substringBefore(" (")) }
+                                    )
+                                }
+                            }
+
+                            Text("কভার লোগো (প্রাথমিক শিক্ষা অধিদপ্তর)", fontSize = 12.sp, color = SlateMuted)
+                            Row(
+                                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                modifier = Modifier.horizontalScroll(rememberScrollState())
+                            ) {
+                                DPE_LOGO_LIST.forEach { logo ->
+                                    val isSel = settings.dpeLogo == logo.id
+                                    FilterChip(
+                                        selected = isSel,
+                                        onClick = { onUpdateSettings(settings.copy(dpeLogo = logo.id)) },
+                                        colors = appFilterChipColors(),
+                                        border = appFilterChipBorder(isSel),
+                                        modifier = Modifier.testTag("studio_logo_${logo.id}"),
+                                        label = { Text(logo.labelBn.substringBefore(" (")) }
+                                    )
+                                }
+                            }
+
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier.fillMaxWidth().clickable { showFoldGuide = !showFoldGuide }
+                            ) {
+                                Checkbox(
+                                    checked = showFoldGuide,
+                                    onCheckedChange = { showFoldGuide = it },
+                                    modifier = Modifier.testTag("studio_fold_guide_checkbox")
+                                )
+                                Text("মাঝখানের ভাঁজ-রেখা দেখান (A4 → A5)", fontSize = 13.sp)
+                            }
+
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier.fillMaxWidth().clickable { onToggleClassHighest(!includeClassHighest) }
+                            ) {
+                                Checkbox(
+                                    checked = includeClassHighest,
+                                    onCheckedChange = onToggleClassHighest,
+                                    modifier = Modifier.testTag("studio_class_highest_checkbox")
+                                )
+                                Column(Modifier.weight(1f)) {
+                                    Text("৩য় পৃষ্ঠায় 'শ্রেণিতে সর্বোচ্চ নম্বর' কলাম যোগ করুন", fontSize = 13.sp, fontWeight = FontWeight.Medium)
+                                    Text(
+                                        "চূড়ান্ত ফলাফলের অধীনে শ্রেণির সর্বোচ্চ নম্বর দেখাবে",
+                                        fontSize = 11.sp,
+                                        color = SlateMuted
+                                    )
+                                }
+                            }
+
+                            SummaryTableConfigCard(
+                                includeSummaryTable = includeSummaryTable,
+                                selectedColumns = summaryColumns,
+                                onToggleInclude = onToggleSummaryTable,
+                                onUpdateColumns = onUpdateSummaryColumns,
+                                initiallyExpanded = true,
+                                collapsibleWhenEnabled = false,
+                                testTagPrefix = "studio_summary"
+                            )
+                        }
                     }
                 }
-
-                Text("কভার লোগো (প্রাথমিক শিক্ষা অধিদপ্তর)", fontSize = 12.sp, color = SlateMuted)
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                    modifier = Modifier.horizontalScroll(rememberScrollState())
-                ) {
-                    DPE_LOGO_LIST.forEach { logo ->
-                        val isSel = settings.dpeLogo == logo.id
-                        FilterChip(
-                            selected = isSel,
-                            onClick = { onUpdateSettings(settings.copy(dpeLogo = logo.id)) },
-                            colors = appFilterChipColors(),
-                            border = appFilterChipBorder(isSel),
-                            modifier = Modifier.testTag("studio_logo_${logo.id}"),
-                            label = { Text(logo.labelBn.substringBefore(" (")) }
-                        )
-                    }
-                }
-
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Checkbox(
-                        checked = showFoldGuide,
-                        onCheckedChange = { showFoldGuide = it },
-                        modifier = Modifier.testTag("studio_fold_guide_checkbox")
-                    )
-                    Text("মাঝখানের ভাঁজ-রেখা দেখান (A4 → A5)", fontSize = 13.sp)
-                }
-
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier.fillMaxWidth().clickable { onToggleClassHighest(!includeClassHighest) }
-                ) {
-                    Checkbox(
-                        checked = includeClassHighest,
-                        onCheckedChange = onToggleClassHighest,
-                        modifier = Modifier.testTag("studio_class_highest_checkbox")
-                    )
-                    Column(Modifier.weight(1f)) {
-                        Text("৩য় পৃষ্ঠায় 'শ্রেণিতে সর্বোচ্চ নম্বর' কলাম যোগ করুন", fontSize = 13.sp, fontWeight = FontWeight.Medium)
-                        Text(
-                            "চূড়ান্ত ফলাফলের অধীনে শ্রেণির সর্বোচ্চ নম্বর দেখাবে",
-                            fontSize = 11.sp,
-                            color = SlateMuted
-                        )
-                    }
-                }
-
-                SummaryTableConfigCard(
-                    includeSummaryTable = includeSummaryTable,
-                    selectedColumns = summaryColumns,
-                    onToggleInclude = onToggleSummaryTable,
-                    onUpdateColumns = onUpdateSummaryColumns,
-                    initiallyExpanded = true,
-                    collapsibleWhenEnabled = false,
-                    testTagPrefix = "studio_summary"
-                )
             }
         }
     }
