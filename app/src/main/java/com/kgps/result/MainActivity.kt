@@ -840,6 +840,11 @@ fun ResultMakerWorkspace(
                                     onSetScanEngineMode = vm::setScanEngineMode,
                                     onSetOfflineDigitScript = vm::setOfflineDigitScript,
                                     onSetOfflineLayoutPreset = vm::setOfflineLayoutPreset,
+                                    onApplyOfflineColumnTemplate = vm::applyOfflineColumnTemplate,
+                                    onResetOfflineColumnsToAuto = vm::resetOfflineColumnsToAuto,
+                                    onAddOfflineColumnRole = vm::addOfflineColumnRole,
+                                    onRemoveOfflineColumnAt = vm::removeOfflineColumnAt,
+                                    onMoveOfflineColumn = vm::moveOfflineColumn,
                                     onAnalyzeClassSheet = { c, t, s, note, scope, force ->
                                         vm.analyzeClassSheet(c, t, s, note, scope, force)
                                     },

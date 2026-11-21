@@ -709,4 +709,73 @@ class OfflineTableScannerTest {
             assertEquals("Row $i GRAND", rows[i][3], r.sheetGrandTotal)
         }
     }
+
+    @Test
+    fun testCustomPreconfiguredColumnsOrderAndTemplates() {
+        // Every ColumnRole item is exposed in ALL_CONFIGURABLE_COLUMN_ITEMS, and suggestions exist
+        assertEquals(ColumnRole.entries.size, ALL_CONFIGURABLE_COLUMN_ITEMS.size)
+        assertTrue(OFFLINE_COLUMN_SUGGESTIONS.count { it.isPopular } >= 4)
+        assertTrue(OFFLINE_COLUMN_SUGGESTIONS.count { !it.isPopular } >= 6)
+
+        val recognizer = createRecognizer()
+        val bank = loadRealDigitBank(isBengali = false, recognizer = recognizer)
+            ?: Array(10) { listOf(drawSyntheticEnglishDigitPatch(it)) }
+
+        val roster = listOf(
+            Student(id = "c1", cls = 4, roll = 1, name = "অর্নব দাশ"),
+            Student(id = "c2", cls = 4, roll = 2, name = "শান্তা ইসলাম")
+        )
+
+        // Unusual teacher order: [Roll, WR, CONT, GRAND] (Written BEFORE Cont, no Name)
+        val rows = listOf(
+            listOf("1", "62", "24", "86"),
+            listOf("2", "55", "27", "82")
+        )
+
+        val gray = buildHandwrittenTableGrayImage(
+            colWidths = intArrayOf(82, 118, 118, 118),
+            numericRows = rows,
+            digitBank = bank,
+            hasNameColumn = false
+        )
+
+        val customOrder = listOf(
+            ColumnRole.ROLL,
+            ColumnRole.FIELD_WR,
+            ColumnRole.FIELD_CONT,
+            ColumnRole.FIELD_GRAND
+        )
+
+        val out = OfflineTableScanner.scanGrayImage(
+            grayImage = gray,
+            recognizer = recognizer,
+            clsHint = 4,
+            termHint = 1,
+            subKeyHint = "BAN",
+            importScope = ClassSheetImportScope.BOTH,
+            digitScript = OfflineDigitScript.ENGLISH,
+            layoutPreset = OfflineTableLayoutPreset.AUTO,
+            existingStudents = roster,
+            customColumns = customOrder
+        )
+
+        assertTrue(out.diagnostics.usedCustomColumns)
+        assertEquals(null, out.diagnostics.skippedNameColumnIndex)
+        assertEquals(customOrder, out.diagnostics.columnRoles)
+        assertEquals(2, out.sheet.rows.size)
+
+        val r0 = out.sheet.rows[0]
+        assertEquals("1", r0.rollText)
+        assertEquals(roster[0].name, r0.name)
+        assertEquals("62", r0.marksText["WR"])
+        assertEquals("24", r0.sheetContinuousTotal)
+        assertEquals("86", r0.sheetGrandTotal)
+
+        val r1 = out.sheet.rows[1]
+        assertEquals("2", r1.rollText)
+        assertEquals(roster[1].name, r1.name)
+        assertEquals("55", r1.marksText["WR"])
+        assertEquals("27", r1.sheetContinuousTotal)
+        assertEquals("82", r1.sheetGrandTotal)
+    }
 }

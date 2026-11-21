@@ -32,7 +32,8 @@ object OfflineTableScanner {
         importScope: ClassSheetImportScope,
         digitScript: OfflineDigitScript,
         layoutPreset: OfflineTableLayoutPreset,
-        existingStudents: List<Student> = emptyList()
+        existingStudents: List<Student> = emptyList(),
+        customColumns: List<ColumnRole> = emptyList()
     ): OfflineScanOutput {
         val gray = GrayImage.fromBitmap(bitmap, maxLongestSide = 1600)
         return scanGrayImage(
@@ -44,7 +45,8 @@ object OfflineTableScanner {
             importScope = importScope,
             digitScript = digitScript,
             layoutPreset = layoutPreset,
-            existingStudents = existingStudents
+            existingStudents = existingStudents,
+            customColumns = customColumns
         )
     }
 
@@ -57,7 +59,8 @@ object OfflineTableScanner {
         importScope: ClassSheetImportScope,
         digitScript: OfflineDigitScript,
         layoutPreset: OfflineTableLayoutPreset,
-        existingStudents: List<Student> = emptyList()
+        existingStudents: List<Student> = emptyList(),
+        customColumns: List<ColumnRole> = emptyList()
     ): OfflineScanOutput {
         val startMs = System.currentTimeMillis()
         val cls = (clsHint ?: 3).coerceIn(1, 5)
@@ -73,13 +76,22 @@ object OfflineTableScanner {
             )
         }
 
-        val (roles, skippedNameColIdx) = assignColumnRoles(
-            grid = grid,
-            cls = cls,
-            subKey = subKey,
-            importScope = importScope,
-            layoutPreset = layoutPreset
-        )
+        val hasCustomCols = customColumns.isNotEmpty()
+        val (roles, skippedNameColIdx) = if (hasCustomCols) {
+            val mapped = List(grid.colBounds.size) { c ->
+                customColumns.getOrElse(c) { ColumnRole.EXTRA_SKIP }
+            }
+            val nameIdx = mapped.indexOf(ColumnRole.NAME_SKIP).takeIf { it >= 0 }
+            mapped to nameIdx
+        } else {
+            assignColumnRoles(
+                grid = grid,
+                cls = cls,
+                subKey = subKey,
+                importScope = importScope,
+                layoutPreset = layoutPreset
+            )
+        }
 
         val effectiveScript = if (digitScript == OfflineDigitScript.AUTO) {
             detectDominantScript(grid, recognizer, roles)
@@ -122,7 +134,7 @@ object OfflineTableScanner {
         }
 
         // Refine ambiguous 2-column mark role assignment in AUTO mode (CONT vs WR vs GRAND)
-        val refinedMarkColumns = refineAutoMarkKeysIfNeeded(
+        val refinedMarkColumns = if (hasCustomCols) null else refineAutoMarkKeysIfNeeded(
             rawRows = rawRows,
             roles = roles,
             cls = cls,
@@ -171,6 +183,11 @@ object OfflineTableScanner {
         val warnings = ArrayList<String>()
         if (abs(grid.deskewDegrees) >= 0.75f) {
             warnings.add("ছবিটি সামান্য বাঁকা ছিল (${String.format("%.1f", abs(grid.deskewDegrees))}° সোজা করা হয়েছে)।")
+        }
+        if (hasCustomCols && grid.colBounds.size != customColumns.size) {
+            warnings.add(
+                "আপনার নির্ধারিত ${bn(customColumns.size.toString())}টি কলামের বিপরীতে ছবিতে ${bn(grid.colBounds.size.toString())}টি কলাম পাওয়া গেছে — কলাম সংখ্যা ঠিক থাকলে ক্রপ যাচাই করুন।"
+            )
         }
         if (skippedNameColIdx != null) {
             warnings.add("কলাম ${bn((skippedNameColIdx + 1).toString())} (শিক্ষার্থীর নাম) বাদ দিয়ে রোল অনুযায়ী অ্যাপের তালিকা থেকে নাম মেলানো হয়েছে।")
@@ -228,7 +245,8 @@ object OfflineTableScanner {
                 skippedNameColumnIndex = skippedNameColIdx,
                 columnRoles = finalRoles,
                 processingMs = elapsedMs,
-                usedDeskewDegrees = grid.deskewDegrees
+                usedDeskewDegrees = grid.deskewDegrees,
+                usedCustomColumns = hasCustomCols
             )
         )
     }

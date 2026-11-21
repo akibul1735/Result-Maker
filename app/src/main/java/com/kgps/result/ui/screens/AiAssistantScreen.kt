@@ -39,6 +39,8 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.rounded.KeyboardArrowLeft
+import androidx.compose.material.icons.automirrored.rounded.KeyboardArrowRight
 import androidx.compose.material.icons.automirrored.rounded.Send
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.ArrowDropDown
@@ -58,6 +60,7 @@ import androidx.compose.material.icons.rounded.PhotoLibrary
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.RotateRight
 import androidx.compose.material.icons.rounded.Search
+import androidx.compose.material.icons.rounded.Star
 import androidx.compose.material.icons.rounded.Tune
 import androidx.compose.material.icons.rounded.UploadFile
 import androidx.compose.material.icons.rounded.WarningAmber
@@ -89,6 +92,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -129,6 +133,10 @@ import com.kgps.result.ai.FieldConfidence
 import com.kgps.result.ai.GeminiApiConfig
 import com.kgps.result.ai.RowValidationReport
 import com.kgps.result.ai.ScannedStudentRow
+import com.kgps.result.ai.offline.ALL_CONFIGURABLE_COLUMN_ITEMS
+import com.kgps.result.ai.offline.ColumnRole
+import com.kgps.result.ai.offline.OFFLINE_COLUMN_SUGGESTIONS
+import com.kgps.result.ai.offline.OfflineColumnTemplate
 import com.kgps.result.ai.offline.OfflineDigitScript
 import com.kgps.result.ai.offline.OfflineScanDiagnostics
 import com.kgps.result.ai.offline.OfflineTableLayoutPreset
@@ -199,6 +207,11 @@ fun AiAssistantScreen(
     onSetScanEngineMode: (ScanEngineMode) -> Unit = {},
     onSetOfflineDigitScript: (OfflineDigitScript) -> Unit = {},
     onSetOfflineLayoutPreset: (OfflineTableLayoutPreset) -> Unit = {},
+    onApplyOfflineColumnTemplate: (OfflineColumnTemplate) -> Unit = {},
+    onResetOfflineColumnsToAuto: () -> Unit = {},
+    onAddOfflineColumnRole: (ColumnRole) -> Unit = {},
+    onRemoveOfflineColumnAt: (Int) -> Unit = {},
+    onMoveOfflineColumn: (Int, Int) -> Unit = { _, _ -> },
     onAnalyzeClassSheet: (clsHint: Int?, termHint: Int?, subKeyHint: String?, teacherNote: String, importScope: ClassSheetImportScope, forceEngine: ScanEngineMode?) -> Unit,
     onLoadSampleClassPreview: (clsHint: Int?, termHint: Int?, subKeyHint: String?, importScope: ClassSheetImportScope) -> Unit,
     onUpdateClassSheetMeta: (cls: Int, term: Int, subKey: String) -> Unit,
@@ -1102,127 +1115,16 @@ fun AiAssistantScreen(
                             }
 
                             if (state.scanEngineMode == ScanEngineMode.OFFLINE_TABLE) {
-                                Surface(
-                                    color = TealSoft,
-                                    border = BorderStroke(1.dp, TealPrimary.copy(alpha = 0.35f)),
-                                    shape = RoundedCornerShape(9.dp),
-                                    modifier = Modifier.fillMaxWidth()
-                                ) {
-                                    Column(
-                                        Modifier.padding(9.dp),
-                                        verticalArrangement = Arrangement.spacedBy(6.dp)
-                                    ) {
-                                        Text(
-                                            "অফলাইন সংখ্যা ধরন (রোল ও নম্বর)",
-                                            fontSize = 11.sp,
-                                            fontWeight = FontWeight.SemiBold,
-                                            color = TealDark
-                                        )
-                                        Row(
-                                            Modifier.fillMaxWidth(),
-                                            horizontalArrangement = Arrangement.spacedBy(5.dp)
-                                        ) {
-                                            OfflineDigitScript.entries.forEach { scriptOpt ->
-                                                val sel = state.offlineDigitScript == scriptOpt
-                                                Surface(
-                                                    color = if (sel) TealPrimary else Color.White,
-                                                    border = BorderStroke(1.dp, if (sel) TealPrimary else SlateOutline),
-                                                    shape = RoundedCornerShape(7.dp),
-                                                    modifier = Modifier
-                                                        .weight(1f)
-                                                        .clickable { onSetOfflineDigitScript(scriptOpt) }
-                                                        .testTag("offline_script_${scriptOpt.name.lowercase()}")
-                                                ) {
-                                                    Text(
-                                                        scriptOpt.shortBn,
-                                                        fontSize = 10.sp,
-                                                        fontWeight = if (sel) FontWeight.Bold else FontWeight.Medium,
-                                                        color = if (sel) Color.White else SlateText,
-                                                        textAlign = TextAlign.Center,
-                                                        maxLines = 1,
-                                                        overflow = TextOverflow.Ellipsis,
-                                                        modifier = Modifier.padding(horizontal = 4.dp, vertical = 5.dp)
-                                                    )
-                                                }
-                                            }
-                                        }
-
-                                        var layoutDrop by remember { mutableStateOf(false) }
-                                        Box(Modifier.fillMaxWidth()) {
-                                            Surface(
-                                                color = Color.White,
-                                                border = BorderStroke(1.dp, SlateOutline),
-                                                shape = RoundedCornerShape(7.dp),
-                                                modifier = Modifier
-                                                    .fillMaxWidth()
-                                                    .clickable { layoutDrop = true }
-                                                    .testTag("offline_layout_selector")
-                                            ) {
-                                                Row(
-                                                    Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
-                                                    verticalAlignment = Alignment.CenterVertically,
-                                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                                                ) {
-                                                    Text(
-                                                        "কলাম বিন্যাস: ${state.offlineLayoutPreset.labelBn}",
-                                                        fontSize = 10.5.sp,
-                                                        fontWeight = FontWeight.Medium,
-                                                        color = SlateText,
-                                                        maxLines = 1,
-                                                        overflow = TextOverflow.Ellipsis,
-                                                        modifier = Modifier.weight(1f)
-                                                    )
-                                                    Icon(
-                                                        Icons.Rounded.ArrowDropDown,
-                                                        contentDescription = null,
-                                                        tint = SlateMuted,
-                                                        modifier = Modifier.size(16.dp)
-                                                    )
-                                                }
-                                            }
-                                            DropdownMenu(
-                                                expanded = layoutDrop,
-                                                onDismissRequest = { layoutDrop = false }
-                                            ) {
-                                                OfflineTableLayoutPreset.entries.forEach { preset ->
-                                                    val isSel = state.offlineLayoutPreset == preset
-                                                    DropdownMenuItem(
-                                                        modifier = Modifier.background(if (isSel) TealContainer else Color.Transparent),
-                                                        text = {
-                                                            Column {
-                                                                Text(
-                                                                    preset.labelBn,
-                                                                    fontSize = 12.sp,
-                                                                    fontWeight = if (isSel) FontWeight.Bold else FontWeight.Medium,
-                                                                    color = if (isSel) TealDark else SlateText
-                                                                )
-                                                                Text(
-                                                                    preset.hintBn,
-                                                                    fontSize = 10.sp,
-                                                                    color = SlateMuted
-                                                                )
-                                                            }
-                                                        },
-                                                        trailingIcon = if (isSel) {
-                                                            { Icon(Icons.Rounded.Check, contentDescription = null, tint = TealDark, modifier = Modifier.size(16.dp)) }
-                                                        } else null,
-                                                        onClick = {
-                                                            onSetOfflineLayoutPreset(preset)
-                                                            layoutDrop = false
-                                                        }
-                                                    )
-                                                }
-                                            }
-                                        }
-
-                                        Text(
-                                            "ইন্টারনেট বা API Key ছাড়াই চলবে · নামের কলাম স্বয়ংক্রিয়ভাবে বাদ দিয়ে রোল অনুযায়ী ডেটাবেস থেকে নাম মেলানো হবে। সেরা ফলের জন্য 'ক্রপ করুন' দিয়ে শুধু দাগযুক্ত টেবিল অংশ রাখুন।",
-                                            fontSize = 10.sp,
-                                            lineHeight = 13.5.sp,
-                                            color = TealDark
-                                        )
-                                    }
-                                }
+                                OfflineColumnConfiguratorPanel(
+                                    selectedScript = state.offlineDigitScript,
+                                    customColumns = state.offlineCustomColumns,
+                                    onSetScript = onSetOfflineDigitScript,
+                                    onApplyTemplate = onApplyOfflineColumnTemplate,
+                                    onResetToAuto = onResetOfflineColumnsToAuto,
+                                    onAddRole = onAddOfflineColumnRole,
+                                    onRemoveAt = onRemoveOfflineColumnAt,
+                                    onMoveColumn = onMoveOfflineColumn
+                                )
                             }
 
                             Surface(
@@ -2203,12 +2105,13 @@ private fun ClassSheetPreviewSection(
                     shape = RoundedCornerShape(8.dp),
                     modifier = Modifier.fillMaxWidth()
                 ) {
-                    val colText = "কলাম ${bn(offlineDiagnostics.columnCount.toString())}টি"
+                    val modeTag = if (offlineDiagnostics.usedCustomColumns) "নির্ধারিত কলাম" else "স্বয়ংক্রিয় কলাম"
+                    val colText = "${bn(offlineDiagnostics.columnCount.toString())}টি কলাম"
                     val nameInfo = if (offlineDiagnostics.skippedNameColumnIndex != null) {
                         "নাম (কলাম ${bn((offlineDiagnostics.skippedNameColumnIndex + 1).toString())}) বাদ"
                     } else "রোল ভিত্তিক"
                     Text(
-                        "$colText · $nameInfo · ${offlineDiagnostics.detectedScript.shortBn} · ${bn(offlineDiagnostics.processingMs.toString())} ms",
+                        "$modeTag · $colText · $nameInfo · ${offlineDiagnostics.detectedScript.shortBn} · ${bn(offlineDiagnostics.processingMs.toString())} ms",
                         fontSize = 10.5.sp,
                         fontWeight = FontWeight.Medium,
                         color = TealDark,
@@ -3115,6 +3018,555 @@ private fun ZoomablePhotoDialog(
                     }
                 }
             }
+        }
+    }
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun OfflineColumnConfiguratorPanel(
+    selectedScript: OfflineDigitScript,
+    customColumns: List<ColumnRole>,
+    onSetScript: (OfflineDigitScript) -> Unit,
+    onApplyTemplate: (OfflineColumnTemplate) -> Unit,
+    onResetToAuto: () -> Unit,
+    onAddRole: (ColumnRole) -> Unit,
+    onRemoveAt: (Int) -> Unit,
+    onMoveColumn: (Int, Int) -> Unit
+) {
+    val popularTemplates = remember { OFFLINE_COLUMN_SUGGESTIONS.filter { it.isPopular } }
+    val moreTemplates = remember { OFFLINE_COLUMN_SUGGESTIONS.filter { !it.isPopular } }
+    var showMorePresets by remember { mutableStateOf(false) }
+    var showAllItems by remember { mutableStateOf(true) }
+    var selectedColIndex by remember(customColumns.size) {
+        mutableIntStateOf((customColumns.size - 1).coerceAtLeast(0))
+    }
+
+    Surface(
+        color = TealSoft,
+        border = BorderStroke(1.dp, TealPrimary.copy(alpha = 0.35f)),
+        shape = RoundedCornerShape(10.dp),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Column(
+            Modifier.padding(10.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            // 1. Digit Script Selector
+            Text(
+                "অফলাইন সংখ্যা ধরন (রোল ও নম্বর)",
+                fontSize = 11.sp,
+                fontWeight = FontWeight.SemiBold,
+                color = TealDark
+            )
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(5.dp)
+            ) {
+                OfflineDigitScript.entries.forEach { scriptOpt ->
+                    val sel = selectedScript == scriptOpt
+                    Surface(
+                        color = if (sel) TealPrimary else Color.White,
+                        border = BorderStroke(1.dp, if (sel) TealPrimary else SlateOutline),
+                        shape = RoundedCornerShape(7.dp),
+                        modifier = Modifier
+                            .weight(1f)
+                            .clickable { onSetScript(scriptOpt) }
+                            .testTag("offline_script_${scriptOpt.name.lowercase()}")
+                    ) {
+                        Text(
+                            scriptOpt.shortBn,
+                            fontSize = 10.sp,
+                            fontWeight = if (sel) FontWeight.Bold else FontWeight.Medium,
+                            color = if (sel) Color.White else SlateText,
+                            textAlign = TextAlign.Center,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.padding(horizontal = 4.dp, vertical = 6.dp)
+                        )
+                    }
+                }
+            }
+
+            HorizontalDivider(color = TealPrimary.copy(alpha = 0.16f))
+
+            // 2. Active Mode Bar (Custom pre-configured vs Auto)
+            Row(
+                Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        if (customColumns.isEmpty()) {
+                            "টেবিলের কলাম (স্বয়ংক্রিয় মোড)"
+                        } else {
+                            "আগেই নির্ধারিত কলাম (${bn(customColumns.size.toString())}টি)"
+                        },
+                        fontSize = 11.5.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = TealDark
+                    )
+                    Text(
+                        if (customColumns.isEmpty()) {
+                            "নিচের সাজেশন বা আইটেম থেকে আগেই ঠিক করতে পারেন"
+                        } else {
+                            "স্ক্যানের সময় ঠিক এই বাম→ডান ক্রম অনুযায়ী পড়া হবে"
+                        },
+                        fontSize = 9.5.sp,
+                        color = SlateMuted
+                    )
+                }
+                if (customColumns.isNotEmpty()) {
+                    Surface(
+                        color = Color.White,
+                        border = BorderStroke(1.dp, TealPrimary.copy(alpha = 0.45f)),
+                        shape = RoundedCornerShape(7.dp),
+                        modifier = Modifier
+                            .clickable { onResetToAuto() }
+                            .testTag("offline_reset_auto_btn")
+                    ) {
+                        Text(
+                            "স্বয়ংক্রিয় করুন",
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = TealDark,
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp)
+                        )
+                    }
+                }
+            }
+
+            // 3. Most-Used Combinations (অধিক ব্যবহৃত কম্বিনেশন)
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                Icon(
+                    Icons.Rounded.Star,
+                    contentDescription = null,
+                    tint = AmberNotice,
+                    modifier = Modifier.size(14.dp)
+                )
+                Text(
+                    "অধিক ব্যবহৃত কম্বিনেশন (১-ট্যাপে সেট)",
+                    fontSize = 10.5.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = SlateText
+                )
+            }
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                popularTemplates.forEach { tpl ->
+                    val isSelected = customColumns == tpl.columns
+                    Surface(
+                        color = if (isSelected) TealPrimary else Color.White,
+                        border = BorderStroke(1.dp, if (isSelected) TealPrimary else SlateOutline),
+                        shape = RoundedCornerShape(9.dp),
+                        modifier = Modifier
+                            .width(192.dp)
+                            .clickable {
+                                onApplyTemplate(tpl)
+                                selectedColIndex = 0
+                            }
+                            .testTag("offline_popular_${tpl.id}")
+                    ) {
+                        Column(
+                            Modifier.padding(8.dp),
+                            verticalArrangement = Arrangement.spacedBy(3.dp)
+                        ) {
+                            Row(
+                                Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Surface(
+                                    color = if (isSelected) Color.White.copy(alpha = 0.2f) else AmberBg,
+                                    shape = RoundedCornerShape(4.dp)
+                                ) {
+                                    Text(
+                                        tpl.badgeBn ?: "জনপ্রিয়",
+                                        fontSize = 9.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = if (isSelected) Color.White else AmberNotice,
+                                        modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.5.dp)
+                                    )
+                                }
+                                if (isSelected) {
+                                    Icon(
+                                        Icons.Rounded.CheckCircle,
+                                        contentDescription = "নির্বাচিত",
+                                        tint = Color.White,
+                                        modifier = Modifier.size(14.dp)
+                                    )
+                                }
+                            }
+                            Text(
+                                tpl.titleBn,
+                                fontSize = 10.5.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = if (isSelected) Color.White else SlateText,
+                                maxLines = 2,
+                                lineHeight = 13.5.sp,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                            Text(
+                                tpl.subtitleBn,
+                                fontSize = 9.sp,
+                                color = if (isSelected) Color.White.copy(alpha = 0.88f) else SlateMuted,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                    }
+                }
+            }
+
+            // 4. More Suggestion Presets toggle + FlowRow
+            Row(
+                Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Text(
+                    "আরও সাজেশন প্রিসেট (${bn(moreTemplates.size.toString())}টি)",
+                    fontSize = 10.5.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = SlateText
+                )
+                Surface(
+                    color = Color.White,
+                    border = BorderStroke(1.dp, SlateOutline),
+                    shape = RoundedCornerShape(6.dp),
+                    modifier = Modifier
+                        .clickable { showMorePresets = !showMorePresets }
+                        .testTag("offline_toggle_more_presets")
+                ) {
+                    Text(
+                        if (showMorePresets) "লুকান" else "সব প্রিসেট দেখুন",
+                        fontSize = 9.5.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = TealDark,
+                        modifier = Modifier.padding(horizontal = 7.dp, vertical = 3.dp)
+                    )
+                }
+            }
+
+            if (showMorePresets) {
+                FlowRow(
+                    Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(5.dp),
+                    verticalArrangement = Arrangement.spacedBy(5.dp)
+                ) {
+                    val autoSel = customColumns.isEmpty()
+                    Surface(
+                        color = if (autoSel) TealPrimary else Color.White,
+                        border = BorderStroke(1.dp, if (autoSel) TealPrimary else SlateOutline),
+                        shape = RoundedCornerShape(7.dp),
+                        modifier = Modifier
+                            .clickable { onResetToAuto() }
+                            .testTag("offline_preset_auto")
+                    ) {
+                        Text(
+                            "স্বয়ংক্রিয় (ছবি দেখে)",
+                            fontSize = 10.sp,
+                            fontWeight = if (autoSel) FontWeight.Bold else FontWeight.Medium,
+                            color = if (autoSel) Color.White else SlateText,
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp)
+                        )
+                    }
+                    moreTemplates.forEach { tpl ->
+                        val sel = customColumns == tpl.columns
+                        Surface(
+                            color = if (sel) TealPrimary else Color.White,
+                            border = BorderStroke(1.dp, if (sel) TealPrimary else SlateOutline),
+                            shape = RoundedCornerShape(7.dp),
+                            modifier = Modifier
+                                .clickable {
+                                    onApplyTemplate(tpl)
+                                    selectedColIndex = 0
+                                }
+                                .testTag("offline_preset_${tpl.id}")
+                        ) {
+                            Text(
+                                tpl.titleBn,
+                                fontSize = 10.sp,
+                                fontWeight = if (sel) FontWeight.Bold else FontWeight.Medium,
+                                color = if (sel) Color.White else SlateText,
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp)
+                            )
+                        }
+                    }
+                }
+            }
+
+            // 5. Active Ordered Column Strip (বাম থেকে ডান ক্রম)
+            if (customColumns.isNotEmpty()) {
+                Surface(
+                    color = Color.White,
+                    border = BorderStroke(1.dp, TealPrimary.copy(alpha = 0.28f)),
+                    shape = RoundedCornerShape(8.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(
+                        Modifier.padding(8.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Text(
+                            "আপনার টেবিলের কলাম ক্রম (বাম → ডান) · সরাতে কলামে ট্যাপ করুন:",
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = TealDark
+                        )
+                        FlowRow(
+                            Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(5.dp),
+                            verticalArrangement = Arrangement.spacedBy(5.dp)
+                        ) {
+                            customColumns.forEachIndexed { idx, role ->
+                                val focused = idx == selectedColIndex
+                                val bg = when {
+                                    focused -> TealPrimary
+                                    role.isSkipped -> AmberBg
+                                    else -> TealContainer
+                                }
+                                val fg = when {
+                                    focused -> Color.White
+                                    role.isSkipped -> AmberNotice
+                                    else -> TealDark
+                                }
+                                val borderCol = when {
+                                    focused -> TealDark
+                                    role.isSkipped -> AmberBorder
+                                    else -> TealPrimary.copy(alpha = 0.35f)
+                                }
+                                Surface(
+                                    color = bg,
+                                    border = BorderStroke(1.dp, borderCol),
+                                    shape = RoundedCornerShape(7.dp),
+                                    modifier = Modifier
+                                        .clickable { selectedColIndex = idx }
+                                        .testTag("offline_selected_col_$idx")
+                                ) {
+                                    Text(
+                                        "${bn((idx + 1).toString())}. ${role.shortBn}",
+                                        fontSize = 10.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = fg,
+                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp)
+                                    )
+                                }
+                            }
+                        }
+
+                        val safeIdx = selectedColIndex.coerceIn(0, customColumns.lastIndex)
+                        val activeRole = customColumns[safeIdx]
+                        Row(
+                            Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(5.dp)
+                        ) {
+                            Text(
+                                "কলাম ${bn((safeIdx + 1).toString())}: ${activeRole.titleBn}",
+                                fontSize = 9.5.sp,
+                                color = SlateMuted,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.weight(1f)
+                            )
+                            Surface(
+                                color = if (safeIdx > 0) SlateSurfaceVariant else Color.Transparent,
+                                border = BorderStroke(1.dp, SlateOutline),
+                                shape = RoundedCornerShape(6.dp),
+                                modifier = Modifier
+                                    .clickable(enabled = safeIdx > 0) {
+                                        onMoveColumn(safeIdx, -1)
+                                        selectedColIndex = (safeIdx - 1).coerceAtLeast(0)
+                                    }
+                                    .testTag("offline_col_move_left")
+                            ) {
+                                Row(
+                                    Modifier.padding(horizontal = 6.dp, vertical = 4.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Icon(
+                                        Icons.AutoMirrored.Rounded.KeyboardArrowLeft,
+                                        contentDescription = "বামে নিন",
+                                        tint = if (safeIdx > 0) SlateText else SlateMuted,
+                                        modifier = Modifier.size(15.dp)
+                                    )
+                                    Text("বামে", fontSize = 9.5.sp, color = if (safeIdx > 0) SlateText else SlateMuted)
+                                }
+                            }
+                            Surface(
+                                color = if (safeIdx < customColumns.lastIndex) SlateSurfaceVariant else Color.Transparent,
+                                border = BorderStroke(1.dp, SlateOutline),
+                                shape = RoundedCornerShape(6.dp),
+                                modifier = Modifier
+                                    .clickable(enabled = safeIdx < customColumns.lastIndex) {
+                                        onMoveColumn(safeIdx, +1)
+                                        selectedColIndex = (safeIdx + 1).coerceAtMost(customColumns.lastIndex)
+                                    }
+                                    .testTag("offline_col_move_right")
+                            ) {
+                                Row(
+                                    Modifier.padding(horizontal = 6.dp, vertical = 4.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(
+                                        "ডানে",
+                                        fontSize = 9.5.sp,
+                                        color = if (safeIdx < customColumns.lastIndex) SlateText else SlateMuted
+                                    )
+                                    Icon(
+                                        Icons.AutoMirrored.Rounded.KeyboardArrowRight,
+                                        contentDescription = "ডানে নিন",
+                                        tint = if (safeIdx < customColumns.lastIndex) SlateText else SlateMuted,
+                                        modifier = Modifier.size(15.dp)
+                                    )
+                                }
+                            }
+                            val canRemove = !(activeRole == ColumnRole.ROLL && customColumns.count { it == ColumnRole.ROLL } <= 1)
+                            if (canRemove) {
+                                Surface(
+                                    color = RoseBg,
+                                    border = BorderStroke(1.dp, RoseDanger.copy(alpha = 0.35f)),
+                                    shape = RoundedCornerShape(6.dp),
+                                    modifier = Modifier
+                                        .clickable {
+                                            onRemoveAt(safeIdx)
+                                            selectedColIndex = (safeIdx - 1).coerceAtLeast(0)
+                                        }
+                                        .testTag("offline_col_remove_btn")
+                                ) {
+                                    Row(
+                                        Modifier.padding(horizontal = 6.dp, vertical = 4.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(2.dp)
+                                    ) {
+                                        Icon(
+                                            Icons.Rounded.Close,
+                                            contentDescription = "বাদ দিন",
+                                            tint = RoseDanger,
+                                            modifier = Modifier.size(13.dp)
+                                        )
+                                        Text("বাদ", fontSize = 9.5.sp, color = RoseDanger, fontWeight = FontWeight.SemiBold)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // 6. All Column Items Picker (সকল আইটেম যোগ/বাদ)
+            Row(
+                Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Text(
+                    "সকল কলাম আইটেম (আগেই যোগ/বাদ দিন)",
+                    fontSize = 10.5.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = SlateText
+                )
+                Surface(
+                    color = Color.White,
+                    border = BorderStroke(1.dp, SlateOutline),
+                    shape = RoundedCornerShape(6.dp),
+                    modifier = Modifier
+                        .clickable { showAllItems = !showAllItems }
+                        .testTag("offline_toggle_all_items")
+                ) {
+                    Text(
+                        if (showAllItems) "সংকুচিত করুন" else "সব আইটেম দেখুন",
+                        fontSize = 9.5.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = TealDark,
+                        modifier = Modifier.padding(horizontal = 7.dp, vertical = 3.dp)
+                    )
+                }
+            }
+
+            if (showAllItems) {
+                FlowRow(
+                    Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(5.dp),
+                    verticalArrangement = Arrangement.spacedBy(5.dp)
+                ) {
+                    ALL_CONFIGURABLE_COLUMN_ITEMS.forEach { role ->
+                        val activeCount = customColumns.count { it == role }
+                        val isAdded = activeCount > 0
+                        val canToggleOff = isAdded && !role.isRepeatable && role != ColumnRole.ROLL
+                        Surface(
+                            color = when {
+                                isAdded && role.isSkipped -> AmberBg
+                                isAdded -> TealPrimary
+                                else -> Color.White
+                            },
+                            border = BorderStroke(
+                                1.dp,
+                                when {
+                                    isAdded && role.isSkipped -> AmberBorder
+                                    isAdded -> TealPrimary
+                                    else -> SlateOutline
+                                }
+                            ),
+                            shape = RoundedCornerShape(7.dp),
+                            modifier = Modifier
+                                .clickable {
+                                    if (canToggleOff) {
+                                        val idx = customColumns.indexOf(role)
+                                        if (idx >= 0) onRemoveAt(idx)
+                                    } else {
+                                        onAddRole(role)
+                                    }
+                                }
+                                .testTag("offline_item_${role.name.lowercase()}")
+                        ) {
+                            Row(
+                                Modifier.padding(horizontal = 7.dp, vertical = 5.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(3.dp)
+                            ) {
+                                Icon(
+                                    if (isAdded && !role.isRepeatable) Icons.Rounded.Check else Icons.Rounded.Add,
+                                    contentDescription = null,
+                                    tint = when {
+                                        isAdded && role.isSkipped -> AmberNotice
+                                        isAdded -> Color.White
+                                        else -> TealPrimary
+                                    },
+                                    modifier = Modifier.size(12.dp)
+                                )
+                                val badge = if (role.isRepeatable && activeCount > 0) " (${bn(activeCount.toString())})" else ""
+                                Text(
+                                    role.shortBn + badge,
+                                    fontSize = 10.sp,
+                                    fontWeight = if (isAdded) FontWeight.Bold else FontWeight.Medium,
+                                    color = when {
+                                        isAdded && role.isSkipped -> AmberNotice
+                                        isAdded -> Color.White
+                                        else -> SlateText
+                                    }
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+
+            Text(
+                "ইন্টারনেট বা API Key ছাড়াই চলবে · 'নাম (বাদ)' বা 'ক্রমিক (বাদ)' থাকলে স্ক্যান না করে রোল অনুযায়ী ডেটাবেস থেকে নাম বসাবে।",
+                fontSize = 9.5.sp,
+                lineHeight = 13.sp,
+                color = TealDark
+            )
         }
     }
 }

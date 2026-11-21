@@ -26,7 +26,9 @@ import com.kgps.result.ai.PreparedImageStats
 import com.kgps.result.ai.ScanConstraintSolver
 import com.kgps.result.ai.ScannedStudentRow
 import com.kgps.result.ai.VisionImageOptimizer
+import com.kgps.result.ai.offline.ColumnRole
 import com.kgps.result.ai.offline.DualScriptDigitRecognizer
+import com.kgps.result.ai.offline.OfflineColumnTemplate
 import com.kgps.result.ai.offline.OfflineDigitScript
 import com.kgps.result.ai.offline.OfflineScanDiagnostics
 import com.kgps.result.ai.offline.OfflineTableLayoutPreset
@@ -118,6 +120,7 @@ data class AiAssistantState(
     val scanEngineMode: ScanEngineMode = ScanEngineMode.CLOUD_GEMINI,
     val offlineDigitScript: OfflineDigitScript = OfflineDigitScript.BENGALI,
     val offlineLayoutPreset: OfflineTableLayoutPreset = OfflineTableLayoutPreset.AUTO,
+    val offlineCustomColumns: List<ColumnRole> = emptyList(),
     val offlineDiagnostics: OfflineScanDiagnostics? = null
 )
 
@@ -1879,7 +1882,77 @@ class ResultMakerViewModel(
     }
 
     fun setOfflineLayoutPreset(preset: OfflineTableLayoutPreset) {
-        _aiState.update { it.copy(offlineLayoutPreset = preset) }
+        _aiState.update { it.copy(offlineLayoutPreset = preset, offlineCustomColumns = emptyList()) }
+    }
+
+    fun applyOfflineColumnTemplate(template: OfflineColumnTemplate) {
+        _aiState.update {
+            it.copy(
+                offlineCustomColumns = template.columns,
+                offlineLayoutPreset = OfflineTableLayoutPreset.AUTO
+            )
+        }
+    }
+
+    fun resetOfflineColumnsToAuto() {
+        _aiState.update {
+            it.copy(
+                offlineCustomColumns = emptyList(),
+                offlineLayoutPreset = OfflineTableLayoutPreset.AUTO
+            )
+        }
+    }
+
+    fun addOfflineColumnRole(role: ColumnRole) {
+        _aiState.update { cur ->
+            val list = cur.offlineCustomColumns.ifEmpty {
+                listOf(ColumnRole.ROLL)
+            }.toMutableList()
+
+            if (!role.isRepeatable && role in list) {
+                return@update cur
+            }
+
+            when (role) {
+                ColumnRole.SERIAL_SKIP -> list.add(0, role)
+                ColumnRole.ROLL -> {
+                    val insertAt = if (list.firstOrNull() == ColumnRole.SERIAL_SKIP) 1 else 0
+                    list.add(insertAt, role)
+                }
+                ColumnRole.NAME_SKIP -> {
+                    val rollIdx = list.indexOf(ColumnRole.ROLL)
+                    val insertAt = if (rollIdx >= 0) rollIdx + 1 else 0
+                    list.add(insertAt, role)
+                }
+                else -> list.add(role)
+            }
+            cur.copy(offlineCustomColumns = list)
+        }
+    }
+
+    fun removeOfflineColumnAt(index: Int) {
+        _aiState.update { cur ->
+            val list = cur.offlineCustomColumns.toMutableList()
+            if (index !in list.indices) return@update cur
+            val removing = list[index]
+            // Always keep at least one ROLL column while in custom mode
+            if (removing == ColumnRole.ROLL && list.count { it == ColumnRole.ROLL } <= 1) {
+                return@update cur
+            }
+            list.removeAt(index)
+            cur.copy(offlineCustomColumns = list)
+        }
+    }
+
+    fun moveOfflineColumn(index: Int, delta: Int) {
+        _aiState.update { cur ->
+            val list = cur.offlineCustomColumns.toMutableList()
+            val target = index + delta
+            if (index !in list.indices || target !in list.indices) return@update cur
+            val item = list.removeAt(index)
+            list.add(target, item)
+            cur.copy(offlineCustomColumns = list)
+        }
     }
 
     fun analyzeSelectedMarksheet(teacherNote: String) {
@@ -1918,6 +1991,7 @@ class ResultMakerViewModel(
         val enhance = _aiState.value.documentEnhance
         val script = _aiState.value.offlineDigitScript
         val layoutPreset = _aiState.value.offlineLayoutPreset
+        val customColumns = _aiState.value.offlineCustomColumns
         val currentStudents = students.value
 
         _aiState.update {
@@ -1942,7 +2016,8 @@ class ResultMakerViewModel(
                             importScope = importScope,
                             digitScript = script,
                             layoutPreset = layoutPreset,
-                            existingStudents = currentStudents
+                            existingStudents = currentStudents,
+                            customColumns = customColumns
                         )
                     }
                     _aiState.update {
