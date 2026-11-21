@@ -3,6 +3,7 @@
 package com.kgps.result.ui.screens
 
 import android.graphics.Bitmap
+import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
@@ -120,8 +121,12 @@ fun BlankSheetPdfScreen(
     initialClass: Int,
     onExportPdf: (pages: List<BlankSheetPageSpec>, orientation: BlankSheetOrientation, fileName: String) -> Unit,
     onPrint: (pages: List<BlankSheetPageSpec>, orientation: BlankSheetOrientation, jobName: String) -> Unit,
+    onBack: (() -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
+    if (onBack != null) {
+        BackHandler { onBack() }
+    }
     val ctx = LocalContext.current
     val availableClassIds = remember(settings.customClasses) { activeClassIds(settings) }
     val allowedClasses = remember(permissions, availableClassIds) {

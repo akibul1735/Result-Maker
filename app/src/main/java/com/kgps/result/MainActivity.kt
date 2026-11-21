@@ -106,6 +106,7 @@ import com.kgps.result.ui.components.SummaryTableConfigCard
 import com.kgps.result.ui.screens.AiAssistantScreen
 import com.kgps.result.ui.screens.AuthScreen
 import com.kgps.result.ui.screens.BatchStudentEditDialog
+import com.kgps.result.ui.screens.BlankSheetPdfScreen
 import com.kgps.result.ui.screens.BulkSheetScreen
 import com.kgps.result.ui.screens.DashboardScreen
 import com.kgps.result.ui.screens.ReportStudioScreen
@@ -114,6 +115,7 @@ import com.kgps.result.ui.screens.SchoolHubScreen
 import com.kgps.result.ui.screens.SettingsScreen
 import com.kgps.result.ui.screens.SmartCsvImportDialog
 import com.kgps.result.ui.screens.StudentEditorScreen
+import androidx.compose.foundation.layout.widthIn
 import com.kgps.result.ui.theme.AmberNotice
 import com.kgps.result.ui.theme.EmeraldGrade
 import com.kgps.result.ui.theme.ResultMakerTheme
@@ -141,8 +143,16 @@ class MainActivity : FragmentActivity() {
             )
         )
         setContent {
-            ResultMakerTheme {
-                AppRoot()
+            val rootContext = LocalContext.current
+            var appFontId by remember { mutableStateOf(Repo.loadAppFont(rootContext)) }
+            ResultMakerTheme(appFontId = appFontId) {
+                AppRoot(
+                    appFontId = appFontId,
+                    onSelectAppFont = { nextFont ->
+                        appFontId = nextFont
+                        Repo.saveAppFont(rootContext, nextFont)
+                    }
+                )
             }
         }
     }
@@ -163,7 +173,10 @@ private val PRIMARY_NAV_ITEMS = listOf(
 )
 
 @Composable
-private fun AppRoot() {
+private fun AppRoot(
+    appFontId: String,
+    onSelectAppFont: (String) -> Unit
+) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val credentialManager = remember(context) { CredentialManager.create(context) }
@@ -374,6 +387,8 @@ private fun AppRoot() {
                         ResultMakerWorkspace(
                             vm = vm,
                             activeSchool = currentActive,
+                            appFontId = appFontId,
+                            onSelectAppFont = onSelectAppFont,
                             snackbarHostState = snackbarHostState,
                             onOpenSchoolHub = vm::openSchoolHub,
                             onSignOut = performSignOut
@@ -423,6 +438,8 @@ private fun ResultMakerSnackbarHost(snackbarHostState: SnackbarHostState) {
 fun ResultMakerWorkspace(
     vm: ResultMakerViewModel,
     activeSchool: SchoolWorkspace,
+    appFontId: String,
+    onSelectAppFont: (String) -> Unit,
     snackbarHostState: SnackbarHostState,
     onOpenSchoolHub: () -> Unit,
     onSignOut: () -> Unit
@@ -440,7 +457,6 @@ fun ResultMakerWorkspace(
     val section by vm.currentSection.collectAsStateWithLifecycle()
     val editingStudent by vm.editingStudent.collectAsStateWithLifecycle()
     val studioStudentId by vm.studioStudentId.collectAsStateWithLifecycle()
-    val studioTabMode by vm.studioTabMode.collectAsStateWithLifecycle()
     val csvImportState by vm.csvImportState.collectAsStateWithLifecycle()
     val batchEditOpen by vm.batchEditOpen.collectAsStateWithLifecycle()
     val batchEditInitialClass by vm.batchEditInitialClass.collectAsStateWithLifecycle()
@@ -550,9 +566,15 @@ fun ResultMakerWorkspace(
     val isAdmin = activeSchool.isAdmin(vm.currentUserId)
     val isEditing = editingStudent != null
     val isSettings = section == NavSection.SETTINGS
-    val showPrimaryChrome = !isEditing && !isSettings
+    val isBlankSheet = section == NavSection.BLANK_SHEET
+    val secondaryTitle = when {
+        isSettings -> "সেটিংস, সদস্য ও ব্যাকআপ"
+        isBlankSheet -> "ফাঁকা ফর্ম / শিট PDF"
+        else -> null
+    }
+    val showPrimaryChrome = !isEditing && secondaryTitle == null
 
-    BackHandler(enabled = !isEditing && (section == NavSection.ROSTER || section == NavSection.SHEET || section == NavSection.ASSISTANT)) {
+    BackHandler(enabled = !isEditing && (section == NavSection.ROSTER || section == NavSection.SHEET || section == NavSection.ASSISTANT || section == NavSection.BLANK_SHEET)) {
         vm.navigate(NavSection.DASHBOARD)
     }
 
@@ -570,8 +592,9 @@ fun ResultMakerWorkspace(
                         currentUserId = vm.currentUserId,
                         permissions = permissions,
                         pendingRequestCount = joinRequests.size,
-                        isSettings = isSettings,
-                        onBackFromSettings = { vm.navigate(NavSection.DASHBOARD) },
+                        secondaryTitle = secondaryTitle,
+                        secondaryBackTag = if (isBlankSheet) "blank_sheet_back_btn" else "settings_back_btn",
+                        onBackFromSecondary = { vm.navigate(NavSection.DASHBOARD) },
                         onOpenSettings = { vm.navigate(NavSection.SETTINGS) },
                         onCsvImport = { vm.openCsvImport("") },
                         onAiScan = vm::openAiScanner,
@@ -796,10 +819,6 @@ fun ResultMakerWorkspace(
                                         students = allowedStudents,
                                         allSchoolStudents = students,
                                         settings = settings,
-                                        permissions = permissions,
-                                        initialClass = cls,
-                                        studioMode = studioTabMode,
-                                        onSetStudioMode = vm::setStudioTabMode,
                                         selectedId = studioStudentId,
                                         includeClassHighest = includeClassHighest,
                                         onToggleClassHighest = vm::setIncludeClassHighestInReport,
@@ -841,34 +860,80 @@ fun ResultMakerWorkspace(
                                         onExportBatchPdf = { batchList, fileName ->
                                             makePdf(batchList, fileName)
                                         },
-                                        onExportBlankPdf = { pages, orientation, fileName ->
-                                            if (!permissions.canExportPdf) {
-                                                vm.showMessage("PDF তৈরি করার অনুমতি আপনার নেই")
-                                            } else if (pages.isEmpty()) {
-                                                vm.showMessage("PDF তৈরির জন্য কোনো পৃষ্ঠা নেই")
-                                            } else {
-                                                pendingBlankPdfPages = pages
-                                                pendingBlankPdfOrientation = orientation
-                                                blankPdfLauncher.launch(fileName)
-                                            }
-                                        },
-                                        onPrintBlankPdf = { pages, orientation, jobName ->
-                                            if (!permissions.canExportPdf) {
-                                                vm.showMessage("প্রিন্ট করার অনুমতি আপনার নেই")
-                                            } else if (pages.isEmpty()) {
-                                                vm.showMessage("প্রিন্ট করার জন্য কোনো পৃষ্ঠা নেই")
-                                            } else {
-                                                BlankSheetPdfGen.print(
-                                                    ctx = ctx,
-                                                    pages = pages,
-                                                    settings = settings,
-                                                    orientation = orientation,
-                                                    jobName = jobName
-                                                )
-                                            }
-                                        },
                                         onBack = { vm.navigate(NavSection.DASHBOARD) }
                                     )
+                                }
+
+                                NavSection.BLANK_SHEET -> if (!permissions.canExportPdf) {
+                                    Column(
+                                        Modifier.fillMaxSize().padding(24.dp),
+                                        verticalArrangement = Arrangement.Center,
+                                        horizontalAlignment = Alignment.CenterHorizontally
+                                    ) {
+                                        Icon(Icons.Rounded.Lock, contentDescription = null, tint = AmberNotice, modifier = Modifier.size(36.dp))
+                                        Text(
+                                            "ফাঁকা ফর্ম / শিট PDF তৈরির অনুমতি আপনার নেই",
+                                            fontWeight = FontWeight.Bold,
+                                            fontSize = 15.sp,
+                                            color = SlateText,
+                                            modifier = Modifier.padding(top = 10.dp)
+                                        )
+                                        Text(
+                                            "অ্যাডমিন আপনার জন্য PDF অনুমতি চালু করলে এখান থেকে ফাঁকা ফর্ম / শিট PDF তৈরি করতে পারবেন।",
+                                            fontSize = 12.sp,
+                                            color = SlateMuted,
+                                            modifier = Modifier.padding(top = 4.dp, bottom = 12.dp)
+                                        )
+                                        Button(onClick = { vm.navigate(NavSection.DASHBOARD) }) {
+                                            Text("ড্যাশবোর্ডে ফিরুন")
+                                        }
+                                    }
+                                } else {
+                                    val allowedCls = permissions.effectiveClasses().toSet()
+                                    val allowedStudents = students
+                                        .filter { it.cls in allowedCls }
+                                        .sortedWith(compareBy({ it.cls }, { it.roll }))
+                                    Column(
+                                        modifier = Modifier.fillMaxSize().padding(horizontal = 8.dp, vertical = 4.dp),
+                                        horizontalAlignment = Alignment.CenterHorizontally
+                                    ) {
+                                        Box(Modifier.widthIn(max = 920.dp).fillMaxSize()) {
+                                            BlankSheetPdfScreen(
+                                                students = allowedStudents,
+                                                settings = settings,
+                                                permissions = permissions,
+                                                initialClass = cls,
+                                                onExportPdf = { pages, orientation, fileName ->
+                                                    if (!permissions.canExportPdf) {
+                                                        vm.showMessage("PDF তৈরি করার অনুমতি আপনার নেই")
+                                                    } else if (pages.isEmpty()) {
+                                                        vm.showMessage("PDF তৈরির জন্য কোনো পৃষ্ঠা নেই")
+                                                    } else {
+                                                        pendingBlankPdfPages = pages
+                                                        pendingBlankPdfOrientation = orientation
+                                                        blankPdfLauncher.launch(fileName)
+                                                    }
+                                                },
+                                                onPrint = { pages, orientation, jobName ->
+                                                    if (!permissions.canExportPdf) {
+                                                        vm.showMessage("প্রিন্ট করার অনুমতি আপনার নেই")
+                                                    } else if (pages.isEmpty()) {
+                                                        vm.showMessage("প্রিন্ট করার জন্য কোনো পৃষ্ঠা নেই")
+                                                    } else {
+                                                        BlankSheetPdfGen.print(
+                                                            ctx = ctx,
+                                                            pages = pages,
+                                                            settings = settings,
+                                                            orientation = orientation,
+                                                            jobName = jobName
+                                                        )
+                                                    }
+                                                },
+                                                onBack = { vm.navigate(NavSection.DASHBOARD) },
+                                                modifier = Modifier.fillMaxSize()
+                                            )
+                                        }
+                                    }
                                 }
 
                                 NavSection.ASSISTANT -> AiAssistantScreen(
@@ -937,6 +1002,8 @@ fun ResultMakerWorkspace(
                                     geminiTesting = geminiTesting,
                                     geminiTestStatus = geminiTestStatus,
                                     geminiTestSuccess = geminiTestSuccess,
+                                    appFontId = appFontId,
+                                    onSelectAppFont = onSelectAppFont,
                                     onUpdateSettings = vm::updateSettings,
                                     onAddCustomField = vm::addCustomField,
                                     onRemoveCustomField = vm::removeCustomField,
@@ -1144,8 +1211,9 @@ private fun ResultMakerTopBar(
     currentUserId: String,
     permissions: TeacherPermissions,
     pendingRequestCount: Int,
-    isSettings: Boolean,
-    onBackFromSettings: () -> Unit,
+    secondaryTitle: String?,
+    secondaryBackTag: String,
+    onBackFromSecondary: () -> Unit,
     onOpenSettings: () -> Unit,
     onCsvImport: () -> Unit,
     onAiScan: () -> Unit,
@@ -1156,6 +1224,7 @@ private fun ResultMakerTopBar(
 ) {
     var menuOpen by remember { mutableStateOf(false) }
     val isAdmin = activeSchool.isAdmin(currentUserId)
+    val isSecondary = secondaryTitle != null
 
     TopAppBar(
         colors = TopAppBarDefaults.topAppBarColors(
@@ -1163,10 +1232,10 @@ private fun ResultMakerTopBar(
             titleContentColor = SlateText
         ),
         navigationIcon = {
-            if (isSettings) {
+            if (isSecondary) {
                 IconButton(
-                    onClick = onBackFromSettings,
-                    modifier = Modifier.size(48.dp).testTag("settings_back_btn")
+                    onClick = onBackFromSecondary,
+                    modifier = Modifier.size(48.dp).testTag(secondaryBackTag)
                 ) {
                     Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "ফিরে যান")
                 }
@@ -1179,13 +1248,14 @@ private fun ResultMakerTopBar(
                     horizontalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
                     Text(
-                        if (isSettings) "সেটিংস, সদস্য ও ব্যাকআপ" else "Result Maker",
+                        secondaryTitle ?: "Result Maker",
                         fontWeight = FontWeight.Bold,
                         fontSize = 18.sp,
                         maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
                         modifier = Modifier.testTag("top_bar_title")
                     )
-                    if (!isSettings) {
+                    if (!isSecondary) {
                         Surface(
                             color = TealSoft,
                             border = BorderStroke(1.dp, EmeraldGrade.copy(alpha = 0.35f)),
@@ -1201,7 +1271,7 @@ private fun ResultMakerTopBar(
                         }
                     }
                 }
-                if (!isSettings) {
+                if (!isSecondary) {
                     Text(
                         "${settings.school.ifBlank { "প্রাথমিক বিদ্যালয়" }} · ${if (isAdmin) "অ্যাডমিন" else "শিক্ষক"}",
                         fontSize = 11.sp,
@@ -1213,7 +1283,7 @@ private fun ResultMakerTopBar(
             }
         },
         actions = {
-            if (!isSettings) {
+            if (!isSecondary) {
                 IconButton(
                     onClick = onOpenSettings,
                     modifier = Modifier.size(48.dp).testTag("top_bar_settings_btn")

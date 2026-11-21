@@ -767,4 +767,23 @@ object Repo {
         val cols = detectCsvColumns(rows, emptyList())
         return applyMappedCsvImport(rows, cols, existing, DEFAULT_SETTINGS, 1).students
     }
+
+    private const val APP_UI_PREFS = "kgps_app_ui_prefs"
+    private const val KEY_APP_UI_FONT = "app_ui_font"
+
+    fun loadAppFont(ctx: Context): String {
+        val saved = ctx.getSharedPreferences(APP_UI_PREFS, Context.MODE_PRIVATE)
+            .getString(KEY_APP_UI_FONT, "system")
+            ?.trim()
+            .orEmpty()
+        return if (APP_FONT_LIST.any { it.id == saved }) saved else "system"
+    }
+
+    fun saveAppFont(ctx: Context, fontId: String) {
+        val valid = if (APP_FONT_LIST.any { it.id == fontId }) fontId else "system"
+        ctx.getSharedPreferences(APP_UI_PREFS, Context.MODE_PRIVATE)
+            .edit()
+            .putString(KEY_APP_UI_FONT, valid)
+            .apply()
+    }
 }

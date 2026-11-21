@@ -76,13 +76,9 @@ enum class NavSection(val route: String, val labelBn: String) {
     ROSTER("roster", "শিক্ষার্থী তালিকা"),
     SHEET("sheet", "ব্যাচ এন্ট্রি"),
     STUDIO("studio", "রিপোর্ট স্টুডিও"),
+    BLANK_SHEET("blank_sheet", "ফাঁকা ফর্ম / শিট PDF"),
     ASSISTANT("assistant", "AI সহায়ক"),
     SETTINGS("settings", "সেটিংস")
-}
-
-enum class StudioTabMode(val labelBn: String) {
-    PROGRESS_REPORT("প্রগতি প্রতিবেদন"),
-    BLANK_FORM("ফাঁকা ফর্ম / শিট PDF")
 }
 
 data class CsvImportModalState(
@@ -323,9 +319,6 @@ class ResultMakerViewModel(
 
     private val _studioStudentId = MutableStateFlow<String?>(null)
     val studioStudentId: StateFlow<String?> = _studioStudentId.asStateFlow()
-
-    private val _studioTabMode = MutableStateFlow(StudioTabMode.PROGRESS_REPORT)
-    val studioTabMode: StateFlow<StudioTabMode> = _studioTabMode.asStateFlow()
 
     private val _csvImportState = MutableStateFlow(CsvImportModalState())
     val csvImportState: StateFlow<CsvImportModalState> = _csvImportState.asStateFlow()
@@ -842,7 +835,6 @@ class ResultMakerViewModel(
         }
         _editingStudent.value = null
         _studioStudentId.value = studentId
-        _studioTabMode.value = StudioTabMode.PROGRESS_REPORT
         _currentSection.value = NavSection.STUDIO
     }
 
@@ -852,12 +844,7 @@ class ResultMakerViewModel(
             return
         }
         _editingStudent.value = null
-        _studioTabMode.value = StudioTabMode.BLANK_FORM
-        _currentSection.value = NavSection.STUDIO
-    }
-
-    fun setStudioTabMode(mode: StudioTabMode) {
-        _studioTabMode.value = mode
+        _currentSection.value = NavSection.BLANK_SHEET
     }
 
     fun selectStudioStudent(studentId: String) {

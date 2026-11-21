@@ -49,6 +49,7 @@ import androidx.compose.material.icons.rounded.PersonRemove
 import androidx.compose.material.icons.rounded.QrCode2
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.School
+import androidx.compose.material.icons.rounded.TextFields
 import androidx.compose.material.icons.rounded.Tune
 import androidx.compose.material.icons.rounded.UploadFile
 import androidx.compose.material.icons.rounded.WarningAmber
@@ -87,6 +88,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.kgps.result.APP_FONT_LIST
 import com.kgps.result.CsvHeaderStyle
 import com.kgps.result.CustomClassDef
 import com.kgps.result.CustomFieldDef
@@ -134,6 +136,7 @@ import com.kgps.result.ui.theme.TealContainer
 import com.kgps.result.ui.theme.TealDark
 import com.kgps.result.ui.theme.TealPrimary
 import com.kgps.result.ui.theme.TealSoft
+import com.kgps.result.ui.theme.appComposeFontFamily
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -160,6 +163,8 @@ fun SettingsScreen(
     geminiTesting: Boolean,
     geminiTestStatus: String?,
     geminiTestSuccess: Boolean?,
+    appFontId: String = "system",
+    onSelectAppFont: (String) -> Unit = {},
     onUpdateSettings: (Settings) -> Unit,
     onAddCustomField: (String) -> Boolean,
     onRemoveCustomField: (String) -> Unit,
@@ -380,6 +385,7 @@ fun SettingsScreen(
         }
     }
 
+    val activeAppFontLabel = APP_FONT_LIST.find { it.id == appFontId }?.labelBn?.substringBefore(" (") ?: appFontId
     val activeFontLabel = PDF_FONT_LIST.find { it.id == s.pdfFont }?.labelBn?.substringBefore(" (") ?: s.pdfFont
     val activeLogoLabel = DPE_LOGO_LIST.find { it.id == s.dpeLogo }?.labelBn?.substringBefore(" (") ?: s.dpeLogo
 
@@ -863,13 +869,74 @@ fun SettingsScreen(
                 }
             }
 
-            // Category 2: Reports, Print & Form Structure
-            SettingsCategoryHeader(title = "রিপোর্ট, প্রিন্ট ও ফর্ম", icon = Icons.Rounded.Description)
+            // Category 2: Font Management (Two separate parts: App UI Font + Report/PDF Font)
+            SettingsCategoryHeader(title = "বাংলা ফন্ট ব্যবস্থাপনা (দুটি ভাগ)", icon = Icons.Rounded.FontDownload)
 
             TreeGroupCard(
-                title = "PDF বাংলা ফন্ট",
-                subtitle = "সক্রিয়: $activeFontLabel",
-                badgeText = "ফন্ট",
+                title = "ভাগ ১: অ্যাপসের নিজস্ব ফন্ট",
+                subtitle = "অ্যাপের লেখা ও মেনু · সক্রিয়: $activeAppFontLabel",
+                badgeText = "অ্যাপ UI",
+                icon = Icons.Rounded.TextFields,
+                expanded = expandedGroup == "app_font",
+                headerTestTag = "settings_group_app_font",
+                onToggle = { expandedGroup = if (expandedGroup == "app_font") "" else "app_font" }
+            ) {
+                TreeBranchItem(isLast = true) {
+                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Text(
+                            "এই ফন্ট শুধু অ্যাপের ড্যাশবোর্ড, শিক্ষার্থী তালিকা, বাটন ও সকল স্ক্রিনে প্রযোজ্য হবে (প্রত্যেক ব্যবহারকারী নিজের পছন্দমতো সেট করতে পারবেন)।",
+                            fontSize = 11.5.sp,
+                            color = SlateMuted
+                        )
+                        APP_FONT_LIST.forEach { font ->
+                            val selected = appFontId == font.id
+                            val sampleFamily = remember(font.id) {
+                                appComposeFontFamily(font.id)
+                            }
+                            Surface(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .testTag("settings_app_font_${font.id}")
+                                    .clickable {
+                                        onSelectAppFont(font.id)
+                                    },
+                                color = if (selected) TealContainer.copy(alpha = 0.65f) else SlateBg,
+                                border = BorderStroke(if (selected) 2.dp else 1.dp, if (selected) TealPrimary else SlateOutline),
+                                shape = RoundedCornerShape(10.dp)
+                            ) {
+                                Row(
+                                    Modifier.padding(8.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    RadioButton(
+                                        selected = selected,
+                                        onClick = {
+                                            onSelectAppFont(font.id)
+                                        }
+                                    )
+                                    Column(Modifier.weight(1f)) {
+                                        Text(font.labelBn, fontWeight = FontWeight.SemiBold, fontSize = 12.5.sp)
+                                        Text(font.descriptionBn, fontSize = 11.sp, color = SlateMuted)
+                                        Text(
+                                            "ড্যাশবোর্ড, শ্রেণি ও শিক্ষার্থী তালিকা — ২০২৬",
+                                            fontSize = 12.5.sp,
+                                            fontFamily = sampleFamily,
+                                            color = SlateText,
+                                            modifier = Modifier.padding(top = 2.dp)
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            TreeGroupCard(
+                title = "ভাগ ২: রিপোর্ট ও অন্যান্য PDF ফন্ট",
+                subtitle = "প্রগতি প্রতিবেদন ও ফাঁকা শিট PDF · সক্রিয়: $activeFontLabel",
+                badgeText = "PDF ফন্ট",
                 icon = Icons.Rounded.FontDownload,
                 expanded = expandedGroup == "font",
                 headerTestTag = "settings_group_font",
@@ -877,6 +944,11 @@ fun SettingsScreen(
             ) {
                 TreeBranchItem(isLast = true) {
                     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Text(
+                            "এই ফন্ট প্রগতি প্রতিবেদন, ফাঁকা ফর্ম / শিট PDF ও ব্যাচ প্রিন্ট PDF তৈরিতে ব্যবহৃত হবে।",
+                            fontSize = 11.5.sp,
+                            color = SlateMuted
+                        )
                         PDF_FONT_LIST.forEach { font ->
                             val selected = s.pdfFont == font.id
                             val sampleFamily = remember(font.id) {
@@ -913,7 +985,7 @@ fun SettingsScreen(
                                         Text(font.labelBn, fontWeight = FontWeight.SemiBold, fontSize = 12.5.sp)
                                         Text(font.descriptionBn, fontSize = 11.sp, color = SlateMuted)
                                         Text(
-                                            "শিখন অগ্রগতি প্রতিবেদন — ২০২৬",
+                                            "শিখন অগ্রগতি প্রতিবেদন ও নম্বরপত্র — ২০২৬",
                                             fontSize = 12.5.sp,
                                             fontFamily = sampleFamily,
                                             color = SlateText,
@@ -926,6 +998,9 @@ fun SettingsScreen(
                     }
                 }
             }
+
+            // Category 3: Reports, Print & Form Structure
+            SettingsCategoryHeader(title = "রিপোর্ট, প্রিন্ট ও ফর্ম", icon = Icons.Rounded.Description)
 
             TreeGroupCard(
                 title = "প্রাথমিক শিক্ষা অধিদপ্তর লোগো",

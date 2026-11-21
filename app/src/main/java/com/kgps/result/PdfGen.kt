@@ -19,6 +19,7 @@ import android.print.PrintAttributes
 import android.print.PrintDocumentAdapter
 import android.print.PrintDocumentInfo
 import android.print.PrintManager
+import androidx.core.content.res.ResourcesCompat
 import java.io.FileOutputStream
 import java.io.OutputStream
 import java.util.concurrent.ConcurrentHashMap
@@ -92,31 +93,41 @@ object PdfGen {
     }
 
     fun resolveTypeface(ctx: Context?, fontId: String, bold: Boolean): Typeface {
-        val assetPath = when (fontId) {
-            "noto_serif", "tiro_bangla" ->
-                if (bold) "fonts/NotoSerifBengali-Bold.ttf" else "fonts/NotoSerifBengali-Regular.ttf"
-            "noto_sans", "hind_siliguri" ->
-                if (bold) "fonts/NotoSansBengali-Bold.ttf" else "fonts/NotoSansBengali-Regular.ttf"
-            else -> null
+        val isSerif = fontId == "noto_serif" || fontId == "tiro_bangla"
+        val fallbackBase = when {
+            isSerif -> Typeface.SERIF
+            fontId == "system" -> Typeface.DEFAULT
+            else -> Typeface.SANS_SERIF
         }
-        if (ctx != null && assetPath != null) {
-            return fontCache.getOrPut(assetPath) {
-                try {
-                    Typeface.createFromAsset(ctx.assets, assetPath)
-                } catch (_: Exception) {
-                    Typeface.create(
-                        if (fontId == "noto_serif" || fontId == "tiro_bangla") Typeface.SERIF else Typeface.SANS_SERIF,
-                        if (bold) Typeface.BOLD else Typeface.NORMAL
-                    )
+        val fallback = Typeface.create(fallbackBase, if (bold) Typeface.BOLD else Typeface.NORMAL)
+        if (ctx == null || fontId == "system") return fallback
+
+        val cacheKey = "$fontId:$bold"
+        return fontCache.getOrPut(cacheKey) {
+            try {
+                val assetPath = when (fontId) {
+                    "noto_serif" -> if (bold) "fonts/NotoSerifBengali-Bold.ttf" else "fonts/NotoSerifBengali-Regular.ttf"
+                    "noto_sans" -> if (bold) "fonts/NotoSansBengali-Bold.ttf" else "fonts/NotoSansBengali-Regular.ttf"
+                    else -> null
                 }
+                if (assetPath != null) {
+                    Typeface.createFromAsset(ctx.assets, assetPath)
+                } else {
+                    val resId = when (fontId) {
+                        "tiro_bangla" -> R.font.tiro_bangla
+                        "hind_siliguri" -> R.font.hind_siliguri
+                        "anek_bangla" -> R.font.anek_bangla
+                        "mina" -> R.font.mina
+                        "baloo_da_2" -> R.font.baloo_da_2
+                        else -> R.font.noto_serif_bengali
+                    }
+                    val loaded = ResourcesCompat.getFont(ctx, resId) ?: fallbackBase
+                    if (bold) Typeface.create(loaded, Typeface.BOLD) else loaded
+                }
+            } catch (_: Exception) {
+                fallback
             }
         }
-        val base = when (fontId) {
-            "noto_serif", "tiro_bangla" -> Typeface.SERIF
-            "noto_sans", "hind_siliguri" -> Typeface.SANS_SERIF
-            else -> Typeface.DEFAULT
-        }
-        return Typeface.create(base, if (bold) Typeface.BOLD else Typeface.NORMAL)
     }
 
     private fun tp(
