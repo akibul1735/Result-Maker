@@ -778,4 +778,40 @@ class OfflineTableScannerTest {
         assertEquals("27", r1.sheetContinuousTotal)
         assertEquals("82", r1.sheetGrandTotal)
     }
+
+    @Test
+    fun testDebugApkPackagesOfflineMlModels() {
+        val apkCandidates = listOf(
+            File("build/outputs/apk/debug/app-debug.apk"),
+            File("app/build/outputs/apk/debug/app-debug.apk")
+        )
+        val apk = apkCandidates.firstOrNull { it.exists() } ?: return
+        java.util.zip.ZipFile(apk).use { zip ->
+            val entries = zip.entries().toList().map { it.name }.filter { it.startsWith("assets/") }
+            assertTrue("APK missing assets/ml/digits_en.bin; found=$entries", "assets/ml/digits_en.bin" in entries)
+            assertTrue("APK missing assets/ml/digits_bn.bin; found=$entries", "assets/ml/digits_bn.bin" in entries)
+        }
+    }
+
+    @Test
+    fun testEmbeddedDigitModelsFallbackIntegrity() {
+        val assetRec = createRecognizer()
+        val embRec = DualScriptDigitRecognizer(
+            openEnglishStream = { EmbeddedDigitModels.openEnglishStream() },
+            openBengaliStream = { EmbeddedDigitModels.openBengaliStream() }
+        )
+        for (d in 0..9) {
+            val (patch, sz) = drawSyntheticEnglishDigitPatch(d)
+            val canon = DigitCnnClassifier.canonicalNormalize(patch, sz, sz)
+            val p1 = assetRec.predict(canon, OfflineDigitScript.ENGLISH)
+            val p2 = embRec.predict(canon, OfflineDigitScript.ENGLISH)
+            assertEquals("Embedded EN digit $d mismatch", p1.digit, p2.digit)
+            assertEquals("Embedded EN confidence mismatch", p1.confidence, p2.confidence, 1e-5f)
+
+            val b1 = assetRec.predict(canon, OfflineDigitScript.BENGALI)
+            val b2 = embRec.predict(canon, OfflineDigitScript.BENGALI)
+            assertEquals("Embedded BN digit $d mismatch", b1.digit, b2.digit)
+            assertEquals("Embedded BN confidence mismatch", b1.confidence, b2.confidence, 1e-5f)
+        }
+    }
 }

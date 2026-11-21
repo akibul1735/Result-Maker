@@ -1,6 +1,7 @@
 package com.kgps.result.ai.offline
 
 import android.content.Context
+import com.kgps.result.R
 import java.io.BufferedInputStream
 import java.io.DataInputStream
 import java.io.InputStream
@@ -382,8 +383,35 @@ class DualScriptDigitRecognizer(
 
     companion object {
         fun fromAssets(context: Context): DualScriptDigitRecognizer = DualScriptDigitRecognizer(
-            openEnglishStream = { context.assets.open("ml/digits_en.bin") },
-            openBengaliStream = { context.assets.open("ml/digits_bn.bin") }
+            openEnglishStream = {
+                openResilientModelStream(
+                    context = context,
+                    assetPath = "ml/digits_en.bin",
+                    rawResId = R.raw.digits_en,
+                    embeddedFallback = { EmbeddedDigitModels.openEnglishStream() }
+                )
+            },
+            openBengaliStream = {
+                openResilientModelStream(
+                    context = context,
+                    assetPath = "ml/digits_bn.bin",
+                    rawResId = R.raw.digits_bn,
+                    embeddedFallback = { EmbeddedDigitModels.openBengaliStream() }
+                )
+            }
         )
+
+        private fun openResilientModelStream(
+            context: Context,
+            assetPath: String,
+            rawResId: Int,
+            embeddedFallback: () -> InputStream
+        ): InputStream {
+            val fromAssets = runCatching { context.assets.open(assetPath) }.getOrNull()
+            if (fromAssets != null) return fromAssets
+            val fromRaw = runCatching { context.resources.openRawResource(rawResId) }.getOrNull()
+            if (fromRaw != null) return fromRaw
+            return embeddedFallback()
+        }
     }
 }
