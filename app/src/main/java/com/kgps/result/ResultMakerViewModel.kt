@@ -26,6 +26,12 @@ import com.kgps.result.ai.PreparedImageStats
 import com.kgps.result.ai.ScanConstraintSolver
 import com.kgps.result.ai.ScannedStudentRow
 import com.kgps.result.ai.VisionImageOptimizer
+import com.kgps.result.ai.offline.DualScriptDigitRecognizer
+import com.kgps.result.ai.offline.OfflineDigitScript
+import com.kgps.result.ai.offline.OfflineScanDiagnostics
+import com.kgps.result.ai.offline.OfflineTableLayoutPreset
+import com.kgps.result.ai.offline.OfflineTableScanner
+import com.kgps.result.ai.offline.ScanEngineMode
 import com.kgps.result.ai.validateScannedStudentRow
 import com.kgps.result.backup.AutoBackupManager
 import com.kgps.result.backup.AutoBackupStatus
@@ -108,7 +114,11 @@ data class AiAssistantState(
     val analysisError: String? = null,
     val analysisResult: ExtractedMarksheet? = null,
     val classSheetResult: ExtractedClassSheet? = null,
-    val savingClassSheet: Boolean = false
+    val savingClassSheet: Boolean = false,
+    val scanEngineMode: ScanEngineMode = ScanEngineMode.CLOUD_GEMINI,
+    val offlineDigitScript: OfflineDigitScript = OfflineDigitScript.BENGALI,
+    val offlineLayoutPreset: OfflineTableLayoutPreset = OfflineTableLayoutPreset.AUTO,
+    val offlineDiagnostics: OfflineScanDiagnostics? = null
 )
 
 @OptIn(ExperimentalCoroutinesApi::class, kotlinx.coroutines.FlowPreview::class)
@@ -126,6 +136,7 @@ class ResultMakerViewModel(
     private val directAiRepository = DirectGeminiAiRepository(appContext)
     private val aiRepository: AiRepository get() = directAiRepository
     private val sampleAiRepository = PlaceholderAiRepository()
+    private val offlineDigitRecognizer by lazy { DualScriptDigitRecognizer.fromAssets(appContext) }
     private var originalMarksheetBitmap: Bitmap? = null
 
     val localSeedCount: Int get() = initialLocalSnapshot?.first?.size ?: 0
@@ -1756,6 +1767,7 @@ class ResultMakerViewModel(
                         hasOriginalImageBackup = false,
                         analysisResult = null,
                         classSheetResult = null,
+                        offlineDiagnostics = null,
                         analysisError = null
                     )
                 }
@@ -1793,6 +1805,7 @@ class ResultMakerViewModel(
                     hasOriginalImageBackup = true,
                     analysisResult = null,
                     classSheetResult = null,
+                    offlineDiagnostics = null,
                     analysisError = null
                 )
             }
@@ -1814,6 +1827,7 @@ class ResultMakerViewModel(
                     hasOriginalImageBackup = true,
                     analysisResult = null,
                     classSheetResult = null,
+                    offlineDiagnostics = null,
                     analysisError = null
                 )
             }
@@ -1834,6 +1848,7 @@ class ResultMakerViewModel(
                     hasOriginalImageBackup = false,
                     analysisResult = null,
                     classSheetResult = null,
+                    offlineDiagnostics = null,
                     analysisError = null
                 )
             }
@@ -1849,9 +1864,22 @@ class ResultMakerViewModel(
                 hasOriginalImageBackup = false,
                 analysisResult = null,
                 classSheetResult = null,
+                offlineDiagnostics = null,
                 analysisError = null
             )
         }
+    }
+
+    fun setScanEngineMode(mode: ScanEngineMode) {
+        _aiState.update { it.copy(scanEngineMode = mode, analysisError = null) }
+    }
+
+    fun setOfflineDigitScript(script: OfflineDigitScript) {
+        _aiState.update { it.copy(offlineDigitScript = script) }
+    }
+
+    fun setOfflineLayoutPreset(preset: OfflineTableLayoutPreset) {
+        _aiState.update { it.copy(offlineLayoutPreset = preset) }
     }
 
     fun analyzeSelectedMarksheet(teacherNote: String) {
@@ -1881,18 +1909,55 @@ class ResultMakerViewModel(
         termHint: Int?,
         subKeyHint: String?,
         teacherNote: String,
-        importScope: ClassSheetImportScope = ClassSheetImportScope.AUTO
+        importScope: ClassSheetImportScope = ClassSheetImportScope.AUTO,
+        forceEngine: ScanEngineMode? = null
     ) {
         val bmp = _aiState.value.selectedImageBitmap ?: return
         if (_aiState.value.analyzingImage) return
+        val activeEngine = forceEngine ?: _aiState.value.scanEngineMode
         val enhance = _aiState.value.documentEnhance
-        _aiState.update { it.copy(analyzingImage = true, analysisError = null, analysisResult = null) }
+        val script = _aiState.value.offlineDigitScript
+        val layoutPreset = _aiState.value.offlineLayoutPreset
+        val currentStudents = students.value
+
+        _aiState.update {
+            it.copy(
+                scanEngineMode = activeEngine,
+                analyzingImage = true,
+                analysisError = null,
+                analysisResult = null,
+                offlineDiagnostics = null
+            )
+        }
         viewModelScope.launch {
             try {
-                val result = aiRepository.analyzeClassSheetImage(
-                    bmp, clsHint, termHint, subKeyHint, teacherNote, importScope, enhance
-                )
-                _aiState.update { it.copy(analyzingImage = false, classSheetResult = result) }
+                if (activeEngine == ScanEngineMode.OFFLINE_TABLE) {
+                    val output = withContext(Dispatchers.Default) {
+                        OfflineTableScanner.scanBitmap(
+                            bitmap = bmp,
+                            recognizer = offlineDigitRecognizer,
+                            clsHint = clsHint,
+                            termHint = termHint,
+                            subKeyHint = subKeyHint,
+                            importScope = importScope,
+                            digitScript = script,
+                            layoutPreset = layoutPreset,
+                            existingStudents = currentStudents
+                        )
+                    }
+                    _aiState.update {
+                        it.copy(
+                            analyzingImage = false,
+                            classSheetResult = output.sheet,
+                            offlineDiagnostics = output.diagnostics
+                        )
+                    }
+                } else {
+                    val result = aiRepository.analyzeClassSheetImage(
+                        bmp, clsHint, termHint, subKeyHint, teacherNote, importScope, enhance
+                    )
+                    _aiState.update { it.copy(analyzingImage = false, classSheetResult = result) }
+                }
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
@@ -2118,7 +2183,7 @@ class ResultMakerViewModel(
     }
 
     fun dismissClassSheetPreview() {
-        _aiState.update { it.copy(classSheetResult = null) }
+        _aiState.update { it.copy(classSheetResult = null, offlineDiagnostics = null) }
     }
 
     fun commitScannedClassSheet() {

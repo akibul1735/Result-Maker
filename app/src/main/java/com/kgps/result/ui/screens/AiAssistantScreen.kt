@@ -61,6 +61,7 @@ import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.Tune
 import androidx.compose.material.icons.rounded.UploadFile
 import androidx.compose.material.icons.rounded.WarningAmber
+import androidx.compose.material.icons.rounded.WifiOff
 import androidx.compose.material.icons.rounded.ZoomIn
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
@@ -128,6 +129,10 @@ import com.kgps.result.ai.FieldConfidence
 import com.kgps.result.ai.GeminiApiConfig
 import com.kgps.result.ai.RowValidationReport
 import com.kgps.result.ai.ScannedStudentRow
+import com.kgps.result.ai.offline.OfflineDigitScript
+import com.kgps.result.ai.offline.OfflineScanDiagnostics
+import com.kgps.result.ai.offline.OfflineTableLayoutPreset
+import com.kgps.result.ai.offline.ScanEngineMode
 import com.kgps.result.ai.validateScannedStudentRow
 import com.kgps.result.bn
 import com.kgps.result.cloud.TeacherPermissions
@@ -191,7 +196,10 @@ fun AiAssistantScreen(
     onRestoreOriginalImage: () -> Unit = {},
     onAnalyzeImage: (String) -> Unit,
     onApplyExtracted: (ExtractedMarksheet) -> Unit,
-    onAnalyzeClassSheet: (clsHint: Int?, termHint: Int?, subKeyHint: String?, teacherNote: String, importScope: ClassSheetImportScope) -> Unit,
+    onSetScanEngineMode: (ScanEngineMode) -> Unit = {},
+    onSetOfflineDigitScript: (OfflineDigitScript) -> Unit = {},
+    onSetOfflineLayoutPreset: (OfflineTableLayoutPreset) -> Unit = {},
+    onAnalyzeClassSheet: (clsHint: Int?, termHint: Int?, subKeyHint: String?, teacherNote: String, importScope: ClassSheetImportScope, forceEngine: ScanEngineMode?) -> Unit,
     onLoadSampleClassPreview: (clsHint: Int?, termHint: Int?, subKeyHint: String?, importScope: ClassSheetImportScope) -> Unit,
     onUpdateClassSheetMeta: (cls: Int, term: Int, subKey: String) -> Unit,
     onUpdateClassSheetScope: (ClassSheetImportScope) -> Unit = {},
@@ -1008,6 +1016,215 @@ fun AiAssistantScreen(
                             }
 
                         if (scanMode == "class") {
+                            // Scan Engine Switcher: Cloud Gemini AI vs Offline Table Engine
+                            Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                                Text(
+                                    "স্ক্যান ইঞ্জিন বাছুন",
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = SlateText
+                                )
+                                Surface(
+                                    color = SlateSurfaceVariant,
+                                    border = BorderStroke(1.dp, SlateOutline),
+                                    shape = RoundedCornerShape(9.dp),
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Row(
+                                        Modifier.fillMaxWidth().padding(2.dp),
+                                        horizontalArrangement = Arrangement.spacedBy(3.dp)
+                                    ) {
+                                        val isCloud = state.scanEngineMode == ScanEngineMode.CLOUD_GEMINI
+                                        Surface(
+                                            color = if (isCloud) TealPrimary else Color.Transparent,
+                                            shape = RoundedCornerShape(7.dp),
+                                            modifier = Modifier
+                                                .weight(1f)
+                                                .clickable { onSetScanEngineMode(ScanEngineMode.CLOUD_GEMINI) }
+                                                .testTag("scan_engine_cloud_btn")
+                                        ) {
+                                            Row(
+                                                Modifier.padding(horizontal = 6.dp, vertical = 6.dp),
+                                                horizontalArrangement = Arrangement.Center,
+                                                verticalAlignment = Alignment.CenterVertically
+                                            ) {
+                                                Icon(
+                                                    Icons.Rounded.AutoAwesome,
+                                                    contentDescription = null,
+                                                    tint = if (isCloud) Color.White else TealPrimary,
+                                                    modifier = Modifier.size(13.dp)
+                                                )
+                                                Spacer(Modifier.width(4.dp))
+                                                Text(
+                                                    "Gemini AI (অনলাইন)",
+                                                    fontSize = 10.5.sp,
+                                                    fontWeight = if (isCloud) FontWeight.Bold else FontWeight.Medium,
+                                                    color = if (isCloud) Color.White else SlateText,
+                                                    maxLines = 1,
+                                                    overflow = TextOverflow.Ellipsis
+                                                )
+                                            }
+                                        }
+
+                                        val isOffline = state.scanEngineMode == ScanEngineMode.OFFLINE_TABLE
+                                        Surface(
+                                            color = if (isOffline) TealDark else Color.Transparent,
+                                            shape = RoundedCornerShape(7.dp),
+                                            modifier = Modifier
+                                                .weight(1f)
+                                                .clickable { onSetScanEngineMode(ScanEngineMode.OFFLINE_TABLE) }
+                                                .testTag("scan_engine_offline_btn")
+                                        ) {
+                                            Row(
+                                                Modifier.padding(horizontal = 6.dp, vertical = 6.dp),
+                                                horizontalArrangement = Arrangement.Center,
+                                                verticalAlignment = Alignment.CenterVertically
+                                            ) {
+                                                Icon(
+                                                    Icons.Rounded.WifiOff,
+                                                    contentDescription = null,
+                                                    tint = if (isOffline) Color.White else TealDark,
+                                                    modifier = Modifier.size(13.dp)
+                                                )
+                                                Spacer(Modifier.width(4.dp))
+                                                Text(
+                                                    "অফলাইন টেবিল",
+                                                    fontSize = 10.5.sp,
+                                                    fontWeight = if (isOffline) FontWeight.Bold else FontWeight.Medium,
+                                                    color = if (isOffline) Color.White else SlateText,
+                                                    maxLines = 1,
+                                                    overflow = TextOverflow.Ellipsis
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
+                            if (state.scanEngineMode == ScanEngineMode.OFFLINE_TABLE) {
+                                Surface(
+                                    color = TealSoft,
+                                    border = BorderStroke(1.dp, TealPrimary.copy(alpha = 0.35f)),
+                                    shape = RoundedCornerShape(9.dp),
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Column(
+                                        Modifier.padding(9.dp),
+                                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                                    ) {
+                                        Text(
+                                            "অফলাইন সংখ্যা ধরন (রোল ও নম্বর)",
+                                            fontSize = 11.sp,
+                                            fontWeight = FontWeight.SemiBold,
+                                            color = TealDark
+                                        )
+                                        Row(
+                                            Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.spacedBy(5.dp)
+                                        ) {
+                                            OfflineDigitScript.entries.forEach { scriptOpt ->
+                                                val sel = state.offlineDigitScript == scriptOpt
+                                                Surface(
+                                                    color = if (sel) TealPrimary else Color.White,
+                                                    border = BorderStroke(1.dp, if (sel) TealPrimary else SlateOutline),
+                                                    shape = RoundedCornerShape(7.dp),
+                                                    modifier = Modifier
+                                                        .weight(1f)
+                                                        .clickable { onSetOfflineDigitScript(scriptOpt) }
+                                                        .testTag("offline_script_${scriptOpt.name.lowercase()}")
+                                                ) {
+                                                    Text(
+                                                        scriptOpt.shortBn,
+                                                        fontSize = 10.sp,
+                                                        fontWeight = if (sel) FontWeight.Bold else FontWeight.Medium,
+                                                        color = if (sel) Color.White else SlateText,
+                                                        textAlign = TextAlign.Center,
+                                                        maxLines = 1,
+                                                        overflow = TextOverflow.Ellipsis,
+                                                        modifier = Modifier.padding(horizontal = 4.dp, vertical = 5.dp)
+                                                    )
+                                                }
+                                            }
+                                        }
+
+                                        var layoutDrop by remember { mutableStateOf(false) }
+                                        Box(Modifier.fillMaxWidth()) {
+                                            Surface(
+                                                color = Color.White,
+                                                border = BorderStroke(1.dp, SlateOutline),
+                                                shape = RoundedCornerShape(7.dp),
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .clickable { layoutDrop = true }
+                                                    .testTag("offline_layout_selector")
+                                            ) {
+                                                Row(
+                                                    Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
+                                                    verticalAlignment = Alignment.CenterVertically,
+                                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                                ) {
+                                                    Text(
+                                                        "কলাম বিন্যাস: ${state.offlineLayoutPreset.labelBn}",
+                                                        fontSize = 10.5.sp,
+                                                        fontWeight = FontWeight.Medium,
+                                                        color = SlateText,
+                                                        maxLines = 1,
+                                                        overflow = TextOverflow.Ellipsis,
+                                                        modifier = Modifier.weight(1f)
+                                                    )
+                                                    Icon(
+                                                        Icons.Rounded.ArrowDropDown,
+                                                        contentDescription = null,
+                                                        tint = SlateMuted,
+                                                        modifier = Modifier.size(16.dp)
+                                                    )
+                                                }
+                                            }
+                                            DropdownMenu(
+                                                expanded = layoutDrop,
+                                                onDismissRequest = { layoutDrop = false }
+                                            ) {
+                                                OfflineTableLayoutPreset.entries.forEach { preset ->
+                                                    val isSel = state.offlineLayoutPreset == preset
+                                                    DropdownMenuItem(
+                                                        modifier = Modifier.background(if (isSel) TealContainer else Color.Transparent),
+                                                        text = {
+                                                            Column {
+                                                                Text(
+                                                                    preset.labelBn,
+                                                                    fontSize = 12.sp,
+                                                                    fontWeight = if (isSel) FontWeight.Bold else FontWeight.Medium,
+                                                                    color = if (isSel) TealDark else SlateText
+                                                                )
+                                                                Text(
+                                                                    preset.hintBn,
+                                                                    fontSize = 10.sp,
+                                                                    color = SlateMuted
+                                                                )
+                                                            }
+                                                        },
+                                                        trailingIcon = if (isSel) {
+                                                            { Icon(Icons.Rounded.Check, contentDescription = null, tint = TealDark, modifier = Modifier.size(16.dp)) }
+                                                        } else null,
+                                                        onClick = {
+                                                            onSetOfflineLayoutPreset(preset)
+                                                            layoutDrop = false
+                                                        }
+                                                    )
+                                                }
+                                            }
+                                        }
+
+                                        Text(
+                                            "ইন্টারনেট বা API Key ছাড়াই চলবে · নামের কলাম স্বয়ংক্রিয়ভাবে বাদ দিয়ে রোল অনুযায়ী ডেটাবেস থেকে নাম মেলানো হবে। সেরা ফলের জন্য 'ক্রপ করুন' দিয়ে শুধু দাগযুক্ত টেবিল অংশ রাখুন।",
+                                            fontSize = 10.sp,
+                                            lineHeight = 13.5.sp,
+                                            color = TealDark
+                                        )
+                                    }
+                                }
+                            }
+
                             Surface(
                                 color = SlateSurfaceVariant,
                                 border = BorderStroke(1.dp, SlateOutline),
@@ -1049,7 +1266,11 @@ fun AiAssistantScreen(
                             }
 
                             Text(
-                                "শ্রেণি, প্রান্তিক ও বিষয় বাছুন (অথবা ছবির উপরে স্পষ্ট লেখা থাকলে 'স্বয়ংক্রিয়' রাখুন)",
+                                if (state.scanEngineMode == ScanEngineMode.OFFLINE_TABLE) {
+                                    "অফলাইন স্ক্যানের জন্য লক্ষ্য শ্রেণি, প্রান্তিক ও বিষয় নিশ্চিত করুন"
+                                } else {
+                                    "শ্রেণি, প্রান্তিক ও বিষয় বাছুন (অথবা ছবির উপরে স্পষ্ট লেখা থাকলে 'স্বয়ংক্রিয়' রাখুন)"
+                                },
                                 fontSize = 10.5.sp,
                                 color = SlateMuted
                             )
@@ -1071,27 +1292,29 @@ fun AiAssistantScreen(
                             )
                         }
 
-                        OutlinedTextField(
-                            value = teacherNote,
-                            onValueChange = { teacherNote = it },
-                            label = {
-                                Text(
-                                    "নির্দেশনা (ঐচ্ছিক, যেমন: রোল ১-৩৬ শুধু ধারাবাহিক)",
-                                    fontSize = 11.sp
-                                )
-                            },
-                            singleLine = true,
-                            textStyle = TextStyle(fontSize = 12.5.sp),
-                            shape = RoundedCornerShape(8.dp),
-                            modifier = Modifier.fillMaxWidth().testTag("ai_scanner_note_input")
-                        )
+                        if (scanMode != "class" || state.scanEngineMode == ScanEngineMode.CLOUD_GEMINI) {
+                            OutlinedTextField(
+                                value = teacherNote,
+                                onValueChange = { teacherNote = it },
+                                label = {
+                                    Text(
+                                        "নির্দেশনা (ঐচ্ছিক, যেমন: রোল ১-৩৬ শুধু ধারাবাহিক)",
+                                        fontSize = 11.sp
+                                    )
+                                },
+                                singleLine = true,
+                                textStyle = TextStyle(fontSize = 12.5.sp),
+                                shape = RoundedCornerShape(8.dp),
+                                modifier = Modifier.fillMaxWidth().testTag("ai_scanner_note_input")
+                            )
+                        }
 
                         Row(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.fillMaxWidth()) {
                             Button(
                                 onClick = {
                                     showOnlyIssues = false
                                     if (scanMode == "class") {
-                                        onAnalyzeClassSheet(clsHint, termHint, subKeyHint, teacherNote, importScope)
+                                        onAnalyzeClassSheet(clsHint, termHint, subKeyHint, teacherNote, importScope, null)
                                     } else {
                                         onAnalyzeImage(teacherNote)
                                     }
@@ -1107,11 +1330,24 @@ fun AiAssistantScreen(
                                         strokeWidth = 2.dp,
                                         color = MaterialTheme.colorScheme.onPrimary
                                     )
-                                    Text(" স্ক্যান হচ্ছে...", fontSize = 11.5.sp)
-                                } else {
-                                    Icon(Icons.Rounded.DocumentScanner, contentDescription = null, modifier = Modifier.size(15.dp))
                                     Text(
-                                        if (scanMode == "class") " স্ক্যান ও প্রিভিউ" else " নম্বরপত্র বিশ্লেষণ",
+                                        if (scanMode == "class" && state.scanEngineMode == ScanEngineMode.OFFLINE_TABLE) " অফলাইন স্ক্যান হচ্ছে..."
+                                        else " স্ক্যান হচ্ছে...",
+                                        fontSize = 11.5.sp
+                                    )
+                                } else {
+                                    Icon(
+                                        if (scanMode == "class" && state.scanEngineMode == ScanEngineMode.OFFLINE_TABLE) Icons.Rounded.WifiOff
+                                        else Icons.Rounded.DocumentScanner,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(15.dp)
+                                    )
+                                    Text(
+                                        when {
+                                            scanMode != "class" -> " নম্বরপত্র বিশ্লেষণ"
+                                            state.scanEngineMode == ScanEngineMode.OFFLINE_TABLE -> " অফলাইন স্ক্যান ও প্রিভিউ"
+                                            else -> " স্ক্যান ও প্রিভিউ"
+                                        },
                                         fontSize = 11.5.sp
                                     )
                                 }
@@ -1152,13 +1388,16 @@ fun AiAssistantScreen(
                                 Icon(Icons.Rounded.ErrorOutline, contentDescription = null, tint = RoseDanger, modifier = Modifier.size(16.dp))
                                 Text(err, color = RoseDanger, fontSize = 11.5.sp, lineHeight = 16.sp)
                             }
-                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Row(
+                                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                modifier = Modifier.horizontalScroll(rememberScrollState())
+                            ) {
                                 if (state.selectedImageBitmap != null && !state.analyzingImage) {
                                     OutlinedButton(
                                         onClick = {
                                             showOnlyIssues = false
                                             if (scanMode == "class") {
-                                                onAnalyzeClassSheet(clsHint, termHint, subKeyHint, teacherNote, importScope)
+                                                onAnalyzeClassSheet(clsHint, termHint, subKeyHint, teacherNote, importScope, null)
                                             } else {
                                                 onAnalyzeImage(teacherNote)
                                             }
@@ -1169,13 +1408,35 @@ fun AiAssistantScreen(
                                     ) {
                                         Text("আবার চেষ্টা করুন", fontSize = 11.sp)
                                     }
+                                    if (scanMode == "class" && state.scanEngineMode == ScanEngineMode.CLOUD_GEMINI) {
+                                        OutlinedButton(
+                                            onClick = {
+                                                showOnlyIssues = false
+                                                onAnalyzeClassSheet(
+                                                    clsHint,
+                                                    termHint,
+                                                    subKeyHint,
+                                                    teacherNote,
+                                                    importScope,
+                                                    ScanEngineMode.OFFLINE_TABLE
+                                                )
+                                            },
+                                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 3.dp),
+                                            shape = RoundedCornerShape(8.dp),
+                                            modifier = Modifier.testTag("ai_fallback_offline_btn")
+                                        ) {
+                                            Text("অফলাইনে স্ক্যান করুন", fontSize = 11.sp, color = TealDark)
+                                        }
+                                    }
                                 }
-                                TextButton(
-                                    onClick = { showModelPicker = true },
-                                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
-                                    modifier = Modifier.testTag("ai_scan_err_settings_btn")
-                                ) {
-                                    Text("মডেল পরিবর্তন করুন", fontSize = 11.sp)
+                                if (state.scanEngineMode == ScanEngineMode.CLOUD_GEMINI) {
+                                    TextButton(
+                                        onClick = { showModelPicker = true },
+                                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                                        modifier = Modifier.testTag("ai_scan_err_settings_btn")
+                                    ) {
+                                        Text("মডেল পরিবর্তন করুন", fontSize = 11.sp)
+                                    }
                                 }
                             }
                         }
@@ -1186,6 +1447,7 @@ fun AiAssistantScreen(
                     state.classSheetResult?.let { sheet ->
                         ClassSheetPreviewSection(
                             sheet = sheet,
+                            offlineDiagnostics = state.offlineDiagnostics,
                             existingStudents = students,
                             permissions = permissions,
                             hasImage = state.selectedImageBitmap != null,
@@ -1837,6 +2099,7 @@ private fun ClassSheetHintSelectors(
 @Composable
 private fun ClassSheetPreviewSection(
     sheet: ExtractedClassSheet,
+    offlineDiagnostics: OfflineScanDiagnostics? = null,
     existingStudents: List<Student>,
     permissions: TeacherPermissions,
     hasImage: Boolean,
@@ -1902,10 +2165,19 @@ private fun ClassSheetPreviewSection(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                Icon(Icons.Rounded.AutoAwesome, contentDescription = null, tint = TealPrimary, modifier = Modifier.size(20.dp))
+                Icon(
+                    if (offlineDiagnostics != null) Icons.Rounded.WifiOff else Icons.Rounded.AutoAwesome,
+                    contentDescription = null,
+                    tint = TealPrimary,
+                    modifier = Modifier.size(20.dp)
+                )
                 Column(Modifier.weight(1f)) {
                     Text(
-                        if (sheet.isSample) "নমুনা প্রিভিউ (সংরক্ষণের আগে যাচাই)" else "স্ক্যান প্রিভিউ (সংরক্ষণের আগে যাচাই ও সংশোধন)",
+                        when {
+                            sheet.isSample -> "নমুনা প্রিভিউ (সংরক্ষণের আগে যাচাই)"
+                            offlineDiagnostics != null -> "অফলাইন টেবিল স্ক্যান প্রিভিউ"
+                            else -> "স্ক্যান প্রিভিউ (সংরক্ষণের আগে যাচাই ও সংশোধন)"
+                        },
                         fontWeight = FontWeight.Bold,
                         fontSize = 14.sp,
                         color = TealDark
@@ -1921,6 +2193,27 @@ private fun ClassSheetPreviewSection(
                         Icon(Icons.Rounded.ZoomIn, contentDescription = null, modifier = Modifier.size(14.dp))
                         Text(" মূল ছবি", fontSize = 11.sp)
                     }
+                }
+            }
+
+            if (offlineDiagnostics != null) {
+                Surface(
+                    color = TealSoft,
+                    border = BorderStroke(1.dp, TealPrimary.copy(alpha = 0.25f)),
+                    shape = RoundedCornerShape(8.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    val colText = "কলাম ${bn(offlineDiagnostics.columnCount.toString())}টি"
+                    val nameInfo = if (offlineDiagnostics.skippedNameColumnIndex != null) {
+                        "নাম (কলাম ${bn((offlineDiagnostics.skippedNameColumnIndex + 1).toString())}) বাদ"
+                    } else "রোল ভিত্তিক"
+                    Text(
+                        "$colText · $nameInfo · ${offlineDiagnostics.detectedScript.shortBn} · ${bn(offlineDiagnostics.processingMs.toString())} ms",
+                        fontSize = 10.5.sp,
+                        fontWeight = FontWeight.Medium,
+                        color = TealDark,
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp)
+                    )
                 }
             }
 

@@ -837,7 +837,12 @@ fun ResultMakerWorkspace(
                                     onRestoreOriginalImage = vm::restoreOriginalMarksheetImage,
                                     onAnalyzeImage = vm::analyzeSelectedMarksheet,
                                     onApplyExtracted = { ext -> vm.applyExtractedMarksheet(ext) },
-                                    onAnalyzeClassSheet = vm::analyzeClassSheet,
+                                    onSetScanEngineMode = vm::setScanEngineMode,
+                                    onSetOfflineDigitScript = vm::setOfflineDigitScript,
+                                    onSetOfflineLayoutPreset = vm::setOfflineLayoutPreset,
+                                    onAnalyzeClassSheet = { c, t, s, note, scope, force ->
+                                        vm.analyzeClassSheet(c, t, s, note, scope, force)
+                                    },
                                     onLoadSampleClassPreview = vm::loadSampleClassSheetPreview,
                                     onUpdateClassSheetMeta = vm::updateClassSheetMeta,
                                     onUpdateClassSheetScope = vm::updateClassSheetScope,
