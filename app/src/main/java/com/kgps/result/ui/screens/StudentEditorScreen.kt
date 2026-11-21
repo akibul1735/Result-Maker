@@ -84,6 +84,7 @@ import com.kgps.result.hasTerm
 import com.kgps.result.mk
 import com.kgps.result.overallPct
 import com.kgps.result.subs
+import com.kgps.result.termNameBn
 import com.kgps.result.total
 import com.kgps.result.ui.components.InlineTeacherRemarkSection
 import com.kgps.result.ui.components.TreeBranchItem
@@ -531,7 +532,7 @@ fun StudentEditorScreen(
                             val termGrade = gradeOf(termPct)
 
                             TreeGroupCard(
-                                title = "${bn(t.toString())} প্রান্তিক মূল্যায়ন",
+                                title = "${termNameBn(t)} মূল্যায়ন",
                                 subtitle = if (hasT) "নির্ধারিত বিষয়ে মোট ${fmt(termSum)} / ${bn(maxAll.toString())}" else "এখনো নম্বর এন্ট্রি হয়নি",
                                 badgeText = if (hasT) "$termGrade · ${fmt(termPct)}%" else "খালি",
                                 badgeColor = if (hasT) EmeraldGrade else SlateMuted,
@@ -638,7 +639,7 @@ fun StudentEditorScreen(
                             val attPct = if (dVal != null && pVal != null && dVal > 0) "${fmt((pVal / dVal) * 100.0)}%" else null
 
                             TreeGroupCard(
-                                title = "${bn(t.toString())} প্রান্তিক — উপস্থিতি ও গুণাবলি",
+                                title = "${termNameBn(t)} — উপস্থিতি ও গুণাবলি",
                                 subtitle = listOfNotNull(
                                     s.x["ACT_$t"]?.let { "সক্রিয়তা: $it" },
                                     s.x["DISC_$t"]?.let { "শৃঙ্খলা: $it" },

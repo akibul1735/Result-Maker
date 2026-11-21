@@ -115,6 +115,7 @@ import com.kgps.result.gradeOf
 import com.kgps.result.mk
 import com.kgps.result.subjectsFor
 import com.kgps.result.subs
+import com.kgps.result.termNameBn
 import com.kgps.result.total
 import com.kgps.result.ui.components.StudentRemarkContextSummary
 import com.kgps.result.ui.components.TeacherRemarkPickerDialog
@@ -554,7 +555,7 @@ fun BulkSheetScreen(
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
                                     Text(
-                                        "${bn(term.toString())} প্রান্তিক",
+                                        termNameBn(term),
                                         fontSize = 11.5.sp,
                                         fontWeight = FontWeight.SemiBold,
                                         color = SlateText,
@@ -571,7 +572,7 @@ fun BulkSheetScreen(
                                         modifier = Modifier.background(if (isSelected) TealContainer else Color.Transparent),
                                         text = {
                                             Text(
-                                                "${bn(t.toString())} প্রান্তিক",
+                                                termNameBn(t),
                                                 fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
                                                 color = if (isSelected) TealDark else SlateText
                                             )
@@ -1998,7 +1999,7 @@ private fun BulkRemarksPanel(
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
                 Text(
-                    "${bn(term.toString())}ম প্রান্তিক · মন্তব্য সম্পন্ন: ${bn(filledCount.toString())}/${bn(classStudents.size.toString())} জন",
+                    "${termNameBn(term)} · মন্তব্য সম্পন্ন: ${bn(filledCount.toString())}/${bn(classStudents.size.toString())} জন",
                     fontSize = 11.5.sp,
                     fontWeight = FontWeight.SemiBold,
                     color = SlateText,

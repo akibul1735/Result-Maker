@@ -131,7 +131,7 @@ fun defaultShortClassLabel(nameBn: String, id: Int): String {
         clean.contains("প্রাক") || clean.contains("শিশু") -> "প্রাক"
         clean.isNotBlank() && clean.length <= 6 -> clean
         clean.isNotBlank() -> clean.take(5)
-        else -> "${bn(id.toString())}ম"
+        else -> ordinalBn(id)
     }
 }
 
@@ -157,7 +157,7 @@ fun classShortBn(cls: Int, settings: Settings? = null): String {
     } else {
         SchoolClassRegistry.findClass(cls)
     }
-    return found?.shortBn ?: CLS_SHORT.getOrNull(cls - 1) ?: "${bn(cls.toString())}ম"
+    return found?.shortBn ?: CLS_SHORT.getOrNull(cls - 1) ?: ordinalBn(cls)
 }
 
 fun syllabusTierForClass(cls: Int, settings: Settings? = null): Int {
@@ -206,6 +206,17 @@ fun subjectsFor(cls: Int, religion: String): List<Sub> {
 fun mk(sub: String, t: Int, c: String) = "${sub}_${t}_$c"
 
 fun bn(s: String): String = s.map { if (it in '0'..'9') '০' + (it - '0') else it }.joinToString("")
+fun ordinalBn(n: Int): String = when (n) {
+    1 -> "১ম"
+    2 -> "২য়"
+    3 -> "৩য়"
+    4 -> "৪র্থ"
+    5 -> "৫ম"
+    6 -> "৬ষ্ঠ"
+    else -> "${bn(n.toString())}ম"
+}
+fun termOrdinalBn(term: Int): String = ordinalBn(term)
+fun termNameBn(term: Int): String = "${termOrdinalBn(term)} প্রান্তিক"
 fun fromBn(s: String): String = s.map { if (it in '০'..'৯') '0' + (it - '০') else it }.joinToString("")
 fun fmtEn(d: Double): String { val r = Math.round(d * 10) / 10.0; return if (r == r.toLong().toDouble()) r.toLong().toString() else r.toString() }
 fun fmt(d: Double): String = bn(fmtEn(d))
@@ -222,7 +233,17 @@ fun Student.cont(s: Sub, t: Int): Double {
     }
 }
 fun Student.wr(s: Sub, t: Int) = if (s.written > 0) (m[mk(s.key, t, "WR")] ?: 0.0) else 0.0
-fun Student.total(s: Sub, t: Int) = cont(s, t) + wr(s, t)
+fun Student.total(s: Sub, t: Int): Double {
+    if (s.key == "ART") return cont(s, t)
+    val hasParts = s.comps.any { m.containsKey(mk(s.key, t, it.key)) } ||
+        m.containsKey(mk(s.key, t, "CONT")) ||
+        (s.written > 0 && m.containsKey(mk(s.key, t, "WR")))
+    return if (hasParts) {
+        cont(s, t) + wr(s, t)
+    } else {
+        m[mk(s.key, t, "TOTAL")] ?: 0.0
+    }
+}
 fun Student.avg(s: Sub) = (1..3).sumOf { total(s, it) } / 3.0
 fun gradeOf(p: Double) = when { p >= 80 -> "A"; p >= 60 -> "B"; p >= 40 -> "C"; else -> "D" }
 fun gradeLabelBn(g: String) = when (g) {

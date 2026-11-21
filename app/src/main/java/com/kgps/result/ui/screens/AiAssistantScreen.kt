@@ -140,6 +140,8 @@ import com.kgps.result.fmt
 import com.kgps.result.fmtEn
 import com.kgps.result.fromBn
 import com.kgps.result.subjectsFor
+import com.kgps.result.termNameBn
+import com.kgps.result.termOrdinalBn
 import com.kgps.result.ui.components.ImageCropDialog
 import com.kgps.result.ui.theme.AmberBg
 import com.kgps.result.ui.theme.AmberBorder
@@ -972,7 +974,7 @@ fun AiAssistantScreen(
                                             fontSize = 13.sp
                                         )
                                         Text(
-                                            "প্রান্তিক: ${bn(ext.term.toString())}ম · নম্বর পাওয়া গেছে: ${bn(ext.marks.size.toString())}টি",
+                                            "প্রান্তিক: ${termOrdinalBn(ext.term)} · নম্বর পাওয়া গেছে: ${bn(ext.marks.size.toString())}টি",
                                             fontSize = 12.sp,
                                             color = SlateMuted
                                         )
@@ -1505,7 +1507,7 @@ private fun ClassSheetPreviewSection(
                         shape = RoundedCornerShape(8.dp),
                         contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)
                     ) {
-                        Text("${bn(sheet.term.toString())} প্রান্তিক", fontSize = 11.5.sp, maxLines = 1, modifier = Modifier.weight(1f))
+                        Text(termNameBn(sheet.term), fontSize = 11.5.sp, maxLines = 1, modifier = Modifier.weight(1f))
                         Icon(Icons.Rounded.ArrowDropDown, contentDescription = null, modifier = Modifier.size(16.dp))
                     }
                     DropdownMenu(expanded = termDrop, onDismissRequest = { termDrop = false }) {
@@ -1515,7 +1517,7 @@ private fun ClassSheetPreviewSection(
                                 modifier = Modifier.background(if (isTermSel) TealContainer else Color.Transparent),
                                 text = {
                                     Text(
-                                        "${bn(t.toString())} প্রান্তিক",
+                                        termNameBn(t),
                                         fontWeight = if (isTermSel) FontWeight.Bold else FontWeight.Normal,
                                         color = if (isTermSel) TealDark else SlateText
                                     )

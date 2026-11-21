@@ -73,6 +73,7 @@ import com.kgps.result.activeSchoolClasses
 import com.kgps.result.bn
 import com.kgps.result.defaultSelectedColumnKeys
 import com.kgps.result.subjectsFor
+import com.kgps.result.termOrdinalBn
 import com.kgps.result.ui.theme.SlateBg
 import com.kgps.result.ui.theme.SlateMuted
 import com.kgps.result.ui.theme.SlateOutline
@@ -237,7 +238,7 @@ fun CsvStepOptions(
                         Text("প্রান্তিক:", fontWeight = FontWeight.SemiBold, fontSize = 11.5.sp, color = SlateMuted)
                         (1..3).forEach { t ->
                             CompactOptionPill(
-                                label = "${bn(t.toString())}ম",
+                                label = termOrdinalBn(t),
                                 selected = config.targetTerm == t,
                                 testTag = "csv_opt_term_$t",
                                 onClick = {

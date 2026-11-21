@@ -176,16 +176,33 @@ object CsvImportAssistant {
             val subShort = s.bn.substringBefore(" (")
             s.comps.forEach { c ->
                 val sample = ((c.max * 8) / 10).coerceAtLeast(1).toString()
+                val compLabel = if (s.key == "ART" && c.key == "TOTAL") "মোট" else c.key
                 out.add(
                     CsvColumnOption(
                         key = mk(s.key, term, c.key),
-                        labelBn = "$subShort · ${c.key} (সর্বোচ্চ ${bn(c.max.toString())})",
+                        labelBn = "$subShort · $compLabel (সর্বোচ্চ ${bn(c.max.toString())})",
                         group = "নম্বর ($subShort)",
                         required = false,
                         sampleEn = sample,
                         ruleHint = "0 থেকে ${c.max}"
                     )
                 )
+            }
+            if (s.key != "ART") {
+                val contMax = s.comps.sumOf { it.max }
+                if (contMax > 0) {
+                    val contSample = ((contMax * 8) / 10).coerceAtLeast(1).toString()
+                    out.add(
+                        CsvColumnOption(
+                            key = mk(s.key, term, "CONT"),
+                            labelBn = "$subShort · মোট ধারাবাহিক (সর্বোচ্চ ${bn(contMax.toString())})",
+                            group = "নম্বর ($subShort)",
+                            required = false,
+                            sampleEn = contSample,
+                            ruleHint = "0 থেকে $contMax"
+                        )
+                    )
+                }
             }
             if (s.written > 0) {
                 val sample = ((s.written * 8) / 10).coerceAtLeast(1).toString()
@@ -197,6 +214,19 @@ object CsvImportAssistant {
                         required = false,
                         sampleEn = sample,
                         ruleHint = "0 থেকে ${s.written}"
+                    )
+                )
+            }
+            if (s.key != "ART") {
+                val totalSample = ((s.max * 8) / 10).coerceAtLeast(1).toString()
+                out.add(
+                    CsvColumnOption(
+                        key = mk(s.key, term, "TOTAL"),
+                        labelBn = "$subShort · মোট (সর্বোচ্চ ${bn(s.max.toString())})",
+                        group = "নম্বর ($subShort)",
+                        required = false,
+                        sampleEn = totalSample,
+                        ruleHint = "0 থেকে ${s.max}"
                     )
                 )
             }
@@ -304,11 +334,7 @@ object CsvImportAssistant {
         } else {
             activeClasses.joinToString(", ") { "${it.shortBn}=${it.id}" }
         }
-        val termLabel = when (config.targetTerm) {
-            1 -> "১ম প্রান্তিক"
-            2 -> "২য় প্রান্তিক"
-            else -> "৩য় প্রান্তিক"
-        }
+        val termLabel = termNameBn(config.targetTerm)
 
         val rulesSummary = buildList {
             val effectiveCls = if (config.targetCls in 1..20) config.targetCls else 3
@@ -324,8 +350,14 @@ object CsvImportAssistant {
                         s.comps.forEach { c ->
                             if (mk(s.key, config.targetTerm, c.key) in selectedKeys) add("${c.key}≤${c.max}")
                         }
+                        if (s.key != "ART" && mk(s.key, config.targetTerm, "CONT") in selectedKeys) {
+                            add("CONT≤${s.comps.sumOf { it.max }}")
+                        }
                         if (s.written > 0 && mk(s.key, config.targetTerm, "WR") in selectedKeys) {
                             add("WR≤${s.written}")
+                        }
+                        if (s.key != "ART" && mk(s.key, config.targetTerm, "TOTAL") in selectedKeys) {
+                            add("TOTAL≤${s.max}")
                         }
                     }.joinToString(",")
                     "${s.bn.substringBefore(" (")}: $parts"
@@ -538,7 +570,12 @@ object CsvImportAssistant {
                             hasWarning = true
                             messages.add("${classShortBn(effectiveCls)} শ্রেণিতে \"$subKey\" বিষয় নেই")
                         } else {
-                            val maxMark = if (compKey == "WR") sub.written else sub.comps.find { it.key == compKey }?.max ?: 0
+                            val maxMark = when (compKey) {
+                                "WR" -> sub.written
+                                "CONT" -> sub.comps.sumOf { it.max }
+                                "TOTAL" -> sub.max
+                                else -> sub.comps.find { it.key == compKey }?.max ?: 0
+                            }
                             if (maxMark <= 0) {
                                 hasWarning = true
                                 messages.add("${sub.bn.substringBefore(" (")} বিষয়ে $compKey অংশ প্রযোজ্য নয়")
@@ -556,7 +593,7 @@ object CsvImportAssistant {
                 val days = termDays[term]
                 if (days != null && pres > days) {
                     hasWarning = true
-                    messages.add("${bn(term.toString())}ম প্রান্তিকে উপস্থিতি ($pres) কার্যদিবসের ($days) বেশি")
+                    messages.add("${termNameBn(term)}ে উপস্থিতি ($pres) কার্যদিবসের ($days) বেশি")
                 }
             }
 

@@ -70,6 +70,7 @@ import com.kgps.result.TraitsBand
 import com.kgps.result.bn
 import com.kgps.result.classShortBn
 import com.kgps.result.fmt
+import com.kgps.result.termNameBn
 import com.kgps.result.ui.theme.AmberBg
 import com.kgps.result.ui.theme.AmberBorder
 import com.kgps.result.ui.theme.AmberNotice
@@ -542,7 +543,7 @@ fun TeacherRemarkPickerDialog(
                                     color = TealDark
                                 )
                                 Text(
-                                    "${student.name.ifBlank { "শিক্ষার্থী" }} · ${classShortBn(student.cls)} · রোল ${bn(student.roll.toString())} · ${bn(term.toString())}ম প্রান্তিক",
+                                    "${student.name.ifBlank { "শিক্ষার্থী" }} · ${classShortBn(student.cls)} · রোল ${bn(student.roll.toString())} · ${termNameBn(term)}",
                                     fontSize = 11.5.sp,
                                     color = SlateMuted,
                                     maxLines = 1,

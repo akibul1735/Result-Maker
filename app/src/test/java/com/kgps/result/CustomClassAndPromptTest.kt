@@ -109,4 +109,64 @@ class CustomClassAndPromptTest {
         assertTrue(prompt.contains("```csv"))
         assertTrue("Prompt should stay concise (< 900 chars), was ${prompt.length}", prompt.length < 900)
     }
+
+    @Test
+    fun csvColumnsIncludeContAndTotalAndValidateCorrectly() {
+        val cfg = CsvPromptConfig(
+            module = CsvImportModule.TERM_MARKS,
+            targetCls = 3,
+            targetTerm = 2,
+            selectedSubjectKeys = setOf("SCI")
+        )
+        val cols = CsvImportAssistant.availableColumnsForConfig(cfg, emptyList())
+        val contCol = cols.firstOrNull { it.key == "SCI_2_CONT" }
+        val totalCol = cols.firstOrNull { it.key == "SCI_2_TOTAL" }
+        assertTrue("Expected SCI_2_CONT option", contCol != null)
+        assertTrue("Expected SCI_2_TOTAL option", totalCol != null)
+        assertTrue(contCol!!.labelBn.contains("মোট ধারাবাহিক"))
+        assertTrue(totalCol!!.labelBn.contains("মোট"))
+
+        // Valid CONT (<= 30) & TOTAL (<= 100) should produce zero warnings
+        val validCsv = "রোল,নাম,SCI_2_CONT,SCI_2_TOTAL\n1,রহিম,28,92"
+        val validParsed = Repo.parseCsv(validCsv)
+        val validCols = Repo.detectCsvColumns(validParsed, emptyList())
+        val validReport = CsvImportAssistant.validateCsvData(validParsed, validCols, emptyList(), 3)
+        assertEquals(
+            "Expected no warnings for valid CONT/TOTAL, got ${validReport.rows.flatMap { it.messages }}",
+            0,
+            validReport.warningCount
+        )
+
+        // Out-of-range CONT (> 30) & TOTAL (> 100) should produce warnings
+        val badCsv = "রোল,নাম,SCI_2_CONT,SCI_2_TOTAL\n1,রহিম,35,110"
+        val badParsed = Repo.parseCsv(badCsv)
+        val badCols = Repo.detectCsvColumns(badParsed, emptyList())
+        val badReport = CsvImportAssistant.validateCsvData(badParsed, badCols, emptyList(), 3)
+        assertTrue("Expected warning for CONT > 30 and TOTAL > 100", badReport.warningCount >= 1)
+        assertTrue(badReport.rows.first().messages.any { it.contains("SCI_2_CONT") })
+        assertTrue(badReport.rows.first().messages.any { it.contains("SCI_2_TOTAL") })
+    }
+
+    @Test
+    fun studentTotalFallsBackToTotalKeyAndTermOrdinalsAreCorrect() {
+        val sci = subjectsFor(3, "ইসলাম").first { it.key == "SCI" }
+        val stTotalOnly = Student(id = "s1", cls = 3, roll = 1, name = "আরিফ", m = mapOf("SCI_2_TOTAL" to 85.0))
+        assertEquals(85.0, stTotalOnly.total(sci, 2), 0.001)
+
+        val stWithParts = Student(
+            id = "s2",
+            cls = 3,
+            roll = 2,
+            name = "করিম",
+            m = mapOf("SCI_2_CONT" to 25.0, "SCI_2_WR" to 60.0, "SCI_2_TOTAL" to 99.0)
+        )
+        assertEquals(85.0, stWithParts.total(sci, 2), 0.001)
+
+        assertEquals("১ম", termOrdinalBn(1))
+        assertEquals("২য়", termOrdinalBn(2))
+        assertEquals("৩য়", termOrdinalBn(3))
+        assertEquals("১ম প্রান্তিক", termNameBn(1))
+        assertEquals("২য় প্রান্তিক", termNameBn(2))
+        assertEquals("৩য় প্রান্তিক", termNameBn(3))
+    }
 }

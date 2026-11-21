@@ -440,6 +440,7 @@ fun ResultMakerWorkspace(
     val section by vm.currentSection.collectAsStateWithLifecycle()
     val editingStudent by vm.editingStudent.collectAsStateWithLifecycle()
     val studioStudentId by vm.studioStudentId.collectAsStateWithLifecycle()
+    val studioTabMode by vm.studioTabMode.collectAsStateWithLifecycle()
     val csvImportState by vm.csvImportState.collectAsStateWithLifecycle()
     val batchEditOpen by vm.batchEditOpen.collectAsStateWithLifecycle()
     val batchEditInitialClass by vm.batchEditInitialClass.collectAsStateWithLifecycle()
@@ -466,6 +467,34 @@ fun ResultMakerWorkspace(
     var pendingPdfStudents by remember { mutableStateOf<List<Student>>(emptyList()) }
     var pendingPdfOptionPrompt by remember { mutableStateOf<Pair<List<Student>, String>?>(null) }
     var pdfExportingCount by remember { mutableStateOf<Int?>(null) }
+    var pendingBlankPdfPages by remember { mutableStateOf<List<BlankSheetPageSpec>>(emptyList()) }
+    var pendingBlankPdfOrientation by remember { mutableStateOf(BlankSheetOrientation.PORTRAIT) }
+    val blankPdfLauncher = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/pdf")) { uri ->
+        val pagesToWrite = pendingBlankPdfPages
+        val orientationToWrite = pendingBlankPdfOrientation
+        if (uri != null && pagesToWrite.isNotEmpty()) {
+            workspaceScope.launch {
+                val result = runCatching {
+                    withContext(Dispatchers.IO) {
+                        ctx.contentResolver.openOutputStream(uri)?.use { out ->
+                            BlankSheetPdfGen.write(
+                                ctx = ctx,
+                                pages = pagesToWrite,
+                                settings = settings,
+                                orientation = orientationToWrite,
+                                out = out
+                            )
+                        }
+                    }
+                }
+                result.onSuccess {
+                    vm.showMessage("ফাঁকা ফর্ম PDF সংরক্ষিত হয়েছে (${bn(pagesToWrite.size.toString())} পৃষ্ঠা)")
+                }.onFailure { e ->
+                    vm.showMessage("PDF তৈরি করা যায়নি: ${e.message ?: "ত্রুটি"}")
+                }
+            }
+        }
+    }
     val pdfLauncher = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/pdf")) { uri ->
         val listToWrite = pendingPdfStudents
         if (uri != null && listToWrite.isNotEmpty()) {
@@ -553,6 +582,7 @@ fun ResultMakerWorkspace(
                                 "সব-শ্রেণির-প্রতিবেদন.pdf"
                             )
                         },
+                        onOpenBlankSheetPdf = vm::openBlankSheetPdf,
                         onOpenSchoolHub = onOpenSchoolHub,
                         onRequestSignOut = { askSignOut = true }
                     )
@@ -670,6 +700,7 @@ fun ResultMakerWorkspace(
                                             "সব-শ্রেণির-প্রতিবেদন.pdf"
                                         )
                                     },
+                                    onOpenBlankSheetPdf = vm::openBlankSheetPdf,
                                     onPrintBatch = { batchList, jobName ->
                                         if (!permissions.canExportPdf) {
                                             vm.showMessage("প্রিন্ট করার অনুমতি আপনার নেই")
@@ -765,6 +796,10 @@ fun ResultMakerWorkspace(
                                         students = allowedStudents,
                                         allSchoolStudents = students,
                                         settings = settings,
+                                        permissions = permissions,
+                                        initialClass = cls,
+                                        studioMode = studioTabMode,
+                                        onSetStudioMode = vm::setStudioTabMode,
                                         selectedId = studioStudentId,
                                         includeClassHighest = includeClassHighest,
                                         onToggleClassHighest = vm::setIncludeClassHighestInReport,
@@ -805,6 +840,32 @@ fun ResultMakerWorkspace(
                                         },
                                         onExportBatchPdf = { batchList, fileName ->
                                             makePdf(batchList, fileName)
+                                        },
+                                        onExportBlankPdf = { pages, orientation, fileName ->
+                                            if (!permissions.canExportPdf) {
+                                                vm.showMessage("PDF তৈরি করার অনুমতি আপনার নেই")
+                                            } else if (pages.isEmpty()) {
+                                                vm.showMessage("PDF তৈরির জন্য কোনো পৃষ্ঠা নেই")
+                                            } else {
+                                                pendingBlankPdfPages = pages
+                                                pendingBlankPdfOrientation = orientation
+                                                blankPdfLauncher.launch(fileName)
+                                            }
+                                        },
+                                        onPrintBlankPdf = { pages, orientation, jobName ->
+                                            if (!permissions.canExportPdf) {
+                                                vm.showMessage("প্রিন্ট করার অনুমতি আপনার নেই")
+                                            } else if (pages.isEmpty()) {
+                                                vm.showMessage("প্রিন্ট করার জন্য কোনো পৃষ্ঠা নেই")
+                                            } else {
+                                                BlankSheetPdfGen.print(
+                                                    ctx = ctx,
+                                                    pages = pages,
+                                                    settings = settings,
+                                                    orientation = orientation,
+                                                    jobName = jobName
+                                                )
+                                            }
                                         },
                                         onBack = { vm.navigate(NavSection.DASHBOARD) }
                                     )
@@ -1089,6 +1150,7 @@ private fun ResultMakerTopBar(
     onCsvImport: () -> Unit,
     onAiScan: () -> Unit,
     onAllPdf: () -> Unit,
+    onOpenBlankSheetPdf: () -> Unit,
     onOpenSchoolHub: () -> Unit,
     onRequestSignOut: () -> Unit
 ) {
@@ -1183,6 +1245,10 @@ private fun ResultMakerTopBar(
                             )
                         }
                         if (permissions.canExportPdf) {
+                            DropdownMenuItem(
+                                text = { Text("ফাঁকা ফর্ম / শিট PDF") },
+                                onClick = { menuOpen = false; onOpenBlankSheetPdf() }
+                            )
                             DropdownMenuItem(
                                 text = { Text("সব শ্রেণির সব শিক্ষার্থীর PDF") },
                                 onClick = { menuOpen = false; onAllPdf() }

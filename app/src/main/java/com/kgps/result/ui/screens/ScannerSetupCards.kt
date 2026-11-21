@@ -82,6 +82,7 @@ import com.kgps.result.classNameBn
 import com.kgps.result.classShortBn
 import com.kgps.result.cloud.TeacherPermissions
 import com.kgps.result.subjectsFor
+import com.kgps.result.termNameBn
 import com.kgps.result.ui.theme.SlateBg
 import com.kgps.result.ui.theme.SlateMuted
 import com.kgps.result.ui.theme.SlateOutline
@@ -760,7 +761,7 @@ internal fun ClassSheetHintSelectors(
                 contentPadding = PaddingValues(horizontal = 7.dp, vertical = 4.dp)
             ) {
                 Text(
-                    termHint?.let { "${bn(it.toString())} প্রান্তিক" } ?: "প্রান্তিক: অটো",
+                    termHint?.let { termNameBn(it) } ?: "প্রান্তিক: অটো",
                     fontSize = 11.sp,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
@@ -790,7 +791,7 @@ internal fun ClassSheetHintSelectors(
                         modifier = Modifier.background(if (isTermSel) TealContainer else Color.Transparent),
                         text = {
                             Text(
-                                "${bn(t.toString())} প্রান্তিক",
+                                termNameBn(t),
                                 fontWeight = if (isTermSel) FontWeight.Bold else FontWeight.Normal,
                                 color = if (isTermSel) TealDark else SlateText
                             )

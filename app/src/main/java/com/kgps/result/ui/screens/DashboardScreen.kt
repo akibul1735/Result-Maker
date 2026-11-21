@@ -30,6 +30,7 @@ import androidx.compose.material.icons.rounded.LibraryBooks
 import androidx.compose.material.icons.rounded.Lock
 import androidx.compose.material.icons.rounded.School
 import androidx.compose.material.icons.rounded.Settings
+import androidx.compose.material.icons.rounded.TableChart
 import androidx.compose.material.icons.rounded.UploadFile
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -102,6 +103,7 @@ fun DashboardScreen(
     onBatchEdit: () -> Unit,
     onAiScan: () -> Unit,
     onAllPdf: () -> Unit,
+    onOpenBlankSheetPdf: () -> Unit = {},
     onPrintBatch: (List<Student>, String) -> Unit,
     onExportBatchPdf: (List<Student>, String) -> Unit,
     onBackupNowAll: () -> Unit,
@@ -458,6 +460,23 @@ fun DashboardScreen(
                                 onClick = onBackupNowAll,
                                 modifier = Modifier.weight(1f)
                             )
+                        }
+
+                        if (permissions.canExportPdf) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                QuickShortcutTile(
+                                    icon = Icons.Rounded.TableChart,
+                                    title = "ফাঁকা ফর্ম / শিট PDF",
+                                    subtitle = "রোল-নামসহ হাতে লেখার ফর্ম",
+                                    tint = TealDark,
+                                    testTag = "dash_blank_sheet_pdf_btn",
+                                    onClick = onOpenBlankSheetPdf,
+                                    modifier = Modifier.weight(1f)
+                                )
+                            }
                         }
                     }
                 }

@@ -96,17 +96,22 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import com.kgps.result.BlankSheetOrientation
+import com.kgps.result.BlankSheetPageSpec
 import com.kgps.result.DPE_LOGO_LIST
 import com.kgps.result.PDF_FONT_LIST
 import com.kgps.result.PdfGen
 import com.kgps.result.ReportSummaryColumn
 import com.kgps.result.Settings
 import com.kgps.result.Student
+import com.kgps.result.StudioTabMode
 import com.kgps.result.bn
 import com.kgps.result.classNameBn
+import com.kgps.result.cloud.TeacherPermissions
 import com.kgps.result.fromBn
 import com.kgps.result.ui.components.BatchReportDialog
 import com.kgps.result.ui.components.SummaryTableConfigCard
+import com.kgps.result.ui.theme.SlateSurfaceVariant
 import com.kgps.result.ui.theme.SlateBg
 import com.kgps.result.ui.theme.SlateMuted
 import com.kgps.result.ui.theme.SlateOutline
@@ -135,6 +140,10 @@ fun ReportStudioScreen(
     students: List<Student>,
     allSchoolStudents: List<Student> = students,
     settings: Settings,
+    permissions: TeacherPermissions = TeacherPermissions(),
+    initialClass: Int = 1,
+    studioMode: StudioTabMode = StudioTabMode.PROGRESS_REPORT,
+    onSetStudioMode: (StudioTabMode) -> Unit = {},
     selectedId: String?,
     includeClassHighest: Boolean = false,
     onToggleClassHighest: (Boolean) -> Unit = {},
@@ -148,6 +157,8 @@ fun ReportStudioScreen(
     onExportPdf: (Student) -> Unit,
     onPrintBatch: (List<Student>, String) -> Unit = { list, _ -> list.firstOrNull()?.let(onPrintStudent) },
     onExportBatchPdf: (List<Student>, String) -> Unit = { list, _ -> list.firstOrNull()?.let(onExportPdf) },
+    onExportBlankPdf: (List<BlankSheetPageSpec>, BlankSheetOrientation, String) -> Unit = { _, _, _ -> },
+    onPrintBlankPdf: (List<BlankSheetPageSpec>, BlankSheetOrientation, String) -> Unit = { _, _, _ -> },
     onBack: () -> Unit
 ) {
     val ctx = LocalContext.current
@@ -156,6 +167,31 @@ fun ReportStudioScreen(
     val sorted = remember(students) {
         students.sortedWith(compareBy({ it.cls }, { it.roll }))
     }
+
+    if (studioMode == StudioTabMode.BLANK_FORM) {
+        Column(
+            modifier = Modifier.fillMaxSize().padding(horizontal = 8.dp, vertical = 4.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Column(
+                Modifier.widthIn(max = 920.dp).fillMaxSize(),
+                verticalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                StudioModeSwitcher(studioMode = studioMode, onSelect = onSetStudioMode)
+                BlankSheetPdfScreen(
+                    students = sorted,
+                    settings = settings,
+                    permissions = permissions,
+                    initialClass = initialClass,
+                    onExportPdf = onExportBlankPdf,
+                    onPrint = onPrintBlankPdf,
+                    modifier = Modifier.weight(1f).fillMaxWidth()
+                )
+            }
+        }
+        return
+    }
+
     val activeIdx = remember(sorted, selectedId) {
         sorted.indexOfFirst { it.id == selectedId }.takeIf { it >= 0 } ?: 0
     }
@@ -186,14 +222,25 @@ fun ReportStudioScreen(
 
     if (active == null) {
         Column(
-            Modifier.fillMaxSize().padding(24.dp),
-            verticalArrangement = Arrangement.Center,
+            modifier = Modifier.fillMaxSize().padding(horizontal = 8.dp, vertical = 4.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            Text("প্রিভিউ দেখানোর মতো কোনো শিক্ষার্থী নেই", fontWeight = FontWeight.SemiBold)
-            Spacer(Modifier.height(8.dp))
-            Button(onClick = onBack, modifier = Modifier.testTag("studio_back_empty_btn")) {
-                Text("তালিকায় ফিরে যান")
+            Column(
+                Modifier.widthIn(max = 920.dp).fillMaxSize(),
+                verticalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                StudioModeSwitcher(studioMode = studioMode, onSelect = onSetStudioMode)
+                Column(
+                    Modifier.weight(1f).fillMaxWidth().padding(24.dp),
+                    verticalArrangement = Arrangement.Center,
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Text("প্রিভিউ দেখানোর মতো কোনো শিক্ষার্থী নেই", fontWeight = FontWeight.SemiBold)
+                    Spacer(Modifier.height(8.dp))
+                    Button(onClick = onBack, modifier = Modifier.testTag("studio_back_empty_btn")) {
+                        Text("তালিকায় ফিরে যান")
+                    }
+                }
             }
         }
         return
@@ -263,6 +310,8 @@ fun ReportStudioScreen(
             Modifier.widthIn(max = 920.dp).fillMaxSize(),
             verticalArrangement = Arrangement.spacedBy(6.dp)
         ) {
+            StudioModeSwitcher(studioMode = studioMode, onSelect = onSetStudioMode)
+
             // Top Compact Single-Row Selection Bar: Class + Roll + Name(Search) + Prev/Next
             Surface(
                 color = MaterialTheme.colorScheme.surface,
@@ -1513,3 +1562,48 @@ private fun SheetOverviewCard(
         }
     }
 }
+
+@Composable
+private fun StudioModeSwitcher(
+    studioMode: StudioTabMode,
+    onSelect: (StudioTabMode) -> Unit
+) {
+    Surface(
+        color = SlateSurfaceVariant,
+        border = BorderStroke(1.dp, SlateOutline),
+        shape = RoundedCornerShape(9.dp),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(3.dp),
+            horizontalArrangement = Arrangement.spacedBy(3.dp)
+        ) {
+            StudioTabMode.entries.forEach { tab ->
+                val isSel = studioMode == tab
+                Surface(
+                    onClick = { onSelect(tab) },
+                    color = if (isSel) TealPrimary else Color.Transparent,
+                    shape = RoundedCornerShape(7.dp),
+                    modifier = Modifier
+                        .weight(1f)
+                        .testTag("studio_mode_tab_${tab.name.lowercase()}")
+                ) {
+                    Box(
+                        contentAlignment = Alignment.Center,
+                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 7.dp)
+                    ) {
+                        Text(
+                            tab.labelBn,
+                            fontSize = 11.5.sp,
+                            fontWeight = if (isSel) FontWeight.Bold else FontWeight.Medium,
+                            color = if (isSel) Color.White else SlateText,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+

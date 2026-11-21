@@ -11,6 +11,7 @@ import com.kgps.result.classNameBn
 import com.kgps.result.fmtEn
 import com.kgps.result.fromBn
 import com.kgps.result.subjectsFor
+import com.kgps.result.termNameBn
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
@@ -672,7 +673,7 @@ internal fun parseExtractedClassSheetJson(
                 ClassSheetImportScope.WR_ONLY -> " · শুধু সামষ্টিক"
                 else -> ""
             }
-            "${classNameBn(detectedCls)} শ্রেণি · ${bn(detectedTerm.toString())} প্রান্তিক$scopeNote — ${bn(parsedRows.size.toString())} জন শনাক্ত।"
+            "${classNameBn(detectedCls)} শ্রেণি · ${termNameBn(detectedTerm)}$scopeNote — ${bn(parsedRows.size.toString())} জন শনাক্ত।"
         },
         warnings = warnings.distinct(),
         rows = parsedRows,
@@ -932,7 +933,7 @@ class DirectGeminiAiRepository(
             remarkCache[cacheKey]?.let { return it }
         }
 
-        val prompt = "${bn(term.toString())} প্রান্তিকের জন্য নিচের তথ্যে ২–৩ বাক্যের প্রাতিষ্ঠানিক বাংলা মন্তব্য লিখুন (শুধু মন্তব্য):\n$trimmedSummary"
+        val prompt = "${termNameBn(term)}ের জন্য নিচের তথ্যে ২–৩ বাক্যের প্রাতিষ্ঠানিক বাংলা মন্তব্য লিখুন (শুধু মন্তব্য):\n$trimmedSummary"
 
         val payload = JSONObject().apply {
             put("contents", JSONArray().apply {
@@ -951,7 +952,7 @@ class DirectGeminiAiRepository(
 
         val (txt, _) = callGenerateContentResilient(apiKey, modelId, payload)
         val cleanRemark = txt.ifBlank {
-            "${bn(term.toString())} প্রান্তিকে শিক্ষার্থীর অগ্রগতি সন্তোষজনক; নিয়মিত অনুশীলন চালিয়ে গেলে আরও ভালো করবে।"
+            "${termNameBn(term)}ে শিক্ষার্থীর অগ্রগতি সন্তোষজনক; নিয়মিত অনুশীলন চালিয়ে গেলে আরও ভালো করবে।"
         }
         return AiDraftRemarkResult(remark = cleanRemark, isPlaceholder = false).also { result ->
             synchronized(cacheLock) { remarkCache[cacheKey] = result }
@@ -1664,7 +1665,7 @@ class PlaceholderAiRepository : AiRepository {
     override suspend fun draftRemark(studentSummary: String, term: Int): AiDraftRemarkResult {
         delay(350)
         return AiDraftRemarkResult(
-            remark = "${bn(term.toString())} প্রান্তিকের মূল্যায়নে শিক্ষার্থীর অংশগ্রহণ ভালো।",
+            remark = "${termNameBn(term)}ের মূল্যায়নে শিক্ষার্থীর অংশগ্রহণ ভালো।",
             isPlaceholder = true
         )
     }

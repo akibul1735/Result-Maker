@@ -80,6 +80,11 @@ enum class NavSection(val route: String, val labelBn: String) {
     SETTINGS("settings", "সেটিংস")
 }
 
+enum class StudioTabMode(val labelBn: String) {
+    PROGRESS_REPORT("প্রগতি প্রতিবেদন"),
+    BLANK_FORM("ফাঁকা ফর্ম / শিট PDF")
+}
+
 data class CsvImportModalState(
     val isOpen: Boolean = false,
     val initialText: String = ""
@@ -318,6 +323,9 @@ class ResultMakerViewModel(
 
     private val _studioStudentId = MutableStateFlow<String?>(null)
     val studioStudentId: StateFlow<String?> = _studioStudentId.asStateFlow()
+
+    private val _studioTabMode = MutableStateFlow(StudioTabMode.PROGRESS_REPORT)
+    val studioTabMode: StateFlow<StudioTabMode> = _studioTabMode.asStateFlow()
 
     private val _csvImportState = MutableStateFlow(CsvImportModalState())
     val csvImportState: StateFlow<CsvImportModalState> = _csvImportState.asStateFlow()
@@ -834,7 +842,22 @@ class ResultMakerViewModel(
         }
         _editingStudent.value = null
         _studioStudentId.value = studentId
+        _studioTabMode.value = StudioTabMode.PROGRESS_REPORT
         _currentSection.value = NavSection.STUDIO
+    }
+
+    fun openBlankSheetPdf() {
+        if (!activePermissions.value.canExportPdf) {
+            showMessage("PDF তৈরি করার অনুমতি আপনার নেই")
+            return
+        }
+        _editingStudent.value = null
+        _studioTabMode.value = StudioTabMode.BLANK_FORM
+        _currentSection.value = NavSection.STUDIO
+    }
+
+    fun setStudioTabMode(mode: StudioTabMode) {
+        _studioTabMode.value = mode
     }
 
     fun selectStudioStudent(studentId: String) {
