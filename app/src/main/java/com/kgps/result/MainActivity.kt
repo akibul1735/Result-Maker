@@ -4,8 +4,8 @@ package com.kgps.result
 
 import android.graphics.Color as AndroidColor
 import android.os.Bundle
-import androidx.activity.ComponentActivity
 import androidx.activity.SystemBarStyle
+import androidx.fragment.app.FragmentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
@@ -127,7 +127,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
-class MainActivity : ComponentActivity() {
+class MainActivity : FragmentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge(
@@ -888,6 +888,7 @@ fun ResultMakerWorkspace(
                                     },
                                     onResetSampleData = vm::resetSampleData,
                                     onClearAllStudents = vm::clearAllStudents,
+                                    onExecuteDataReset = vm::executeDataReset,
                                     onRegenerateJoinCode = vm::regenerateJoinCode,
                                     onApproveJoinRequest = vm::approveJoinRequest,
                                     onRejectJoinRequest = vm::rejectJoinRequest,

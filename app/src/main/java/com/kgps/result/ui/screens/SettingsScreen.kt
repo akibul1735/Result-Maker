@@ -39,6 +39,7 @@ import androidx.compose.material.icons.rounded.Backup
 import androidx.compose.material.icons.rounded.Badge
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.Description
+import androidx.compose.material.icons.rounded.Fingerprint
 import androidx.compose.material.icons.rounded.FontDownload
 import androidx.compose.material.icons.rounded.Image
 import androidx.compose.material.icons.rounded.PersonRemove
@@ -101,11 +102,14 @@ import com.kgps.result.backup.DriveBackupFile
 import com.kgps.result.backup.LocalBackupEntry
 import com.kgps.result.backup.XlsxExporter
 import com.kgps.result.bn
+import com.kgps.result.DataResetCategory
+import com.kgps.result.DataResetRequest
 import com.kgps.result.cloud.JoinRequestItem
 import com.kgps.result.cloud.MemberRole
 import com.kgps.result.cloud.SchoolMemberProfile
 import com.kgps.result.cloud.SchoolWorkspace
 import com.kgps.result.cloud.TeacherPermissions
+import com.kgps.result.ui.components.DataResetDialog
 import com.kgps.result.ui.components.TeacherPermissionsEditorDialog
 import com.kgps.result.ui.components.TreeBranchItem
 import com.kgps.result.ui.components.TreeGroupCard
@@ -157,6 +161,7 @@ fun SettingsScreen(
     onExportAllPdf: () -> Unit,
     onResetSampleData: () -> Unit,
     onClearAllStudents: () -> Unit,
+    onExecuteDataReset: (DataResetRequest) -> Unit,
     onRegenerateJoinCode: () -> Unit,
     onApproveJoinRequest: (JoinRequestItem, TeacherPermissions) -> Unit,
     onRejectJoinRequest: (String) -> Unit,
@@ -211,8 +216,8 @@ fun SettingsScreen(
         }
     }
 
-    var askReset by remember { mutableStateOf(false) }
-    var askClear by remember { mutableStateOf(false) }
+    var showDataResetWizard by remember { mutableStateOf(false) }
+    var dataResetInitialCategory by remember { mutableStateOf<DataResetCategory?>(null) }
     var askRegenerateCode by remember { mutableStateOf(false) }
     var askLeaveSchool by remember { mutableStateOf(false) }
     var askSignOut by remember { mutableStateOf(false) }
@@ -1017,7 +1022,7 @@ fun SettingsScreen(
             if (isAdmin) {
                 TreeGroupCard(
                     title = "ডাটা রিসেট ও মুছে ফেলা",
-                    subtitle = "নমুনা রিসেট অথবা সকল শিক্ষার্থী মুছুন",
+                    subtitle = "শ্রেণি, বিষয়, বেসিক তথ্য বা সম্পূর্ণ ডাটা রিসেট (ফিঙ্গারপ্রিন্ট সুরক্ষিত)",
                     badgeText = "সতর্কতা",
                     badgeColor = RoseDanger,
                     badgeContainerColor = RoseBg,
@@ -1029,21 +1034,43 @@ fun SettingsScreen(
                     TreeBranchItem(isLast = true) {
                         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                             Text(
-                                "সতর্কতা: নিচের অপশনগুলো ব্যবহার করলে বিদ্যালয়ের বর্তমান তালিকা পরিবর্তিত বা স্থায়ীভাবে মুছে যেতে পারে।",
+                                "সতর্কতা: যেকোনো রিসেট বা মুছে ফেলার আগে সতর্কবার্তা দেখানো হবে এবং ডিভাইসের ফিঙ্গারপ্রিন্ট সেন্সর যাচাই করা বাধ্যতামূলক।",
                                 fontSize = 11.5.sp,
                                 color = RoseDanger,
                                 lineHeight = 16.sp
                             )
+                            Button(
+                                onClick = {
+                                    dataResetInitialCategory = null
+                                    showDataResetWizard = true
+                                },
+                                colors = ButtonDefaults.buttonColors(containerColor = TealPrimary),
+                                shape = RoundedCornerShape(10.dp),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .heightIn(min = 48.dp)
+                                    .testTag("settings_step_reset_btn")
+                            ) {
+                                Icon(Icons.Rounded.Fingerprint, contentDescription = null, modifier = Modifier.size(18.dp))
+                                Spacer(Modifier.size(6.dp))
+                                Text("ধাপে ধাপে ডাটা রিসেট (শ্রেণি, বিষয়, বেসিক তথ্য)", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                            }
                             Row(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.fillMaxWidth()) {
                                 OutlinedButton(
-                                    onClick = { askReset = true },
-                                    modifier = Modifier.weight(1f).testTag("settings_reset_sample_btn"),
+                                    onClick = {
+                                        dataResetInitialCategory = DataResetCategory.SAMPLE_DATA
+                                        showDataResetWizard = true
+                                    },
+                                    modifier = Modifier.weight(1f).heightIn(min = 48.dp).testTag("settings_reset_sample_btn"),
                                     shape = RoundedCornerShape(8.dp)
                                 ) { Text("নমুনা রিসেট", fontSize = 12.sp) }
                                 Button(
-                                    onClick = { askClear = true },
+                                    onClick = {
+                                        dataResetInitialCategory = DataResetCategory.ALL_STUDENTS
+                                        showDataResetWizard = true
+                                    },
                                     colors = ButtonDefaults.buttonColors(containerColor = RoseDanger),
-                                    modifier = Modifier.weight(1f).testTag("settings_clear_all_btn"),
+                                    modifier = Modifier.weight(1f).heightIn(min = 48.dp).testTag("settings_clear_all_btn"),
                                     shape = RoundedCornerShape(8.dp)
                                 ) { Text("সব মুছুন", fontSize = 12.sp) }
                             }
@@ -1499,33 +1526,18 @@ fun SettingsScreen(
         )
     }
 
-    if (askReset) {
-        AlertDialog(
-            onDismissRequest = { askReset = false },
-            title = { Text("নমুনা ডাটা রিসেট করবেন?") },
-            text = { Text("বর্তমান সকল তথ্য প্রতিস্থাপিত হয়ে প্রাথমিক নমুনা শিক্ষার্থী ও সেটিংস লোড হবে।") },
-            confirmButton = {
-                Button(onClick = { askReset = false; onResetSampleData() }) { Text("হ্যাঁ, রিসেট") }
-            },
-            dismissButton = {
-                TextButton(onClick = { askReset = false }) { Text("বাতিল") }
-            }
-        )
-    }
-
-    if (askClear) {
-        AlertDialog(
-            onDismissRequest = { askClear = false },
-            title = { Text("সব শিক্ষার্থী মুছে ফেলবেন?") },
-            text = { Text("সকল শ্রেণির সকল শিক্ষার্থীর তথ্য স্থায়ীভাবে মুছে যাবে। ব্যাকআপ না থাকলে পুনরুদ্ধার করা যাবে না।") },
-            confirmButton = {
-                Button(
-                    onClick = { askClear = false; onClearAllStudents() },
-                    colors = ButtonDefaults.buttonColors(containerColor = RoseDanger)
-                ) { Text("সব মুছুন") }
-            },
-            dismissButton = {
-                TextButton(onClick = { askClear = false }) { Text("বাতিল") }
+    if (showDataResetWizard) {
+        DataResetDialog(
+            students = students,
+            settings = settings,
+            initialCategory = dataResetInitialCategory,
+            onDismiss = { showDataResetWizard = false },
+            onConfirmReset = { req ->
+                when (req.category) {
+                    DataResetCategory.SAMPLE_DATA -> onResetSampleData()
+                    DataResetCategory.ALL_STUDENTS -> onClearAllStudents()
+                    else -> onExecuteDataReset(req)
+                }
             }
         )
     }

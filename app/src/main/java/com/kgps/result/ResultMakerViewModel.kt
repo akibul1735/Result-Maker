@@ -1335,6 +1335,73 @@ class ResultMakerViewModel(
         }
     }
 
+    fun executeDataReset(request: DataResetRequest) {
+        val school = activeSchool.value ?: return
+        if (!school.isAdmin(currentUserId)) {
+            showMessage("ডাটা রিসেটের অনুমতি শুধুমাত্র বিদ্যালয়ের অ্যাডমিনের")
+            return
+        }
+        if (!DataResetEngine.isRequestValid(request)) {
+            showMessage("রিসেটের জন্য বৈধ শ্রেণি বা অংশ নির্বাচন করুন")
+            return
+        }
+
+        when (request.category) {
+            DataResetCategory.SAMPLE_DATA -> {
+                resetSampleData()
+                return
+            }
+            DataResetCategory.ALL_STUDENTS -> {
+                clearAllStudents()
+                return
+            }
+            else -> Unit
+        }
+
+        val prevList = students.value
+        val customKeys = settings.value.customFields.map { it.key }.toSet()
+        val (nextList, affectedCount) = DataResetEngine.applyReset(
+            students = prevList,
+            request = request,
+            customFieldKeys = customKeys
+        )
+
+        if (affectedCount == 0 && prevList == nextList) {
+            showMessage("নির্বাচিত অংশে রিসেট করার মতো কোনো ডাটা পাওয়া যায়নি")
+            return
+        }
+
+        if (request.category == DataResetCategory.CLASS_STUDENTS) {
+            val currentStudioId = _studioStudentId.value
+            if (currentStudioId != null && nextList.none { it.id == currentStudioId }) {
+                _studioStudentId.value = null
+            }
+        }
+
+        val deleteRemoved = request.category == DataResetCategory.CLASS_STUDENTS
+        viewModelScope.launch {
+            cloudRepo.syncBatchStudents(
+                schoolId = school.id,
+                previousList = prevList,
+                nextList = nextList,
+                deleteRemoved = deleteRemoved
+            )
+                .onSuccess {
+                    val label = when (request.category) {
+                        DataResetCategory.RESULTS -> "নির্বাচিত শ্রেণি ও বিষয়ের ফলাফল রিসেট হয়েছে"
+                        DataResetCategory.ATTENDANCE_TRAITS -> "উপস্থিতি, গুণাবলী ও মন্তব্য রিসেট হয়েছে"
+                        DataResetCategory.BASIC_INFO -> "শিক্ষার্থীদের বেসিক তথ্য রিসেট হয়েছে"
+                        DataResetCategory.CLASS_STUDENTS -> "নির্বাচিত শ্রেণির শিক্ষার্থী মুছে ফেলা হয়েছে"
+                        else -> "ডাটা রিসেট সম্পন্ন হয়েছে"
+                    }
+                    showMessage("$label (${bn(affectedCount.toString())} জন)")
+                }
+                .onFailure { e ->
+                    showMessage(friendlyFirestoreErrorMessage(e))
+                }
+        }
+    }
+
     // ---------- 3-System Auto Backup (Local JSON + Google Drive + CSV) ----------
 
     fun toggleLocalAutoBackup(enabled: Boolean) {
