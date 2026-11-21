@@ -93,7 +93,7 @@ object PdfGen {
     }
 
     fun resolveTypeface(ctx: Context?, fontId: String, bold: Boolean): Typeface {
-        val isSerif = fontId == "noto_serif" || fontId == "tiro_bangla"
+        val isSerif = fontId in setOf("noto_serif", "tiro_bangla", "nikosh", "sutonny_mj", "kalpurush", "solaiman_lipi")
         val fallbackBase = when {
             isSerif -> Typeface.SERIF
             fontId == "system" -> Typeface.DEFAULT
@@ -114,6 +114,10 @@ object PdfGen {
                     Typeface.createFromAsset(ctx.assets, assetPath)
                 } else {
                     val resId = when (fontId) {
+                        "nikosh" -> R.font.nikosh
+                        "sutonny_mj" -> R.font.sutonny_mj
+                        "kalpurush" -> R.font.kalpurush
+                        "solaiman_lipi" -> R.font.solaiman_lipi
                         "tiro_bangla" -> R.font.tiro_bangla
                         "hind_siliguri" -> R.font.hind_siliguri
                         "anek_bangla" -> R.font.anek_bangla

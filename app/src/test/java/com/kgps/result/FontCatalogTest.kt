@@ -7,9 +7,13 @@ import org.junit.Test
 class FontCatalogTest {
 
     @Test
-    fun `pdf and app font catalogs cover seven official bengali fonts`() {
+    fun `pdf and app font catalogs cover eleven official bengali fonts`() {
         val expectedPdfIds = listOf(
             "noto_serif",
+            "nikosh",
+            "sutonny_mj",
+            "kalpurush",
+            "solaiman_lipi",
             "tiro_bangla",
             "noto_sans",
             "hind_siliguri",

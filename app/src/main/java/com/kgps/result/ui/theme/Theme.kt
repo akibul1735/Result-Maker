@@ -66,6 +66,10 @@ private val ResultMakerColorScheme = lightColorScheme(
 )
 
 fun appComposeFontFamily(fontId: String): FontFamily = when (fontId) {
+    "nikosh" -> FontFamily(Font(R.font.nikosh, FontWeight.Normal))
+    "sutonny_mj" -> FontFamily(Font(R.font.sutonny_mj, FontWeight.Normal))
+    "kalpurush" -> FontFamily(Font(R.font.kalpurush, FontWeight.Normal))
+    "solaiman_lipi" -> FontFamily(Font(R.font.solaiman_lipi, FontWeight.Normal))
     "noto_serif" -> FontFamily(Font(R.font.noto_serif_bengali, FontWeight.Normal))
     "tiro_bangla" -> FontFamily(Font(R.font.tiro_bangla, FontWeight.Normal))
     "noto_sans" -> FontFamily(Font(R.font.noto_sans_bengali, FontWeight.Normal))
