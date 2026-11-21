@@ -32,6 +32,7 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.ArrowDropDown
+import androidx.compose.material.icons.rounded.AutoFixHigh
 import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.ContentPaste
@@ -41,6 +42,9 @@ import androidx.compose.material.icons.rounded.DoneAll
 import androidx.compose.material.icons.rounded.Edit
 import androidx.compose.material.icons.rounded.EditNote
 import androidx.compose.material.icons.rounded.Lock
+import androidx.compose.material.icons.rounded.Refresh
+import androidx.compose.material.icons.rounded.SwapHoriz
+import androidx.compose.material.icons.rounded.Tune
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -69,6 +73,7 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
@@ -97,6 +102,7 @@ import com.kgps.result.CLSN
 import com.kgps.result.RELIGIONS
 import com.kgps.result.Settings
 import com.kgps.result.Student
+import com.kgps.result.TeacherRemarkEngine
 import com.kgps.result.avg
 import com.kgps.result.bn
 import com.kgps.result.cloud.TeacherPermissions
@@ -109,6 +115,8 @@ import com.kgps.result.mk
 import com.kgps.result.subjectsFor
 import com.kgps.result.subs
 import com.kgps.result.total
+import com.kgps.result.ui.components.StudentRemarkContextSummary
+import com.kgps.result.ui.components.TeacherRemarkPickerDialog
 import com.kgps.result.ui.theme.AmberBg
 import com.kgps.result.ui.theme.AmberNotice
 import com.kgps.result.ui.theme.EmeraldGrade
@@ -143,6 +151,7 @@ private val SHEET_MODES = listOf(
     "all" to "সকল বিষয় মোট",
     "attendance" to "উপস্থিতি এন্ট্রি",
     "traits" to "গুণাবলি এন্ট্রি",
+    "remarks" to "মন্তব্য অটো-ফিল",
     "info" to "তথ্য ও কাস্টম"
 )
 
@@ -161,6 +170,7 @@ fun BulkSheetScreen(
     onBatchEdit: (Int) -> Unit = {},
     onBatchPatchTraits: (studentIds: Set<String>, xKeys: Set<String>, value: String?) -> Unit = { _, _, _ -> },
     onBatchPatchAttendance: (studentIds: Set<String>, term: Int, workingDays: Int?, presentDays: Int?) -> Unit = { _, _, _, _ -> },
+    onBatchPatchRemarks: (term: Int, remarksByStudentId: Map<String, String?>) -> Unit = { _, _ -> },
     onShowMessage: (String) -> Unit
 ) {
     val clipboard = LocalClipboardManager.current
@@ -174,7 +184,7 @@ fun BulkSheetScreen(
             when (id) {
                 "subject" -> permissions.allSubjects || permissions.effectiveSubjects().isNotEmpty() || permissions.canViewOtherSubjects
                 "all" -> permissions.allSubjects || permissions.effectiveSubjects().isNotEmpty() || permissions.canViewOtherSubjects
-                "attendance", "traits" -> permissions.canEditAttendance
+                "attendance", "traits", "remarks" -> permissions.canEditAttendance
                 "info" -> permissions.canManageStudents
                 else -> true
             }
@@ -198,6 +208,7 @@ fun BulkSheetScreen(
     var selectedAttStudentIds by remember { mutableStateOf<Set<String>>(emptySet()) }
     var batchWorkingDaysInput by remember { mutableStateOf("") }
     var batchPresentDaysInput by remember { mutableStateOf("") }
+    var remarkPickerStudent by remember { mutableStateOf<Student?>(null) }
 
     LaunchedEffect(activeCls, mode) {
         traitBatchSelectMode = false
@@ -328,6 +339,7 @@ fun BulkSheetScreen(
                 SheetColDef("DISC_$term", "শৃঙ্খলা", "হালকা চেপে ধরুন", width = 94.dp, xKey = "DISC_$term", isNumeric = false, isTraitCycle = true),
                 SheetColDef("COND_$term", "আচরণ", "হালকা চেপে ধরুন", width = 94.dp, xKey = "COND_$term", isNumeric = false, isTraitCycle = true)
             )
+            "remarks" -> emptyList()
             else -> buildList {
                 add(SheetColDef("info_guardian", "অভিভাবকের নাম", "তথ্য", width = 132.dp, infoFieldKey = "guardian", isNumeric = false))
                 add(SheetColDef("info_mobile", "মোবাইল", "নম্বর", width = 108.dp, infoFieldKey = "mobile", isNumeric = true))
@@ -860,9 +872,50 @@ fun BulkSheetScreen(
                                 )
                             }
                         }
+                    } else if (mode == "remarks" && permissions.canEditAttendance && classStudents.isNotEmpty()) {
+                        Surface(
+                            onClick = {
+                                val updates = classStudents.mapNotNull { st ->
+                                    val existingRem = st.x["REM_$term"]?.trim().orEmpty()
+                                    if (existingRem.isNotEmpty()) return@mapNotNull null
+                                    val autoRem = TeacherRemarkEngine.autoPrefillIfApplicable(st, term)
+                                        ?: return@mapNotNull null
+                                    st.id to autoRem
+                                }.toMap()
+                                if (updates.isEmpty()) {
+                                    onShowMessage("ফাঁকা অবস্থায় থাকা কোনো শিক্ষার্থীর নম্বর, উপস্থিতি বা গুণাবলি পাওয়া যায়নি")
+                                } else {
+                                    onBatchPatchRemarks(term, updates)
+                                }
+                            },
+                            shape = RoundedCornerShape(7.dp),
+                            color = TealPrimary,
+                            modifier = Modifier.height(32.dp).testTag("sheet_remarks_autofill_blank_btn")
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 9.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                Icon(
+                                    Icons.Rounded.AutoFixHigh,
+                                    contentDescription = null,
+                                    tint = Color.White,
+                                    modifier = Modifier.size(14.dp)
+                                )
+                                Text(
+                                    "ফাঁকা অটো পূরণ",
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color.White,
+                                    maxLines = 1,
+                                    softWrap = false
+                                )
+                            }
+                        }
                     }
 
-                    if (mode != "traits") {
+                    if (mode != "traits" && mode != "remarks") {
                         Surface(
                             onClick = { navDir = if (navDir == "down") "right" else "down" },
                             shape = RoundedCornerShape(7.dp),
@@ -1339,6 +1392,29 @@ fun BulkSheetScreen(
                         textAlign = TextAlign.Center
                     )
                 }
+            } else if (mode == "remarks") {
+                BulkRemarksPanel(
+                    classStudents = classStudents,
+                    term = term,
+                    canEdit = permissions.canEditAttendance,
+                    onApplySingle = { studentId, text ->
+                        onPatchStudentField(studentId, "x.REM_$term", text)
+                    },
+                    onOpenPicker = { student -> remarkPickerStudent = student },
+                    onBatchFillAllWithData = {
+                        val updates = classStudents.mapNotNull { st ->
+                            val autoRem = TeacherRemarkEngine.autoPrefillIfApplicable(st, term)
+                                ?: return@mapNotNull null
+                            st.id to autoRem
+                        }.toMap()
+                        if (updates.isEmpty()) {
+                            onShowMessage("নম্বর, উপস্থিতি বা গুণাবলির তথ্য যুক্ত কোনো শিক্ষার্থী নেই")
+                        } else {
+                            onBatchPatchRemarks(term, updates)
+                        }
+                    },
+                    onOpenStudent = onOpenStudent
+                )
             } else {
                 Column(Modifier.fillMaxSize()) {
                     // Header row
@@ -1852,6 +1928,319 @@ fun BulkSheetScreen(
                                     }
                                 }
                                 HorizontalDivider(color = SlateOutline)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    remarkPickerStudent?.let { targetStudent ->
+        TeacherRemarkPickerDialog(
+            student = targetStudent,
+            term = term,
+            currentRemark = targetStudent.x["REM_$term"].orEmpty(),
+            onSelect = { chosen ->
+                onPatchStudentField(targetStudent.id, "x.REM_$term", chosen)
+                remarkPickerStudent = null
+            },
+            onDismiss = { remarkPickerStudent = null }
+        )
+    }
+}
+
+@Composable
+private fun BulkRemarksPanel(
+    classStudents: List<Student>,
+    term: Int,
+    canEdit: Boolean,
+    onApplySingle: (studentId: String, remark: String) -> Unit,
+    onOpenPicker: (Student) -> Unit,
+    onBatchFillAllWithData: () -> Unit,
+    onOpenStudent: (Student) -> Unit
+) {
+    val filledCount = remember(classStudents, term) {
+        classStudents.count { !it.x["REM_$term"].isNullOrBlank() }
+    }
+
+    Column(Modifier.fillMaxSize()) {
+        Surface(color = SlateSurfaceVariant) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 10.dp, vertical = 7.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Text(
+                    "${bn(term.toString())}ম প্রান্তিক · মন্তব্য সম্পন্ন: ${bn(filledCount.toString())}/${bn(classStudents.size.toString())} জন",
+                    fontSize = 11.5.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = SlateText,
+                    modifier = Modifier.weight(1f)
+                )
+                if (canEdit) {
+                    Surface(
+                        onClick = onBatchFillAllWithData,
+                        shape = RoundedCornerShape(7.dp),
+                        color = TealSoft,
+                        border = BorderStroke(1.dp, TealContainer),
+                        modifier = Modifier.testTag("sheet_remarks_reset_all_btn")
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            Icon(
+                                Icons.Rounded.Refresh,
+                                contentDescription = null,
+                                tint = TealPrimary,
+                                modifier = Modifier.size(13.dp)
+                            )
+                            Text(
+                                "সবার সেরা অটো হালনাগাদ",
+                                fontSize = 10.5.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = TealPrimary
+                            )
+                        }
+                    }
+                }
+            }
+        }
+        HorizontalDivider(color = SlateOutline)
+
+        LazyColumn(
+            modifier = Modifier.fillMaxSize(),
+            contentPadding = PaddingValues(10.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            itemsIndexed(classStudents, key = { _, s -> s.id }) { _, student ->
+                val currentRem = student.x["REM_$term"]?.trim().orEmpty()
+                val profile = remember(student, term) {
+                    TeacherRemarkEngine.analyzeProfile(student, term)
+                }
+                val rankedOptions = remember(student, term) {
+                    TeacherRemarkEngine.getRankedAlternatives(student, term)
+                }
+                val topOpt = rankedOptions.firstOrNull()
+                val isUsingTop = topOpt != null && currentRem == topOpt.text.trim()
+
+                Surface(
+                    color = MaterialTheme.colorScheme.surface,
+                    border = BorderStroke(
+                        1.dp,
+                        if (currentRem.isNotEmpty()) TealContainer else SlateOutline
+                    ),
+                    shape = RoundedCornerShape(11.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(
+                        modifier = Modifier.padding(10.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .clip(RoundedCornerShape(6.dp))
+                                    .clickable { onOpenStudent(student) }
+                                    .padding(vertical = 2.dp)
+                            ) {
+                                Surface(
+                                    color = TealSoft,
+                                    shape = RoundedCornerShape(6.dp)
+                                ) {
+                                    Text(
+                                        bn(student.roll.toString()),
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = TealPrimary,
+                                        modifier = Modifier.padding(horizontal = 7.dp, vertical = 2.dp)
+                                    )
+                                }
+                                Text(
+                                    student.name.ifBlank { "নামহীন শিক্ষার্থী" },
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = SlateText,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+
+                            Surface(
+                                color = when {
+                                    isUsingTop -> TealSoft
+                                    currentRem.isNotEmpty() -> SlateSurfaceVariant
+                                    else -> AmberBg
+                                },
+                                shape = RoundedCornerShape(999.dp)
+                            ) {
+                                Text(
+                                    text = when {
+                                        isUsingTop -> "সেরা অটো ম্যাচ"
+                                        currentRem.isNotEmpty() -> "নির্বাচিত"
+                                        else -> "অপেক্ষমান"
+                                    },
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = when {
+                                        isUsingTop -> TealDark
+                                        currentRem.isNotEmpty() -> SlateText
+                                        else -> AmberNotice
+                                    },
+                                    modifier = Modifier.padding(horizontal = 7.dp, vertical = 2.dp)
+                                )
+                            }
+                        }
+
+                        StudentRemarkContextSummary(profile = profile)
+
+                        if (currentRem.isNotEmpty()) {
+                            Surface(
+                                color = SlateBg,
+                                shape = RoundedCornerShape(8.dp),
+                                border = BorderStroke(1.dp, SlateOutline),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Text(
+                                    text = currentRem,
+                                    fontSize = 12.sp,
+                                    lineHeight = 17.sp,
+                                    color = SlateText,
+                                    modifier = Modifier.padding(horizontal = 9.dp, vertical = 7.dp)
+                                )
+                            }
+                        } else if (topOpt != null) {
+                            Surface(
+                                color = TealSoft.copy(alpha = 0.6f),
+                                shape = RoundedCornerShape(8.dp),
+                                border = BorderStroke(1.dp, TealContainer),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Column(
+                                    modifier = Modifier.padding(horizontal = 9.dp, vertical = 6.dp),
+                                    verticalArrangement = Arrangement.spacedBy(2.dp)
+                                ) {
+                                    Text(
+                                        if (profile.hasAnyData) "অটো প্রস্তাবনা (সেরা ম্যাচ):" else "সাধারণ প্রস্তাবনা (তথ্য দিলে আরও নির্ভুল হবে):",
+                                        fontSize = 10.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = TealPrimary
+                                    )
+                                    Text(
+                                        text = topOpt.text,
+                                        fontSize = 11.5.sp,
+                                        lineHeight = 16.sp,
+                                        color = SlateText
+                                    )
+                                }
+                            }
+                        }
+
+                        if (canEdit) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                if (topOpt != null && currentRem != topOpt.text.trim()) {
+                                    Surface(
+                                        onClick = { onApplySingle(student.id, topOpt.text) },
+                                        shape = RoundedCornerShape(8.dp),
+                                        color = TealPrimary,
+                                        modifier = Modifier.testTag("sheet_remark_apply_top_${student.id}")
+                                    ) {
+                                        Row(
+                                            modifier = Modifier.padding(horizontal = 9.dp, vertical = 6.dp),
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                        ) {
+                                            Icon(
+                                                Icons.Rounded.Check,
+                                                contentDescription = null,
+                                                tint = Color.White,
+                                                modifier = Modifier.size(13.dp)
+                                            )
+                                            Text(
+                                                if (currentRem.isEmpty()) "ব্যবহার করুন" else "সেরা অটো",
+                                                fontSize = 11.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                color = Color.White
+                                            )
+                                        }
+                                    }
+                                }
+
+                                if (rankedOptions.size > 1) {
+                                    Surface(
+                                        onClick = {
+                                            val curIdx = rankedOptions.indexOfFirst { it.text.trim() == currentRem }
+                                            val pool = rankedOptions.size.coerceAtMost(8)
+                                            val nextIdx = if (curIdx < 0) 0 else (curIdx + 1) % pool
+                                            onApplySingle(student.id, rankedOptions[nextIdx].text)
+                                        },
+                                        shape = RoundedCornerShape(8.dp),
+                                        color = SlateSurfaceVariant,
+                                        border = BorderStroke(1.dp, SlateOutline),
+                                        modifier = Modifier.testTag("sheet_remark_next_${student.id}")
+                                    ) {
+                                        Row(
+                                            modifier = Modifier.padding(horizontal = 9.dp, vertical = 6.dp),
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                        ) {
+                                            Icon(
+                                                Icons.Rounded.SwapHoriz,
+                                                contentDescription = null,
+                                                tint = SlateText,
+                                                modifier = Modifier.size(13.dp)
+                                            )
+                                            Text(
+                                                "অন্য বিকল্প",
+                                                fontSize = 11.sp,
+                                                fontWeight = FontWeight.SemiBold,
+                                                color = SlateText
+                                            )
+                                        }
+                                    }
+                                }
+
+                                Surface(
+                                    onClick = { onOpenPicker(student) },
+                                    shape = RoundedCornerShape(8.dp),
+                                    color = TealSoft,
+                                    border = BorderStroke(1.dp, TealContainer),
+                                    modifier = Modifier.testTag("sheet_remark_all_${student.id}")
+                                ) {
+                                    Row(
+                                        modifier = Modifier.padding(horizontal = 9.dp, vertical = 6.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                    ) {
+                                        Icon(
+                                            Icons.Rounded.Tune,
+                                            contentDescription = null,
+                                            tint = TealPrimary,
+                                            modifier = Modifier.size(13.dp)
+                                        )
+                                        Text(
+                                            "সব বিকল্প (${bn(rankedOptions.size.toString())})",
+                                            fontSize = 11.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = TealPrimary
+                                        )
+                                    }
+                                }
                             }
                         }
                     }

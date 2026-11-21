@@ -1138,6 +1138,37 @@ class ResultMakerViewModel(
         }
     }
 
+    fun batchUpdateRemarks(
+        term: Int,
+        remarksByStudentId: Map<String, String?>
+    ) {
+        val school = activeSchool.value ?: return
+        val perm = school.permissionsFor(currentUserId)
+        if (!perm.canEditAttendance) {
+            showMessage("মন্তব্য সম্পাদনার অনুমতি আপনার নেই")
+            return
+        }
+        val safeTerm = term.coerceIn(1, 3)
+        val allowedIds = students.value
+            .filter { it.id in remarksByStudentId.keys && perm.canAccessClass(it.cls) }
+            .map { it.id }
+            .toSet()
+        val filteredUpdates = remarksByStudentId.filterKeys { it in allowedIds }
+        if (filteredUpdates.isEmpty()) {
+            showMessage("আপডেট করার মতো কোনো শিক্ষার্থী পাওয়া যায়নি")
+            return
+        }
+        viewModelScope.launch {
+            cloudRepo.patchBatchPerStudentXField(school.id, "REM_$safeTerm", filteredUpdates)
+                .onSuccess {
+                    showMessage("${bn(filteredUpdates.size.toString())} জন শিক্ষার্থীর অটো মন্তব্য সংরক্ষিত হয়েছে")
+                }
+                .onFailure { e ->
+                    showMessage(friendlyFirestoreErrorMessage(e))
+                }
+        }
+    }
+
     fun deleteStudent(id: String) {
         val school = activeSchool.value ?: return
         val target = students.value.find { it.id == id } ?: return

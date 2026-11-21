@@ -967,6 +967,46 @@ class SchoolCloudRepository(
         }
     }
 
+    suspend fun patchBatchPerStudentXField(
+        schoolId: String,
+        xKey: String,
+        valuesByStudentId: Map<String, String?>
+    ): Result<Unit> {
+        val cleanKey = xKey.trim()
+        val path = "schools/$schoolId/students"
+        if (cleanKey.isEmpty() || valuesByStudentId.isEmpty()) return Result.success(Unit)
+        return try {
+            val uid = requireUserId()
+            val name = currentUserName().take(100)
+            val col = db.collection("schools").document(schoolId).collection("students")
+            valuesByStudentId.entries.chunked(380).forEach { chunk ->
+                val batch = db.batch()
+                chunk.forEach { (studentId, rawVal) ->
+                    val docId = sanitizeDocId(studentId)
+                    val fieldValue: Any = if (rawVal.isNullOrBlank()) {
+                        FieldValue.delete()
+                    } else {
+                        rawVal.trim().take(240)
+                    }
+                    val payload = mapOf<String, Any>(
+                        "x.$cleanKey" to fieldValue,
+                        "updatedByUid" to uid,
+                        "updatedByName" to name,
+                        "updatedAt" to FieldValue.serverTimestamp()
+                    )
+                    batch.update(col.document(docId), payload)
+                }
+                batch.commit().await()
+            }
+            Result.success(Unit)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.UPDATE, path)
+            Result.failure(e)
+        }
+    }
+
     suspend fun deleteStudent(schoolId: String, studentId: String): Result<Unit> {
         val docId = sanitizeDocId(studentId)
         val path = "schools/$schoolId/students/$docId"

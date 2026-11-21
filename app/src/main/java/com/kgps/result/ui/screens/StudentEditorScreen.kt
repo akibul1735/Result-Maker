@@ -6,7 +6,6 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -22,7 +21,6 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.automirrored.rounded.MenuBook
-import androidx.compose.material.icons.rounded.AutoAwesome
 import androidx.compose.material.icons.rounded.Badge
 import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.ContactPhone
@@ -43,7 +41,6 @@ import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Tab
@@ -52,6 +49,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -70,6 +68,7 @@ import com.kgps.result.DEFAULT_UPAZILA
 import com.kgps.result.RELIGIONS
 import com.kgps.result.Settings
 import com.kgps.result.Student
+import com.kgps.result.TeacherRemarkEngine
 import com.kgps.result.bn
 import com.kgps.result.cloud.StudentSyncMeta
 import com.kgps.result.cloud.TeacherPermissions
@@ -84,6 +83,7 @@ import com.kgps.result.mk
 import com.kgps.result.overallPct
 import com.kgps.result.subs
 import com.kgps.result.total
+import com.kgps.result.ui.components.InlineTeacherRemarkSection
 import com.kgps.result.ui.components.TreeBranchItem
 import com.kgps.result.ui.components.TreeGroupCard
 import com.kgps.result.ui.theme.AmberBg
@@ -117,14 +117,36 @@ fun StudentEditorScreen(
     onDraftRemark: (Student, Int, (String) -> Unit) -> Unit,
     onShowMessage: (String) -> Unit
 ) {
-    var s by remember(initialStudent.id) {
-        mutableStateOf(
-            initialStudent.copy(
-                upazila = initialStudent.upazila.ifBlank { DEFAULT_UPAZILA },
-                district = initialStudent.district.ifBlank { DEFAULT_DISTRICT }
-            )
+    val prefillInit = remember(initialStudent.id, permissions.canEditAttendance) {
+        val base = initialStudent.copy(
+            upazila = initialStudent.upazila.ifBlank { DEFAULT_UPAZILA },
+            district = initialStudent.district.ifBlank { DEFAULT_DISTRICT }
         )
+        if (!permissions.canEditAttendance) {
+            Triple(base, emptyMap<Int, String>(), setOf(1, 2, 3))
+        } else {
+            val nextX = base.x.toMutableMap()
+            val autoMap = mutableMapOf<Int, String>()
+            val locked = mutableSetOf<Int>()
+            (1..3).forEach { t ->
+                val remKey = "REM_$t"
+                val curRem = nextX[remKey]?.trim().orEmpty()
+                val autoRem = TeacherRemarkEngine.autoPrefillIfApplicable(base, t)
+                if (curRem.isEmpty() && autoRem != null) {
+                    nextX[remKey] = autoRem
+                    autoMap[t] = autoRem
+                } else if (autoRem != null && curRem == autoRem) {
+                    autoMap[t] = autoRem
+                } else if (curRem.isNotEmpty()) {
+                    locked.add(t)
+                }
+            }
+            Triple(base.copy(x = nextX), autoMap.toMap(), locked.toSet())
+        }
     }
+    var s by remember(initialStudent.id) { mutableStateOf(prefillInit.first) }
+    var autoManagedRemarks by remember(initialStudent.id) { mutableStateOf(prefillInit.second) }
+    var manuallyLockedTerms by remember(initialStudent.id) { mutableStateOf(prefillInit.third) }
     val cur by rememberUpdatedState(s)
     val deleted = remember { booleanArrayOf(false) }
     val defaultTab = remember(permissions) {
@@ -148,6 +170,30 @@ fun StudentEditorScreen(
     var expandedTerm by remember { mutableStateOf<Int?>(1) }
     var expandedSubKey by remember { mutableStateOf<String?>(null) }
     var expandedTraitsTerm by remember { mutableStateOf<Int?>(1) }
+
+    LaunchedEffect(s.m, s.x, permissions.canEditAttendance, manuallyLockedTerms) {
+        if (!permissions.canEditAttendance) return@LaunchedEffect
+        var updatedX: MutableMap<String, String>? = null
+        var updatedAuto: MutableMap<Int, String>? = null
+        (1..3).forEach { t ->
+            if (t !in manuallyLockedTerms) {
+                val remKey = "REM_$t"
+                val curRem = (updatedX ?: s.x)[remKey]?.trim().orEmpty()
+                val lastAuto = (updatedAuto ?: autoManagedRemarks)[t]
+                if (curRem.isEmpty() || (lastAuto != null && curRem == lastAuto)) {
+                    val nextAuto = TeacherRemarkEngine.autoPrefillIfApplicable(s, t)
+                    if (nextAuto != null && nextAuto != curRem) {
+                        val xm = updatedX ?: s.x.toMutableMap().also { updatedX = it }
+                        xm[remKey] = nextAuto
+                        val am = updatedAuto ?: autoManagedRemarks.toMutableMap().also { updatedAuto = it }
+                        am[t] = nextAuto
+                    }
+                }
+            }
+        }
+        updatedX?.let { s = s.copy(x = it) }
+        updatedAuto?.let { autoManagedRemarks = it }
+    }
 
     DisposableEffect(initialStudent.id) {
         onDispose {
@@ -580,19 +626,6 @@ fun StudentEditorScreen(
                         val canEditAtt = permissions.canEditAttendance
                         if (!canEditAtt) {
                             ReadOnlyPermissionBanner("উপস্থিতি, গুণাবলি ও মন্তব্য সম্পাদনার অনুমতি আপনার নেই (শুধুমাত্র দেখার জন্য)।")
-                        } else if (!isGeminiConfigured) {
-                            Surface(
-                                color = AmberBg,
-                                shape = RoundedCornerShape(8.dp),
-                                modifier = Modifier.fillMaxWidth()
-                            ) {
-                                Text(
-                                    "AI মতামত খসড়া ব্যবহার করতে সেটিংস → Gemini AI ও মডেল থেকে আপনার Gemini API Key যুক্ত করুন।",
-                                    fontSize = 11.5.sp,
-                                    color = AmberNotice,
-                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 7.dp)
-                                )
-                            }
                         }
 
                         (1..3).forEach { t ->
@@ -608,16 +641,16 @@ fun StudentEditorScreen(
                                     s.x["ACT_$t"]?.let { "সক্রিয়তা: $it" },
                                     s.x["DISC_$t"]?.let { "শৃঙ্খলা: $it" },
                                     s.x["COND_$t"]?.let { "আচরণ: $it" }
-                                ).joinToString(" · ").ifBlank { "উপস্থিতি, গুণাবলি ও মন্তব্য" },
-                                badgeText = attPct?.let { "উপস্থিতি $it" } ?: "তথ্য দিন",
-                                badgeColor = if (attPct != null) EmeraldGrade else SlateMuted,
+                                ).joinToString(" · ").ifBlank { "উপস্থিতি, গুণাবলি ও স্বয়ংক্রিয় মন্তব্য" },
+                                badgeText = attPct?.let { "উপস্থিতি $it" } ?: if (remarkText.isNotBlank()) "মন্তব্য প্রস্তুত" else "তথ্য দিন",
+                                badgeColor = if (attPct != null || remarkText.isNotBlank()) EmeraldGrade else SlateMuted,
                                 icon = Icons.Rounded.EventAvailable,
                                 expanded = expandedTraitsTerm == t,
                                 headerTestTag = "editor_traits_term_$t",
                                 onToggle = { expandedTraitsTerm = if (expandedTraitsTerm == t) null else t }
                             ) {
                                 TreeBranchItem(isLast = true) {
-                                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                             Box(Modifier.weight(1f)) {
                                                 EditorTextField("মোট কার্যদিবস", s.x["DAYS_$t"] ?: "", number = true, enabled = canEditAtt) {
@@ -655,24 +688,35 @@ fun StudentEditorScreen(
                                             }
                                         }
 
-                                        EditorTextField("শ্রেণি শিক্ষকের মতামত", remarkText, lines = 3, enabled = canEditAtt) {
-                                            setX(remKey, it)
-                                        }
-
-                                        if (canEditAtt) {
-                                            OutlinedButton(
-                                                onClick = {
-                                                    onDraftRemark(s, t) { drafted -> setX(remKey, drafted) }
-                                                },
-                                                enabled = draftingRemarkTerm == null,
-                                                shape = RoundedCornerShape(8.dp),
-                                                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp),
-                                                modifier = Modifier.fillMaxWidth().testTag("editor_ai_draft_$t")
-                                            ) {
-                                                Icon(Icons.Rounded.AutoAwesome, contentDescription = null, modifier = Modifier.size(15.dp))
-                                                Text(if (draftingRemarkTerm == t) " তৈরি হচ্ছে..." else " AI খসড়া তৈরি করুন", fontSize = 12.sp)
+                                        InlineTeacherRemarkSection(
+                                            student = s,
+                                            term = t,
+                                            remarkText = remarkText,
+                                            enabled = canEditAtt,
+                                            isAutoSynced = t !in manuallyLockedTerms && remarkText.isNotBlank(),
+                                            isGeminiConfigured = isGeminiConfigured,
+                                            draftingRemarkTerm = draftingRemarkTerm,
+                                            onSelectRemark = { chosen ->
+                                                manuallyLockedTerms = manuallyLockedTerms + t
+                                                setX(remKey, chosen)
+                                            },
+                                            onManualEditRemark = { edited ->
+                                                manuallyLockedTerms = manuallyLockedTerms + t
+                                                setX(remKey, edited)
+                                            },
+                                            onResetAutoRemark = {
+                                                val top = TeacherRemarkEngine.bestRemark(s, t).text
+                                                manuallyLockedTerms = manuallyLockedTerms - t
+                                                autoManagedRemarks = autoManagedRemarks + (t to top)
+                                                setX(remKey, top)
+                                            },
+                                            onAiDraftRemark = {
+                                                onDraftRemark(s, t) { drafted ->
+                                                    manuallyLockedTerms = manuallyLockedTerms + t
+                                                    setX(remKey, drafted)
+                                                }
                                             }
-                                        }
+                                        )
                                     }
                                 }
                             }

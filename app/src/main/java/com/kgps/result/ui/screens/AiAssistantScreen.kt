@@ -231,11 +231,11 @@ fun AiAssistantScreen(
     var unreviewedPendingCount by remember { mutableStateOf(0) }
 
     var pendingCameraUri by remember { mutableStateOf<Uri?>(null) }
-    var activeScannerMenu by remember { mutableStateOf<ScannerMenuSection?>(null) }
+    var activeConfigMenu by remember { mutableStateOf<ScannerConfigMenu?>(null) }
 
     LaunchedEffect(state.classSheetResult, state.analysisResult) {
         if (state.classSheetResult != null || state.analysisResult != null) {
-            activeScannerMenu = null
+            activeConfigMenu = null
         }
     }
 
@@ -786,38 +786,19 @@ fun AiAssistantScreen(
                         }
                     }
 
-                    ScannerCompactMenuContainer(
-                        activeMenu = activeScannerMenu,
-                        onSelectMenu = { activeScannerMenu = it },
+                    ScannerConfigMenuBar(
+                        activeMenu = activeConfigMenu,
+                        onToggleMenu = { activeConfigMenu = it },
                         scanMode = scanMode,
                         canManageStudents = permissions.canManageStudents,
-                        onChangeScanMode = { scanMode = it },
-                        onOpenCsvImport = onOpenCsvImport,
-                        selectedImageBitmap = state.selectedImageBitmap,
-                        documentEnhance = state.documentEnhance,
-                        preparedStatsLabel = preparedStatsInfo?.first,
-                        preparedStatsGood = preparedStatsInfo?.second == true,
-                        onLaunchCamera = {
-                            val uri = createTempScanImageUri(context)
-                            pendingCameraUri = uri
-                            cameraLauncher.launch(uri)
-                        },
-                        onLaunchGallery = {
-                            photoPicker.launch(
-                                PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
-                            )
-                        },
-                        onAskClearImage = { askClearImage = true },
-                        onOpenZoom = { zoomDialogOpen = true },
-                        onOpenCrop = { cropDialogOpen = true },
-                        onRotateImage = onRotateImage,
-                        onToggleDocumentEnhance = onToggleDocumentEnhance,
                         importScope = importScope,
                         clsHint = clsHint,
                         termHint = termHint,
                         subKeyHint = subKeyHint,
                         teacherNote = teacherNote,
                         permissions = permissions,
+                        onChangeScanMode = { scanMode = it },
+                        onOpenCsvImport = onOpenCsvImport,
                         onChangeScope = { importScope = it },
                         onChangeCls = { newCls ->
                             clsHint = newCls
@@ -828,13 +809,39 @@ fun AiAssistantScreen(
                         },
                         onChangeTerm = { termHint = it },
                         onChangeSub = { subKeyHint = it },
-                        onChangeTeacherNote = { teacherNote = it },
+                        onChangeTeacherNote = { teacherNote = it }
+                    )
+
+                    ScannerPhotoAndActionCard(
+                        scanMode = scanMode,
+                        selectedImageBitmap = state.selectedImageBitmap,
+                        documentEnhance = state.documentEnhance,
+                        preparedStatsLabel = preparedStatsInfo?.first,
+                        preparedStatsGood = preparedStatsInfo?.second == true,
                         analyzingImage = state.analyzingImage,
-                        hasPreviewOrError = state.classSheetResult != null ||
-                            state.analysisResult != null ||
-                            state.analysisError != null,
-                        onScan = triggerScan,
+                        onLaunchCamera = {
+                            activeConfigMenu = null
+                            val uri = createTempScanImageUri(context)
+                            pendingCameraUri = uri
+                            cameraLauncher.launch(uri)
+                        },
+                        onLaunchGallery = {
+                            activeConfigMenu = null
+                            photoPicker.launch(
+                                PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
+                            )
+                        },
+                        onAskClearImage = { askClearImage = true },
+                        onOpenZoom = { zoomDialogOpen = true },
+                        onOpenCrop = { cropDialogOpen = true },
+                        onRotateImage = onRotateImage,
+                        onToggleDocumentEnhance = onToggleDocumentEnhance,
+                        onScan = {
+                            activeConfigMenu = null
+                            triggerScan()
+                        },
                         onLoadSample = {
+                            activeConfigMenu = null
                             showOnlyIssues = false
                             onLoadSampleClassPreview(clsHint, termHint, subKeyHint, importScope)
                         }
