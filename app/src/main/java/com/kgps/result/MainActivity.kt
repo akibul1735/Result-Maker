@@ -837,16 +837,8 @@ fun ResultMakerWorkspace(
                                     onRestoreOriginalImage = vm::restoreOriginalMarksheetImage,
                                     onAnalyzeImage = vm::analyzeSelectedMarksheet,
                                     onApplyExtracted = { ext -> vm.applyExtractedMarksheet(ext) },
-                                    onSetScanEngineMode = vm::setScanEngineMode,
-                                    onSetOfflineDigitScript = vm::setOfflineDigitScript,
-                                    onSetOfflineLayoutPreset = vm::setOfflineLayoutPreset,
-                                    onApplyOfflineColumnTemplate = vm::applyOfflineColumnTemplate,
-                                    onResetOfflineColumnsToAuto = vm::resetOfflineColumnsToAuto,
-                                    onAddOfflineColumnRole = vm::addOfflineColumnRole,
-                                    onRemoveOfflineColumnAt = vm::removeOfflineColumnAt,
-                                    onMoveOfflineColumn = vm::moveOfflineColumn,
-                                    onAnalyzeClassSheet = { c, t, s, note, scope, force ->
-                                        vm.analyzeClassSheet(c, t, s, note, scope, force)
+                                    onAnalyzeClassSheet = { c, t, s, note, scope ->
+                                        vm.analyzeClassSheet(c, t, s, note, scope)
                                     },
                                     onLoadSampleClassPreview = vm::loadSampleClassSheetPreview,
                                     onUpdateClassSheetMeta = vm::updateClassSheetMeta,

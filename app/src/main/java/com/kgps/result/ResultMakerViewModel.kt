@@ -26,14 +26,6 @@ import com.kgps.result.ai.PreparedImageStats
 import com.kgps.result.ai.ScanConstraintSolver
 import com.kgps.result.ai.ScannedStudentRow
 import com.kgps.result.ai.VisionImageOptimizer
-import com.kgps.result.ai.offline.ColumnRole
-import com.kgps.result.ai.offline.DualScriptDigitRecognizer
-import com.kgps.result.ai.offline.OfflineColumnTemplate
-import com.kgps.result.ai.offline.OfflineDigitScript
-import com.kgps.result.ai.offline.OfflineScanDiagnostics
-import com.kgps.result.ai.offline.OfflineTableLayoutPreset
-import com.kgps.result.ai.offline.OfflineTableScanner
-import com.kgps.result.ai.offline.ScanEngineMode
 import com.kgps.result.ai.validateScannedStudentRow
 import com.kgps.result.backup.AutoBackupManager
 import com.kgps.result.backup.AutoBackupStatus
@@ -116,12 +108,7 @@ data class AiAssistantState(
     val analysisError: String? = null,
     val analysisResult: ExtractedMarksheet? = null,
     val classSheetResult: ExtractedClassSheet? = null,
-    val savingClassSheet: Boolean = false,
-    val scanEngineMode: ScanEngineMode = ScanEngineMode.CLOUD_GEMINI,
-    val offlineDigitScript: OfflineDigitScript = OfflineDigitScript.BENGALI,
-    val offlineLayoutPreset: OfflineTableLayoutPreset = OfflineTableLayoutPreset.AUTO,
-    val offlineCustomColumns: List<ColumnRole> = emptyList(),
-    val offlineDiagnostics: OfflineScanDiagnostics? = null
+    val savingClassSheet: Boolean = false
 )
 
 @OptIn(ExperimentalCoroutinesApi::class, kotlinx.coroutines.FlowPreview::class)
@@ -139,7 +126,6 @@ class ResultMakerViewModel(
     private val directAiRepository = DirectGeminiAiRepository(appContext)
     private val aiRepository: AiRepository get() = directAiRepository
     private val sampleAiRepository = PlaceholderAiRepository()
-    private val offlineDigitRecognizer by lazy { DualScriptDigitRecognizer.fromAssets(appContext) }
     private var originalMarksheetBitmap: Bitmap? = null
 
     val localSeedCount: Int get() = initialLocalSnapshot?.first?.size ?: 0
@@ -1770,7 +1756,6 @@ class ResultMakerViewModel(
                         hasOriginalImageBackup = false,
                         analysisResult = null,
                         classSheetResult = null,
-                        offlineDiagnostics = null,
                         analysisError = null
                     )
                 }
@@ -1808,7 +1793,6 @@ class ResultMakerViewModel(
                     hasOriginalImageBackup = true,
                     analysisResult = null,
                     classSheetResult = null,
-                    offlineDiagnostics = null,
                     analysisError = null
                 )
             }
@@ -1830,7 +1814,6 @@ class ResultMakerViewModel(
                     hasOriginalImageBackup = true,
                     analysisResult = null,
                     classSheetResult = null,
-                    offlineDiagnostics = null,
                     analysisError = null
                 )
             }
@@ -1851,7 +1834,6 @@ class ResultMakerViewModel(
                     hasOriginalImageBackup = false,
                     analysisResult = null,
                     classSheetResult = null,
-                    offlineDiagnostics = null,
                     analysisError = null
                 )
             }
@@ -1867,91 +1849,8 @@ class ResultMakerViewModel(
                 hasOriginalImageBackup = false,
                 analysisResult = null,
                 classSheetResult = null,
-                offlineDiagnostics = null,
                 analysisError = null
             )
-        }
-    }
-
-    fun setScanEngineMode(mode: ScanEngineMode) {
-        _aiState.update { it.copy(scanEngineMode = mode, analysisError = null) }
-    }
-
-    fun setOfflineDigitScript(script: OfflineDigitScript) {
-        _aiState.update { it.copy(offlineDigitScript = script) }
-    }
-
-    fun setOfflineLayoutPreset(preset: OfflineTableLayoutPreset) {
-        _aiState.update { it.copy(offlineLayoutPreset = preset, offlineCustomColumns = emptyList()) }
-    }
-
-    fun applyOfflineColumnTemplate(template: OfflineColumnTemplate) {
-        _aiState.update {
-            it.copy(
-                offlineCustomColumns = template.columns,
-                offlineLayoutPreset = OfflineTableLayoutPreset.AUTO
-            )
-        }
-    }
-
-    fun resetOfflineColumnsToAuto() {
-        _aiState.update {
-            it.copy(
-                offlineCustomColumns = emptyList(),
-                offlineLayoutPreset = OfflineTableLayoutPreset.AUTO
-            )
-        }
-    }
-
-    fun addOfflineColumnRole(role: ColumnRole) {
-        _aiState.update { cur ->
-            val list = cur.offlineCustomColumns.ifEmpty {
-                listOf(ColumnRole.ROLL)
-            }.toMutableList()
-
-            if (!role.isRepeatable && role in list) {
-                return@update cur
-            }
-
-            when (role) {
-                ColumnRole.SERIAL_SKIP -> list.add(0, role)
-                ColumnRole.ROLL -> {
-                    val insertAt = if (list.firstOrNull() == ColumnRole.SERIAL_SKIP) 1 else 0
-                    list.add(insertAt, role)
-                }
-                ColumnRole.NAME_SKIP -> {
-                    val rollIdx = list.indexOf(ColumnRole.ROLL)
-                    val insertAt = if (rollIdx >= 0) rollIdx + 1 else 0
-                    list.add(insertAt, role)
-                }
-                else -> list.add(role)
-            }
-            cur.copy(offlineCustomColumns = list)
-        }
-    }
-
-    fun removeOfflineColumnAt(index: Int) {
-        _aiState.update { cur ->
-            val list = cur.offlineCustomColumns.toMutableList()
-            if (index !in list.indices) return@update cur
-            val removing = list[index]
-            // Always keep at least one ROLL column while in custom mode
-            if (removing == ColumnRole.ROLL && list.count { it == ColumnRole.ROLL } <= 1) {
-                return@update cur
-            }
-            list.removeAt(index)
-            cur.copy(offlineCustomColumns = list)
-        }
-    }
-
-    fun moveOfflineColumn(index: Int, delta: Int) {
-        _aiState.update { cur ->
-            val list = cur.offlineCustomColumns.toMutableList()
-            val target = index + delta
-            if (index !in list.indices || target !in list.indices) return@update cur
-            val item = list.removeAt(index)
-            list.add(target, item)
-            cur.copy(offlineCustomColumns = list)
         }
     }
 
@@ -1982,57 +1881,25 @@ class ResultMakerViewModel(
         termHint: Int?,
         subKeyHint: String?,
         teacherNote: String,
-        importScope: ClassSheetImportScope = ClassSheetImportScope.AUTO,
-        forceEngine: ScanEngineMode? = null
+        importScope: ClassSheetImportScope = ClassSheetImportScope.AUTO
     ) {
         val bmp = _aiState.value.selectedImageBitmap ?: return
         if (_aiState.value.analyzingImage) return
-        val activeEngine = forceEngine ?: _aiState.value.scanEngineMode
         val enhance = _aiState.value.documentEnhance
-        val script = _aiState.value.offlineDigitScript
-        val layoutPreset = _aiState.value.offlineLayoutPreset
-        val customColumns = _aiState.value.offlineCustomColumns
-        val currentStudents = students.value
 
         _aiState.update {
             it.copy(
-                scanEngineMode = activeEngine,
                 analyzingImage = true,
                 analysisError = null,
-                analysisResult = null,
-                offlineDiagnostics = null
+                analysisResult = null
             )
         }
         viewModelScope.launch {
             try {
-                if (activeEngine == ScanEngineMode.OFFLINE_TABLE) {
-                    val output = withContext(Dispatchers.Default) {
-                        OfflineTableScanner.scanBitmap(
-                            bitmap = bmp,
-                            recognizer = offlineDigitRecognizer,
-                            clsHint = clsHint,
-                            termHint = termHint,
-                            subKeyHint = subKeyHint,
-                            importScope = importScope,
-                            digitScript = script,
-                            layoutPreset = layoutPreset,
-                            existingStudents = currentStudents,
-                            customColumns = customColumns
-                        )
-                    }
-                    _aiState.update {
-                        it.copy(
-                            analyzingImage = false,
-                            classSheetResult = output.sheet,
-                            offlineDiagnostics = output.diagnostics
-                        )
-                    }
-                } else {
-                    val result = aiRepository.analyzeClassSheetImage(
-                        bmp, clsHint, termHint, subKeyHint, teacherNote, importScope, enhance
-                    )
-                    _aiState.update { it.copy(analyzingImage = false, classSheetResult = result) }
-                }
+                val result = aiRepository.analyzeClassSheetImage(
+                    bmp, clsHint, termHint, subKeyHint, teacherNote, importScope, enhance
+                )
+                _aiState.update { it.copy(analyzingImage = false, classSheetResult = result) }
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
@@ -2258,7 +2125,7 @@ class ResultMakerViewModel(
     }
 
     fun dismissClassSheetPreview() {
-        _aiState.update { it.copy(classSheetResult = null, offlineDiagnostics = null) }
+        _aiState.update { it.copy(classSheetResult = null) }
     }
 
     fun commitScannedClassSheet() {

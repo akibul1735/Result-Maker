@@ -64,7 +64,6 @@ import androidx.compose.material.icons.rounded.Star
 import androidx.compose.material.icons.rounded.Tune
 import androidx.compose.material.icons.rounded.UploadFile
 import androidx.compose.material.icons.rounded.WarningAmber
-import androidx.compose.material.icons.rounded.WifiOff
 import androidx.compose.material.icons.rounded.ZoomIn
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
@@ -90,6 +89,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
@@ -133,14 +133,6 @@ import com.kgps.result.ai.FieldConfidence
 import com.kgps.result.ai.GeminiApiConfig
 import com.kgps.result.ai.RowValidationReport
 import com.kgps.result.ai.ScannedStudentRow
-import com.kgps.result.ai.offline.ALL_CONFIGURABLE_COLUMN_ITEMS
-import com.kgps.result.ai.offline.ColumnRole
-import com.kgps.result.ai.offline.OFFLINE_COLUMN_SUGGESTIONS
-import com.kgps.result.ai.offline.OfflineColumnTemplate
-import com.kgps.result.ai.offline.OfflineDigitScript
-import com.kgps.result.ai.offline.OfflineScanDiagnostics
-import com.kgps.result.ai.offline.OfflineTableLayoutPreset
-import com.kgps.result.ai.offline.ScanEngineMode
 import com.kgps.result.ai.validateScannedStudentRow
 import com.kgps.result.bn
 import com.kgps.result.cloud.TeacherPermissions
@@ -204,15 +196,7 @@ fun AiAssistantScreen(
     onRestoreOriginalImage: () -> Unit = {},
     onAnalyzeImage: (String) -> Unit,
     onApplyExtracted: (ExtractedMarksheet) -> Unit,
-    onSetScanEngineMode: (ScanEngineMode) -> Unit = {},
-    onSetOfflineDigitScript: (OfflineDigitScript) -> Unit = {},
-    onSetOfflineLayoutPreset: (OfflineTableLayoutPreset) -> Unit = {},
-    onApplyOfflineColumnTemplate: (OfflineColumnTemplate) -> Unit = {},
-    onResetOfflineColumnsToAuto: () -> Unit = {},
-    onAddOfflineColumnRole: (ColumnRole) -> Unit = {},
-    onRemoveOfflineColumnAt: (Int) -> Unit = {},
-    onMoveOfflineColumn: (Int, Int) -> Unit = { _, _ -> },
-    onAnalyzeClassSheet: (clsHint: Int?, termHint: Int?, subKeyHint: String?, teacherNote: String, importScope: ClassSheetImportScope, forceEngine: ScanEngineMode?) -> Unit,
+    onAnalyzeClassSheet: (clsHint: Int?, termHint: Int?, subKeyHint: String?, teacherNote: String, importScope: ClassSheetImportScope) -> Unit,
     onLoadSampleClassPreview: (clsHint: Int?, termHint: Int?, subKeyHint: String?, importScope: ClassSheetImportScope) -> Unit,
     onUpdateClassSheetMeta: (cls: Int, term: Int, subKey: String) -> Unit,
     onUpdateClassSheetScope: (ClassSheetImportScope) -> Unit = {},
@@ -247,6 +231,13 @@ fun AiAssistantScreen(
     var unreviewedPendingCount by remember { mutableStateOf(0) }
 
     var pendingCameraUri by remember { mutableStateOf<Uri?>(null) }
+    var activeScannerMenu by remember { mutableStateOf<ScannerMenuSection?>(null) }
+
+    LaunchedEffect(state.classSheetResult, state.analysisResult) {
+        if (state.classSheetResult != null || state.analysisResult != null) {
+            activeScannerMenu = null
+        }
+    }
 
     val photoPicker = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.PickVisualMedia()
@@ -771,7 +762,7 @@ fun AiAssistantScreen(
                     }
                 }
             } else {
-                // Organized Multi-Step Scanner Tab (Photo -> Target/Engine -> Offline Setup -> Scan)
+                // Compact Top-Menu Scanner Tab (Single menu row -> tap to open only that menu)
                 Column(
                     Modifier
                         .fillMaxSize()
@@ -779,13 +770,6 @@ fun AiAssistantScreen(
                         .padding(horizontal = 10.dp, vertical = 6.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    ScannerModeHeaderBar(
-                        scanMode = scanMode,
-                        canManageStudents = permissions.canManageStudents,
-                        onChangeScanMode = { scanMode = it },
-                        onOpenCsvImport = onOpenCsvImport
-                    )
-
                     val preparedStatsInfo = state.preparedImageStats?.let { st ->
                         val kb = ((st.byteSize + 512) / 1024).coerceAtLeast(1)
                         val label = "প্রস্তুত: ${st.width}×${st.height}px · ~${bn(kb.toString())} KB" +
@@ -793,8 +777,22 @@ fun AiAssistantScreen(
                         label to (kb <= 650)
                     }
 
-                    ScannerPhotoCaptureCard(
+                    val triggerScan: () -> Unit = {
+                        showOnlyIssues = false
+                        if (scanMode == "class") {
+                            onAnalyzeClassSheet(clsHint, termHint, subKeyHint, teacherNote, importScope)
+                        } else {
+                            onAnalyzeImage(teacherNote)
+                        }
+                    }
+
+                    ScannerCompactMenuContainer(
+                        activeMenu = activeScannerMenu,
+                        onSelectMenu = { activeScannerMenu = it },
                         scanMode = scanMode,
+                        canManageStudents = permissions.canManageStudents,
+                        onChangeScanMode = { scanMode = it },
+                        onOpenCsvImport = onOpenCsvImport,
                         selectedImageBitmap = state.selectedImageBitmap,
                         documentEnhance = state.documentEnhance,
                         preparedStatsLabel = preparedStatsInfo?.first,
@@ -813,19 +811,13 @@ fun AiAssistantScreen(
                         onOpenZoom = { zoomDialogOpen = true },
                         onOpenCrop = { cropDialogOpen = true },
                         onRotateImage = onRotateImage,
-                        onToggleDocumentEnhance = onToggleDocumentEnhance
-                    )
-
-                    ScannerConfigCard(
-                        scanMode = scanMode,
-                        scanEngineMode = state.scanEngineMode,
+                        onToggleDocumentEnhance = onToggleDocumentEnhance,
                         importScope = importScope,
                         clsHint = clsHint,
                         termHint = termHint,
                         subKeyHint = subKeyHint,
                         teacherNote = teacherNote,
                         permissions = permissions,
-                        onSetScanEngineMode = onSetScanEngineMode,
                         onChangeScope = { importScope = it },
                         onChangeCls = { newCls ->
                             clsHint = newCls
@@ -836,35 +828,12 @@ fun AiAssistantScreen(
                         },
                         onChangeTerm = { termHint = it },
                         onChangeSub = { subKeyHint = it },
-                        onChangeTeacherNote = { teacherNote = it }
-                    )
-
-                    if (scanMode == "class" && state.scanEngineMode == ScanEngineMode.OFFLINE_TABLE) {
-                        OfflineTableConfiguratorCard(
-                            selectedScript = state.offlineDigitScript,
-                            customColumns = state.offlineCustomColumns,
-                            onSetScript = onSetOfflineDigitScript,
-                            onApplyTemplate = onApplyOfflineColumnTemplate,
-                            onResetToAuto = onResetOfflineColumnsToAuto,
-                            onAddRole = onAddOfflineColumnRole,
-                            onRemoveAt = onRemoveOfflineColumnAt,
-                            onMoveColumn = onMoveOfflineColumn
-                        )
-                    }
-
-                    ScannerPrimaryActionBar(
-                        scanMode = scanMode,
-                        scanEngineMode = state.scanEngineMode,
-                        hasImage = state.selectedImageBitmap != null,
+                        onChangeTeacherNote = { teacherNote = it },
                         analyzingImage = state.analyzingImage,
-                        onScan = {
-                            showOnlyIssues = false
-                            if (scanMode == "class") {
-                                onAnalyzeClassSheet(clsHint, termHint, subKeyHint, teacherNote, importScope, null)
-                            } else {
-                                onAnalyzeImage(teacherNote)
-                            }
-                        },
+                        hasPreviewOrError = state.classSheetResult != null ||
+                            state.analysisResult != null ||
+                            state.analysisError != null,
+                        onScan = triggerScan,
                         onLoadSample = {
                             showOnlyIssues = false
                             onLoadSampleClassPreview(clsHint, termHint, subKeyHint, importScope)
@@ -898,7 +867,7 @@ fun AiAssistantScreen(
                                         onClick = {
                                             showOnlyIssues = false
                                             if (scanMode == "class") {
-                                                onAnalyzeClassSheet(clsHint, termHint, subKeyHint, teacherNote, importScope, null)
+                                                onAnalyzeClassSheet(clsHint, termHint, subKeyHint, teacherNote, importScope)
                                             } else {
                                                 onAnalyzeImage(teacherNote)
                                             }
@@ -909,35 +878,13 @@ fun AiAssistantScreen(
                                     ) {
                                         Text("আবার চেষ্টা করুন", fontSize = 11.sp)
                                     }
-                                    if (scanMode == "class" && state.scanEngineMode == ScanEngineMode.CLOUD_GEMINI) {
-                                        OutlinedButton(
-                                            onClick = {
-                                                showOnlyIssues = false
-                                                onAnalyzeClassSheet(
-                                                    clsHint,
-                                                    termHint,
-                                                    subKeyHint,
-                                                    teacherNote,
-                                                    importScope,
-                                                    ScanEngineMode.OFFLINE_TABLE
-                                                )
-                                            },
-                                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 3.dp),
-                                            shape = RoundedCornerShape(8.dp),
-                                            modifier = Modifier.testTag("ai_fallback_offline_btn")
-                                        ) {
-                                            Text("অফলাইনে স্ক্যান করুন", fontSize = 11.sp, color = TealDark)
-                                        }
-                                    }
                                 }
-                                if (state.scanEngineMode == ScanEngineMode.CLOUD_GEMINI) {
-                                    TextButton(
-                                        onClick = { showModelPicker = true },
-                                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
-                                        modifier = Modifier.testTag("ai_scan_err_settings_btn")
-                                    ) {
-                                        Text("মডেল পরিবর্তন করুন", fontSize = 11.sp)
-                                    }
+                                TextButton(
+                                    onClick = { showModelPicker = true },
+                                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                                    modifier = Modifier.testTag("ai_scan_err_settings_btn")
+                                ) {
+                                    Text("মডেল পরিবর্তন করুন", fontSize = 11.sp)
                                 }
                             }
                         }
@@ -948,7 +895,6 @@ fun AiAssistantScreen(
                     state.classSheetResult?.let { sheet ->
                         ClassSheetPreviewSection(
                             sheet = sheet,
-                            offlineDiagnostics = state.offlineDiagnostics,
                             existingStudents = students,
                             permissions = permissions,
                             hasImage = state.selectedImageBitmap != null,
@@ -1415,7 +1361,6 @@ private fun AiModelPickerDialog(
 @Composable
 private fun ClassSheetPreviewSection(
     sheet: ExtractedClassSheet,
-    offlineDiagnostics: OfflineScanDiagnostics? = null,
     existingStudents: List<Student>,
     permissions: TeacherPermissions,
     hasImage: Boolean,
@@ -1482,18 +1427,15 @@ private fun ClassSheetPreviewSection(
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 Icon(
-                    if (offlineDiagnostics != null) Icons.Rounded.WifiOff else Icons.Rounded.AutoAwesome,
+                    Icons.Rounded.AutoAwesome,
                     contentDescription = null,
                     tint = TealPrimary,
                     modifier = Modifier.size(20.dp)
                 )
                 Column(Modifier.weight(1f)) {
                     Text(
-                        when {
-                            sheet.isSample -> "নমুনা প্রিভিউ (সংরক্ষণের আগে যাচাই)"
-                            offlineDiagnostics != null -> "অফলাইন টেবিল স্ক্যান প্রিভিউ"
-                            else -> "স্ক্যান প্রিভিউ (সংরক্ষণের আগে যাচাই ও সংশোধন)"
-                        },
+                        if (sheet.isSample) "নমুনা প্রিভিউ (সংরক্ষণের আগে যাচাই)"
+                        else "স্ক্যান প্রিভিউ (সংরক্ষণের আগে যাচাই ও সংশোধন)",
                         fontWeight = FontWeight.Bold,
                         fontSize = 14.sp,
                         color = TealDark
@@ -1509,28 +1451,6 @@ private fun ClassSheetPreviewSection(
                         Icon(Icons.Rounded.ZoomIn, contentDescription = null, modifier = Modifier.size(14.dp))
                         Text(" মূল ছবি", fontSize = 11.sp)
                     }
-                }
-            }
-
-            if (offlineDiagnostics != null) {
-                Surface(
-                    color = TealSoft,
-                    border = BorderStroke(1.dp, TealPrimary.copy(alpha = 0.25f)),
-                    shape = RoundedCornerShape(8.dp),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    val modeTag = if (offlineDiagnostics.usedCustomColumns) "নির্ধারিত কলাম" else "স্বয়ংক্রিয় কলাম"
-                    val colText = "${bn(offlineDiagnostics.columnCount.toString())}টি কলাম"
-                    val nameInfo = if (offlineDiagnostics.skippedNameColumnIndex != null) {
-                        "নাম (কলাম ${bn((offlineDiagnostics.skippedNameColumnIndex + 1).toString())}) বাদ"
-                    } else "রোল ভিত্তিক"
-                    Text(
-                        "$modeTag · $colText · $nameInfo · ${offlineDiagnostics.detectedScript.shortBn} · ${bn(offlineDiagnostics.processingMs.toString())} ms",
-                        fontSize = 10.5.sp,
-                        fontWeight = FontWeight.Medium,
-                        color = TealDark,
-                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp)
-                    )
                 }
             }
 
