@@ -82,6 +82,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import com.kgps.result.BlankColFill
+import com.kgps.result.BlankNumeralStyle
 import com.kgps.result.BlankSheetCatalog
 import com.kgps.result.BlankSheetColumn
 import com.kgps.result.BlankSheetConfig
@@ -205,9 +206,9 @@ fun BlankSheetPdfScreen(
             .ifBlank { "সাধারণ" }
     }
 
-    val selectedTermLabel = remember(config.term, config.customTermTitle) {
+    val selectedTermLabel = remember(config.term, config.customTermTitle, config.numeralStyle) {
         when (config.term) {
-            1, 2, 3 -> termNameBn(config.term)
+            1, 2, 3 -> BlankSheetCatalog.formatDigits(termNameBn(config.term), config.numeralStyle)
             0 -> "বার্ষিক"
             -1 -> config.customTermTitle.ifBlank { "শিরোনামহীন" }
             else -> "শিরোনামহীন"
@@ -216,7 +217,11 @@ fun BlankSheetPdfScreen(
 
     val exportFileName = remember(config, selectedClassLabel, selectedSubjectLabel) {
         val clsPart = if (config.selectedClass == null) "সব-শ্রেণি" else "শ্রেণি-${config.selectedClass}"
-        val subPart = selectedSubjectLabel.replace(" ", "-")
+        val subPart = if (config.subjectKey == BlankSheetCatalog.ALL_SUBJECTS_KEY) {
+            "সব-বিষয়"
+        } else {
+            selectedSubjectLabel.replace(" ", "-")
+        }
         "ফাঁকা-শিট-$clsPart-$subPart.pdf"
     }
 
@@ -252,7 +257,7 @@ fun BlankSheetPdfScreen(
                         text = if (setupExpanded) {
                             "ফাঁকা ফর্ম / নম্বর শিট সেটাপ"
                         } else {
-                            "$selectedClassLabel · $selectedSubjectLabel · ${bn(config.rowsPerPage.toString())} জন/পেজ · ${bn(config.columns.size.toString())} কলাম"
+                            "$selectedClassLabel · $selectedSubjectLabel · ${bn(config.rowsPerPage.toString())} জন/পেজ · ${config.numeralStyle.shortLabelBn}"
                         },
                         fontSize = 12.sp,
                         fontWeight = FontWeight.Bold,
@@ -347,7 +352,7 @@ fun BlankSheetPdfScreen(
                             Box(Modifier.weight(1.1f)) {
                                 CompactDropdownPill(
                                     label = "বিষয়: $selectedSubjectLabel",
-                                    highlighted = false,
+                                    highlighted = config.subjectKey == BlankSheetCatalog.ALL_SUBJECTS_KEY,
                                     testTag = "blank_subject_dropdown",
                                     onClick = { subjectMenuOpen = true }
                                 )
@@ -373,6 +378,7 @@ fun BlankSheetPdfScreen(
                                             onClick = {
                                                 subjectMenuOpen = false
                                                 config = config.copy(subjectKey = opt.key)
+                                                previewPageIdx = 0
                                             }
                                         )
                                     }
@@ -450,9 +456,11 @@ fun BlankSheetPdfScreen(
                             }
                         }
 
-                        // Row 2: Rows Per Page Stepper/Presets + Page Orientation + More Options
+                        // Row 2: Rows Per Page + Orientation + Numeral Style (বাংলা/English) + More Options
                         Row(
-                            modifier = Modifier.fillMaxWidth(),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .horizontalScroll(rememberScrollState()),
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(5.dp)
                         ) {
@@ -469,7 +477,7 @@ fun BlankSheetPdfScreen(
                                 ) {
                                     Text(
                                         "প্রতি পেজ:",
-                                        fontSize = 10.5.sp,
+                                        fontSize = 10.sp,
                                         color = SlateMuted,
                                         modifier = Modifier.padding(start = 2.dp, end = 3.dp)
                                     )
@@ -498,7 +506,7 @@ fun BlankSheetPdfScreen(
                                         ) {
                                             Row(
                                                 verticalAlignment = Alignment.CenterVertically,
-                                                modifier = Modifier.padding(horizontal = 6.dp)
+                                                modifier = Modifier.padding(horizontal = 5.dp)
                                             ) {
                                                 Text(
                                                     bn(config.rowsPerPage.toString()),
@@ -554,10 +562,10 @@ fun BlankSheetPdfScreen(
                                 color = SlateSurfaceVariant,
                                 border = BorderStroke(1.dp, SlateOutline),
                                 shape = RoundedCornerShape(7.dp),
-                                modifier = Modifier.weight(1f).height(32.dp)
+                                modifier = Modifier.height(32.dp)
                             ) {
                                 Row(
-                                    modifier = Modifier.fillMaxSize().padding(2.dp),
+                                    modifier = Modifier.fillMaxHeight().padding(2.dp),
                                     horizontalArrangement = Arrangement.spacedBy(2.dp)
                                 ) {
                                     listOf(
@@ -570,14 +578,57 @@ fun BlankSheetPdfScreen(
                                             color = if (isSel) TealPrimary else Color.Transparent,
                                             shape = RoundedCornerShape(5.dp),
                                             modifier = Modifier
-                                                .weight(1f)
                                                 .fillMaxHeight()
                                                 .testTag("blank_ori_${ori.name.lowercase()}")
                                         ) {
-                                            Box(contentAlignment = Alignment.Center) {
+                                            Box(
+                                                contentAlignment = Alignment.Center,
+                                                modifier = Modifier.padding(horizontal = 7.dp)
+                                            ) {
                                                 Text(
                                                     lbl,
-                                                    fontSize = 11.sp,
+                                                    fontSize = 10.5.sp,
+                                                    fontWeight = if (isSel) FontWeight.Bold else FontWeight.Medium,
+                                                    color = if (isSel) Color.White else SlateText,
+                                                    maxLines = 1
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
+                            // Numeral Style Switch (বাংলা ১২৩ / English 123)
+                            Surface(
+                                color = SlateSurfaceVariant,
+                                border = BorderStroke(1.dp, SlateOutline),
+                                shape = RoundedCornerShape(7.dp),
+                                modifier = Modifier.height(32.dp)
+                            ) {
+                                Row(
+                                    modifier = Modifier.fillMaxHeight().padding(2.dp),
+                                    horizontalArrangement = Arrangement.spacedBy(2.dp)
+                                ) {
+                                    listOf(
+                                        BlankNumeralStyle.BENGALI to "১২৩",
+                                        BlankNumeralStyle.ENGLISH to "123"
+                                    ).forEach { (style, lbl) ->
+                                        val isSel = config.numeralStyle == style
+                                        Surface(
+                                            onClick = { config = config.copy(numeralStyle = style) },
+                                            color = if (isSel) TealPrimary else Color.Transparent,
+                                            shape = RoundedCornerShape(5.dp),
+                                            modifier = Modifier
+                                                .fillMaxHeight()
+                                                .testTag("blank_num_${style.name.lowercase()}")
+                                        ) {
+                                            Box(
+                                                contentAlignment = Alignment.Center,
+                                                modifier = Modifier.padding(horizontal = 7.dp)
+                                            ) {
+                                                Text(
+                                                    lbl,
+                                                    fontSize = 10.5.sp,
                                                     fontWeight = if (isSel) FontWeight.Bold else FontWeight.Medium,
                                                     color = if (isSel) Color.White else SlateText,
                                                     maxLines = 1
@@ -609,7 +660,7 @@ fun BlankSheetPdfScreen(
                                     )
                                     Text(
                                         "আরও",
-                                        fontSize = 11.sp,
+                                        fontSize = 10.5.sp,
                                         fontWeight = FontWeight.SemiBold,
                                         color = if (showMoreOptions) TealDark else SlateText
                                     )
@@ -940,10 +991,10 @@ fun BlankSheetPdfScreen(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(4.dp)
                     ) {
-                        val filledColsText = if (config.autoFillRollAndName) "শুধু রোল ও নাম পূর্ণ" else "সব ঘর ফাঁকা"
                         Text(
                             text = if (activePage != null) {
-                                "পৃষ্ঠা ${bn(activePage.globalPageNumber.toString())}/${bn(activePage.totalPages.toString())} · ${activePage.classTitleBn} · $filledColsText"
+                                val subSuffix = if (activePage.subjectTitleBn.isNotBlank()) " · ${activePage.subjectTitleBn}" else ""
+                                "পৃষ্ঠা ${bn(activePage.globalPageNumber.toString())}/${bn(activePage.totalPages.toString())} · ${activePage.classTitleBn}$subSuffix"
                             } else {
                                 "কোনো পৃষ্ঠা নেই"
                             },

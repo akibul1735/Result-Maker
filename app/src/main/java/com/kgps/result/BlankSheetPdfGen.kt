@@ -29,36 +29,37 @@ object BlankSheetPdfGen {
         BlankSheetOrientation.LANDSCAPE -> A4_LONG to A4_SHORT
     }
 
+    // Pure Black, White, and Ultra-Light Gray Shades Only
     private val borderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = 0xFF1E293B.toInt()
+        color = 0xFF000000.toInt()
         style = Paint.Style.STROKE
-        strokeWidth = 0.75f
+        strokeWidth = 0.7f
     }
 
     private val headerStrokePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = 0xFF0F172A.toInt()
+        color = 0xFF000000.toInt()
         style = Paint.Style.STROKE
         strokeWidth = 1.0f
     }
 
     private val headerFillPaint = Paint().apply {
-        color = 0xFFE2E8F0.toInt()
+        color = 0xFFF2F2F2.toInt() // ~5% very light black shade
         style = Paint.Style.FILL
     }
 
     private val metaFillPaint = Paint().apply {
-        color = 0xFFF1F5F9.toInt()
+        color = 0xFFF7F7F7.toInt() // ~3% very light black shade
         style = Paint.Style.FILL
     }
 
     private val metaStrokePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = 0xFF94A3B8.toInt()
+        color = 0xFF000000.toInt()
         style = Paint.Style.STROKE
         strokeWidth = 0.75f
     }
 
     private val altRowFillPaint = Paint().apply {
-        color = 0xFFF8FAFC.toInt()
+        color = 0xFFFAFAFA.toInt() // ~2% ultra-light black shade
         style = Paint.Style.FILL
     }
 
@@ -67,7 +68,7 @@ object BlankSheetPdfGen {
         size: Float,
         bold: Boolean,
         fontId: String,
-        color: Int = 0xFF0F172A.toInt()
+        color: Int = 0xFF000000.toInt()
     ) = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         textSize = size
         this.color = color
@@ -103,6 +104,7 @@ object BlankSheetPdfGen {
         try {
             pages.forEachIndexed { idx, page ->
                 val pdfPage = doc.startPage(PdfDocument.PageInfo.Builder(w, h, idx + 1).create())
+                pdfPage.canvas.drawColor(Color.WHITE)
                 drawPage(ctx, pdfPage.canvas, page, settings, orientation)
                 doc.finishPage(pdfPage)
             }
@@ -188,10 +190,11 @@ object BlankSheetPdfGen {
         val marginBottom = 20f
         val contentW = pageW - marginX * 2f
         val fontId = st.pdfFont
+        val numStyle = page.numeralStyle
 
-        // 1. Optional DPE Logo on top-left + School Title & Subtitle
-        val logoSize = 28f
-        val logoBmp = PdfGen.resolveLogoBitmap(ctx, st.dpeLogo)
+        // 1. Monochrome Black-and-White DPE Logo on top-left + School Title & Subtitle
+        val logoSize = 27f
+        val logoBmp = PdfGen.resolveLogoBitmap(ctx, "simple")
         if (logoBmp != null) {
             c.drawBitmap(
                 logoBmp,
@@ -202,7 +205,7 @@ object BlankSheetPdfGen {
         }
 
         val schoolName = st.school.trim().ifBlank { "প্রাথমিক বিদ্যালয়" }
-        val schoolPaint = textPaint(ctx, 13.5f, bold = true, fontId = fontId).apply {
+        val schoolPaint = textPaint(ctx, 13.5f, bold = true, fontId = fontId, color = 0xFF000000.toInt()).apply {
             textAlign = Paint.Align.CENTER
         }
         val titleMaxW = contentW - (if (logoBmp != null) logoSize * 2f + 12f else 0f)
@@ -211,6 +214,7 @@ object BlankSheetPdfGen {
         }
         c.drawText(schoolName, pageW / 2f, marginTop + 12.5f, schoolPaint)
 
+        val yearFormatted = BlankSheetCatalog.formatDigits(st.year.ifBlank { "২০২৬" }, numStyle)
         val addressAndYear = buildString {
             val addr = st.schoolAddress.trim()
             if (addr.isNotEmpty()) {
@@ -218,9 +222,9 @@ object BlankSheetPdfGen {
                 append(" · ")
             }
             append("শিক্ষাবর্ষ: ")
-            append(bn(st.year.ifBlank { "২০২৬" }))
+            append(yearFormatted)
         }
-        val subPaint = textPaint(ctx, 8.8f, bold = false, fontId = fontId, color = 0xFF475569.toInt()).apply {
+        val subPaint = textPaint(ctx, 8.8f, bold = false, fontId = fontId, color = 0xFF262626.toInt()).apply {
             textAlign = Paint.Align.CENTER
         }
         while (subPaint.measureText(addressAndYear) > titleMaxW && subPaint.textSize > 6.8f) {
@@ -228,19 +232,19 @@ object BlankSheetPdfGen {
         }
         c.drawText(addressAndYear, pageW / 2f, marginTop + 25.5f, subPaint)
 
-        // 2. Highlighted Class + Subject + Term Title Banner
+        // 2. Concise Bengali Class + Subject + Term Title Banner (White + Very Light Gray Shade + Black Border)
         val metaTop = marginTop + 34f
         val metaH = 24f
         val metaRect = RectF(marginX, metaTop, marginX + contentW, metaTop + metaH)
-        c.drawRoundRect(metaRect, 4f, 4f, metaFillPaint)
-        c.drawRoundRect(metaRect, 4f, 4f, metaStrokePaint)
+        c.drawRoundRect(metaRect, 3f, 3f, metaFillPaint)
+        c.drawRoundRect(metaRect, 3f, 3f, metaStrokePaint)
 
         val metaY = metaTop + 15.8f
         val classBannerText = "শ্রেণি: ${page.classTitleBn}"
         val subjectBannerText = if (page.subjectTitleBn.isNotBlank()) {
             "বিষয়: ${page.subjectTitleBn}"
         } else {
-            "বিষয়: ............................"
+            "বিষয়: ......................"
         }
         val rightBannerText = buildString {
             if (page.termTitleBn.isNotBlank()) {
@@ -248,18 +252,18 @@ object BlankSheetPdfGen {
                 append(" · ")
             }
             append("পৃষ্ঠা ")
-            append(bn(page.classPageIndex.toString()))
+            append(BlankSheetCatalog.formatInt(page.classPageIndex, numStyle))
             append("/")
-            append(bn(page.classTotalPages.toString()))
+            append(BlankSheetCatalog.formatInt(page.classTotalPages, numStyle))
         }
 
-        val leftBannerPaint = textPaint(ctx, 9.6f, bold = true, fontId = fontId, color = 0xFF0F172A.toInt()).apply {
+        val leftBannerPaint = textPaint(ctx, 9.6f, bold = true, fontId = fontId, color = 0xFF000000.toInt()).apply {
             textAlign = Paint.Align.LEFT
         }
-        val centerBannerPaint = textPaint(ctx, 10.2f, bold = true, fontId = fontId, color = 0xFF0F766E.toInt()).apply {
+        val centerBannerPaint = textPaint(ctx, 10.2f, bold = true, fontId = fontId, color = 0xFF000000.toInt()).apply {
             textAlign = Paint.Align.CENTER
         }
-        val rightBannerPaint = textPaint(ctx, 8.8f, bold = false, fontId = fontId, color = 0xFF334155.toInt()).apply {
+        val rightBannerPaint = textPaint(ctx, 8.8f, bold = false, fontId = fontId, color = 0xFF1A1A1A.toInt()).apply {
             textAlign = Paint.Align.RIGHT
         }
 
@@ -300,7 +304,7 @@ object BlankSheetPdfGen {
         val totalWeight = cols.sumOf { it.widthWeight.toDouble() }.toFloat().coerceAtLeast(1f)
         val colWidths = cols.map { (it.widthWeight / totalWeight) * contentW }
 
-        // 4. Draw Table Header Row
+        // 4. Draw Table Header Row (Very Light Gray Shade + Black Borders + Concise Bengali Text)
         c.drawRect(marginX, tableTop, marginX + contentW, tableTop + tableHeaderH, headerFillPaint)
         var x = marginX
         cols.forEachIndexed { idx, col ->
@@ -313,7 +317,7 @@ object BlankSheetPdfGen {
                 null
             }
             val lines = if (maxHint != null) {
-                listOf(col.titleBn, "(${bn(maxHint.toString())})")
+                listOf(col.titleBn, "(${BlankSheetCatalog.formatInt(maxHint, numStyle)})")
             } else {
                 listOf(col.titleBn)
             }
@@ -322,7 +326,8 @@ object BlankSheetPdfGen {
                 ctx = ctx,
                 size = if (cols.size >= 9) 8.2f else 9.0f,
                 bold = true,
-                fontId = fontId
+                fontId = fontId,
+                color = 0xFF000000.toInt()
             ).apply {
                 textAlign = Paint.Align.CENTER
             }
@@ -339,7 +344,7 @@ object BlankSheetPdfGen {
             x += w
         }
 
-        // 5. Draw Table Body Rows (Only Roll & Name are filled; all other columns are blank)
+        // 5. Draw Table Body Rows (Only Roll & Name filled; all other cells blank)
         var curY = tableTop + tableHeaderH
         val baseCellFont = when {
             rowH >= 28f -> 9.8f
@@ -368,7 +373,8 @@ object BlankSheetPdfGen {
                         ctx = ctx,
                         size = baseCellFont,
                         bold = isRoll,
-                        fontId = fontId
+                        fontId = fontId,
+                        color = 0xFF000000.toInt()
                     )
                     val padX = if (col.align == BlankColAlign.LEFT) 5f else 3f
                     val availW = max(8f, w - padX * 2f)
@@ -389,19 +395,18 @@ object BlankSheetPdfGen {
             curY += rowH
         }
 
-        // Outer border around whole table for crisp finish
         c.drawRect(marginX, tableTop, marginX + contentW, curY, headerStrokePaint)
 
-        // 6. Footer Line
+        // 6. Monochrome Footer Line
         val footerY = pageH - marginBottom + 2f
-        val footerLeftPaint = textPaint(ctx, 7.8f, bold = false, fontId = fontId, color = 0xFF475569.toInt()).apply {
+        val footerLeftPaint = textPaint(ctx, 7.8f, bold = false, fontId = fontId, color = 0xFF262626.toInt()).apply {
             textAlign = Paint.Align.LEFT
         }
-        val footerRightPaint = textPaint(ctx, 8.2f, bold = false, fontId = fontId, color = 0xFF1E293B.toInt()).apply {
+        val footerRightPaint = textPaint(ctx, 8.2f, bold = false, fontId = fontId, color = 0xFF000000.toInt()).apply {
             textAlign = Paint.Align.RIGHT
         }
-        val leftFooter = "মোট শিক্ষার্থী: ${bn(page.totalStudentsInClass.toString())} জন · মোট পৃষ্ঠা ${bn(page.globalPageNumber.toString())}/${bn(page.totalPages.toString())}"
-        val rightFooter = "তারিখ: ......................    বিষয় শিক্ষকের স্বাক্ষর: ..................................."
+        val leftFooter = "মোট: ${BlankSheetCatalog.formatInt(page.totalStudentsInClass, numStyle)} জন · মোট পৃষ্ঠা ${BlankSheetCatalog.formatInt(page.globalPageNumber, numStyle)}/${BlankSheetCatalog.formatInt(page.totalPages, numStyle)}"
+        val rightFooter = "তারিখ: ......................   শিক্ষকের স্বাক্ষর: ..........................."
         c.drawText(leftFooter, marginX, footerY, footerLeftPaint)
         c.drawText(rightFooter, marginX + contentW, footerY, footerRightPaint)
     }

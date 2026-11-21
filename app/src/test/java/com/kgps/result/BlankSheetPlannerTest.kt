@@ -17,69 +17,105 @@ class BlankSheetPlannerTest {
     }
 
     @Test
-    fun singleClassPaginationAndRollNameFilling() {
+    fun conciseBengaliColumnHeadersAreUsed() {
+        val expected = listOf("রোল", "নাম", "পাঠ্যবই", "কাজ", "ভাষা", "অভীক্ষা", "ধারাবাহিক", "লিখিত", "মোট")
+        val actual = BlankSheetCatalog.presetColumns(BlankSheetPreset.FULL_MARKS).map { it.titleBn }
+        assertEquals(expected, actual)
+    }
+
+    @Test
+    fun singleClassPaginationAndBengaliOrEnglishNumeralsWork() {
         val settings = Settings(school = "কাজীপাড়া সরকারি প্রাথমিক বিদ্যালয়")
-        val cfg = BlankSheetConfig(
+        val bnCfg = BlankSheetConfig(
             selectedClass = 3,
             subjectKey = "SCI",
             term = 2,
             rowsPerPage = 10,
+            numeralStyle = BlankNumeralStyle.BENGALI,
             autoFillRollAndName = true
         )
-
-        val pages = BlankSheetPlanner.buildPages(
+        val bnPages = BlankSheetPlanner.buildPages(
             students = sampleStudents(),
             settings = settings,
-            config = cfg,
+            config = bnCfg,
             allowedClassIds = listOf(1, 2, 3, 4, 5)
         )
 
-        assertEquals(3, pages.size)
-        assertEquals(listOf(10, 10, 5), pages.map { it.rows.size })
-        assertEquals("তৃতীয় শ্রেণি", pages[0].classTitleBn)
-        assertEquals("বিজ্ঞান", pages[0].subjectTitleBn)
-        assertEquals("২য় প্রান্তিক", pages[0].termTitleBn)
+        assertEquals(3, bnPages.size)
+        assertEquals(listOf(10, 10, 5), bnPages.map { it.rows.size })
+        assertEquals("৩য় শ্রেণি", bnPages[0].classTitleBn)
+        assertEquals("বিজ্ঞান", bnPages[0].subjectTitleBn)
+        assertEquals("২য় প্রান্তিক", bnPages[0].termTitleBn)
+        assertEquals("০১", bnPages[0].rows[0].rollText)
+        assertEquals("২৫", bnPages[2].rows[4].rollText)
 
-        // Sorted by roll and formatted in Bengali numerals
-        assertEquals("০১", pages[0].rows[0].rollText)
-        assertEquals("শিক্ষার্থী ৩-1", pages[0].rows[0].nameText)
-        assertEquals("২৫", pages[2].rows[4].rollText)
-        assertEquals(1, pages[0].classPageIndex)
-        assertEquals(3, pages[0].classTotalPages)
-        assertEquals(3, pages[2].globalPageNumber)
-        assertEquals(3, pages[2].totalPages)
+        // Same config with English numerals
+        val enPages = BlankSheetPlanner.buildPages(
+            students = sampleStudents(),
+            settings = settings,
+            config = bnCfg.copy(numeralStyle = BlankNumeralStyle.ENGLISH),
+            allowedClassIds = listOf(1, 2, 3, 4, 5)
+        )
+        assertEquals("3য় শ্রেণি", enPages[0].classTitleBn)
+        assertEquals("2য় প্রান্তিক", enPages[0].termTitleBn)
+        assertEquals("01", enPages[0].rows[0].rollText)
+        assertEquals("25", enPages[2].rows[4].rollText)
     }
 
     @Test
-    fun allClassesGeneratesSeparateClassHeadersAndSkipsEmptyClasses() {
-        val settings = Settings(school = "টেস্ট বিদ্যালয়")
+    fun singleClassAllSubjectsGeneratesEverySubjectInOrder() {
+        val cfg = BlankSheetConfig(
+            selectedClass = 3,
+            subjectKey = BlankSheetCatalog.ALL_SUBJECTS_KEY,
+            term = 1,
+            rowsPerPage = 15
+        )
+        val pages = BlankSheetPlanner.buildPages(
+            students = sampleStudents(),
+            settings = Settings(),
+            config = cfg,
+            allowedClassIds = listOf(1, 2, 3, 4, 5)
+        )
+        // Class 3 has 8 subjects, 25 students @ 15/page = 2 pages per subject -> 16 pages total
+        assertEquals(16, pages.size)
+        val distinctSubjects = pages.map { it.subjectTitleBn }.distinct()
+        assertEquals(8, distinctSubjects.size)
+        assertTrue(distinctSubjects.contains("বাংলা"))
+        assertTrue(distinctSubjects.contains("বিজ্ঞান"))
+        assertTrue(distinctSubjects.contains("বাংলাদেশ ও বিশ্বপরিচয়"))
+        assertEquals(1, pages[0].classPageIndex)
+        assertEquals(2, pages[0].classTotalPages)
+        assertEquals(1, pages[2].classPageIndex)
+        assertEquals("ইংরেজি", pages[2].subjectTitleBn)
+    }
+
+    @Test
+    fun allClassesAllSubjectsGeneratesFullBatchAcrossClasses() {
         val cfg = BlankSheetConfig(
             selectedClass = null, // সব শ্রেণি
-            subjectKey = "BAN",
+            subjectKey = BlankSheetCatalog.ALL_SUBJECTS_KEY, // সব বিষয়
             term = 1,
             rowsPerPage = 15,
-            extraBlankRowsPerClass = 2,
-            fillRemainingPageRows = false
+            extraBlankRowsPerClass = 0
         )
 
         val pages = BlankSheetPlanner.buildPages(
             students = sampleStudents(),
-            settings = settings,
+            settings = Settings(),
             config = cfg,
             allowedClassIds = listOf(1, 2, 3, 4, 5)
         )
 
-        // Class 1: 12 + 2 = 14 rows (1 page), Class 3: 25 + 2 = 27 rows (2 pages: 15, 12)
-        assertEquals(3, pages.size)
-        assertEquals(1, pages[0].cls)
-        assertEquals("প্রথম শ্রেণি", pages[0].classTitleBn)
-        assertEquals(14, pages[0].rows.size)
-        assertEquals("", pages[0].rows[12].rollText)
-        assertEquals("", pages[0].rows[12].nameText)
-
-        assertEquals(3, pages[1].cls)
-        assertEquals(3, pages[2].cls)
-        assertEquals(listOf(15, 12), listOf(pages[1].rows.size, pages[2].rows.size))
+        // Class 1: 12 students -> 1 page * 7 subjects = 7 pages
+        // Class 3: 25 students -> 2 pages * 8 subjects = 16 pages
+        // Total = 23 pages; Class 2, 4, 5 empty so skipped
+        assertEquals(23, pages.size)
+        assertEquals(7, pages.count { it.cls == 1 })
+        assertEquals(16, pages.count { it.cls == 3 })
+        assertEquals("১ম শ্রেণি", pages[0].classTitleBn)
+        assertEquals("৩য় শ্রেণি", pages[7].classTitleBn)
+        assertEquals(23, pages.last().globalPageNumber)
+        assertEquals(23, pages.last().totalPages)
     }
 
     @Test
@@ -102,7 +138,7 @@ class BlankSheetPlannerTest {
             allowedClassIds = listOf(1, 2, 3)
         )
 
-        assertEquals(2, pages.size) // 12 padded to 20 -> 2 pages of 10
+        assertEquals(2, pages.size)
         assertEquals(10, pages[0].rows.size)
         assertEquals(10, pages[1].rows.size)
         assertTrue(pages.all { p -> p.rows.all { it.rollText.isEmpty() && it.nameText.isEmpty() } })
