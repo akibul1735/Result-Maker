@@ -98,13 +98,14 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.kgps.result.CLSN
 import com.kgps.result.RELIGIONS
 import com.kgps.result.Settings
 import com.kgps.result.Student
 import com.kgps.result.TeacherRemarkEngine
+import com.kgps.result.activeClassIds
 import com.kgps.result.avg
 import com.kgps.result.bn
+import com.kgps.result.classNameBn
 import com.kgps.result.cloud.TeacherPermissions
 import com.kgps.result.cont
 import com.kgps.result.fmt
@@ -176,7 +177,10 @@ fun BulkSheetScreen(
     val clipboard = LocalClipboardManager.current
     val focusManager = LocalFocusManager.current
     val haptic = LocalHapticFeedback.current
-    val allowedClasses = remember(permissions) { permissions.effectiveClasses() }
+    val availableClassIds = remember(settings.customClasses) { activeClassIds(settings) }
+    val allowedClasses = remember(permissions, availableClassIds) {
+        permissions.effectiveClasses(availableClassIds)
+    }
     val activeCls = if (cls in allowedClasses) cls else (allowedClasses.firstOrNull() ?: cls)
 
     val availableModes = remember(permissions) {
@@ -504,7 +508,7 @@ fun BulkSheetScreen(
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
                                 Text(
-                                    "${CLSN[activeCls - 1]} শ্রেণি",
+                                    "${classNameBn(activeCls, settings)} শ্রেণি",
                                     fontSize = 11.5.sp,
                                     fontWeight = FontWeight.SemiBold,
                                     color = SlateText,
@@ -522,7 +526,7 @@ fun BulkSheetScreen(
                                     modifier = Modifier.background(if (isSelected) TealContainer else Color.Transparent),
                                     text = {
                                         Text(
-                                            "${CLSN[c - 1]} শ্রেণি (${bn(count.toString())} জন)",
+                                            "${classNameBn(c, settings)} শ্রেণি (${bn(count.toString())} জন)",
                                             fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
                                             color = if (isSelected) TealDark else SlateText
                                         )
@@ -1378,7 +1382,7 @@ fun BulkSheetScreen(
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
                     Text(
-                        "${CLSN[activeCls - 1]} শ্রেণিতে এখনো কোনো শিক্ষার্থী নেই",
+                        "${classNameBn(activeCls, settings)} শ্রেণিতে এখনো কোনো শিক্ষার্থী নেই",
                         color = SlateMuted,
                         fontSize = 14.sp,
                         fontWeight = FontWeight.SemiBold
@@ -1427,7 +1431,16 @@ fun BulkSheetScreen(
                         }
                         Box(Modifier.width(1.dp).height(46.dp).background(SlateOutline))
                         Row(Modifier.weight(1f).horizontalScroll(hScroll)) {
+                            var renderedContHeader = false
+                            val contMaxForSub = activeSub?.comps?.sumOf { it.max } ?: 0
                             cols.forEach { col ->
+                                if (mode == "subject" && col.markCompKey == "WR" && !renderedContHeader) {
+                                    renderedContHeader = true
+                                    SheetComputedHeader(
+                                        label = "ধারাবাহিক",
+                                        subLabel = if (contMaxForSub > 0) "সর্বোচ্চ ${fmtSheetDigits(contMaxForSub.toString())}" else ""
+                                    )
+                                }
                                 val colEditable = isColumnEditable(col)
                                 Column(
                                     Modifier.width(col.width).height(46.dp).padding(horizontal = 4.dp),
@@ -1451,12 +1464,13 @@ fun BulkSheetScreen(
                             }
                             when (mode) {
                                 "subject" -> {
-                                    val contMax = activeSub?.comps?.sumOf { it.max } ?: 0
+                                    if (!renderedContHeader) {
+                                        SheetComputedHeader(
+                                            label = "ধারাবাহিক",
+                                            subLabel = if (contMaxForSub > 0) "সর্বোচ্চ ${fmtSheetDigits(contMaxForSub.toString())}" else ""
+                                        )
+                                    }
                                     val totalMax = activeSub?.max ?: 0
-                                    SheetComputedHeader(
-                                        label = "ধারাবাহিক",
-                                        subLabel = if (contMax > 0) "সর্বোচ্চ ${fmtSheetDigits(contMax.toString())}" else ""
-                                    )
                                     SheetComputedHeader(
                                         label = "মোট",
                                         subLabel = if (totalMax > 0) "সর্বোচ্চ ${fmtSheetDigits(totalMax.toString())}" else ""
@@ -1536,7 +1550,16 @@ fun BulkSheetScreen(
                                     Box(Modifier.width(1.dp).fillMaxHeight().background(SlateOutline))
 
                                     Row(Modifier.weight(1f).fillMaxHeight().horizontalScroll(hScroll)) {
+                                        val subForStudent = if (mode == "subject" && activeSub != null) {
+                                            s.subs().find { it.key == activeSub.key } ?: activeSub
+                                        } else null
+                                        var renderedContCell = false
                                         cols.forEachIndexed { cIdx, col ->
+                                            if (mode == "subject" && col.markCompKey == "WR" && !renderedContCell && subForStudent != null) {
+                                                renderedContCell = true
+                                                val cScore = s.cont(subForStudent, term)
+                                                SheetComputedCell(fmtSheetNum(cScore), SlateBg, SlateMuted)
+                                            }
                                             val hasPerm = isColumnEditable(col)
                                             val colEditable = isEditMode && hasPerm
 
@@ -1901,12 +1924,13 @@ fun BulkSheetScreen(
                                             Box(Modifier.width(1.dp).fillMaxHeight().background(SlateOutline))
                                         }
 
-                                        if (mode == "subject" && activeSub != null) {
-                                            val subForStudent = s.subs().find { it.key == activeSub.key } ?: activeSub
-                                            val cScore = s.cont(subForStudent, term)
+                                        if (mode == "subject" && subForStudent != null) {
+                                            if (!renderedContCell) {
+                                                val cScore = s.cont(subForStudent, term)
+                                                SheetComputedCell(fmtSheetNum(cScore), SlateBg, SlateMuted)
+                                            }
                                             val tScore = s.total(subForStudent, term)
                                             val grade = gradeOf((tScore / subForStudent.max.toDouble()) * 100.0)
-                                            SheetComputedCell(fmtSheetNum(cScore), SlateBg, SlateMuted)
                                             SheetComputedCell(fmtSheetNum(tScore), TealContainer.copy(alpha = 0.25f), TealPrimary, bold = true)
                                             SheetComputedCell(grade, SlateBg, TealPrimary, bold = true)
                                         } else if (mode == "all" && (permissions.allSubjects || permissions.canViewOtherSubjects)) {

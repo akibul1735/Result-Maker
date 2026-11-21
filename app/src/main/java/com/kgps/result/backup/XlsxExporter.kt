@@ -1,10 +1,11 @@
 package com.kgps.result.backup
 
-import com.kgps.result.CLSN
 import com.kgps.result.CsvHeaderStyle
 import com.kgps.result.CustomFieldDef
 import com.kgps.result.Repo
 import com.kgps.result.Student
+import com.kgps.result.activeClassIds
+import com.kgps.result.classNameBn
 import java.io.ByteArrayOutputStream
 import java.util.zip.ZipEntry
 import java.util.zip.ZipOutputStream
@@ -21,11 +22,11 @@ object XlsxExporter {
         students: List<Student>,
         customFields: List<CustomFieldDef>,
         style: CsvHeaderStyle,
-        classes: List<Int> = (1..5).toList()
+        classes: List<Int> = activeClassIds()
     ): ByteArray {
         val sheets = classes.map { cls ->
             val tabName = when (style) {
-                CsvHeaderStyle.FRIENDLY_BN -> "${CLSN[cls - 1]} শ্রেণি"
+                CsvHeaderStyle.FRIENDLY_BN -> "${classNameBn(cls)} শ্রেণি"
                 CsvHeaderStyle.FRIENDLY_EN -> "Class $cls"
                 CsvHeaderStyle.SYSTEM_KEYS -> "Class_$cls"
             }

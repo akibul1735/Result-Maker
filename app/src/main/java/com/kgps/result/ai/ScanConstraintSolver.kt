@@ -48,7 +48,7 @@ object ScanConstraintSolver {
         scope: ClassSheetImportScope = ClassSheetImportScope.BOTH
     ): ScannedStudentRow {
         if (scope == ClassSheetImportScope.WR_ONLY) return row
-        val subDef = subjectsFor(cls.coerceIn(1, 5), RELIGIONS.first()).find { it.key == subKey }
+        val subDef = subjectsFor(cls.coerceIn(1, 20), RELIGIONS.first()).find { it.key == subKey }
             ?: return row
 
         val compSpecs = subDef.comps // [TB, ACT, LANG, CT] বা ART-এর জন্য [TOTAL]
@@ -232,7 +232,7 @@ object ScanConstraintSolver {
         val aiNorm = row.aiIssues.entries.associate { (k, v) -> normalizeIssueKey(k) to v }
         val dbNameActive = hasExistingDbName && !row.useScannedNameForExisting
 
-        val subDef = subjectsFor(cls.coerceIn(1, 5), RELIGIONS.first()).find { it.key == subKey }
+        val subDef = subjectsFor(cls.coerceIn(1, 20), RELIGIONS.first()).find { it.key == subKey }
         val compSpecs = subDef?.comps ?: emptyList()
         val compKeys = compSpecs.map { it.key }
         val hasWritten = (subDef?.written ?: 0) > 0

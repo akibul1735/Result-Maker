@@ -78,8 +78,8 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.kgps.result.CLS_SHORT
 import com.kgps.result.CsvHeaderStyle
+import com.kgps.result.activeClassIds
 import com.kgps.result.ai.DiscoveredGeminiModel
 import com.kgps.result.ai.GeminiApiConfig
 import com.kgps.result.backup.AutoBackupStatus
@@ -89,6 +89,7 @@ import com.kgps.result.backup.BackupScheduleMode
 import com.kgps.result.backup.BackupSystemKind
 import com.kgps.result.backup.CsvBackupFormat
 import com.kgps.result.bn
+import com.kgps.result.classShortBn
 import com.kgps.result.cloud.SchoolWorkspace
 import com.kgps.result.cloud.TeacherPermissions
 import java.util.Calendar
@@ -1010,6 +1011,7 @@ internal fun SettingsAutoBackupContent(
 internal fun SettingsCsvJsonContent(
     permissions: TeacherPermissions,
     isAdmin: Boolean,
+    availableClassIds: List<Int> = activeClassIds(),
     studentCountByClass: Map<Int, Int>,
     csvHeaderStyle: CsvHeaderStyle,
     onSelectCsvHeaderStyle: (CsvHeaderStyle) -> Unit,
@@ -1025,8 +1027,8 @@ internal fun SettingsCsvJsonContent(
     onExportJson: () -> Unit,
     onRestoreJsonFile: () -> Unit
 ) {
-    val allowedClasses = remember(permissions) {
-        permissions.effectiveClasses().ifEmpty { (1..5).toList() }
+    val allowedClasses = remember(permissions, availableClassIds) {
+        permissions.effectiveClasses(availableClassIds).ifEmpty { availableClassIds }
     }
     var selectedExportCls by remember(allowedClasses) {
         mutableStateOf(allowedClasses.first())
@@ -1102,7 +1104,7 @@ internal fun SettingsCsvJsonContent(
                         }
                     }
 
-                    // Single-row compact class selector pills
+                    // Single-row horizontally scrollable class selector pills
                     Surface(
                         color = Color.White,
                         border = BorderStroke(1.dp, SlateOutline),
@@ -1112,8 +1114,9 @@ internal fun SettingsCsvJsonContent(
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(2.dp),
-                            horizontalArrangement = Arrangement.spacedBy(2.dp),
+                                .horizontalScroll(rememberScrollState())
+                                .padding(3.dp),
+                            horizontalArrangement = Arrangement.spacedBy(4.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             allowedClasses.forEach { c ->
@@ -1122,17 +1125,16 @@ internal fun SettingsCsvJsonContent(
                                 Box(
                                     contentAlignment = Alignment.Center,
                                     modifier = Modifier
-                                        .weight(1f)
                                         .heightIn(min = 38.dp)
                                         .clip(RoundedCornerShape(7.dp))
                                         .background(if (selected) TealPrimary else Color.Transparent)
                                         .clickable { selectedExportCls = c }
                                         .testTag("settings_csv_class_chip_$c")
-                                        .padding(horizontal = 2.dp, vertical = 3.dp)
+                                        .padding(horizontal = 10.dp, vertical = 4.dp)
                                 ) {
                                     Text(
-                                        text = "${CLS_SHORT[c - 1]} (${bn(count.toString())})",
-                                        fontSize = 10.sp,
+                                        text = "${classShortBn(c)} (${bn(count.toString())})",
+                                        fontSize = 10.5.sp,
                                         fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
                                         color = if (selected) Color.White else SlateText,
                                         maxLines = 1,
@@ -1145,7 +1147,7 @@ internal fun SettingsCsvJsonContent(
                         }
                     }
 
-                    val clsLabel = CLS_SHORT.getOrElse(selectedExportCls - 1) { "$selectedExportCls" }
+                    val clsLabel = classShortBn(selectedExportCls)
                     Row(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.fillMaxWidth()) {
                         OutlinedButton(
                             onClick = { onExportCsvForClass(selectedExportCls) },

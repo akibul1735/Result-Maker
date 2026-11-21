@@ -702,6 +702,8 @@ fun ResultMakerWorkspace(
                                     settings = settings,
                                     cls = cls,
                                     permissions = permissions,
+                                    isAdmin = isAdmin,
+                                    onAddCustomClass = vm::addCustomClass,
                                     onSelectClass = vm::selectClass,
                                     onOpenStudent = { vm.openEditor(it, NavSection.ROSTER) },
                                     onNewStudentInClass = { targetCls ->
@@ -877,6 +879,8 @@ fun ResultMakerWorkspace(
                                     onUpdateSettings = vm::updateSettings,
                                     onAddCustomField = vm::addCustomField,
                                     onRemoveCustomField = vm::removeCustomField,
+                                    onAddCustomClass = vm::addCustomClass,
+                                    onRemoveCustomClass = vm::removeCustomClass,
                                     onOpenCsvImport = { txt -> vm.openCsvImport(txt) },
                                     onRestoreBackupJson = vm::restoreBackupJson,
                                     onExportAllPdf = {

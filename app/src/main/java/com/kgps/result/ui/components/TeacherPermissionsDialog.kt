@@ -38,8 +38,10 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.kgps.result.CLSN
-import com.kgps.result.cloud.ALL_CLASS_NUMS
+import com.kgps.result.SchoolClassDef
+import com.kgps.result.activeSchoolClasses
+import com.kgps.result.bn
+import com.kgps.result.classNameBn
 import com.kgps.result.cloud.ALL_SUBJECT_KEYS
 import com.kgps.result.cloud.SUBJECT_ACCESS_DEFS
 import com.kgps.result.cloud.TeacherPermissions
@@ -60,14 +62,16 @@ fun TeacherPermissionsEditorDialog(
     title: String,
     teacherLabel: String,
     initialPermissions: TeacherPermissions,
+    availableClasses: List<SchoolClassDef> = activeSchoolClasses(),
     confirmButtonText: String,
     onDismiss: () -> Unit,
     onConfirm: (TeacherPermissions) -> Unit
 ) {
+    val allClassIds = remember(availableClasses) { availableClasses.map { it.id } }
     var allClasses by remember(initialPermissions) { mutableStateOf(initialPermissions.allClasses) }
-    var selectedClasses by remember(initialPermissions) {
+    var selectedClasses by remember(initialPermissions, allClassIds) {
         mutableStateOf(
-            if (initialPermissions.allClasses) ALL_CLASS_NUMS.toSet()
+            if (initialPermissions.allClasses) allClassIds.toSet()
             else initialPermissions.allowedClasses.toSet()
         )
     }
@@ -85,7 +89,7 @@ fun TeacherPermissionsEditorDialog(
 
     fun buildResult(): TeacherPermissions = TeacherPermissions(
         allClasses = allClasses,
-        allowedClasses = if (allClasses) ALL_CLASS_NUMS else selectedClasses.sorted(),
+        allowedClasses = if (allClasses) allClassIds else selectedClasses.sorted(),
         allSubjects = allSubjects,
         allowedSubjects = if (allSubjects) ALL_SUBJECT_KEYS else ALL_SUBJECT_KEYS.filter { it in selectedSubjects },
         canViewOtherSubjects = canViewOtherSubjects,
@@ -120,7 +124,7 @@ fun TeacherPermissionsEditorDialog(
                     OutlinedButton(
                         onClick = {
                             allClasses = true
-                            selectedClasses = ALL_CLASS_NUMS.toSet()
+                            selectedClasses = allClassIds.toSet()
                             allSubjects = true
                             selectedSubjects = ALL_SUBJECT_KEYS.toSet()
                             canViewOtherSubjects = true
@@ -137,7 +141,7 @@ fun TeacherPermissionsEditorDialog(
                     OutlinedButton(
                         onClick = {
                             allClasses = true
-                            selectedClasses = ALL_CLASS_NUMS.toSet()
+                            selectedClasses = allClassIds.toSet()
                             allSubjects = false
                             if (selectedSubjects.size == ALL_SUBJECT_KEYS.size || selectedSubjects.isEmpty()) {
                                 selectedSubjects = setOf("BAN")
@@ -166,13 +170,13 @@ fun TeacherPermissionsEditorDialog(
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Column(Modifier.weight(1f)) {
                                 Text("কোন শ্রেণির ডেটা অ্যাক্সেস করবেন", fontWeight = FontWeight.SemiBold, fontSize = 12.5.sp, color = SlateText)
-                                Text(if (allClasses) "সকল শ্রেণি (১ম–৫ম)" else "শুধুমাত্র চিহ্নিত শ্রেণি", fontSize = 11.sp, color = SlateMuted)
+                                Text(if (allClasses) "সকল শ্রেণি (${bn(availableClasses.size.toString())}টি)" else "শুধুমাত্র চিহ্নিত শ্রেণি", fontSize = 11.sp, color = SlateMuted)
                             }
                             Switch(
                                 checked = allClasses,
                                 onCheckedChange = { checked ->
                                     allClasses = checked
-                                    if (checked) selectedClasses = ALL_CLASS_NUMS.toSet()
+                                    if (checked) selectedClasses = allClassIds.toSet()
                                 }
                             )
                         }
@@ -181,7 +185,8 @@ fun TeacherPermissionsEditorDialog(
                                 horizontalArrangement = Arrangement.spacedBy(6.dp),
                                 verticalArrangement = Arrangement.spacedBy(4.dp)
                             ) {
-                                ALL_CLASS_NUMS.forEach { c ->
+                                availableClasses.forEach { cDef ->
+                                    val c = cDef.id
                                     val isSel = c in selectedClasses
                                     FilterChip(
                                         selected = isSel,
@@ -190,7 +195,7 @@ fun TeacherPermissionsEditorDialog(
                                         },
                                         colors = appFilterChipColors(),
                                         border = appFilterChipBorder(isSel),
-                                        label = { Text("${CLSN[c - 1]}", fontSize = 11.5.sp) }
+                                        label = { Text(cDef.nameBn, fontSize = 11.5.sp) }
                                     )
                                 }
                             }

@@ -1,8 +1,8 @@
 package com.kgps.result.ui.screens
 
-import com.kgps.result.CLS_SHORT
 import com.kgps.result.Student
 import com.kgps.result.bn
+import com.kgps.result.classShortBn
 import com.kgps.result.cloud.TeacherPermissions
 import com.kgps.result.fromBn
 import com.kgps.result.gradeOf
@@ -323,4 +323,4 @@ fun formatBackupShortTime(ms: Long): String {
     }
 }
 
-fun classShortLabel(cls: Int): String = CLS_SHORT.getOrNull(cls - 1) ?: bn(cls.toString())
+fun classShortLabel(cls: Int): String = classShortBn(cls)

@@ -96,7 +96,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
-import com.kgps.result.CLSN
 import com.kgps.result.DPE_LOGO_LIST
 import com.kgps.result.PDF_FONT_LIST
 import com.kgps.result.PdfGen
@@ -104,6 +103,7 @@ import com.kgps.result.ReportSummaryColumn
 import com.kgps.result.Settings
 import com.kgps.result.Student
 import com.kgps.result.bn
+import com.kgps.result.classNameBn
 import com.kgps.result.fromBn
 import com.kgps.result.ui.components.BatchReportDialog
 import com.kgps.result.ui.components.SummaryTableConfigCard
@@ -290,7 +290,7 @@ fun ReportStudioScreen(
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
                                 Text(
-                                    CLSN[active.cls - 1],
+                                    classNameBn(active.cls, settings),
                                     fontSize = 12.sp,
                                     fontWeight = FontWeight.Bold,
                                     color = TealPrimary,
@@ -312,7 +312,7 @@ fun ReportStudioScreen(
                                     modifier = Modifier.background(if (isSel) TealContainer else Color.Transparent),
                                     text = {
                                         Text(
-                                            "${CLSN[c - 1]} শ্রেণি (${bn(count.toString())} জন)",
+                                            "${classNameBn(c, settings)} শ্রেণি (${bn(count.toString())} জন)",
                                             fontWeight = if (isSel) FontWeight.Bold else FontWeight.Normal,
                                             color = if (isSel) TealDark else SlateText
                                         )
@@ -964,7 +964,7 @@ fun ReportStudioScreen(
                                 onClick = { filterCls = c },
                                 colors = appFilterChipColors(),
                                 border = appFilterChipBorder(isSel),
-                                label = { Text("${CLSN[c - 1]} শ্রেণি", fontSize = 11.5.sp) }
+                                label = { Text("${classNameBn(c, settings)} শ্রেণি", fontSize = 11.5.sp) }
                             )
                         }
                     }
@@ -1024,7 +1024,7 @@ fun ReportStudioScreen(
                                                 overflow = TextOverflow.Ellipsis
                                             )
                                             val meta = buildString {
-                                                append("${CLSN[s.cls - 1]} শ্রেণি")
+                                                append("${classNameBn(s.cls, settings)} শ্রেণি")
                                                 if (s.guardian.isNotBlank()) append(" · ${s.guardian}")
                                             }
                                             Text(meta, fontSize = 11.sp, color = SlateMuted, maxLines = 1)

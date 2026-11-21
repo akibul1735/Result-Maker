@@ -334,3 +334,69 @@ test("Granular teacher permissions restrict classes, subjects, attendance, and p
   );
   await assertFails(bobC3.delete());
 });
+
+test("Admin can configure custom classes and teachers with custom class permission can edit only those classes", async () => {
+  const aliceDb = testEnv.authenticatedContext(ALICE_UID).firestore();
+  const bobDb = testEnv.authenticatedContext(BOB_UID).firestore();
+
+  await testEnv.withSecurityRulesDisabled(async (ctx) => {
+    const adminDb = ctx.firestore();
+    const school = makeSchoolPayload(ALICE_UID, "CST600", true);
+    school.memberUids = [ALICE_UID, BOB_UID];
+    school.memberProfiles[BOB_UID] = {
+      uid: BOB_UID,
+      name: "Bob",
+      email: "bob@x.com",
+      role: "TEACHER",
+      allClasses: false,
+      allowedClasses: [6],
+      allSubjects: true,
+      allowedSubjects: ["BAN", "ENG", "MATH", "SOC", "SCI", "BGW", "REL", "PE", "ART"],
+      canViewOtherSubjects: true,
+      canEditAttendance: true,
+      canManageStudents: true,
+      canExportPdf: true,
+    };
+    await adminDb.collection("schools").doc("school_custom").set(school);
+    await adminDb.collection("schoolCodes").doc("CST600").set(makeCodePayload("school_custom", ALICE_UID));
+  });
+
+  // Admin can update customClasses
+  await assertSucceeds(
+    aliceDb.collection("schools").doc("school_custom").update({
+      customClasses: [{ id: 6, nameBn: "৬ষ্ঠ", shortBn: "৬ষ্ঠ", syllabusTier: 3 }],
+      "teachers.6": "নতুন শিক্ষক",
+      "teacherMobiles.6": "01799999999",
+      updatedAt: pastDate(300),
+    })
+  );
+
+  // Admin can create Class 6 student, while cls 21 fails
+  const c6Ref = aliceDb.collection("schools").doc("school_custom").collection("students").doc("st_c6");
+  const c1Ref = aliceDb.collection("schools").doc("school_custom").collection("students").doc("st_c1");
+  await assertSucceeds(c6Ref.set(makeStudentPayload(ALICE_UID, 1, "সাদিয়া", 6)));
+  await assertSucceeds(c1Ref.set(makeStudentPayload(ALICE_UID, 1, "রাফি", 1)));
+  await assertFails(
+    aliceDb.collection("schools").doc("school_custom").collection("students").doc("st_c21")
+      .set(makeStudentPayload(ALICE_UID, 1, "অবৈধ", 21))
+  );
+
+  // Teacher Bob (allowedClasses: [6]) can update Class 6 student, cannot update Class 1 student
+  await assertSucceeds(
+    bobDb.collection("schools").doc("school_custom").collection("students").doc("st_c6").update({
+      "m.BAN_1_TB": 15,
+      updatedByUid: BOB_UID,
+      updatedByName: "Bob",
+      updatedAt: pastDate(200),
+    })
+  );
+  await assertFails(
+    bobDb.collection("schools").doc("school_custom").collection("students").doc("st_c1").update({
+      "m.BAN_1_TB": 15,
+      updatedByUid: BOB_UID,
+      updatedByName: "Bob",
+      updatedAt: pastDate(150),
+    })
+  );
+});
+

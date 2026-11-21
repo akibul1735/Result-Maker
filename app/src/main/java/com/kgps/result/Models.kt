@@ -25,6 +25,21 @@ data class CustomFieldDef(
     val label: String
 )
 
+data class CustomClassDef(
+    val id: Int,
+    val nameBn: String,
+    val shortBn: String = "",
+    val syllabusTier: Int = 3 // 1 = ১ম–২য় ধরন (সমন্বিত), 3 = ৩য়–৫ম ধরন (বিজ্ঞান ও বাওবি)
+)
+
+data class SchoolClassDef(
+    val id: Int,
+    val nameBn: String,
+    val shortBn: String,
+    val syllabusTier: Int,
+    val isCustom: Boolean
+)
+
 data class Settings(
     val school: String = "",
     val schoolAddress: String = "",
@@ -33,7 +48,8 @@ data class Settings(
     val teacherMobiles: Map<Int, String> = emptyMap(),
     val pdfFont: String = "noto_serif",
     val dpeLogo: String = "simple",
-    val customFields: List<CustomFieldDef> = emptyList()
+    val customFields: List<CustomFieldDef> = emptyList(),
+    val customClasses: List<CustomClassDef> = emptyList()
 )
 
 data class DpeLogoInfo(val id: String, val labelBn: String, val descriptionBn: String)
@@ -61,6 +77,105 @@ val RELIGIONS = listOf("ইসলাম", "হিন্দু", "বৌদ্ধ
 val CLSN = listOf("প্রথম", "দ্বিতীয়", "তৃতীয়", "চতুর্থ", "পঞ্চম")
 val CLS_SHORT = listOf("১ম", "২য়", "৩য়", "৪র্থ", "৫ম")
 
+val DEFAULT_SCHOOL_CLASSES: List<SchoolClassDef> = listOf(
+    SchoolClassDef(1, "প্রথম", "১ম", 1, isCustom = false),
+    SchoolClassDef(2, "দ্বিতীয়", "২য়", 1, isCustom = false),
+    SchoolClassDef(3, "তৃতীয়", "৩য়", 3, isCustom = false),
+    SchoolClassDef(4, "চতুর্থ", "৪র্থ", 3, isCustom = false),
+    SchoolClassDef(5, "পঞ্চম", "৫ম", 3, isCustom = false)
+)
+
+object SchoolClassRegistry {
+    @Volatile
+    private var customList: List<CustomClassDef> = emptyList()
+
+    fun update(custom: List<CustomClassDef>) {
+        customList = custom
+            .filter { it.id in 6..20 && it.nameBn.isNotBlank() }
+            .distinctBy { it.id }
+            .sortedBy { it.id }
+    }
+
+    fun currentCustom(): List<CustomClassDef> = customList
+
+    fun activeClasses(custom: List<CustomClassDef> = customList): List<SchoolClassDef> {
+        val extras = custom
+            .filter { it.id in 6..20 && it.nameBn.isNotBlank() }
+            .distinctBy { it.id }
+            .sortedBy { it.id }
+            .map { cc ->
+                SchoolClassDef(
+                    id = cc.id,
+                    nameBn = cc.nameBn.trim(),
+                    shortBn = cc.shortBn.trim().ifBlank { defaultShortClassLabel(cc.nameBn, cc.id) },
+                    syllabusTier = if (cc.syllabusTier <= 2) 1 else 3,
+                    isCustom = true
+                )
+            }
+        return DEFAULT_SCHOOL_CLASSES + extras
+    }
+
+    fun activeIds(custom: List<CustomClassDef> = customList): List<Int> =
+        activeClasses(custom).map { it.id }
+
+    fun findClass(cls: Int, custom: List<CustomClassDef> = customList): SchoolClassDef? =
+        activeClasses(custom).find { it.id == cls }
+}
+
+fun defaultShortClassLabel(nameBn: String, id: Int): String {
+    val clean = nameBn.trim()
+        .removeSuffix("শ্রেণি")
+        .removeSuffix("শ্রেণী")
+        .trim()
+    return when {
+        clean.contains("প্রাক") || clean.contains("শিশু") -> "প্রাক"
+        clean.isNotBlank() && clean.length <= 6 -> clean
+        clean.isNotBlank() -> clean.take(5)
+        else -> "${bn(id.toString())}ম"
+    }
+}
+
+fun activeSchoolClasses(settings: Settings? = null): List<SchoolClassDef> =
+    if (settings != null) SchoolClassRegistry.activeClasses(settings.customClasses)
+    else SchoolClassRegistry.activeClasses()
+
+fun activeClassIds(settings: Settings? = null): List<Int> =
+    activeSchoolClasses(settings).map { it.id }
+
+fun classNameBn(cls: Int, settings: Settings? = null): String {
+    val found = if (settings != null) {
+        SchoolClassRegistry.findClass(cls, settings.customClasses)
+    } else {
+        SchoolClassRegistry.findClass(cls)
+    }
+    return found?.nameBn ?: CLSN.getOrNull(cls - 1) ?: bn(cls.toString())
+}
+
+fun classShortBn(cls: Int, settings: Settings? = null): String {
+    val found = if (settings != null) {
+        SchoolClassRegistry.findClass(cls, settings.customClasses)
+    } else {
+        SchoolClassRegistry.findClass(cls)
+    }
+    return found?.shortBn ?: CLS_SHORT.getOrNull(cls - 1) ?: "${bn(cls.toString())}ম"
+}
+
+fun syllabusTierForClass(cls: Int, settings: Settings? = null): Int {
+    if (cls <= 2) return 1
+    if (cls <= 5) return 3
+    val found = if (settings != null) {
+        SchoolClassRegistry.findClass(cls, settings.customClasses)
+    } else {
+        SchoolClassRegistry.findClass(cls)
+    }
+    return found?.syllabusTier ?: 3
+}
+
+fun nextAvailableCustomClassId(customClasses: List<CustomClassDef>): Int? {
+    val used = customClasses.map { it.id }.toSet()
+    return (6..20).firstOrNull { it !in used }
+}
+
 private fun comps(tb: Int, ct: Int) = listOf(
     Comp("TB", "পাঠ্যপুস্তক/শিক্ষক সহায়িকার কাজ", tb),
     Comp("ACT", "শ্রেণিকাজে সক্রিয়তা", 5),
@@ -69,7 +184,7 @@ private fun comps(tb: Int, ct: Int) = listOf(
 )
 
 fun subjectsFor(cls: Int, religion: String): List<Sub> {
-    val low = cls <= 2
+    val low = syllabusTierForClass(cls) <= 2
     fun full(k: String, n: String) =
         if (low) Sub(k, n, 100, comps(20, 20), 50) else Sub(k, n, 100, comps(10, 10), 70)
     fun half(k: String, n: String) = Sub(k, n, 50, comps(20, 20), 0)
@@ -124,7 +239,7 @@ fun Student.overallPct(): Double {
 
 fun createEmptyStudent(cls: Int, roll: Int, religion: String = "ইসলাম"): Student = Student(
     id = java.util.UUID.randomUUID().toString(),
-    cls = cls.coerceIn(1, 5),
+    cls = cls.coerceIn(1, 20),
     roll = roll.coerceAtLeast(1),
     name = "",
     religion = religion

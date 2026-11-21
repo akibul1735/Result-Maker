@@ -204,12 +204,13 @@ service cloud.firestore {
              data.school is string && data.school.size() >= 1 && data.school.size() <= 160 &&
              data.schoolAddress is string && data.schoolAddress.size() <= 240 &&
              data.year is string && data.year.size() >= 1 && data.year.size() <= 40 &&
-             data.teachers is map && data.teachers.size() <= 10 &&
-             data.teacherMobiles is map && data.teacherMobiles.size() <= 10 &&
+             data.teachers is map && data.teachers.size() <= 25 &&
+             data.teacherMobiles is map && data.teacherMobiles.size() <= 25 &&
              data.pdfFont is string && data.pdfFont.size() >= 1 && data.pdfFont.size() <= 40 &&
              data.dpeLogo in ['simple', 'color'] &&
              data.customFields is list && data.customFields.size() <= 30 &&
              (data.customFields.size() == 0 || data.customFields[0] is map) &&
+             (!('customClasses' in data) || (data.customClasses is list && data.customClasses.size() <= 15 && (data.customClasses.size() == 0 || data.customClasses[0] is map))) &&
              data.createdAt is timestamp && data.createdAt <= request.time &&
              data.updatedAt is timestamp && data.updatedAt <= request.time;
     }
@@ -228,7 +229,7 @@ service cloud.firestore {
     }
 
     function isValidStudent(data) {
-      return data.cls is int && data.cls >= 1 && data.cls <= 5 &&
+      return data.cls is int && data.cls >= 1 && data.cls <= 20 &&
              data.roll is int && data.roll >= 1 && data.roll <= 9999 &&
              data.name is string && data.name.size() <= 120 &&
              data.guardian is string && data.guardian.size() <= 120 &&
@@ -317,7 +318,7 @@ service cloud.firestore {
                        incoming().memberProfiles[request.auth.uid].uid == request.auth.uid &&
                        incoming().memberProfiles[request.auth.uid].role == 'ADMIN' &&
                        incoming().keys().hasAll(['ownerUid', 'joinCode', 'approvalRequired', 'memberUids', 'adminUids', 'memberProfiles', 'school', 'schoolAddress', 'year', 'teachers', 'teacherMobiles', 'pdfFont', 'dpeLogo', 'customFields', 'createdAt', 'updatedAt']) &&
-                       incoming().keys().hasOnly(['ownerUid', 'joinCode', 'approvalRequired', 'memberUids', 'adminUids', 'memberProfiles', 'school', 'schoolAddress', 'year', 'teachers', 'teacherMobiles', 'pdfFont', 'dpeLogo', 'customFields', 'createdAt', 'updatedAt']) &&
+                       incoming().keys().hasOnly(['ownerUid', 'joinCode', 'approvalRequired', 'memberUids', 'adminUids', 'memberProfiles', 'school', 'schoolAddress', 'year', 'teachers', 'teacherMobiles', 'pdfFont', 'dpeLogo', 'customFields', 'customClasses', 'createdAt', 'updatedAt']) &&
                        isValidSchool(incoming()) &&
                        existsAfter(/databases/$(database)/documents/schoolCodes/$(incoming().joinCode));
 
@@ -334,7 +335,7 @@ service cloud.firestore {
                            incoming().diff(existing()).affectedKeys().hasOnly([
                              'joinCode', 'approvalRequired', 'memberUids', 'adminUids', 'memberProfiles',
                              'school', 'schoolAddress', 'year', 'teachers', 'teacherMobiles',
-                             'pdfFont', 'dpeLogo', 'customFields', 'updatedAt'
+                             'pdfFont', 'dpeLogo', 'customFields', 'customClasses', 'updatedAt'
                            ])
                          ) ||
                          // Action 2: Non-owner member leaves school

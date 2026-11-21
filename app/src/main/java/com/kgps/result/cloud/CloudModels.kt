@@ -4,8 +4,9 @@ import androidx.annotation.Keep
 import com.google.firebase.Timestamp
 import com.google.firebase.firestore.DocumentId
 import com.google.firebase.firestore.IgnoreExtraProperties
-import com.kgps.result.CLS_SHORT
 import com.kgps.result.Settings
+import com.kgps.result.activeClassIds
+import com.kgps.result.classShortBn
 
 enum class MemberRole(val code: String, val labelBn: String) {
     ADMIN("ADMIN", "অ্যাডমিন"),
@@ -57,8 +58,8 @@ data class TeacherPermissions(
     fun canViewSubject(subKey: String): Boolean =
         allSubjects || subKey in allowedSubjects || canViewOtherSubjects
 
-    fun effectiveClasses(): List<Int> =
-        if (allClasses) ALL_CLASS_NUMS else allowedClasses.filter { it in 1..5 }.distinct().sorted()
+    fun effectiveClasses(availableClasses: List<Int> = activeClassIds()): List<Int> =
+        if (allClasses) availableClasses else allowedClasses.filter { it in 1..20 }.distinct().sorted()
 
     fun effectiveSubjects(): List<String> =
         if (allSubjects) ALL_SUBJECT_KEYS else allowedSubjects.filter { it in ALL_SUBJECT_KEYS }.distinct()
@@ -78,7 +79,7 @@ data class TeacherPermissions(
         val clsPart = when {
             allClasses -> "সব শ্রেণি"
             allowedClasses.isEmpty() -> "কোনো শ্রেণি নয়"
-            else -> allowedClasses.sorted().joinToString(", ") { CLS_SHORT.getOrElse(it - 1) { it.toString() } }
+            else -> allowedClasses.sorted().joinToString(", ") { classShortBn(it) }
         }
         val subPart = when {
             allSubjects -> "সব বিষয়"
@@ -97,10 +98,10 @@ data class TeacherPermissions(
         fun fullAccess(): TeacherPermissions = TeacherPermissions()
 
         fun subjectOnlyPreset(
-            classes: List<Int> = ALL_CLASS_NUMS,
+            classes: List<Int> = activeClassIds(),
             subjects: List<String> = listOf("BAN")
         ): TeacherPermissions = TeacherPermissions(
-            allClasses = classes.size == 5,
+            allClasses = classes.containsAll(activeClassIds()),
             allowedClasses = classes,
             allSubjects = false,
             allowedSubjects = subjects,
@@ -120,10 +121,10 @@ data class TeacherPermissions(
             val allClasses = (map["allClasses"] as? Boolean) ?: true
             val allowedClasses = (map["allowedClasses"] as? List<*>)
                 ?.mapNotNull { (it as? Number)?.toInt() }
-                ?.filter { it in 1..5 }
+                ?.filter { it in 1..20 }
                 ?.distinct()
                 ?.sorted()
-                ?: if (allClasses) ALL_CLASS_NUMS else emptyList()
+                ?: if (allClasses) activeClassIds() else emptyList()
 
             val allSubjects = (map["allSubjects"] as? Boolean) ?: true
             val allowedSubjects = (map["allowedSubjects"] as? List<*>)

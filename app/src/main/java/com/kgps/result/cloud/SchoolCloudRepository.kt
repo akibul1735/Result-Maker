@@ -306,6 +306,9 @@ class SchoolCloudRepository(
                 "pdfFont" to settings.pdfFont.ifBlank { "noto_serif" }.take(40),
                 "dpeLogo" to if (settings.dpeLogo == "color") "color" else "simple",
                 "customFields" to settings.customFields.take(30).map { mapOf("key" to it.key, "label" to it.label) },
+                "customClasses" to settings.customClasses.take(15).map {
+                    mapOf("id" to it.id, "nameBn" to it.nameBn, "shortBn" to it.shortBn, "syllabusTier" to it.syllabusTier)
+                },
                 "createdAt" to FieldValue.serverTimestamp(),
                 "updatedAt" to FieldValue.serverTimestamp()
             )
@@ -764,6 +767,9 @@ class SchoolCloudRepository(
                     "pdfFont" to nextSettings.pdfFont.ifBlank { "noto_serif" }.take(40),
                     "dpeLogo" to if (nextSettings.dpeLogo == "color") "color" else "simple",
                     "customFields" to nextSettings.customFields.take(30).map { mapOf("key" to it.key, "label" to it.label) },
+                    "customClasses" to nextSettings.customClasses.take(15).map {
+                        mapOf("id" to it.id, "nameBn" to it.nameBn, "shortBn" to it.shortBn, "syllabusTier" to it.syllabusTier)
+                    },
                     "updatedAt" to FieldValue.serverTimestamp()
                 )
             )
@@ -833,7 +839,7 @@ class SchoolCloudRepository(
                     "updatedByName" to name,
                     "updatedAt" to FieldValue.serverTimestamp()
                 )
-                if (existing.cls != student.cls) updates["cls"] = student.cls.coerceIn(1, 5)
+                if (existing.cls != student.cls) updates["cls"] = student.cls.coerceIn(1, 20)
                 if (existing.roll != student.roll) updates["roll"] = student.roll.coerceIn(1, 9999)
                 if (existing.name != student.name) updates["name"] = student.name.take(120)
                 if (existing.guardian != student.guardian) updates["guardian"] = student.guardian.take(120)
@@ -1066,7 +1072,7 @@ class SchoolCloudRepository(
                 } else if (prev != st) {
                     ops.add(
                         docId to mapOf(
-                            "cls" to st.cls.coerceIn(1, 5),
+                            "cls" to st.cls.coerceIn(1, 20),
                             "roll" to st.roll.coerceIn(1, 9999),
                             "name" to st.name.take(120),
                             "guardian" to st.guardian.take(120),
@@ -1138,7 +1144,7 @@ class SchoolCloudRepository(
 
     private fun buildStudentCreatePayload(s: Student, uid: String, userName: String): Map<String, Any> =
         mapOf(
-            "cls" to s.cls.coerceIn(1, 5),
+            "cls" to s.cls.coerceIn(1, 20),
             "roll" to s.roll.coerceIn(1, 9999),
             "name" to s.name.take(120),
             "guardian" to s.guardian.take(120),
@@ -1203,6 +1209,17 @@ class SchoolCloudRepository(
             CustomFieldDef(key, label)
         }
 
+        val ccRaw = doc.get("customClasses") as? List<*> ?: emptyList<Any>()
+        val customClasses = ccRaw.mapNotNull { item ->
+            val m = item as? Map<*, *> ?: return@mapNotNull null
+            val id = (m["id"] as? Number)?.toInt()?.takeIf { it in 6..20 } ?: return@mapNotNull null
+            val nameBn = (m["nameBn"] as? String)?.trim()?.takeIf { it.isNotBlank() } ?: return@mapNotNull null
+            val shortBn = (m["shortBn"] as? String)?.trim().orEmpty()
+                .ifBlank { com.kgps.result.defaultShortClassLabel(nameBn, id) }
+            val tier = ((m["syllabusTier"] as? Number)?.toInt() ?: 3).let { if (it <= 2) 1 else 3 }
+            com.kgps.result.CustomClassDef(id = id, nameBn = nameBn, shortBn = shortBn, syllabusTier = tier)
+        }.distinctBy { it.id }.sortedBy { it.id }
+
         val dpeLogo = if (doc.getString("dpeLogo") == "color") "color" else "simple"
         val settings = Settings(
             school = doc.getString("school").orEmpty(),
@@ -1212,7 +1229,8 @@ class SchoolCloudRepository(
             teacherMobiles = teacherMobiles,
             pdfFont = doc.getString("pdfFont")?.ifBlank { "noto_serif" } ?: "noto_serif",
             dpeLogo = dpeLogo,
-            customFields = customFields
+            customFields = customFields,
+            customClasses = customClasses
         )
 
         return SchoolWorkspace(
@@ -1247,7 +1265,7 @@ class SchoolCloudRepository(
 
         val st = Student(
             id = doc.id,
-            cls = ((doc.get("cls") as? Number)?.toInt() ?: 1).coerceIn(1, 5),
+            cls = ((doc.get("cls") as? Number)?.toInt() ?: 1).coerceIn(1, 20),
             roll = ((doc.get("roll") as? Number)?.toInt() ?: 1).coerceAtLeast(1),
             name = doc.getString("name").orEmpty(),
             guardian = doc.getString("guardian").orEmpty(),

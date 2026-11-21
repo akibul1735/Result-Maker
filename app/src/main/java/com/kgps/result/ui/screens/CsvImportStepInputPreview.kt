@@ -60,13 +60,14 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.kgps.result.CLS_SHORT
 import com.kgps.result.CsvRowStatus
 import com.kgps.result.CsvValidatedRow
 import com.kgps.result.CsvValidationReport
 import com.kgps.result.Repo
 import com.kgps.result.Settings
+import com.kgps.result.activeSchoolClasses
 import com.kgps.result.bn
+import com.kgps.result.classShortBn
 import com.kgps.result.ui.theme.AmberBg
 import com.kgps.result.ui.theme.AmberBorder
 import com.kgps.result.ui.theme.AmberNotice
@@ -216,7 +217,8 @@ fun CsvStepInputAndMapping(
                         horizontalArrangement = Arrangement.spacedBy(6.dp),
                         verticalArrangement = Arrangement.spacedBy(4.dp)
                     ) {
-                        (1..5).forEach { c ->
+                        activeSchoolClasses(settings).forEach { cDef ->
+                            val c = cDef.id
                             val isFallbackSel = fallbackCls == c
                             FilterChip(
                                 selected = isFallbackSel,
@@ -225,7 +227,7 @@ fun CsvStepInputAndMapping(
                                 border = appFilterChipBorder(isFallbackSel),
                                 label = {
                                     Text(
-                                        CLS_SHORT[c - 1],
+                                        cDef.shortBn,
                                         fontSize = 11.5.sp,
                                         fontWeight = if (isFallbackSel) FontWeight.Bold else FontWeight.Normal
                                     )
@@ -719,7 +721,7 @@ private fun CsvPreviewRowCard(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    val clsStr = row.resolvedCls?.let { CLS_SHORT[it - 1] } ?: "?"
+                    val clsStr = row.resolvedCls?.let { classShortBn(it) } ?: "?"
                     val rollStr = row.resolvedRoll?.let { "রোল ${bn(it.toString())}" } ?: "স্বয়ংক্রিয় রোল"
                     val nameStr = row.resolvedName.ifBlank { "(নাম নেই)" }
                     Text(

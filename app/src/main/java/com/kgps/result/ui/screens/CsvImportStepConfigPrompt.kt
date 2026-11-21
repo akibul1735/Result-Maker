@@ -1,8 +1,12 @@
 package com.kgps.result.ui.screens
 
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
@@ -23,6 +27,8 @@ import androidx.compose.material.icons.rounded.AutoAwesome
 import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.ContentCopy
 import androidx.compose.material.icons.rounded.Description
+import androidx.compose.material.icons.rounded.ExpandLess
+import androidx.compose.material.icons.rounded.ExpandMore
 import androidx.compose.material.icons.rounded.FactCheck
 import androidx.compose.material.icons.rounded.GridOn
 import androidx.compose.material.icons.rounded.Lock
@@ -33,32 +39,37 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.kgps.result.CLS_SHORT
 import com.kgps.result.CsvDelimiterFormat
 import com.kgps.result.CsvDigitMode
 import com.kgps.result.CsvImportAssistant
 import com.kgps.result.CsvImportModule
 import com.kgps.result.CsvPromptConfig
-import com.kgps.result.CustomFieldDef
 import com.kgps.result.Settings
+import com.kgps.result.activeSchoolClasses
 import com.kgps.result.bn
 import com.kgps.result.defaultSelectedColumnKeys
 import com.kgps.result.subjectsFor
@@ -78,35 +89,32 @@ import com.kgps.result.ui.theme.appFilterChipColors
 @Composable
 fun CsvStepOptions(
     config: CsvPromptConfig,
-    customFields: List<CustomFieldDef>,
+    settings: Settings,
     onConfigChange: (CsvPromptConfig) -> Unit
 ) {
-    val effectiveCls = if (config.targetCls in 1..5) config.targetCls else 3
+    val customFields = settings.customFields
+    val schoolClasses = remember(settings.customClasses) { activeSchoolClasses(settings) }
+    val effectiveCls = if (config.targetCls in 1..20) config.targetCls else 3
     val availableCols = remember(config.module, config.targetCls, config.targetTerm, config.selectedSubjectKeys, config.includeCustomFields, customFields) {
         CsvImportAssistant.availableColumnsForConfig(config, customFields)
     }
     val groupedCols = remember(availableCols) { availableCols.groupBy { it.group } }
     val selectedCount = availableCols.count { it.required || config.selectedColumnKeys.contains(it.key) }
+    var columnsExpanded by remember { mutableStateOf(false) }
 
     Column(
         modifier = Modifier
             .fillMaxSize()
             .verticalScroll(rememberScrollState())
-            .padding(horizontal = 16.dp, vertical = 12.dp),
-        verticalArrangement = Arrangement.spacedBy(14.dp)
+            .padding(horizontal = 12.dp, vertical = 8.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
-        Text(
-            "১. কী ধরনের ডেটা ইমপোর্ট করতে চান তা বেছে নিন",
-            style = MaterialTheme.typography.titleMedium,
-            color = SlateText
-        )
-
-        // Module cards (2x2 or stacked gracefully)
-        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        // 1. Compact 2x2 single-row module pills
+        Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
             CsvImportModule.entries.chunked(2).forEach { pair ->
                 Row(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
                     pair.forEach { mod ->
                         val selected = config.module == mod
@@ -119,6 +127,7 @@ fun CsvStepOptions(
                         Surface(
                             modifier = Modifier
                                 .weight(1f)
+                                .clip(RoundedCornerShape(10.dp))
                                 .testTag("csv_module_${mod.id}")
                                 .clickable {
                                     val nextCols = defaultSelectedColumnKeys(
@@ -130,42 +139,31 @@ fun CsvStepOptions(
                                     )
                                     onConfigChange(config.copy(module = mod, selectedColumnKeys = nextCols))
                                 },
-                            shape = RoundedCornerShape(12.dp),
-                            color = if (selected) TealContainer.copy(alpha = 0.7f) else Color.White,
+                            shape = RoundedCornerShape(10.dp),
+                            color = if (selected) TealContainer.copy(alpha = 0.75f) else Color.White,
                             border = BorderStroke(
-                                width = if (selected) 2.dp else 1.dp,
+                                width = if (selected) 1.5.dp else 1.dp,
                                 color = if (selected) TealPrimary else SlateOutline
-                            ),
-                            tonalElevation = if (selected) 2.dp else 0.dp
+                            )
                         ) {
-                            Column(
-                                modifier = Modifier.padding(12.dp),
-                                verticalArrangement = Arrangement.spacedBy(4.dp)
+                            Row(
+                                modifier = Modifier.padding(horizontal = 9.dp, vertical = 9.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
                             ) {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                                ) {
-                                    Icon(
-                                        icon,
-                                        contentDescription = null,
-                                        tint = if (selected) TealPrimary else SlateMuted,
-                                        modifier = Modifier.size(18.dp)
-                                    )
-                                    Text(
-                                        mod.titleBn,
-                                        fontWeight = FontWeight.Bold,
-                                        fontSize = 13.sp,
-                                        color = if (selected) TealDark else SlateText,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis
-                                    )
-                                }
+                                Icon(
+                                    icon,
+                                    contentDescription = null,
+                                    tint = if (selected) TealPrimary else SlateMuted,
+                                    modifier = Modifier.size(16.dp)
+                                )
                                 Text(
-                                    mod.subtitleBn,
-                                    fontSize = 11.sp,
-                                    lineHeight = 15.sp,
-                                    color = SlateMuted
+                                    mod.titleBn,
+                                    fontWeight = if (selected) FontWeight.Bold else FontWeight.SemiBold,
+                                    fontSize = 12.sp,
+                                    color = if (selected) TealDark else SlateText,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
                                 )
                             }
                         }
@@ -174,25 +172,31 @@ fun CsvStepOptions(
             }
         }
 
-        // Target Class & Term
+        // 2. Compact Class, Term & Subjects card
         Card(
             colors = CardDefaults.cardColors(containerColor = SlateBg),
             border = BorderStroke(1.dp, SlateOutline),
-            shape = RoundedCornerShape(12.dp)
+            shape = RoundedCornerShape(10.dp)
         ) {
             Column(
-                modifier = Modifier.padding(12.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp)
+                modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp)
             ) {
-                Text("শ্রেণি ও প্রান্তিক নির্বাচন", fontWeight = FontWeight.SemiBold, fontSize = 13.sp, color = SlateText)
-                FlowRow(
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(5.dp),
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    (1..5).forEach { c ->
+                    Text("শ্রেণি:", fontWeight = FontWeight.SemiBold, fontSize = 11.5.sp, color = SlateMuted)
+                    schoolClasses.forEach { cDef ->
+                        val c = cDef.id
                         val isClsSelected = config.targetCls == c
-                        FilterChip(
+                        CompactOptionPill(
+                            label = cDef.shortBn,
                             selected = isClsSelected,
+                            testTag = "csv_opt_cls_$c",
                             onClick = {
                                 val nextCols = defaultSelectedColumnKeys(
                                     module = config.module,
@@ -202,22 +206,13 @@ fun CsvStepOptions(
                                     selectedSubjects = config.selectedSubjectKeys
                                 )
                                 onConfigChange(config.copy(targetCls = c, selectedColumnKeys = nextCols))
-                            },
-                            colors = appFilterChipColors(),
-                            border = appFilterChipBorder(isClsSelected),
-                            label = {
-                                Text(
-                                    "${CLS_SHORT[c - 1]} শ্রেণি",
-                                    fontSize = 12.sp,
-                                    fontWeight = if (isClsSelected) FontWeight.Bold else FontWeight.Normal
-                                )
-                            },
-                            modifier = Modifier.testTag("csv_opt_cls_$c")
+                            }
                         )
                     }
-                    val isMultiSelected = config.targetCls == 0
-                    FilterChip(
-                        selected = isMultiSelected,
+                    CompactOptionPill(
+                        label = "একাধিক",
+                        selected = config.targetCls == 0,
+                        testTag = "csv_opt_cls_multi",
                         onClick = {
                             val nextCols = defaultSelectedColumnKeys(
                                 module = config.module,
@@ -227,29 +222,24 @@ fun CsvStepOptions(
                                 selectedSubjects = config.selectedSubjectKeys
                             )
                             onConfigChange(config.copy(targetCls = 0, selectedColumnKeys = nextCols))
-                        },
-                        colors = appFilterChipColors(),
-                        border = appFilterChipBorder(isMultiSelected),
-                        label = {
-                            Text(
-                                "একাধিক শ্রেণি",
-                                fontSize = 12.sp,
-                                fontWeight = if (isMultiSelected) FontWeight.Bold else FontWeight.Normal
-                            )
-                        },
-                        modifier = Modifier.testTag("csv_opt_cls_multi")
+                        }
                     )
                 }
 
                 if (config.module != CsvImportModule.STUDENT_PROFILE) {
-                    FlowRow(
-                        horizontalArrangement = Arrangement.spacedBy(6.dp),
-                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(5.dp),
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
+                        Text("প্রান্তিক:", fontWeight = FontWeight.SemiBold, fontSize = 11.5.sp, color = SlateMuted)
                         (1..3).forEach { t ->
-                            val isTermSelected = config.targetTerm == t
-                            FilterChip(
-                                selected = isTermSelected,
+                            CompactOptionPill(
+                                label = "${bn(t.toString())}ম",
+                                selected = config.targetTerm == t,
+                                testTag = "csv_opt_term_$t",
                                 onClick = {
                                     val nextCols = defaultSelectedColumnKeys(
                                         module = config.module,
@@ -259,32 +249,26 @@ fun CsvStepOptions(
                                         selectedSubjects = config.selectedSubjectKeys
                                     )
                                     onConfigChange(config.copy(targetTerm = t, selectedColumnKeys = nextCols))
-                                },
-                                colors = appFilterChipColors(),
-                                border = appFilterChipBorder(isTermSelected),
-                                label = {
-                                    Text(
-                                        "${bn(t.toString())}ম প্রান্তিক",
-                                        fontSize = 12.sp,
-                                        fontWeight = if (isTermSelected) FontWeight.Bold else FontWeight.Normal
-                                    )
-                                },
-                                modifier = Modifier.testTag("csv_opt_term_$t")
+                                }
                             )
                         }
                     }
                 }
 
                 if (config.module == CsvImportModule.TERM_MARKS || config.module == CsvImportModule.FULL_RECORD) {
-                    val clsSubjects = remember(effectiveCls) { subjectsFor(effectiveCls, "ইসলাম") }
-                    Text("বিষয়সমূহ (ফাঁকা বা সবগুলো একসাথে বেছে নিন):", fontSize = 11.5.sp, color = SlateMuted)
-                    FlowRow(
-                        horizontalArrangement = Arrangement.spacedBy(6.dp),
-                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                    val clsSubjects = remember(effectiveCls, settings.customClasses) { subjectsFor(effectiveCls, "ইসলাম") }
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(5.dp),
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        val allSubsSelected = config.selectedSubjectKeys.isEmpty()
-                        FilterChip(
-                            selected = allSubsSelected,
+                        Text("বিষয়:", fontWeight = FontWeight.SemiBold, fontSize = 11.5.sp, color = SlateMuted)
+                        CompactOptionPill(
+                            label = "সব",
+                            selected = config.selectedSubjectKeys.isEmpty(),
+                            testTag = "csv_opt_sub_all",
                             onClick = {
                                 val nextCols = defaultSelectedColumnKeys(
                                     module = config.module,
@@ -294,22 +278,14 @@ fun CsvStepOptions(
                                     selectedSubjects = emptySet()
                                 )
                                 onConfigChange(config.copy(selectedSubjectKeys = emptySet(), selectedColumnKeys = nextCols))
-                            },
-                            colors = appFilterChipColors(),
-                            border = appFilterChipBorder(allSubsSelected),
-                            label = {
-                                Text(
-                                    "সব বিষয়",
-                                    fontSize = 11.5.sp,
-                                    fontWeight = if (allSubsSelected) FontWeight.Bold else FontWeight.Normal
-                                )
-                            },
-                            modifier = Modifier.testTag("csv_opt_sub_all")
+                            }
                         )
                         clsSubjects.forEach { s ->
                             val isSelected = config.selectedSubjectKeys.contains(s.key)
-                            FilterChip(
+                            CompactOptionPill(
+                                label = s.bn.substringBefore(" ("),
                                 selected = isSelected,
+                                testTag = "csv_opt_sub_${s.key}",
                                 onClick = {
                                     val nextSubs = if (isSelected) {
                                         config.selectedSubjectKeys - s.key
@@ -324,17 +300,7 @@ fun CsvStepOptions(
                                         selectedSubjects = nextSubs
                                     )
                                     onConfigChange(config.copy(selectedSubjectKeys = nextSubs, selectedColumnKeys = nextCols))
-                                },
-                                colors = appFilterChipColors(),
-                                border = appFilterChipBorder(isSelected),
-                                label = {
-                                    Text(
-                                        s.bn.substringBefore(" ("),
-                                        fontSize = 11.5.sp,
-                                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
-                                    )
-                                },
-                                modifier = Modifier.testTag("csv_opt_sub_${s.key}")
+                                }
                             )
                         }
                     }
@@ -342,36 +308,40 @@ fun CsvStepOptions(
             }
         }
 
-        // Columns toggle card
+        // 3. Collapsible Columns Card (collapsed by default)
         Card(
             colors = CardDefaults.cardColors(containerColor = Color.White),
             border = BorderStroke(1.dp, SlateOutline),
-            shape = RoundedCornerShape(12.dp)
+            shape = RoundedCornerShape(10.dp)
         ) {
-            Column(
-                modifier = Modifier.padding(12.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
+            Column(modifier = Modifier.fillMaxWidth()) {
                 Row(
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { columnsExpanded = !columnsExpanded }
+                        .padding(start = 10.dp, end = 6.dp, top = 5.dp, bottom = 5.dp)
+                        .testTag("csv_cols_expand_toggle"),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(
-                        "প্রয়োজনীয় কলাম (${bn(selectedCount.toString())}/${bn(availableCols.size.toString())}টি)",
+                        "কলাম (${bn(selectedCount.toString())}/${bn(availableCols.size.toString())}টি)",
                         fontWeight = FontWeight.SemiBold,
-                        fontSize = 13.sp,
+                        fontSize = 12.sp,
                         color = SlateText
                     )
-                    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(2.dp)
+                    ) {
                         TextButton(
                             onClick = {
                                 onConfigChange(config.copy(selectedColumnKeys = availableCols.map { it.key }.toSet()))
                             },
-                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
-                            modifier = Modifier.testTag("csv_cols_select_all_btn")
+                            contentPadding = PaddingValues(horizontal = 6.dp, vertical = 0.dp),
+                            modifier = Modifier.height(28.dp).testTag("csv_cols_select_all_btn")
                         ) {
-                            Text("সব দিন", fontSize = 11.5.sp)
+                            Text("সব", fontSize = 11.sp)
                         }
                         TextButton(
                             onClick = {
@@ -381,132 +351,208 @@ fun CsvStepOptions(
                                     )
                                 )
                             },
-                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
-                            modifier = Modifier.testTag("csv_cols_required_only_btn")
+                            contentPadding = PaddingValues(horizontal = 6.dp, vertical = 0.dp),
+                            modifier = Modifier.height(28.dp).testTag("csv_cols_required_only_btn")
                         ) {
-                            Text("শুধু জরুরি", fontSize = 11.5.sp)
+                            Text("জরুরি", fontSize = 11.sp)
                         }
+                        Icon(
+                            if (columnsExpanded) Icons.Rounded.ExpandLess else Icons.Rounded.ExpandMore,
+                            contentDescription = if (columnsExpanded) "সংকুচিত করুন" else "কলাম দেখুন",
+                            tint = SlateMuted,
+                            modifier = Modifier.size(18.dp)
+                        )
                     }
                 }
 
-                groupedCols.forEach { (groupName, groupCols) ->
-                    Text(groupName, fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = TealDark)
-                    FlowRow(
-                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                AnimatedVisibility(visible = columnsExpanded) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(start = 10.dp, end = 10.dp, bottom = 10.dp),
                         verticalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
-                        groupCols.forEach { col ->
-                            val isChecked = col.required || config.selectedColumnKeys.contains(col.key)
-                            FilterChip(
-                                selected = isChecked,
-                                onClick = {
-                                    if (!col.required) {
-                                        val next = if (isChecked) {
-                                            config.selectedColumnKeys - col.key
+                        HorizontalDivider(color = SlateOutline.copy(alpha = 0.6f))
+                        groupedCols.forEach { (groupName, groupCols) ->
+                            Text(groupName, fontSize = 10.5.sp, fontWeight = FontWeight.SemiBold, color = TealDark)
+                            FlowRow(
+                                horizontalArrangement = Arrangement.spacedBy(5.dp),
+                                verticalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                groupCols.forEach { col ->
+                                    val isChecked = col.required || config.selectedColumnKeys.contains(col.key)
+                                    FilterChip(
+                                        selected = isChecked,
+                                        onClick = {
+                                            if (!col.required) {
+                                                val next = if (isChecked) {
+                                                    config.selectedColumnKeys - col.key
+                                                } else {
+                                                    config.selectedColumnKeys + col.key
+                                                }
+                                                onConfigChange(config.copy(selectedColumnKeys = next))
+                                            }
+                                        },
+                                        leadingIcon = {
+                                            if (col.required) {
+                                                Icon(Icons.Rounded.Lock, contentDescription = "আবশ্যক", modifier = Modifier.size(13.dp))
+                                            } else if (isChecked) {
+                                                Icon(Icons.Rounded.Check, contentDescription = null, modifier = Modifier.size(13.dp))
+                                            }
+                                        },
+                                        colors = if (col.required) {
+                                            FilterChipDefaults.filterChipColors(
+                                                selectedContainerColor = TealContainer,
+                                                selectedLabelColor = TealDark,
+                                                selectedLeadingIconColor = TealDark
+                                            )
                                         } else {
-                                            config.selectedColumnKeys + col.key
-                                        }
-                                        onConfigChange(config.copy(selectedColumnKeys = next))
-                                    }
-                                },
-                                leadingIcon = {
-                                    if (col.required) {
-                                        Icon(Icons.Rounded.Lock, contentDescription = "আবশ্যক", modifier = Modifier.size(14.dp))
-                                    } else if (isChecked) {
-                                        Icon(Icons.Rounded.Check, contentDescription = null, modifier = Modifier.size(14.dp))
-                                    }
-                                },
-                                colors = if (col.required) {
-                                    FilterChipDefaults.filterChipColors(
-                                        selectedContainerColor = TealContainer,
-                                        selectedLabelColor = TealDark,
-                                        selectedLeadingIconColor = TealDark
+                                            appFilterChipColors()
+                                        },
+                                        border = appFilterChipBorder(isChecked),
+                                        label = {
+                                            Text(
+                                                col.labelBn,
+                                                fontSize = 11.sp,
+                                                fontWeight = if (isChecked) FontWeight.SemiBold else FontWeight.Normal
+                                            )
+                                        },
+                                        modifier = Modifier.testTag("csv_col_toggle_${col.key}")
                                     )
-                                } else {
-                                    appFilterChipColors()
-                                },
-                                border = appFilterChipBorder(isChecked),
-                                label = {
-                                    Text(
-                                        col.labelBn,
-                                        fontSize = 11.5.sp,
-                                        fontWeight = if (isChecked) FontWeight.SemiBold else FontWeight.Normal
-                                    )
-                                },
-                                modifier = Modifier.testTag("csv_col_toggle_${col.key}")
-                            )
+                                }
+                            }
                         }
                     }
                 }
             }
         }
 
-        // Format & Digit Style
+        // 4. Compact Format, Digit Mode & Note card
         Card(
             colors = CardDefaults.cardColors(containerColor = SlateBg),
             border = BorderStroke(1.dp, SlateOutline),
-            shape = RoundedCornerShape(12.dp)
+            shape = RoundedCornerShape(10.dp)
         ) {
             Column(
-                modifier = Modifier.padding(12.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp)
+                modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp)
             ) {
-                Text("আউটপুট ফরম্যাট ও সংখ্যার ধরন", fontWeight = FontWeight.SemiBold, fontSize = 13.sp, color = SlateText)
-                FlowRow(
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(6.dp),
-                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    CsvDelimiterFormat.entries.forEach { fmtOpt ->
-                        val isFmtSelected = config.format == fmtOpt
-                        FilterChip(
-                            selected = isFmtSelected,
-                            onClick = { onConfigChange(config.copy(format = fmtOpt)) },
-                            colors = appFilterChipColors(),
-                            border = appFilterChipBorder(isFmtSelected),
-                            label = {
-                                Text(
-                                    fmtOpt.labelBn,
-                                    fontSize = 12.sp,
-                                    fontWeight = if (isFmtSelected) FontWeight.Bold else FontWeight.Normal
-                                )
-                            },
-                            modifier = Modifier.testTag("csv_fmt_${fmtOpt.id}")
-                        )
+                    // Format segmented control
+                    Surface(
+                        color = Color.White,
+                        border = BorderStroke(1.dp, SlateOutline),
+                        shape = RoundedCornerShape(8.dp),
+                        modifier = Modifier.weight(1.1f)
+                    ) {
+                        Row(Modifier.padding(2.dp), horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+                            CsvDelimiterFormat.entries.forEach { fmtOpt ->
+                                val isFmtSelected = config.format == fmtOpt
+                                Box(
+                                    contentAlignment = Alignment.Center,
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .clip(RoundedCornerShape(6.dp))
+                                        .background(if (isFmtSelected) TealPrimary else Color.Transparent)
+                                        .clickable { onConfigChange(config.copy(format = fmtOpt)) }
+                                        .padding(horizontal = 4.dp, vertical = 6.dp)
+                                        .testTag("csv_fmt_${fmtOpt.id}")
+                                ) {
+                                    Text(
+                                        text = when (fmtOpt) {
+                                            CsvDelimiterFormat.COMMA -> "CSV"
+                                            CsvDelimiterFormat.TAB -> "ট্যাব"
+                                            CsvDelimiterFormat.SEMICOLON -> "; CSV"
+                                        },
+                                        fontSize = 11.sp,
+                                        fontWeight = if (isFmtSelected) FontWeight.Bold else FontWeight.Medium,
+                                        color = if (isFmtSelected) Color.White else SlateText,
+                                        maxLines = 1,
+                                        textAlign = TextAlign.Center
+                                    )
+                                }
+                            }
+                        }
+                    }
+
+                    // Digit segmented control
+                    Surface(
+                        color = Color.White,
+                        border = BorderStroke(1.dp, SlateOutline),
+                        shape = RoundedCornerShape(8.dp),
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Row(Modifier.padding(2.dp), horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+                            CsvDigitMode.entries.forEach { digitOpt ->
+                                val isDigitSelected = config.digitMode == digitOpt
+                                Box(
+                                    contentAlignment = Alignment.Center,
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .clip(RoundedCornerShape(6.dp))
+                                        .background(if (isDigitSelected) TealPrimary else Color.Transparent)
+                                        .clickable { onConfigChange(config.copy(digitMode = digitOpt)) }
+                                        .padding(horizontal = 4.dp, vertical = 6.dp)
+                                        .testTag("csv_digit_${digitOpt.id}")
+                                ) {
+                                    Text(
+                                        text = if (digitOpt == CsvDigitMode.ENGLISH) "0-9" else "০-৯",
+                                        fontSize = 11.sp,
+                                        fontWeight = if (isDigitSelected) FontWeight.Bold else FontWeight.Medium,
+                                        color = if (isDigitSelected) Color.White else SlateText,
+                                        maxLines = 1,
+                                        textAlign = TextAlign.Center
+                                    )
+                                }
+                            }
+                        }
                     }
                 }
-                FlowRow(
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                    verticalArrangement = Arrangement.spacedBy(6.dp)
-                ) {
-                    CsvDigitMode.entries.forEach { digitOpt ->
-                        val isDigitSelected = config.digitMode == digitOpt
-                        FilterChip(
-                            selected = isDigitSelected,
-                            onClick = { onConfigChange(config.copy(digitMode = digitOpt)) },
-                            colors = appFilterChipColors(),
-                            border = appFilterChipBorder(isDigitSelected),
-                            label = {
-                                Text(
-                                    digitOpt.labelBn,
-                                    fontSize = 12.sp,
-                                    fontWeight = if (isDigitSelected) FontWeight.Bold else FontWeight.Normal
-                                )
-                            },
-                            modifier = Modifier.testTag("csv_digit_${digitOpt.id}")
-                        )
-                    }
-                }
+
                 OutlinedTextField(
                     value = config.extraInstruction,
                     onValueChange = { onConfigChange(config.copy(extraInstruction = it)) },
-                    label = { Text("AI-কে অতিরিক্ত নির্দেশনা (ঐচ্ছিক, যেমন: রোল ১-৩০)", fontSize = 11.5.sp) },
+                    placeholder = { Text("অতিরিক্ত নির্দেশনা (ঐচ্ছিক, যেমন: রোল ১-৩০)", fontSize = 11.sp) },
                     singleLine = true,
+                    textStyle = TextStyle(fontSize = 12.sp),
+                    shape = RoundedCornerShape(8.dp),
                     modifier = Modifier
                         .fillMaxWidth()
                         .testTag("csv_extra_instruction_input")
                 )
             }
         }
+    }
+}
+
+@Composable
+private fun CompactOptionPill(
+    label: String,
+    selected: Boolean,
+    testTag: String,
+    onClick: () -> Unit
+) {
+    Surface(
+        color = if (selected) TealPrimary else Color.White,
+        border = BorderStroke(1.dp, if (selected) TealPrimary else SlateOutline),
+        shape = RoundedCornerShape(8.dp),
+        modifier = Modifier
+            .clip(RoundedCornerShape(8.dp))
+            .clickable(onClick = onClick)
+            .testTag(testTag)
+    ) {
+        Text(
+            text = label,
+            fontSize = 11.5.sp,
+            fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
+            color = if (selected) Color.White else SlateText,
+            maxLines = 1,
+            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
+        )
     }
 }
 

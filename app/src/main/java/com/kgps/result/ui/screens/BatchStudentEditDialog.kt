@@ -58,13 +58,15 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
-import com.kgps.result.CLSN
 import com.kgps.result.DEFAULT_DISTRICT
 import com.kgps.result.DEFAULT_UPAZILA
 import com.kgps.result.RELIGIONS
 import com.kgps.result.Settings
 import com.kgps.result.Student
+import com.kgps.result.activeClassIds
 import com.kgps.result.bn
+import com.kgps.result.classNameBn
+import com.kgps.result.classShortBn
 import com.kgps.result.cloud.TeacherPermissions
 import com.kgps.result.fromBn
 import com.kgps.result.ui.theme.EmeraldGrade
@@ -110,7 +112,8 @@ fun BatchStudentEditDialog(
     onDismiss: () -> Unit,
     onApply: (studentIds: Set<String>, patch: BatchStudentUpdatePatch) -> Unit
 ) {
-    val allowedClasses = remember(permissions) { permissions.effectiveClasses() }
+    val availableClassIds = remember(settings.customClasses) { activeClassIds(settings) }
+    val allowedClasses = remember(permissions, availableClassIds) { permissions.effectiveClasses(availableClassIds) }
     val accessibleStudents = remember(students, allowedClasses) {
         students
             .filter { it.cls in allowedClasses }
@@ -343,7 +346,7 @@ fun BatchStudentEditDialog(
                                     onClick = { classFilter = c },
                                     colors = appFilterChipColors(),
                                     border = appFilterChipBorder(isSel),
-                                    label = { Text("${CLSN[c - 1]} (${bn(cnt.toString())})", fontSize = 11.5.sp) }
+                                    label = { Text("${classNameBn(c, settings)} (${bn(cnt.toString())})", fontSize = 11.5.sp) }
                                 )
                             }
                         }
@@ -430,7 +433,7 @@ fun BatchStudentEditDialog(
                                                 shape = RoundedCornerShape(6.dp)
                                             ) {
                                                 Text(
-                                                    "${CLSN[s.cls - 1].take(2)}·${bn(s.roll.toString().padStart(2, '0'))}",
+                                                    "${classShortBn(s.cls, settings)}·${bn(s.roll.toString().padStart(2, '0'))}",
                                                     fontSize = 11.sp,
                                                     fontWeight = FontWeight.Bold,
                                                     color = TealDark,

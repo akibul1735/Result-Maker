@@ -120,8 +120,6 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.core.content.FileProvider
 import com.kgps.result.AiAssistantState
-import com.kgps.result.CLSN
-import com.kgps.result.CLS_SHORT
 import com.kgps.result.RELIGIONS
 import com.kgps.result.Student
 import com.kgps.result.ai.AiModelMode
@@ -135,6 +133,8 @@ import com.kgps.result.ai.RowValidationReport
 import com.kgps.result.ai.ScannedStudentRow
 import com.kgps.result.ai.validateScannedStudentRow
 import com.kgps.result.bn
+import com.kgps.result.classNameBn
+import com.kgps.result.classShortBn
 import com.kgps.result.cloud.TeacherPermissions
 import com.kgps.result.fmt
 import com.kgps.result.fmtEn
@@ -496,7 +496,7 @@ fun AiAssistantScreen(
                                 ) {
                                     Text(
                                         selectedStudent?.let {
-                                            "${CLS_SHORT[it.cls - 1]}·${bn(it.roll.toString())} ${it.name}"
+                                            "${classShortBn(it.cls)}·${bn(it.roll.toString())} ${it.name}"
                                         } ?: "প্রসঙ্গ: সাধারণ",
                                         fontSize = 11.5.sp,
                                         fontWeight = if (selectedStudent != null) FontWeight.SemiBold else FontWeight.Normal,
@@ -535,7 +535,7 @@ fun AiAssistantScreen(
                                         modifier = Modifier.background(if (isStuSel) TealContainer else Color.Transparent),
                                         text = {
                                             Text(
-                                                "${CLSN[s.cls - 1]} · রোল ${bn(s.roll.toString())} — ${s.name.ifBlank { "(নাম নেই)" }}",
+                                                "${classNameBn(s.cls)} · রোল ${bn(s.roll.toString())} — ${s.name.ifBlank { "(নাম নেই)" }}",
                                                 fontWeight = if (isStuSel) FontWeight.Bold else FontWeight.Normal,
                                                 color = if (isStuSel) TealDark else SlateText
                                             )
@@ -967,7 +967,7 @@ fun AiAssistantScreen(
                                 ) {
                                     Column(Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                                         Text(
-                                            "শিক্ষার্থী: ${ext.student.name ?: "অজানা"} · শ্রেণি: ${ext.student.cls?.let { CLSN[it - 1] } ?: "—"} · রোল: ${ext.student.roll?.let { bn(it.toString()) } ?: "—"}",
+                                            "শিক্ষার্থী: ${ext.student.name ?: "অজানা"} · শ্রেণি: ${ext.student.cls?.let { classNameBn(it) } ?: "—"} · রোল: ${ext.student.roll?.let { bn(it.toString()) } ?: "—"}",
                                             fontWeight = FontWeight.SemiBold,
                                             fontSize = 13.sp
                                         )
@@ -1470,7 +1470,7 @@ private fun ClassSheetPreviewSection(
                         shape = RoundedCornerShape(8.dp),
                         contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)
                     ) {
-                        Text("${CLSN[sheet.cls - 1]} শ্রেণি", fontSize = 11.5.sp, maxLines = 1, modifier = Modifier.weight(1f))
+                        Text("${classNameBn(sheet.cls)} শ্রেণি", fontSize = 11.5.sp, maxLines = 1, modifier = Modifier.weight(1f))
                         Icon(Icons.Rounded.ArrowDropDown, contentDescription = null, modifier = Modifier.size(16.dp))
                     }
                     DropdownMenu(expanded = clsDrop, onDismissRequest = { clsDrop = false }) {
@@ -1480,7 +1480,7 @@ private fun ClassSheetPreviewSection(
                                 modifier = Modifier.background(if (isClsSel) TealContainer else Color.Transparent),
                                 text = {
                                     Text(
-                                        "${CLSN[c - 1]} শ্রেণি",
+                                        "${classNameBn(c)} শ্রেণি",
                                         fontWeight = if (isClsSel) FontWeight.Bold else FontWeight.Normal,
                                         color = if (isClsSel) TealDark else SlateText
                                     )

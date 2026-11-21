@@ -96,7 +96,7 @@ fun SmartCsvImportDialog(
     }
 
     var promptConfig by remember(defaultCls, settings.customFields) {
-        val safeCls = defaultCls.coerceIn(1, 5)
+        val safeCls = defaultCls.coerceIn(1, 20)
         mutableStateOf(
             CsvPromptConfig(
                 module = CsvImportModule.STUDENT_PROFILE,
@@ -114,7 +114,7 @@ fun SmartCsvImportDialog(
     var promptCopiedRecently by remember { mutableStateOf(false) }
 
     var rawText by remember(initialText) { mutableStateOf(initialText) }
-    var fallbackCls by remember(defaultCls) { mutableStateOf(defaultCls.coerceIn(1, 5)) }
+    var fallbackCls by remember(defaultCls) { mutableStateOf(defaultCls.coerceIn(1, 20)) }
     val parsedRows = remember(rawText) {
         if (rawText.isBlank()) emptyList() else Repo.parseCsv(rawText)
     }
@@ -193,56 +193,50 @@ fun SmartCsvImportDialog(
             tonalElevation = 4.dp
         ) {
             Column(modifier = Modifier.fillMaxSize()) {
-                // Header
+                // Compact Header + Stepper
                 Surface(color = TealSoft) {
                     Column {
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(start = 16.dp, end = 8.dp, top = 10.dp, bottom = 6.dp),
+                                .padding(start = 14.dp, end = 6.dp, top = 6.dp, bottom = 2.dp),
                             horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Row(
                                 verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                horizontalArrangement = Arrangement.spacedBy(7.dp),
                                 modifier = Modifier.weight(1f)
                             ) {
                                 Icon(
                                     Icons.Rounded.AutoAwesome,
                                     contentDescription = null,
                                     tint = TealPrimary,
-                                    modifier = Modifier.size(20.dp)
+                                    modifier = Modifier.size(18.dp)
                                 )
-                                Column {
-                                    Text(
-                                        "স্মার্ট AI ও CSV ইমপোর্ট",
-                                        style = MaterialTheme.typography.titleMedium,
-                                        color = TealDark
-                                    )
-                                    Text(
-                                        "অপশন বেছে প্রম্পট নিন → AI CSV পেস্ট/আপলোড → প্রিভিউ ও সেভ",
-                                        fontSize = 11.sp,
-                                        color = SlateMuted,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis
-                                    )
-                                }
+                                Text(
+                                    "স্মার্ট AI ও CSV ইমপোর্ট",
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 15.sp,
+                                    color = TealDark,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
                             }
                             IconButton(
                                 onClick = onDismiss,
-                                modifier = Modifier.testTag("csv_dialog_close_btn")
+                                modifier = Modifier.size(40.dp).testTag("csv_dialog_close_btn")
                             ) {
-                                Icon(Icons.Rounded.Close, contentDescription = "বন্ধ করুন", tint = SlateText)
+                                Icon(Icons.Rounded.Close, contentDescription = "বন্ধ করুন", tint = SlateText, modifier = Modifier.size(20.dp))
                             }
                         }
 
-                        // 4-step interactive stepper
+                        // Compact 4-step interactive stepper
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(horizontal = 12.dp, vertical = 8.dp),
-                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                .padding(horizontal = 10.dp, vertical = 5.dp),
+                            horizontalArrangement = Arrangement.spacedBy(5.dp)
                         ) {
                             CsvWizardStep.entries.forEach { step ->
                                 val active = currentStep == step
@@ -263,18 +257,18 @@ fun SmartCsvImportDialog(
                                         .weight(1f)
                                         .testTag("csv_step_tab_${step.num}")
                                         .clickable { currentStep = step },
-                                    shape = RoundedCornerShape(10.dp),
+                                    shape = RoundedCornerShape(8.dp),
                                     color = bg,
                                     border = BorderStroke(1.dp, if (active || done) TealPrimary.copy(alpha = 0.4f) else SlateOutline)
                                 ) {
                                     Row(
-                                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 8.dp),
+                                        modifier = Modifier.padding(horizontal = 4.dp, vertical = 6.dp),
                                         horizontalArrangement = Arrangement.Center,
                                         verticalAlignment = Alignment.CenterVertically
                                     ) {
                                         Text(
                                             "${bn(step.num.toString())}. ${step.shortTitle}",
-                                            fontSize = 11.5.sp,
+                                            fontSize = 11.sp,
                                             fontWeight = if (active) FontWeight.Bold else FontWeight.SemiBold,
                                             color = fg,
                                             maxLines = 1,
@@ -293,7 +287,7 @@ fun SmartCsvImportDialog(
                     when (currentStep) {
                         CsvWizardStep.OPTIONS -> CsvStepOptions(
                             config = promptConfig,
-                            customFields = settings.customFields,
+                            settings = settings,
                             onConfigChange = {
                                 promptConfig = it
                                 promptCopiedRecently = false
@@ -368,7 +362,7 @@ fun SmartCsvImportDialog(
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(horizontal = 14.dp, vertical = 10.dp),
+                            .padding(horizontal = 12.dp, vertical = 7.dp),
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {

@@ -13,12 +13,14 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.KeyboardArrowRight
 import androidx.compose.material.icons.rounded.Add
+import androidx.compose.material.icons.rounded.AddCircleOutline
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.FolderOpen
 import androidx.compose.material.icons.rounded.Lock
@@ -47,12 +49,14 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.kgps.result.CLSN
 import com.kgps.result.Settings
 import com.kgps.result.Student
+import com.kgps.result.activeClassIds
 import com.kgps.result.bn
+import com.kgps.result.classNameBn
 import com.kgps.result.cloud.TeacherPermissions
 import com.kgps.result.fromBn
+import com.kgps.result.ui.components.AddCustomClassDialog
 import com.kgps.result.ui.components.TreeBranchItem
 import com.kgps.result.ui.components.TreeGroupCard
 import com.kgps.result.ui.theme.AmberNotice
@@ -70,14 +74,20 @@ fun RosterScreen(
     settings: Settings,
     cls: Int,
     permissions: TeacherPermissions,
+    isAdmin: Boolean = false,
+    onAddCustomClass: ((nameBn: String, shortBn: String, syllabusTier: Int) -> Boolean)? = null,
     onSelectClass: (Int) -> Unit,
     onOpenStudent: (Student) -> Unit,
     onNewStudentInClass: (Int) -> Unit
 ) {
     var query by remember { mutableStateOf("") }
-    var expandedClass by remember(cls) { mutableStateOf<Int?>(cls) }
+    var expandedClass by remember { mutableStateOf<Int?>(null) }
+    var showAddClassDialog by remember { mutableStateOf(false) }
 
-    val visibleClasses = remember(permissions) { permissions.effectiveClasses() }
+    val availableClassIds = remember(settings.customClasses) { activeClassIds(settings) }
+    val visibleClasses = remember(permissions, availableClassIds) {
+        permissions.effectiveClasses(availableClassIds)
+    }
     val q = query.trim().lowercase()
     val qDigits = fromBn(q)
 
@@ -138,9 +148,44 @@ fun RosterScreen(
                 shape = RoundedCornerShape(12.dp)
             )
 
-            Spacer(Modifier.height(8.dp))
+            Spacer(Modifier.height(6.dp))
 
-            // Pure Class -> Student List Tree
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    "শ্রেণিতে ট্যাপ করে শিক্ষার্থী দেখুন (${bn(visibleClasses.size.toString())}টি শ্রেণি)",
+                    fontSize = 11.5.sp,
+                    color = SlateMuted,
+                    fontWeight = FontWeight.Medium
+                )
+                if (isAdmin && onAddCustomClass != null) {
+                    OutlinedButton(
+                        onClick = { showAddClassDialog = true },
+                        shape = RoundedCornerShape(8.dp),
+                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                        border = BorderStroke(1.dp, TealPrimary.copy(alpha = 0.5f)),
+                        modifier = Modifier
+                            .heightIn(min = 34.dp)
+                            .testTag("roster_add_custom_class_btn")
+                    ) {
+                        Icon(
+                            Icons.Rounded.AddCircleOutline,
+                            contentDescription = null,
+                            tint = TealPrimary,
+                            modifier = Modifier.size(15.dp)
+                        )
+                        Spacer(Modifier.size(4.dp))
+                        Text("নতুন শ্রেণি", fontSize = 11.5.sp, fontWeight = FontWeight.SemiBold, color = TealPrimary)
+                    }
+                }
+            }
+
+            Spacer(Modifier.height(6.dp))
+
+            // Pure Class -> Student List Tree (all collapsed by default until tapped)
             LazyColumn(
                 modifier = Modifier.weight(1f),
                 verticalArrangement = Arrangement.spacedBy(10.dp),
@@ -169,7 +214,7 @@ fun RosterScreen(
                     val isExpanded = if (q.isNotEmpty()) matching.isNotEmpty() else (expandedClass == c)
 
                     TreeGroupCard(
-                        title = "${CLSN[c - 1]} শ্রেণি",
+                        title = "${classNameBn(c, settings)} শ্রেণি",
                         subtitle = "শ্রেণি শিক্ষক: $teacherName",
                         badgeText = "${bn(allInClass.size.toString())} জন",
                         badgeColor = TealPrimary,
@@ -308,5 +353,15 @@ fun RosterScreen(
                 }
             }
         }
+    }
+
+    if (showAddClassDialog && onAddCustomClass != null) {
+        AddCustomClassDialog(
+            settings = settings,
+            onDismiss = { showAddClassDialog = false },
+            onConfirm = { nameBn, shortBn, tier ->
+                onAddCustomClass(nameBn, shortBn, tier)
+            }
+        )
     }
 }

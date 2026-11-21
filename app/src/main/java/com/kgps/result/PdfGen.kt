@@ -541,7 +541,7 @@ object PdfGen {
         val formDy = 32f
         dottedField(ctx, c, "শিক্ষার্থীর নাম:", s.name, 456f, formY0, 801f, 10.5f, f)
 
-        dottedField(ctx, c, "শ্রেণি:", CLSN[s.cls - 1], 456f, formY0 + formDy, 622f, 10.5f, f)
+        dottedField(ctx, c, "শ্রেণি:", classNameBn(s.cls, st), 456f, formY0 + formDy, 622f, 10.5f, f)
         dottedField(ctx, c, "রোল/আইডি:", bn(s.roll.toString()), 632f, formY0 + formDy, 801f, 10.5f, f)
 
         val unionText = s.union.trim()
@@ -561,7 +561,7 @@ object PdfGen {
         center(
             ctx,
             c,
-            "(${CLSN[s.cls - 1]} শ্রেণি — শিখন অগ্রগতি প্রতিবেদন)",
+            "(${classNameBn(s.cls, st)} শ্রেণি — শিখন অগ্রগতি প্রতিবেদন)",
             frontCx,
             536f,
             9.5f,
@@ -615,7 +615,7 @@ object PdfGen {
         }
         c.drawText(page2NameText, 399f, 38f, topRightP)
 
-        val page3InfoText = "শ্রেণি: ${CLSN[s.cls - 1]}   ·   রোল/আইডি: ${bn(s.roll.toString())}"
+        val page3InfoText = "শ্রেণি: ${classNameBn(s.cls)}   ·   রোল/আইডি: ${bn(s.roll.toString())}"
         while (topLeftP.measureText(page3InfoText) > 368f && topLeftP.textSize > 6.5f) {
             topLeftP.textSize -= 0.3f
         }

@@ -32,7 +32,7 @@ enum class DataResetCategory(
     ),
     ALL_STUDENTS(
         titleBn = "সকল শ্রেণির সব শিক্ষার্থী মুছুন",
-        subtitleBn = "বিদ্যালয়ের ১ম–৫ম শ্রেণির সকল শিক্ষার্থীর তথ্য স্থায়ীভাবে মুছে ফেলুন",
+        subtitleBn = "বিদ্যালয়ের সকল শ্রেণির শিক্ষার্থীর তথ্য স্থায়ীভাবে মুছে ফেলুন",
         badgeBn = "সম্পূর্ণ মুছুন",
         isHighRiskAll = true
     ),
@@ -89,9 +89,9 @@ object DataResetEngine {
     )
 
     fun subjectOptionsForClasses(classes: Set<Int>): List<ResetSubjectOption> {
-        val targetClasses = classes.ifEmpty { (1..5).toSet() }
-        val hasLow = targetClasses.any { it <= 2 }
-        val hasHigh = targetClasses.any { it >= 3 }
+        val targetClasses = classes.ifEmpty { activeClassIds().toSet() }
+        val hasLow = targetClasses.any { syllabusTierForClass(it) <= 2 }
+        val hasHigh = targetClasses.any { syllabusTierForClass(it) >= 3 }
         return SUBJECT_CATALOG.filter { opt ->
             when (opt.key) {
                 "SOC" -> hasLow
@@ -219,12 +219,13 @@ object DataResetEngine {
         customFieldKeys: Set<String> = emptySet()
     ): DataResetImpact {
         val sortedClasses = request.selectedClasses.sorted()
-        val classLabel = if (sortedClasses.size == 5) {
-            "সকল শ্রেণি (১ম–৫ম)"
+        val allIds = activeClassIds()
+        val classLabel = if (sortedClasses.containsAll(allIds) && allIds.isNotEmpty()) {
+            "সকল শ্রেণি"
         } else if (sortedClasses.isEmpty()) {
             "কোনো শ্রেণি নির্বাচিত নয়"
         } else {
-            sortedClasses.joinToString(", ") { "${CLSN[it - 1]} শ্রেণি" }
+            sortedClasses.joinToString(", ") { "${classNameBn(it)} শ্রেণি" }
         }
 
         val termLabel = request.selectedTerms.sorted().joinToString(", ") { term ->
@@ -337,7 +338,7 @@ object DataResetEngine {
                     matchedStudentCount = students.size,
                     affectedStudentCount = students.size,
                     affectedEntryCount = students.size,
-                    scopeSummaryBn = "সকল শ্রেণি (১ম–৫ম) — সম্পূর্ণ ডাটা মুছে ফেলা",
+                    scopeSummaryBn = "সকল শ্রেণি — সম্পূর্ণ ডাটা মুছে ফেলা",
                     preservedSummaryBn = "বিদ্যালয়ের নাম, শিক্ষক তালিকা ও অ্যাপ সেটিংস অক্ষুণ্ণ থাকবে।",
                     warningLines = listOf(
                         "চরম সতর্কতা! বিদ্যালয়ের সকল শ্রেণির (${bn(students.size.toString())} জন) শিক্ষার্থী স্থায়ীভাবে মুছে যাবে।",

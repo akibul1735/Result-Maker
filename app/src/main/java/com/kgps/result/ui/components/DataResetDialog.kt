@@ -70,14 +70,14 @@ import androidx.compose.ui.window.DialogProperties
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
-import com.kgps.result.CLSN
-import com.kgps.result.CLS_SHORT
 import com.kgps.result.DataResetCategory
 import com.kgps.result.DataResetEngine
 import com.kgps.result.DataResetRequest
 import com.kgps.result.Settings
 import com.kgps.result.Student
+import com.kgps.result.activeClassIds
 import com.kgps.result.bn
+import com.kgps.result.classShortBn
 import com.kgps.result.security.BiometricAvailability
 import com.kgps.result.security.BiometricResetAuthenticator
 import com.kgps.result.security.BiometricVerificationResult
@@ -150,8 +150,9 @@ fun DataResetDialog(
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
 
-    val countByClass = remember(students) {
-        (1..5).associateWith { c -> students.count { it.cls == c } }
+    val activeClassList = remember(settings.customClasses) { activeClassIds(settings) }
+    val countByClass = remember(students, activeClassList) {
+        activeClassList.associateWith { c -> students.count { it.cls == c } }
     }
     val customFieldKeys = remember(settings.customFields) {
         settings.customFields.map { it.key }.toSet()
@@ -380,11 +381,11 @@ fun DataResetDialog(
                                             fontSize = 13.sp,
                                             color = SlateText
                                         )
-                                        val allSelected = request.selectedClasses.size == 5
+                                        val allSelected = request.selectedClasses.size == activeClassList.size
                                         TextButton(
                                             onClick = {
                                                 request = request.copy(
-                                                    selectedClasses = if (allSelected) setOf(1) else (1..5).toSet()
+                                                    selectedClasses = if (allSelected) setOf(1) else activeClassList.toSet()
                                                 )
                                             },
                                             modifier = Modifier.testTag("reset_toggle_all_classes")
@@ -399,7 +400,7 @@ fun DataResetDialog(
                                         horizontalArrangement = Arrangement.spacedBy(6.dp),
                                         verticalArrangement = Arrangement.spacedBy(6.dp)
                                     ) {
-                                        (1..5).forEach { c ->
+                                        activeClassList.forEach { c ->
                                             val sel = c in request.selectedClasses
                                             val cnt = countByClass[c] ?: 0
                                             FilterChip(
@@ -419,7 +420,7 @@ fun DataResetDialog(
                                                 modifier = Modifier.testTag("reset_class_$c"),
                                                 label = {
                                                     Text(
-                                                        "${CLS_SHORT[c - 1]} (${bn(cnt.toString())})",
+                                                        "${classShortBn(c, settings)} (${bn(cnt.toString())})",
                                                         fontSize = 12.sp
                                                     )
                                                 }

@@ -75,11 +75,11 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.kgps.result.CLSN
-import com.kgps.result.CLS_SHORT
 import com.kgps.result.RELIGIONS
 import com.kgps.result.ai.ClassSheetImportScope
 import com.kgps.result.bn
+import com.kgps.result.classNameBn
+import com.kgps.result.classShortBn
 import com.kgps.result.cloud.TeacherPermissions
 import com.kgps.result.subjectsFor
 import com.kgps.result.ui.theme.SlateBg
@@ -123,7 +123,7 @@ internal fun ScannerConfigMenuBar(
     }
     val subLabel = subKeyHint?.let { k -> subs.find { it.key == k }?.bn ?: k }
     val targetSubtitle = if (scanMode == "class") {
-        val cText = clsHint?.let { CLS_SHORT[it - 1] } ?: "অটো"
+        val cText = clsHint?.let { classShortBn(it) } ?: "অটো"
         val tText = termHint?.let { bn(it.toString()) } ?: "অটো"
         if (subLabel != null) "$cText · $tText · $subLabel" else "$cText · $tText · বিষয় অটো"
     } else {
@@ -705,7 +705,7 @@ internal fun ClassSheetHintSelectors(
                 contentPadding = PaddingValues(horizontal = 7.dp, vertical = 4.dp)
             ) {
                 Text(
-                    clsHint?.let { "${CLS_SHORT[it - 1]} শ্রেণি" } ?: "শ্রেণি: অটো",
+                    clsHint?.let { "${classShortBn(it)} শ্রেণি" } ?: "শ্রেণি: অটো",
                     fontSize = 11.sp,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
@@ -735,7 +735,7 @@ internal fun ClassSheetHintSelectors(
                         modifier = Modifier.background(if (isClsSel) TealContainer else Color.Transparent),
                         text = {
                             Text(
-                                "${CLSN[c - 1]} শ্রেণি",
+                                "${classNameBn(c)} শ্রেণি",
                                 fontWeight = if (isClsSel) FontWeight.Bold else FontWeight.Normal,
                                 color = if (isClsSel) TealDark else SlateText
                             )

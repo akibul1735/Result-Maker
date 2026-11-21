@@ -60,7 +60,6 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import com.kgps.result.AttendanceBand
-import com.kgps.result.CLS_SHORT
 import com.kgps.result.RemarkCategory
 import com.kgps.result.ResultBand
 import com.kgps.result.Student
@@ -69,6 +68,7 @@ import com.kgps.result.TeacherRemarkEngine
 import com.kgps.result.TeacherRemarkOption
 import com.kgps.result.TraitsBand
 import com.kgps.result.bn
+import com.kgps.result.classShortBn
 import com.kgps.result.fmt
 import com.kgps.result.ui.theme.AmberBg
 import com.kgps.result.ui.theme.AmberBorder
@@ -542,7 +542,7 @@ fun TeacherRemarkPickerDialog(
                                     color = TealDark
                                 )
                                 Text(
-                                    "${student.name.ifBlank { "শিক্ষার্থী" }} · ${CLS_SHORT.getOrElse(student.cls - 1) { "${student.cls}ম" }} · রোল ${bn(student.roll.toString())} · ${bn(term.toString())}ম প্রান্তিক",
+                                    "${student.name.ifBlank { "শিক্ষার্থী" }} · ${classShortBn(student.cls)} · রোল ${bn(student.roll.toString())} · ${bn(term.toString())}ম প্রান্তিক",
                                     fontSize = 11.5.sp,
                                     color = SlateMuted,
                                     maxLines = 1,

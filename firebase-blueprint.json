@@ -51,6 +51,7 @@
         "pdfFont": { "type": "string" },
         "dpeLogo": { "type": "string", "enum": ["simple", "color"] },
         "customFields": { "type": "array" },
+        "customClasses": { "type": "array" },
         "createdAt": { "type": "string", "format": "date-time" },
         "updatedAt": { "type": "string", "format": "date-time" }
       },

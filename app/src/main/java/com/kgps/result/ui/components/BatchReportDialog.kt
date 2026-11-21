@@ -62,10 +62,10 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
-import com.kgps.result.CLSN
 import com.kgps.result.ReportSummaryColumn
 import com.kgps.result.Student
 import com.kgps.result.bn
+import com.kgps.result.classNameBn
 import com.kgps.result.fromBn
 import com.kgps.result.ui.theme.AmberBg
 import com.kgps.result.ui.theme.AmberBorder
@@ -281,7 +281,7 @@ fun BatchReportDialog(
                                             modifier = Modifier.testTag("batch_class_chip_$c"),
                                             label = {
                                                 Text(
-                                                    "${CLSN[c - 1]} (${bn(count.toString())})",
+                                                    "${classNameBn(c)} (${bn(count.toString())})",
                                                     fontSize = 12.sp,
                                                     fontWeight = if (isSel) FontWeight.Bold else FontWeight.Medium
                                                 )
@@ -307,7 +307,7 @@ fun BatchReportDialog(
                                         ) {
                                             Icon(Icons.Rounded.School, contentDescription = null, tint = TealPrimary, modifier = Modifier.size(20.dp))
                                             Text(
-                                                "${CLSN[selectedClass - 1]} শ্রেণির পূর্ণাঙ্গ ব্যাচ",
+                                                "${classNameBn(selectedClass)} শ্রেণির পূর্ণাঙ্গ ব্যাচ",
                                                 fontWeight = FontWeight.Bold,
                                                 fontSize = 13.5.sp,
                                                 color = TealDark
@@ -356,7 +356,7 @@ fun BatchReportDialog(
                                             onClick = { customFilterCls = c },
                                             colors = appFilterChipColors(),
                                             border = appFilterChipBorder(isSel),
-                                            label = { Text("${CLSN[c - 1]} (${bn((classCounts[c] ?: 0).toString())})", fontSize = 11.sp) }
+                                            label = { Text("${classNameBn(c)} (${bn((classCounts[c] ?: 0).toString())})", fontSize = 11.sp) }
                                         )
                                     }
                                 }
@@ -505,7 +505,7 @@ fun BatchReportDialog(
                                                         modifier = Modifier.weight(1f)
                                                     )
                                                     Text(
-                                                        "${CLSN[s.cls - 1]} শ্রেণি",
+                                                        "${classNameBn(s.cls)} শ্রেণি",
                                                         fontSize = 10.5.sp,
                                                         color = SlateMuted
                                                     )
@@ -553,7 +553,7 @@ fun BatchReportDialog(
                                                     shape = RoundedCornerShape(7.dp)
                                                 ) {
                                                     Text(
-                                                        "${CLSN[c - 1]}: ${bn(count.toString())} জন",
+                                                        "${classNameBn(c)}: ${bn(count.toString())} জন",
                                                         fontSize = 11.5.sp,
                                                         fontWeight = FontWeight.SemiBold,
                                                         color = TealDark,
@@ -563,7 +563,7 @@ fun BatchReportDialog(
                                             }
                                         }
                                         Text(
-                                            "সব শ্রেণির মোট ${bn(sortedStudents.size.toString())} জন শিক্ষার্থীর রিপোর্ট কার্ড (১ম→৫ম ও রোল ক্রমে) মোট ${bn((sortedStudents.size * 2).toString())}টি A4 পৃষ্ঠায় তৈরি হবে।",
+                                            "সব শ্রেণির মোট ${bn(sortedStudents.size.toString())} জন শিক্ষার্থীর রিপোর্ট কার্ড (শ্রেণি ও রোল ক্রমে) মোট ${bn((sortedStudents.size * 2).toString())}টি A4 পৃষ্ঠায় তৈরি হবে।",
                                             fontSize = 12.sp,
                                             color = SlateText,
                                             lineHeight = 17.sp

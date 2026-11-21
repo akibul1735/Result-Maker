@@ -33,11 +33,14 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ExitToApp
 import androidx.compose.material.icons.automirrored.rounded.Logout
 import androidx.compose.material.icons.rounded.AccountCircle
+import androidx.compose.material.icons.rounded.AddCircle
 import androidx.compose.material.icons.rounded.AdminPanelSettings
 import androidx.compose.material.icons.rounded.AutoAwesome
 import androidx.compose.material.icons.rounded.Backup
 import androidx.compose.material.icons.rounded.Badge
 import androidx.compose.material.icons.rounded.Close
+import androidx.compose.material.icons.rounded.ContentCopy
+import androidx.compose.material.icons.rounded.DeleteOutline
 import androidx.compose.material.icons.rounded.Description
 import androidx.compose.material.icons.rounded.Fingerprint
 import androidx.compose.material.icons.rounded.FontDownload
@@ -49,7 +52,6 @@ import androidx.compose.material.icons.rounded.School
 import androidx.compose.material.icons.rounded.Tune
 import androidx.compose.material.icons.rounded.UploadFile
 import androidx.compose.material.icons.rounded.WarningAmber
-import androidx.compose.material.icons.rounded.ContentCopy
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
@@ -72,6 +74,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalClipboardManager
@@ -84,8 +87,8 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.kgps.result.CLSN
 import com.kgps.result.CsvHeaderStyle
+import com.kgps.result.CustomClassDef
 import com.kgps.result.CustomFieldDef
 import com.kgps.result.DPE_LOGO_LIST
 import com.kgps.result.PDF_FONT_LIST
@@ -93,6 +96,8 @@ import com.kgps.result.PdfGen
 import com.kgps.result.Repo
 import com.kgps.result.Settings
 import com.kgps.result.Student
+import com.kgps.result.activeClassIds
+import com.kgps.result.activeSchoolClasses
 import com.kgps.result.ai.DiscoveredGeminiModel
 import com.kgps.result.backup.AutoBackupStatus
 import com.kgps.result.backup.BackupScheduleConfig
@@ -102,6 +107,7 @@ import com.kgps.result.backup.DriveBackupFile
 import com.kgps.result.backup.LocalBackupEntry
 import com.kgps.result.backup.XlsxExporter
 import com.kgps.result.bn
+import com.kgps.result.classNameBn
 import com.kgps.result.DataResetCategory
 import com.kgps.result.DataResetRequest
 import com.kgps.result.cloud.JoinRequestItem
@@ -109,6 +115,7 @@ import com.kgps.result.cloud.MemberRole
 import com.kgps.result.cloud.SchoolMemberProfile
 import com.kgps.result.cloud.SchoolWorkspace
 import com.kgps.result.cloud.TeacherPermissions
+import com.kgps.result.ui.components.AddCustomClassDialog
 import com.kgps.result.ui.components.DataResetDialog
 import com.kgps.result.ui.components.TeacherPermissionsEditorDialog
 import com.kgps.result.ui.components.TreeBranchItem
@@ -156,6 +163,8 @@ fun SettingsScreen(
     onUpdateSettings: (Settings) -> Unit,
     onAddCustomField: (String) -> Boolean,
     onRemoveCustomField: (String) -> Unit,
+    onAddCustomClass: (String, String, Int) -> Boolean = { _, _, _ -> false },
+    onRemoveCustomClass: (Int) -> Unit = {},
     onOpenCsvImport: (String) -> Unit,
     onRestoreBackupJson: (String) -> Unit,
     onExportAllPdf: () -> Unit,
@@ -222,6 +231,8 @@ fun SettingsScreen(
     var askLeaveSchool by remember { mutableStateOf(false) }
     var askSignOut by remember { mutableStateOf(false) }
     var pendingRemoveField by remember { mutableStateOf<CustomFieldDef?>(null) }
+    var showAddCustomClassDialog by remember { mutableStateOf(false) }
+    var pendingRemoveCustomClass by remember { mutableStateOf<CustomClassDef?>(null) }
     var pendingRemoveMember by remember { mutableStateOf<SchoolMemberProfile?>(null) }
     var pendingApproveRequest by remember { mutableStateOf<JoinRequestItem?>(null) }
     var pendingEditMember by remember { mutableStateOf<SchoolMemberProfile?>(null) }
@@ -240,7 +251,8 @@ fun SettingsScreen(
     val csvExportLauncher = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("text/csv")) { uri ->
         if (uri != null) {
             try {
-                val allowed = permissions.effectiveClasses().ifEmpty { (1..5).toList() }
+                val availableIds = activeClassIds(settings)
+                val allowed = permissions.effectiveClasses(availableIds).ifEmpty { availableIds }
                 val target = pendingCsvExportCls
                 val listToExport = if (target == null) students.filter { it.cls in allowed } else students
                 ctx.contentResolver.openOutputStream(uri)?.use {
@@ -256,7 +268,7 @@ fun SettingsScreen(
                 val msg = if (target == null) {
                     "১টি CSV ফাইলে সকল শ্রেণির ডাটা সংরক্ষিত হয়েছে"
                 } else {
-                    "${CLSN[target - 1]} শ্রেণির CSV ফাইল সংরক্ষিত হয়েছে"
+                    "${classNameBn(target, settings)} শ্রেণির CSV ফাইল সংরক্ষিত হয়েছে"
                 }
                 onShowMessage(msg)
             } catch (e: Exception) {
@@ -274,7 +286,7 @@ fun SettingsScreen(
                     targetCls = pendingCsvTemplateCls
                 )
                 ctx.contentResolver.openOutputStream(uri)?.use { it.write(hdr.toByteArray(Charsets.UTF_8)) }
-                onShowMessage("${CLSN[pendingCsvTemplateCls - 1]} শ্রেণির খালি CSV টেমপ্লেট তৈরি হয়েছে")
+                onShowMessage("${classNameBn(pendingCsvTemplateCls, settings)} শ্রেণির খালি CSV টেমপ্লেট তৈরি হয়েছে")
             } catch (e: Exception) {
                 onShowMessage("টেমপ্লেট তৈরি হয়নি: ${e.message ?: "ত্রুটি"}")
             }
@@ -286,7 +298,8 @@ fun SettingsScreen(
     ) { uri ->
         if (uri != null) {
             try {
-                val allowed = permissions.effectiveClasses().ifEmpty { (1..5).toList() }
+                val availableIds = activeClassIds(settings)
+                val allowed = permissions.effectiveClasses(availableIds).ifEmpty { availableIds }
                 val bytes = XlsxExporter.exportAllClassesWorkbook(
                     students = students.filter { it.cls in allowed },
                     customFields = settings.customFields,
@@ -304,7 +317,8 @@ fun SettingsScreen(
     val csvZipExportLauncher = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/zip")) { uri ->
         if (uri != null) {
             try {
-                val allowed = permissions.effectiveClasses().ifEmpty { (1..5).toList() }
+                val availableIds = activeClassIds(settings)
+                val allowed = permissions.effectiveClasses(availableIds).ifEmpty { availableIds }
                 val bytes = Repo.toPerClassCsvZip(
                     list = students.filter { it.cls in allowed },
                     customFields = settings.customFields,
@@ -709,10 +723,100 @@ fun SettingsScreen(
                 }
             }
 
+            val allClassesList = remember(s.customClasses) { activeSchoolClasses(s) }
+            TreeGroupCard(
+                title = "শ্রেণি ব্যবস্থাপনা ও নতুন শ্রেণি",
+                subtitle = if (s.customClasses.isEmpty()) {
+                    "মূল ১ম–৫ম শ্রেণি চালু আছে · নতুন শ্রেণি যোগ করুন"
+                } else {
+                    "মোট ${bn(allClassesList.size.toString())}টি শ্রেণি (নতুন ${bn(s.customClasses.size.toString())}টি)"
+                },
+                badgeText = "${bn(allClassesList.size.toString())}টি",
+                icon = Icons.Rounded.School,
+                expanded = expandedGroup == "classes",
+                headerTestTag = "settings_group_classes",
+                onToggle = { expandedGroup = if (expandedGroup == "classes") "" else "classes" }
+            ) {
+                TreeBranchItem(isLast = true) {
+                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        allClassesList.forEach { cDef ->
+                            val stuCnt = students.count { it.cls == cDef.id }
+                            Surface(
+                                color = SlateBg,
+                                border = BorderStroke(1.dp, SlateOutline),
+                                shape = RoundedCornerShape(8.dp),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 7.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    Surface(
+                                        color = if (cDef.isCustom) TealSoft else Color.White,
+                                        shape = RoundedCornerShape(6.dp),
+                                        border = BorderStroke(1.dp, if (cDef.isCustom) TealPrimary.copy(alpha = 0.4f) else SlateOutline)
+                                    ) {
+                                        Text(
+                                            cDef.shortBn,
+                                            fontSize = 11.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = if (cDef.isCustom) TealDark else SlateText,
+                                            modifier = Modifier.padding(horizontal = 7.dp, vertical = 2.dp)
+                                        )
+                                    }
+                                    Column(Modifier.weight(1f)) {
+                                        Text(
+                                            "${cDef.nameBn} শ্রেণি",
+                                            fontSize = 12.5.sp,
+                                            fontWeight = FontWeight.SemiBold,
+                                            color = SlateText
+                                        )
+                                        val tierText = if (cDef.syllabusTier <= 2) "১ম–২য় ধরন (৫০/৫০)" else "৩য়–৫ম ধরন (৩০/৭০)"
+                                        Text(
+                                            "${bn(stuCnt.toString())} জন শিক্ষার্থী · $tierText",
+                                            fontSize = 10.5.sp,
+                                            color = SlateMuted
+                                        )
+                                    }
+                                    if (cDef.isCustom && isAdmin) {
+                                        IconButton(
+                                            onClick = {
+                                                pendingRemoveCustomClass = s.customClasses.find { it.id == cDef.id }
+                                            },
+                                            modifier = Modifier.size(36.dp).testTag("settings_remove_class_${cDef.id}")
+                                        ) {
+                                            Icon(
+                                                Icons.Rounded.DeleteOutline,
+                                                contentDescription = "${cDef.nameBn} মুছুন",
+                                                tint = RoseDanger,
+                                                modifier = Modifier.size(18.dp)
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        if (isAdmin) {
+                            OutlinedButton(
+                                onClick = { showAddCustomClassDialog = true },
+                                enabled = s.customClasses.size < 15,
+                                shape = RoundedCornerShape(8.dp),
+                                modifier = Modifier.fillMaxWidth().testTag("settings_add_custom_class_btn")
+                            ) {
+                                Icon(Icons.Rounded.AddCircle, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Spacer(Modifier.size(6.dp))
+                                Text("নতুন শ্রেণি যোগ করুন (যেমন: প্রাক-প্রাথমিক, ষষ্ঠ)", fontSize = 12.sp)
+                            }
+                        }
+                    }
+                }
+            }
+
             TreeGroupCard(
                 title = "শ্রেণি শিক্ষক ও মোবাইল",
-                subtitle = "১ম–৫ম শ্রেণির দায়িত্বপ্রাপ্ত শিক্ষক",
-                badgeText = "৫ শ্রেণি",
+                subtitle = "${allClassesList.size.let { bn(it.toString()) }}টি শ্রেণির দায়িত্বপ্রাপ্ত শিক্ষক",
+                badgeText = "${bn(allClassesList.size.toString())} শ্রেণি",
                 icon = Icons.Rounded.Badge,
                 expanded = expandedGroup == "teachers",
                 headerTestTag = "settings_group_teachers",
@@ -720,8 +824,9 @@ fun SettingsScreen(
             ) {
                 TreeBranchItem(isLast = true) {
                     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                        (1..5).forEach { c ->
-                            Text("${CLSN[c - 1]} শ্রেণি", fontWeight = FontWeight.Medium, fontSize = 12.sp, color = SlateMuted)
+                        allClassesList.forEach { cDef ->
+                            val c = cDef.id
+                            Text("${cDef.nameBn} শ্রেণি", fontWeight = FontWeight.Medium, fontSize = 12.sp, color = SlateMuted)
                             Row(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.fillMaxWidth()) {
                                 OutlinedTextField(
                                     value = s.teachers[c] ?: "",
@@ -987,12 +1092,14 @@ fun SettingsScreen(
                 headerTestTag = "settings_group_csv_json",
                 onToggle = { expandedGroup = if (expandedGroup == "csv_json") "" else "csv_json" }
             ) {
-                val countByClass = remember(students) {
-                    (1..5).associateWith { c -> students.count { it.cls == c } }
+                val allClsIds = remember(s.customClasses) { activeClassIds(s) }
+                val countByClass = remember(students, allClsIds) {
+                    allClsIds.associateWith { c -> students.count { it.cls == c } }
                 }
                 SettingsCsvJsonContent(
                     permissions = permissions,
                     isAdmin = isAdmin,
+                    availableClassIds = allClsIds,
                     studentCountByClass = countByClass,
                     csvHeaderStyle = backupStatus.csvHeaderStyle,
                     onSelectCsvHeaderStyle = onSelectCsvHeaderStyle,
@@ -1174,7 +1281,7 @@ fun SettingsScreen(
                         Column(Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
                             Text("অ্যাপ্লিকেশন তথ্য", fontWeight = FontWeight.Bold, fontSize = 12.5.sp, color = SlateText)
                             Text("অ্যাপ আইডি: com.kgps.result · ভার্সন: 1.0.0", fontSize = 11.5.sp, color = SlateMuted)
-                            Text("ফরম্যাট: NCTB প্রাথমিক বিদ্যালয় (১ম–৫ম শ্রেণি) A4 Landscape ভাঁজযোগ্য বুকলেট", fontSize = 11.5.sp, color = SlateMuted)
+                            Text("ফরম্যাট: NCTB প্রাথমিক বিদ্যালয় (১ম–৫ম ও কাস্টম শ্রেণি) A4 Landscape ভাঁজযোগ্য বুকলেট", fontSize = 11.5.sp, color = SlateMuted)
                         }
                     }
                 }
@@ -1191,6 +1298,7 @@ fun SettingsScreen(
             teacherLabel = "${req.displayName.ifBlank { "শিক্ষক" }} (${req.email})",
             initialPermissions = TeacherPermissions.fullAccess(),
             confirmButtonText = "অনুমোদন করুন",
+            availableClasses = activeSchoolClasses(s),
             onDismiss = { pendingApproveRequest = null },
             onConfirm = { chosenPerm ->
                 onApproveJoinRequest(req, chosenPerm)
@@ -1206,6 +1314,7 @@ fun SettingsScreen(
             teacherLabel = "${member.name.ifBlank { "শিক্ষক" }} (${member.email})",
             initialPermissions = member.permissions,
             confirmButtonText = "সংরক্ষণ করুন",
+            availableClasses = activeSchoolClasses(s),
             onDismiss = { pendingEditMember = null },
             onConfirm = { chosenPerm ->
                 onUpdateMemberPermissions(member.uid, chosenPerm)
@@ -1633,6 +1742,46 @@ fun SettingsScreen(
             },
             dismissButton = {
                 TextButton(onClick = { pendingRemoveMember = null }) { Text("বাতিল") }
+            }
+        )
+    }
+
+    if (showAddCustomClassDialog) {
+        AddCustomClassDialog(
+            settings = s,
+            onDismiss = { showAddCustomClassDialog = false },
+            onConfirm = { nameBn, shortBn, tier ->
+                onAddCustomClass(nameBn, shortBn, tier)
+            }
+        )
+    }
+
+    pendingRemoveCustomClass?.let { cc ->
+        val stuCount = students.count { it.cls == cc.id }
+        AlertDialog(
+            onDismissRequest = { pendingRemoveCustomClass = null },
+            title = { Text("\"${cc.nameBn}\" শ্রেণি মুছবেন?") },
+            text = {
+                Text(
+                    if (stuCount > 0) {
+                        "এই শ্রেণির নামের তালিকা সরানো হবে। বর্তমানে থাকা ${bn(stuCount.toString())} জন শিক্ষার্থীর ডাটা মুছে যাবে না।"
+                    } else {
+                        "\"${cc.nameBn}\" শ্রেণিটি শ্রেণির তালিকা থেকে সরানো হবে।"
+                    }
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        onRemoveCustomClass(cc.id)
+                        pendingRemoveCustomClass = null
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = RoseDanger),
+                    modifier = Modifier.testTag("settings_confirm_remove_class_btn")
+                ) { Text("হ্যাঁ, সরান") }
+            },
+            dismissButton = {
+                TextButton(onClick = { pendingRemoveCustomClass = null }) { Text("বাতিল") }
             }
         )
     }

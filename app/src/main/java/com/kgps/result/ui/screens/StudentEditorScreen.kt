@@ -69,7 +69,9 @@ import com.kgps.result.RELIGIONS
 import com.kgps.result.Settings
 import com.kgps.result.Student
 import com.kgps.result.TeacherRemarkEngine
+import com.kgps.result.activeClassIds
 import com.kgps.result.bn
+import com.kgps.result.classShortBn
 import com.kgps.result.cloud.StudentSyncMeta
 import com.kgps.result.cloud.TeacherPermissions
 import com.kgps.result.fmt
@@ -354,7 +356,7 @@ fun StudentEditorScreen(
                                         horizontalArrangement = Arrangement.spacedBy(6.dp),
                                         modifier = Modifier.horizontalScroll(rememberScrollState())
                                     ) {
-                                        permissions.effectiveClasses().forEach { c ->
+                                        permissions.effectiveClasses(activeClassIds(settings)).forEach { c ->
                                             val isSel = s.cls == c
                                             FilterChip(
                                                 selected = isSel,
@@ -362,7 +364,7 @@ fun StudentEditorScreen(
                                                 onClick = { if (canEditProfile) s = s.copy(cls = c) },
                                                 colors = appFilterChipColors(),
                                                 border = appFilterChipBorder(isSel, enabled = canEditProfile),
-                                                label = { Text(bn(c.toString()), fontWeight = if (isSel) FontWeight.Bold else FontWeight.Normal) }
+                                                label = { Text(classShortBn(c, settings), fontWeight = if (isSel) FontWeight.Bold else FontWeight.Normal) }
                                             )
                                         }
                                     }

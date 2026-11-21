@@ -620,7 +620,8 @@ class AutoBackupManager(
                     outputName = dailyName
                 }
                 CsvBackupFormat.EXCEL -> {
-                    val activeClasses = (1..5).filter { c -> students.any { it.cls == c } }.ifEmpty { (1..5).toList() }
+                    val knownIds = com.kgps.result.activeClassIds(settings)
+                    val activeClasses = knownIds.filter { c -> students.any { it.cls == c } }.ifEmpty { knownIds }
                     val xlsxBytes = XlsxExporter.exportAllClassesWorkbook(
                         students = students,
                         customFields = settings.customFields,

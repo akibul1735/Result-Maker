@@ -277,7 +277,11 @@ class ResultMakerViewModel(
         .stateIn(viewModelScope, SharingStarted.Eagerly, emptyMap())
 
     val settings: StateFlow<Settings> = activeSchool
-        .map { it?.settings ?: DEFAULT_SETTINGS }
+        .map { school ->
+            val st = school?.settings ?: DEFAULT_SETTINGS
+            SchoolClassRegistry.update(st.customClasses)
+            st
+        }
         .stateIn(viewModelScope, SharingStarted.Eagerly, DEFAULT_SETTINGS)
 
     val joinRequests: StateFlow<List<JoinRequestItem>> =
@@ -782,11 +786,11 @@ class ResultMakerViewModel(
     // ---------- Navigation & Student CRUD ----------
 
     fun selectClass(cls: Int) {
-        if (cls in 1..5) _selectedClass.value = cls
+        if (cls in 1..20) _selectedClass.value = cls
     }
 
     fun openSheetForClass(cls: Int) {
-        if (cls in 1..5) _selectedClass.value = cls
+        if (cls in 1..20) _selectedClass.value = cls
         _editingStudent.value = null
         _currentSection.value = NavSection.SHEET
     }
@@ -1236,6 +1240,74 @@ class ResultMakerViewModel(
         if (removed != null) {
             showMessage("\"${removed.label}\" ফিল্ড মুছে ফেলা হয়েছে")
         }
+    }
+
+    fun addCustomClass(
+        nameBn: String,
+        shortBn: String = "",
+        syllabusTier: Int = 3
+    ): Boolean {
+        val school = activeSchool.value ?: return false
+        if (!school.isAdmin(currentUserId)) {
+            showMessage("নতুন শ্রেণি যোগ করার অনুমতি শুধুমাত্র অ্যাডমিনের")
+            return false
+        }
+        val trimmed = nameBn.trim()
+        if (trimmed.isEmpty()) {
+            showMessage("শ্রেণির নাম লিখুন")
+            return false
+        }
+        val current = settings.value
+        if (activeSchoolClasses(current).any { it.nameBn.equals(trimmed, ignoreCase = true) }) {
+            showMessage("এই নামে একটি শ্রেণি ইতিমধ্যে আছে")
+            return false
+        }
+        val nextId = nextAvailableCustomClassId(current.customClasses)
+        if (nextId == null) {
+            showMessage("সর্বোচ্চ ১৫টি নতুন শ্রেণি যোগ করা যায়")
+            return false
+        }
+        val cleanShort = shortBn.trim().ifBlank { defaultShortClassLabel(trimmed, nextId) }.take(8)
+        val tier = if (syllabusTier <= 2) 1 else 3
+        val newDef = CustomClassDef(
+            id = nextId,
+            nameBn = trimmed,
+            shortBn = cleanShort,
+            syllabusTier = tier
+        )
+        val updatedCustom = (current.customClasses + newDef).sortedBy { it.id }
+        SchoolClassRegistry.update(updatedCustom)
+        val next = current.copy(customClasses = updatedCustom)
+        updateSettings(next)
+        _selectedClass.value = nextId
+        showMessage("\"$trimmed\" শ্রেণি যোগ করা হয়েছে")
+        return true
+    }
+
+    fun removeCustomClass(classId: Int) {
+        val school = activeSchool.value ?: return
+        if (!school.isAdmin(currentUserId)) {
+            showMessage("শ্রেণি মুছে ফেলার অনুমতি শুধুমাত্র অ্যাডমিনের")
+            return
+        }
+        if (classId in 1..5) {
+            showMessage("মূল ১ম–৫ম শ্রেণি মুছে ফেলা যায় না")
+            return
+        }
+        val current = settings.value
+        val removed = current.customClasses.find { it.id == classId } ?: return
+        val updatedCustom = current.customClasses.filter { it.id != classId }
+        SchoolClassRegistry.update(updatedCustom)
+        val next = current.copy(
+            customClasses = updatedCustom,
+            teachers = current.teachers - classId,
+            teacherMobiles = current.teacherMobiles - classId
+        )
+        updateSettings(next)
+        if (_selectedClass.value == classId) {
+            _selectedClass.value = 1
+        }
+        showMessage("\"${removed.nameBn}\" শ্রেণি তালিকা থেকে সরানো হয়েছে")
     }
 
     fun applyCsvImport(summary: Repo.CsvImportSummary) {
@@ -1776,7 +1848,7 @@ class ResultMakerViewModel(
         val grade = gradeOf(pct)
         val hasEval = (1..3).any { s.hasTerm(it) }
         return buildString {
-            append("নাম: ${s.name}, শ্রেণি: ${CLSN[s.cls - 1]}, রোল: ${s.roll}, ধর্ম: ${s.religion}")
+            append("নাম: ${s.name}, শ্রেণি: ${classNameBn(s.cls, settings.value)}, রোল: ${s.roll}, ধর্ম: ${s.religion}")
             if (s.guardian.isNotBlank()) append(", অভিভাবক: ${s.guardian}")
             if (hasEval) append(", গড়: ${fmtEn(pct)}% ($grade - ${gradeLabelBn(grade)})")
         }
@@ -2039,7 +2111,7 @@ class ResultMakerViewModel(
     fun updateClassSheetMeta(cls: Int, term: Int, subKey: String) {
         _aiState.update { st ->
             val current = st.classSheetResult ?: return@update st
-            val safeCls = cls.coerceIn(1, 5)
+            val safeCls = cls.coerceIn(1, 20)
             val safeTerm = term.coerceIn(1, 3)
             val hasWritten = (subjectsFor(safeCls, RELIGIONS.first()).find { it.key == subKey }?.written ?: 0) > 0
             val nextScope = if (!hasWritten && current.scope == ClassSheetImportScope.WR_ONLY) {
@@ -2067,7 +2139,7 @@ class ResultMakerViewModel(
     fun updateClassSheetScope(newScope: ClassSheetImportScope) {
         _aiState.update { st ->
             val current = st.classSheetResult ?: return@update st
-            val hasWritten = (subjectsFor(current.cls.coerceIn(1, 5), RELIGIONS.first())
+            val hasWritten = (subjectsFor(current.cls.coerceIn(1, 20), RELIGIONS.first())
                 .find { it.key == current.subKey }?.written ?: 0) > 0
             val safeScope = when (newScope) {
                 ClassSheetImportScope.WR_ONLY -> if (hasWritten) ClassSheetImportScope.WR_ONLY else ClassSheetImportScope.BOTH
@@ -2232,12 +2304,12 @@ class ResultMakerViewModel(
         if (_aiState.value.savingClassSheet) return
 
         val perm = school.permissionsFor(currentUserId)
-        val cls = sheet.cls.coerceIn(1, 5)
+        val cls = sheet.cls.coerceIn(1, 20)
         val term = sheet.term.coerceIn(1, 3)
         val subKey = sheet.subKey
 
         if (!perm.canAccessClass(cls)) {
-            showMessage("এই শ্রেণিতে (${CLSN[cls - 1]}) ডেটা সংরক্ষণের অনুমতি আপনার নেই")
+            showMessage("এই শ্রেণিতে (${classNameBn(cls, settings.value)}) ডেটা সংরক্ষণের অনুমতি আপনার নেই")
             return
         }
         if (!perm.canEditSubject(subKey)) {
@@ -2386,13 +2458,13 @@ class ResultMakerViewModel(
 
     fun applyExtractedMarksheet(ext: ExtractedMarksheet): Student {
         val perm = activePermissions.value
-        val cls = (ext.student.cls ?: _selectedClass.value).coerceIn(1, 5)
+        val cls = (ext.student.cls ?: _selectedClass.value).coerceIn(1, 20)
         val roll = ext.student.roll?.takeIf { it > 0 }
             ?: ((students.value.filter { it.cls == cls }.maxOfOrNull { it.roll } ?: 0) + 1)
 
         val existing = students.value.find { it.cls == cls && it.roll == roll }
         if (!perm.canAccessClass(cls)) {
-            showMessage("এই শ্রেণিতে (${CLSN[cls - 1]}) নম্বর বা তথ্য সংরক্ষণের অনুমতি আপনার নেই")
+            showMessage("এই শ্রেণিতে (${classNameBn(cls, settings.value)}) নম্বর বা তথ্য সংরক্ষণের অনুমতি আপনার নেই")
             return existing ?: createEmptyStudent(cls, roll)
         }
         if (existing == null && !perm.canManageStudents) {

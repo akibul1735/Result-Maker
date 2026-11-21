@@ -56,12 +56,13 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.kgps.result.CLSN
 import com.kgps.result.ReportSummaryColumn
 import com.kgps.result.Settings
 import com.kgps.result.Student
+import com.kgps.result.activeClassIds
 import com.kgps.result.backup.AutoBackupStatus
 import com.kgps.result.bn
+import com.kgps.result.classNameBn
 import com.kgps.result.cloud.TeacherPermissions
 import com.kgps.result.fmt
 import com.kgps.result.ui.components.BatchReportDialog
@@ -108,7 +109,8 @@ fun DashboardScreen(
     onPreviewStudent: (Student) -> Unit,
     onOpenSheetInClass: (Int) -> Unit
 ) {
-    val visibleClasses = remember(permissions) { permissions.effectiveClasses() }
+    val availableClassIds = remember(settings.customClasses) { activeClassIds(settings) }
+    val visibleClasses = remember(permissions, availableClassIds) { permissions.effectiveClasses(availableClassIds) }
     var classFilter by remember(visibleClasses) { mutableStateOf<Int?>(null) } // null = সব অনুমোদিত শ্রেণি
     var termFilter by remember { mutableIntStateOf(0) } // 0 = বার্ষিক, 1..3 = নির্দিষ্ট প্রান্তিক
     var showBatchDialog by remember { mutableStateOf(false) }
@@ -492,7 +494,7 @@ fun DashboardScreen(
                                     onClick = { classFilter = c },
                                     colors = appFilterChipColors(),
                                     border = appFilterChipBorder(sel),
-                                    label = { Text("${CLSN[c - 1]} শ্রেণি", fontSize = 11.5.sp) }
+                                    label = { Text("${classNameBn(c, settings)} শ্রেণি", fontSize = 11.5.sp) }
                                 )
                             }
                         }

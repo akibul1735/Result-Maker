@@ -49,16 +49,17 @@ object Repo {
     val TEXT_KEYS: List<String> = (1..3).flatMap { t -> listOf("DAYS", "PRES", "ACT", "DISC", "COND", "REM").map { "${it}_$t" } }
 
     fun exportMarkKeysForClass(cls: Int?): List<String> {
+        val low = cls != null && syllabusTierForClass(cls) <= 2
         val subs = when {
             cls == null -> listOf("BAN", "ENG", "MATH", "SOC", "SCI", "BGW", "REL", "PE", "ART")
-            cls <= 2 -> listOf("BAN", "ENG", "MATH", "SOC", "REL", "PE", "ART")
+            low -> listOf("BAN", "ENG", "MATH", "SOC", "REL", "PE", "ART")
             else -> listOf("BAN", "ENG", "MATH", "SCI", "BGW", "REL", "PE", "ART")
         }
         return subs.flatMap { s ->
             val comps = when {
                 s == "ART" -> listOf("TOTAL")
                 s == "SOC" || s == "PE" -> listOf("TB", "ACT", "LANG", "CT", "CONT", "TOTAL")
-                s == "REL" && cls != null && cls <= 2 -> listOf("TB", "ACT", "LANG", "CT", "CONT", "TOTAL")
+                s == "REL" && low -> listOf("TB", "ACT", "LANG", "CT", "CONT", "TOTAL")
                 else -> listOf("TB", "ACT", "LANG", "CT", "WR", "CONT", "TOTAL")
             }
             (1..3).flatMap { t -> comps.map { c -> mk(s, t, c) } }
@@ -79,6 +80,16 @@ object Repo {
         o.put("customFields", JSONArray().also { arr ->
             st.customFields.forEach { cf ->
                 arr.put(JSONObject().apply { put("key", cf.key); put("label", cf.label) })
+            }
+        })
+        o.put("customClasses", JSONArray().also { arr ->
+            st.customClasses.forEach { cc ->
+                arr.put(JSONObject().apply {
+                    put("id", cc.id)
+                    put("nameBn", cc.nameBn)
+                    put("shortBn", cc.shortBn)
+                    put("syllabusTier", cc.syllabusTier)
+                })
             }
         })
         val a = JSONArray()
@@ -111,6 +122,17 @@ object Repo {
                 if (k.isNotBlank() && l.isNotBlank()) CustomFieldDef(k, l) else null
             }
         } else emptyList()
+        val ccArr = o.optJSONArray("customClasses")
+        val customClasses = if (ccArr != null) {
+            (0 until ccArr.length()).mapNotNull { idx ->
+                val obj = ccArr.optJSONObject(idx) ?: return@mapNotNull null
+                val id = obj.optInt("id", -1).takeIf { it in 6..20 } ?: return@mapNotNull null
+                val nameBn = obj.optString("nameBn").trim().takeIf { it.isNotBlank() } ?: return@mapNotNull null
+                val shortBn = obj.optString("shortBn").trim().ifBlank { defaultShortClassLabel(nameBn, id) }
+                val tier = obj.optInt("syllabusTier", 3).let { if (it <= 2) 1 else 3 }
+                CustomClassDef(id, nameBn, shortBn, tier)
+            }.distinctBy { it.id }.sortedBy { it.id }
+        } else emptyList()
         val st = Settings(
             school = o.optString("school"),
             schoolAddress = o.optString("schoolAddress"),
@@ -118,7 +140,8 @@ object Repo {
             teachers = intMap(o.optJSONObject("teachers")), teacherMobiles = intMap(o.optJSONObject("teacherMobiles")),
             pdfFont = o.optString("pdfFont", "noto_serif").ifBlank { "noto_serif" },
             dpeLogo = if (rawLogo == "color") "color" else "simple",
-            customFields = customFields
+            customFields = customFields,
+            customClasses = customClasses
         )
         val a = o.optJSONArray("students") ?: JSONArray()
         val list = (0 until a.length()).map { i ->
@@ -335,7 +358,7 @@ object Repo {
         val filtered = if (targetCls != null) list.filter { it.cls == targetCls } else list
         val rows = filtered.sortedWith(compareBy({ it.cls }, { it.roll })).map { s ->
             val clsCell = when (style) {
-                CsvHeaderStyle.FRIENDLY_BN -> if (s.cls in 1..5) "${CLS_SHORT[s.cls - 1]} শ্রেণি" else s.cls.toString()
+                CsvHeaderStyle.FRIENDLY_BN -> "${classShortBn(s.cls)} শ্রেণি"
                 CsvHeaderStyle.FRIENDLY_EN -> "Class ${s.cls}"
                 CsvHeaderStyle.SYSTEM_KEYS -> s.cls.toString()
             }
@@ -411,7 +434,7 @@ object Repo {
         customFields: List<CustomFieldDef> = emptyList(),
         style: CsvHeaderStyle = CsvHeaderStyle.FRIENDLY_BN,
         prefix: String = "Class",
-        classes: List<Int> = (1..5).toList()
+        classes: List<Int> = activeClassIds()
     ): ByteArray {
         val baos = ByteArrayOutputStream()
         ZipOutputStream(baos).use { zos ->
@@ -483,13 +506,37 @@ object Repo {
     fun parseClassNum(raw: String): Int? {
         val s = fromBn(raw).trim().lowercase()
         if (s.isBlank()) return null
-        s.toIntOrNull()?.takeIf { it in 1..5 }?.let { return it }
-        if (s.contains("প্রথম") || s.contains("১ম") || s.contains("1st") || s.contains("class 1")) return 1
+        s.toIntOrNull()?.takeIf { it in 1..20 }?.let { return it }
+        SchoolClassRegistry.currentCustom().forEach { cc ->
+            val nameNorm = fromBn(cc.nameBn).trim().lowercase()
+            val shortNorm = fromBn(cc.shortBn).trim().lowercase()
+            if ((nameNorm.isNotBlank() && s.contains(nameNorm)) ||
+                (shortNorm.isNotBlank() && s.contains(shortNorm))) {
+                return cc.id
+            }
+        }
+        if (s.contains("প্রথম") || s.contains("১ম") || s.contains("1st") || s.contains("class 1 ")) return 1
         if (s.contains("দ্বিতীয়") || s.contains("দ্বিতীয়") || s.contains("২য়") || s.contains("২য়") || s.contains("2nd") || s.contains("class 2")) return 2
         if (s.contains("তৃতীয়") || s.contains("তৃতীয়") || s.contains("৩য়") || s.contains("৩য়") || s.contains("3rd") || s.contains("class 3")) return 3
         if (s.contains("চতুর্থ") || s.contains("৪র্থ") || s.contains("4th") || s.contains("class 4")) return 4
         if (s.contains("পঞ্চম") || s.contains("৫ম") || s.contains("5th") || s.contains("class 5")) return 5
-        return s.firstOrNull { it in '1'..'5' }?.digitToInt()
+        if (s.contains("ষষ্ঠ") || s.contains("৬ষ্ঠ") || s.contains("6th") || s.contains("class 6")) {
+            return SchoolClassRegistry.activeClasses().firstOrNull { it.nameBn.contains("৬ষ্ঠ") || it.id == 6 }?.id ?: 6
+        }
+        if (s.contains("সপ্তম") || s.contains("৭ম") || s.contains("7th") || s.contains("class 7")) {
+            return SchoolClassRegistry.activeClasses().firstOrNull { it.nameBn.contains("৭ম") || it.id == 7 }?.id ?: 7
+        }
+        if (s.contains("অষ্টম") || s.contains("৮ম") || s.contains("8th") || s.contains("class 8")) {
+            return SchoolClassRegistry.activeClasses().firstOrNull { it.nameBn.contains("৮ম") || it.id == 8 }?.id ?: 8
+        }
+        if (s.contains("প্রাক") || s.contains("শিশু") || s.contains("pre")) {
+            return SchoolClassRegistry.currentCustom().firstOrNull {
+                it.nameBn.contains("প্রাক") || it.nameBn.contains("শিশু")
+            }?.id
+        }
+        val numToken = Regex("\\b([1-9]|1[0-9]|20)\\b").find(s)?.groupValues?.getOrNull(1)?.toIntOrNull()
+        if (numToken != null && numToken in 1..20) return numToken
+        return null
     }
 
     val STANDARD_FIELDS: List<Pair<String, String>> = listOf(
@@ -674,7 +721,7 @@ object Repo {
             }
 
             val cls = clsVal ?: defaultCls
-            if (cls !in 1..5) continue
+            if (cls !in 1..20) continue
             if (rollVal == null && stdMap["name"].isNullOrBlank()) continue
             val roll = rollVal ?: run {
                 val nextAuto = (autoRollByCls[cls] ?: out.filter { it.cls == cls }.maxOfOrNull { it.roll } ?: 0) + 1

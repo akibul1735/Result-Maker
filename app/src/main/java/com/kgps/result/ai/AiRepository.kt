@@ -5,9 +5,9 @@ import android.graphics.Bitmap
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
 import android.util.Base64
-import com.kgps.result.CLSN
 import com.kgps.result.RELIGIONS
 import com.kgps.result.bn
+import com.kgps.result.classNameBn
 import com.kgps.result.fmtEn
 import com.kgps.result.fromBn
 import com.kgps.result.subjectsFor
@@ -548,7 +548,7 @@ internal fun parseExtractedClassSheetJson(
     subKeyHint: String?,
     requestedScope: ClassSheetImportScope = ClassSheetImportScope.AUTO
 ): ExtractedClassSheet {
-    val detectedCls = (clsHint ?: json.optInt("cls", 3)).coerceIn(1, 5)
+    val detectedCls = (clsHint ?: json.optInt("cls", 3)).coerceIn(1, 20)
     val detectedTerm = (termHint ?: json.optInt("term", 1)).coerceIn(1, 3)
     val rawSub = json.optString("subKey").trim().uppercase()
     val validSubs = subjectsFor(detectedCls, RELIGIONS.first()).map { it.key }.toSet()
@@ -672,7 +672,7 @@ internal fun parseExtractedClassSheetJson(
                 ClassSheetImportScope.WR_ONLY -> " · শুধু সামষ্টিক"
                 else -> ""
             }
-            "${CLSN[detectedCls - 1]} শ্রেণি · ${bn(detectedTerm.toString())} প্রান্তিক$scopeNote — ${bn(parsedRows.size.toString())} জন শনাক্ত।"
+            "${classNameBn(detectedCls)} শ্রেণি · ${bn(detectedTerm.toString())} প্রান্তিক$scopeNote — ${bn(parsedRows.size.toString())} জন শনাক্ত।"
         },
         warnings = warnings.distinct(),
         rows = parsedRows,
@@ -1601,7 +1601,7 @@ class PlaceholderAiRepository : AiRepository {
         documentEnhance: Boolean
     ): ExtractedClassSheet {
         delay(500)
-        val cls = (clsHint ?: 3).coerceIn(1, 5)
+        val cls = (clsHint ?: 3).coerceIn(1, 20)
         val term = (termHint ?: 1).coerceIn(1, 3)
         val sub = subKeyHint ?: "MATH"
         val hasWritten = (subjectsFor(cls, RELIGIONS.first()).find { it.key == sub }?.written ?: 0) > 0

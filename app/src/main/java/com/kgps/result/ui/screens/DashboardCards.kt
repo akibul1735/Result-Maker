@@ -49,9 +49,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.kgps.result.CLSN
 import com.kgps.result.Student
 import com.kgps.result.bn
+import com.kgps.result.classNameBn
 import com.kgps.result.fmt
 import com.kgps.result.ui.theme.AmberBg
 import com.kgps.result.ui.theme.AmberBorder
@@ -182,7 +182,7 @@ fun ProgressTrackerCard(
                                 verticalArrangement = Arrangement.spacedBy(2.dp)
                             ) {
                                 Text(
-                                    "${CLSN[item.cls - 1]} (${bn(item.totalStudents.toString())})",
+                                    "${classNameBn(item.cls)} (${bn(item.totalStudents.toString())})",
                                     fontWeight = FontWeight.Bold,
                                     fontSize = 11.5.sp,
                                     color = SlateText
