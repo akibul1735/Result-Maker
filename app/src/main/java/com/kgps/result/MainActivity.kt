@@ -24,10 +24,13 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.Add
@@ -99,6 +102,7 @@ import com.kgps.result.cloud.attemptAutoSignIn
 import com.kgps.result.cloud.authStateFlow
 import com.kgps.result.cloud.onGoogleSignInClicked
 import com.kgps.result.cloud.signOutFromGoogle
+import com.kgps.result.ui.components.SummaryTableConfigCard
 import com.kgps.result.ui.screens.AiAssistantScreen
 import com.kgps.result.ui.screens.AuthScreen
 import com.kgps.result.ui.screens.BatchStudentEditDialog
@@ -453,6 +457,8 @@ fun ResultMakerWorkspace(
     val geminiTestSuccess by vm.geminiTestSuccess.collectAsStateWithLifecycle()
     val isGeminiConfigured by vm.isGeminiConfigured.collectAsStateWithLifecycle()
     val includeClassHighest by vm.includeClassHighestInReport.collectAsStateWithLifecycle()
+    val includeSummaryTable by vm.includeSummaryTableInReport.collectAsStateWithLifecycle()
+    val summaryColumns by vm.summaryTableColumns.collectAsStateWithLifecycle()
 
     val workspaceScope = rememberCoroutineScope()
     var askSignOut by remember { mutableStateOf(false) }
@@ -474,7 +480,9 @@ fun ResultMakerWorkspace(
                                 st = settings,
                                 out = out,
                                 allStudents = students,
-                                showClassHighest = includeClassHighest
+                                showClassHighest = includeClassHighest,
+                                showSummaryTable = includeSummaryTable,
+                                summaryColumns = summaryColumns
                             )
                         }
                     }
@@ -646,6 +654,10 @@ fun ResultMakerWorkspace(
                                     backupStatus = backupStatus,
                                     includeClassHighest = includeClassHighest,
                                     onToggleClassHighest = vm::setIncludeClassHighestInReport,
+                                    includeSummaryTable = includeSummaryTable,
+                                    summaryColumns = summaryColumns,
+                                    onToggleSummaryTable = vm::setIncludeSummaryTableInReport,
+                                    onUpdateSummaryColumns = vm::setSummaryTableColumns,
                                     onOpenApprovals = { vm.navigate(NavSection.SETTINGS) },
                                     onOpenSettings = { vm.navigate(NavSection.SETTINGS) },
                                     onCsvImport = { vm.openCsvImport("") },
@@ -670,7 +682,9 @@ fun ResultMakerWorkspace(
                                                 st = settings,
                                                 jobName = jobName,
                                                 allStudents = students,
-                                                showClassHighest = includeClassHighest
+                                                showClassHighest = includeClassHighest,
+                                                showSummaryTable = includeSummaryTable,
+                                                summaryColumns = summaryColumns
                                             )
                                         }
                                     },
@@ -751,6 +765,10 @@ fun ResultMakerWorkspace(
                                         selectedId = studioStudentId,
                                         includeClassHighest = includeClassHighest,
                                         onToggleClassHighest = vm::setIncludeClassHighestInReport,
+                                        includeSummaryTable = includeSummaryTable,
+                                        summaryColumns = summaryColumns,
+                                        onToggleSummaryTable = vm::setIncludeSummaryTableInReport,
+                                        onUpdateSummaryColumns = vm::setSummaryTableColumns,
                                         onSelectId = vm::selectStudioStudent,
                                         onUpdateSettings = vm::updateSettings,
                                         onPrintStudent = { s ->
@@ -760,7 +778,9 @@ fun ResultMakerWorkspace(
                                                 st = settings,
                                                 jobName = "${s.name.ifBlank { "Report" }}_${s.roll}",
                                                 allStudents = students,
-                                                showClassHighest = includeClassHighest
+                                                showClassHighest = includeClassHighest,
+                                                showSummaryTable = includeSummaryTable,
+                                                summaryColumns = summaryColumns
                                             )
                                         },
                                         onExportPdf = { s -> makePdf(listOf(s), "${s.name.ifBlank { "student" }}-report.pdf") },
@@ -774,7 +794,9 @@ fun ResultMakerWorkspace(
                                                     st = settings,
                                                     jobName = jobName,
                                                     allStudents = students,
-                                                    showClassHighest = includeClassHighest
+                                                    showClassHighest = includeClassHighest,
+                                                    showSummaryTable = includeSummaryTable,
+                                                    summaryColumns = summaryColumns
                                                 )
                                             }
                                         },
@@ -951,7 +973,13 @@ fun ResultMakerWorkspace(
             onDismissRequest = { pendingPdfOptionPrompt = null },
             title = { Text("রিপোর্ট PDF অপশন", fontWeight = FontWeight.Bold, fontSize = 16.sp) },
             text = {
-                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(max = 380.dp)
+                        .verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
                     Text(
                         "${bn(targetList.size.toString())} জন শিক্ষার্থীর (${bn((targetList.size * 2).toString())} পৃষ্ঠা) PDF তৈরি হবে।",
                         fontSize = 13.sp,
@@ -989,6 +1017,16 @@ fun ResultMakerWorkspace(
                             }
                         }
                     }
+
+                    SummaryTableConfigCard(
+                        includeSummaryTable = includeSummaryTable,
+                        selectedColumns = summaryColumns,
+                        onToggleInclude = vm::setIncludeSummaryTableInReport,
+                        onUpdateColumns = vm::setSummaryTableColumns,
+                        initiallyExpanded = true,
+                        collapsibleWhenEnabled = true,
+                        testTagPrefix = "pdf_prompt_summary"
+                    )
                 }
             },
             confirmButton = {

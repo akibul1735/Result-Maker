@@ -22,6 +22,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.Close
@@ -62,6 +63,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import com.kgps.result.CLSN
+import com.kgps.result.ReportSummaryColumn
 import com.kgps.result.Student
 import com.kgps.result.bn
 import com.kgps.result.fromBn
@@ -92,6 +94,10 @@ fun BatchReportDialog(
     initialClass: Int,
     includeClassHighest: Boolean = false,
     onToggleClassHighest: (Boolean) -> Unit = {},
+    includeSummaryTable: Boolean = false,
+    summaryColumns: List<ReportSummaryColumn> = ReportSummaryColumn.DEFAULT_SELECTED,
+    onToggleSummaryTable: (Boolean) -> Unit = {},
+    onUpdateSummaryColumns: (List<ReportSummaryColumn>) -> Unit = {},
     onPrintBatch: (students: List<Student>, jobName: String) -> Unit,
     onExportBatchPdf: (students: List<Student>, fileName: String) -> Unit,
     onDismiss: () -> Unit
@@ -613,41 +619,59 @@ fun BatchReportDialog(
                     }
                 }
 
-                // Optional Class Highest Column Toggle
-                Surface(
-                    color = if (includeClassHighest) TealSoft else SlateBg,
-                    border = BorderStroke(1.dp, if (includeClassHighest) TealPrimary.copy(alpha = 0.45f) else SlateOutline),
-                    shape = RoundedCornerShape(9.dp),
+                // Optional Page 3 Report Options (Scrollable when expanded so action buttons remain visible)
+                Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .clickable { onToggleClassHighest(!includeClassHighest) }
-                        .testTag("batch_class_highest_row")
+                        .heightIn(max = 220.dp)
+                        .verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
-                    Row(
-                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
-                        verticalAlignment = Alignment.CenterVertically
+                    Surface(
+                        color = if (includeClassHighest) TealSoft else SlateBg,
+                        border = BorderStroke(1.dp, if (includeClassHighest) TealPrimary.copy(alpha = 0.45f) else SlateOutline),
+                        shape = RoundedCornerShape(9.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { onToggleClassHighest(!includeClassHighest) }
+                            .testTag("batch_class_highest_row")
                     ) {
-                        Checkbox(
-                            checked = includeClassHighest,
-                            onCheckedChange = onToggleClassHighest,
-                            modifier = Modifier.testTag("batch_class_highest_checkbox")
-                        )
-                        Column(Modifier.weight(1f).padding(end = 6.dp)) {
-                            Text(
-                                "৩য় পৃষ্ঠায় 'শ্রেণিতে সর্বোচ্চ নম্বর' কলাম যোগ করুন",
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.SemiBold,
-                                color = SlateText
+                        Row(
+                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Checkbox(
+                                checked = includeClassHighest,
+                                onCheckedChange = onToggleClassHighest,
+                                modifier = Modifier.testTag("batch_class_highest_checkbox")
                             )
-                            Text(
-                                "চূড়ান্ত ফলাফলের অধীনে বিষয়ভিত্তিক শ্রেণির সর্বোচ্চ নম্বর দেখাবে",
-                                fontSize = 10.5.sp,
-                                color = SlateMuted,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
+                            Column(Modifier.weight(1f).padding(end = 6.dp)) {
+                                Text(
+                                    "৩য় পৃষ্ঠায় 'শ্রেণিতে সর্বোচ্চ নম্বর' কলাম যোগ করুন",
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = SlateText
+                                )
+                                Text(
+                                    "চূড়ান্ত ফলাফলের অধীনে বিষয়ভিত্তিক শ্রেণির সর্বোচ্চ নম্বর দেখাবে",
+                                    fontSize = 10.5.sp,
+                                    color = SlateMuted,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
                         }
                     }
+
+                    SummaryTableConfigCard(
+                        includeSummaryTable = includeSummaryTable,
+                        selectedColumns = summaryColumns,
+                        onToggleInclude = onToggleSummaryTable,
+                        onUpdateColumns = onUpdateSummaryColumns,
+                        initiallyExpanded = false,
+                        collapsibleWhenEnabled = true,
+                        testTagPrefix = "batch_summary"
+                    )
                 }
 
                 // Print + PDF Action Buttons

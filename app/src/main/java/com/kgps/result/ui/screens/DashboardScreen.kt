@@ -57,6 +57,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.kgps.result.CLSN
+import com.kgps.result.ReportSummaryColumn
 import com.kgps.result.Settings
 import com.kgps.result.Student
 import com.kgps.result.backup.AutoBackupStatus
@@ -90,6 +91,10 @@ fun DashboardScreen(
     backupStatus: AutoBackupStatus,
     includeClassHighest: Boolean = false,
     onToggleClassHighest: (Boolean) -> Unit = {},
+    includeSummaryTable: Boolean = false,
+    summaryColumns: List<ReportSummaryColumn> = ReportSummaryColumn.DEFAULT_SELECTED,
+    onToggleSummaryTable: (Boolean) -> Unit = {},
+    onUpdateSummaryColumns: (List<ReportSummaryColumn>) -> Unit = {},
     onOpenApprovals: () -> Unit,
     onOpenSettings: () -> Unit,
     onCsvImport: () -> Unit,
@@ -556,6 +561,10 @@ fun DashboardScreen(
             initialClass = classFilter ?: selectedClass,
             includeClassHighest = includeClassHighest,
             onToggleClassHighest = onToggleClassHighest,
+            includeSummaryTable = includeSummaryTable,
+            summaryColumns = summaryColumns,
+            onToggleSummaryTable = onToggleSummaryTable,
+            onUpdateSummaryColumns = onUpdateSummaryColumns,
             onPrintBatch = onPrintBatch,
             onExportBatchPdf = onExportBatchPdf,
             onDismiss = { showBatchDialog = false }

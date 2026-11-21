@@ -23,6 +23,7 @@ import java.io.FileOutputStream
 import java.io.OutputStream
 import java.util.concurrent.ConcurrentHashMap
 import kotlin.math.PI
+import kotlin.math.abs
 import kotlin.math.cos
 import kotlin.math.max
 import kotlin.math.sin
@@ -313,13 +314,15 @@ object PdfGen {
         showFoldGuide: Boolean = true,
         scale: Float = 2f,
         allStudents: List<Student> = listOf(s),
-        showClassHighest: Boolean = false
+        showClassHighest: Boolean = false,
+        showSummaryTable: Boolean = false,
+        summaryColumns: List<ReportSummaryColumn> = ReportSummaryColumn.DEFAULT_SELECTED
     ): Bitmap {
         val bmp = Bitmap.createBitmap((W * scale).toInt(), (H * scale).toInt(), Bitmap.Config.ARGB_8888)
         val c = Canvas(bmp)
         c.drawColor(Color.WHITE)
         c.scale(scale, scale)
-        marks(ctx, c, s, st.pdfFont, showFoldGuide, allStudents, showClassHighest)
+        marks(ctx, c, s, st.pdfFont, showFoldGuide, allStudents, showClassHighest, showSummaryTable, summaryColumns)
         return bmp
     }
 
@@ -329,7 +332,9 @@ object PdfGen {
         st: Settings,
         out: OutputStream,
         allStudents: List<Student> = students,
-        showClassHighest: Boolean = false
+        showClassHighest: Boolean = false,
+        showSummaryTable: Boolean = false,
+        summaryColumns: List<ReportSummaryColumn> = ReportSummaryColumn.DEFAULT_SELECTED
     ) {
         val doc = PdfDocument()
         try {
@@ -340,7 +345,17 @@ object PdfGen {
                 doc.finishPage(p1)
 
                 val p2 = doc.startPage(PdfDocument.PageInfo.Builder(W, H, n++).create())
-                marks(ctx, p2.canvas, s, st.pdfFont, showFoldGuide = false, allStudents = allStudents, showClassHighest = showClassHighest)
+                marks(
+                    ctx,
+                    p2.canvas,
+                    s,
+                    st.pdfFont,
+                    showFoldGuide = false,
+                    allStudents = allStudents,
+                    showClassHighest = showClassHighest,
+                    showSummaryTable = showSummaryTable,
+                    summaryColumns = summaryColumns
+                )
                 doc.finishPage(p2)
             }
             doc.writeTo(out)
@@ -355,7 +370,9 @@ object PdfGen {
         st: Settings,
         jobName: String,
         allStudents: List<Student> = students,
-        showClassHighest: Boolean = false
+        showClassHighest: Boolean = false,
+        showSummaryTable: Boolean = false,
+        summaryColumns: List<ReportSummaryColumn> = ReportSummaryColumn.DEFAULT_SELECTED
     ) {
         if (students.isEmpty()) return
         val printManager = ctx.getSystemService(Context.PRINT_SERVICE) as? PrintManager ?: return
@@ -390,7 +407,16 @@ object PdfGen {
                 }
                 try {
                     FileOutputStream(destination.fileDescriptor).use { fos ->
-                        write(ctx, students, st, fos, allStudents = allStudents, showClassHighest = showClassHighest)
+                        write(
+                            ctx,
+                            students,
+                            st,
+                            fos,
+                            allStudents = allStudents,
+                            showClassHighest = showClassHighest,
+                            showSummaryTable = showSummaryTable,
+                            summaryColumns = summaryColumns
+                        )
                     }
                     callback.onWriteFinished(arrayOf(PageRange.ALL_PAGES))
                 } catch (e: Exception) {
@@ -570,7 +596,9 @@ object PdfGen {
         f: String,
         showFoldGuide: Boolean,
         allStudents: List<Student>,
-        showClassHighest: Boolean
+        showClassHighest: Boolean,
+        showSummaryTable: Boolean,
+        summaryColumns: List<ReportSummaryColumn>
     ) {
         drawPanelFrames(c, showFoldGuide)
 
@@ -703,6 +731,8 @@ object PdfGen {
         // ---- ডান ভেতরের অর্ধেক (x: 443..814) ----
         val rx = 443f
         val rW = 371f
+        val classPeers = (allStudents + s).distinctBy { it.id }.filter { it.cls == s.cls }
+        val pct = s.overallPct()
 
         if (!showClassHighest) {
             val rcw = rW / 6f
@@ -732,7 +762,6 @@ object PdfGen {
                 cell(ctx, c, if (anyData) gradeOf(a / sub.max * 100) else "", rx + 4 * rcw, ry, rcw, rh, 9.5f, true, false, f)
             }
 
-            val pct = s.overallPct()
             cell(
                 ctx,
                 c,
@@ -818,7 +847,6 @@ object PdfGen {
                 )
             }
 
-            val classPeers = (allStudents + s).distinctBy { it.id }.filter { it.cls == s.cls }
             val classHighestTotal = classPeers
                 .filter { peer -> (1..3).any { peer.hasTerm(it) } }
                 .maxOfOrNull { peer -> peer.subs().sumOf { peer.avg(it) } }
@@ -844,7 +872,6 @@ object PdfGen {
                 cell(ctx, c, if (anyData) gradeOf(a / sub.max * 100) else "", rxCols[5], ry, rw[5], rh, 9f, true, false, f)
             }
 
-            val pct = s.overallPct()
             cell(
                 ctx,
                 c,
@@ -903,22 +930,106 @@ object PdfGen {
             cell(ctx, c, "", rxCols[5], ty, rw[5] + rw[6], totalH, 7f, false, true, f)
         }
 
-        // ---- নিচে ডানে: উপস্থিতি (গুণাবলির সাথে সারিবদ্ধ) ----
+        // ---- নিচে ডানে: ঐচ্ছিক ফলাফল সারাংশ টেবিল + উপস্থিতি ----
+        val activeSummaryCols = if (showSummaryTable) summaryColumns.distinct() else emptyList()
         val aw = floatArrayOf(125f, 82f, 82f, 82f)
-        val attTopH = 27f
-        val attSubH = 32f
-        cell(ctx, c, "উপস্থিতি", rx, by, rW, attTopH, 9.5f, true, true, f)
+
+        val attStartY: Float
+        val attTopH: Float
+        val attSubH: Float
+        val attRowsStartY: Float
+        val attRowH: Float
+
+        if (activeSummaryCols.isNotEmpty()) {
+            val summaryY = ty + totalH + 7f
+            val sumHdrH = 24f
+            val sumValH = 21f
+
+            val totalWeight = activeSummaryCols.sumOf { it.tableWeight.toDouble() }.toFloat().coerceAtLeast(1f)
+            val useCompactHeaders = activeSummaryCols.size >= 4
+            val hdrFontSize = when (activeSummaryCols.size) {
+                1, 2, 3 -> 7.8f
+                4 -> 7.2f
+                else -> 6.6f
+            }
+            val valFontSize = when (activeSummaryCols.size) {
+                1, 2, 3 -> 9.2f
+                4 -> 8.6f
+                else -> 8.0f
+            }
+
+            val totalAvgObtained = subs.sumOf { s.avg(it) }
+            val studentMeritRank: Int? = if (!anyData) {
+                null
+            } else {
+                val evaluatedPeers = classPeers.filter { peer -> (1..3).any { peer.hasTerm(it) } }
+                1 + evaluatedPeers.count { peer ->
+                    val peerPct = peer.overallPct()
+                    val peerAvg = peer.subs().sumOf { peer.avg(it) }
+                    peerPct > pct + 0.0001 || (abs(peerPct - pct) <= 0.0001 && peerAvg > totalAvgObtained + 0.0001)
+                }
+            }
+            val attendanceAvgPct: Double? = run {
+                var sumDays = 0.0
+                var sumPres = 0.0
+                for (t in 1..3) {
+                    val d = s.x["DAYS_$t"]?.let { fromBn(it).toDoubleOrNull() }
+                    val p = s.x["PRES_$t"]?.let { fromBn(it).toDoubleOrNull() }
+                    if (d != null && d > 0.0 && p != null && p >= 0.0) {
+                        sumDays += d
+                        sumPres += p.coerceAtMost(d)
+                    }
+                }
+                if (sumDays > 0.0) (sumPres / sumDays) * 100.0 else null
+            }
+
+            var sx = rx
+            activeSummaryCols.forEachIndexed { idx, col ->
+                val colW = if (idx == activeSummaryCols.lastIndex) {
+                    (rx + rW) - sx
+                } else {
+                    rW * (col.tableWeight / totalWeight)
+                }
+                val hdrLabel = if (useCompactHeaders) col.compactHeaderBn else col.headerBn
+                val valueLabel = when (col) {
+                    ReportSummaryColumn.PERCENTAGE -> if (anyData) "${fmt(pct)}%" else ""
+                    ReportSummaryColumn.GRADE_POSITION -> if (anyData) gradeLabelBn(gradeOf(pct)) else ""
+                    ReportSummaryColumn.MERIT_RANK -> studentMeritRank?.let { bn(it.toString()) } ?: ""
+                    ReportSummaryColumn.OVERALL_GRADE -> if (anyData) gradeOf(pct) else ""
+                    ReportSummaryColumn.ATTENDANCE_RATE -> attendanceAvgPct?.let { "${fmt(it)}%" } ?: ""
+                    ReportSummaryColumn.TOTAL_AVERAGE -> if (anyData) "${fmt(totalAvgObtained)} / ${bn(totMax.toString())}" else ""
+                }
+                cell(ctx, c, hdrLabel, sx, summaryY, colW, sumHdrH, hdrFontSize, true, true, f)
+                cell(ctx, c, valueLabel, sx, summaryY + sumHdrH, colW, sumValH, valFontSize, true, false, f)
+                sx += colW
+            }
+
+            attStartY = summaryY + sumHdrH + sumValH + 7f
+            attTopH = 20f
+            attSubH = 24f
+            attRowsStartY = attStartY + attTopH + attSubH
+            val targetAttBottom = qRowsY + 3 * qRowH // বাম দিকের গুণাবলি ছকের নিচের সাথে হুবহু সমান
+            attRowH = ((targetAttBottom - attRowsStartY) / 3f).coerceAtLeast(24f)
+        } else {
+            attStartY = by
+            attTopH = 27f
+            attSubH = 32f
+            attRowsStartY = qRowsY
+            attRowH = qRowH
+        }
+
+        cell(ctx, c, "উপস্থিতি", rx, attStartY, rW, attTopH, if (activeSummaryCols.isNotEmpty()) 9f else 9.5f, true, true, f)
         var ax = rx
         listOf("বিবরণ", "১ম প্রান্তিক", "২য় প্রান্তিক", "৩য় প্রান্তিক").forEachIndexed { i, h ->
-            cell(ctx, c, h, ax, by + attTopH, aw[i], attSubH, 8.5f, true, true, f)
+            cell(ctx, c, h, ax, attStartY + attTopH, aw[i], attSubH, if (activeSummaryCols.isNotEmpty()) 8f else 8.5f, true, true, f)
             ax += aw[i]
         }
 
         val attLabels = listOf("মোট কার্যদিবস", "শিক্ষার্থীর উপস্থিতি", "উপস্থিতির হার")
         attLabels.forEachIndexed { r, lab ->
-            val yy = qRowsY + r * qRowH
+            val yy = attRowsStartY + r * attRowH
             ax = rx
-            cell(ctx, c, lab, ax, yy, aw[0], qRowH, 8.5f, true, false, f)
+            cell(ctx, c, lab, ax, yy, aw[0], attRowH, 8.5f, true, false, f)
             ax += aw[0]
             for (t in 1..3) {
                 val d = s.x["DAYS_$t"]?.let { fromBn(it).toDoubleOrNull() }
@@ -928,7 +1039,7 @@ object PdfGen {
                     1 -> p?.let { fmt(it) } ?: ""
                     else -> if (d != null && p != null && d > 0) "${fmt(p / d * 100)}%" else ""
                 }
-                cell(ctx, c, txt, ax, yy, aw[t], qRowH, 9.5f, r == 2, false, f)
+                cell(ctx, c, txt, ax, yy, aw[t], attRowH, 9.2f, r == 2, false, f)
                 ax += aw[t]
             }
         }

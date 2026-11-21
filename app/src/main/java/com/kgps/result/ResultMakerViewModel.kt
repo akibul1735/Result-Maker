@@ -330,6 +330,16 @@ class ResultMakerViewModel(
     )
     val includeClassHighestInReport: StateFlow<Boolean> = _includeClassHighestInReport.asStateFlow()
 
+    private val _includeSummaryTableInReport = MutableStateFlow(
+        reportPrefs.getBoolean("include_summary_table", false)
+    )
+    val includeSummaryTableInReport: StateFlow<Boolean> = _includeSummaryTableInReport.asStateFlow()
+
+    private val _summaryTableColumns = MutableStateFlow(
+        ReportSummaryColumn.deserializeList(reportPrefs.getString("summary_table_columns", null))
+    )
+    val summaryTableColumns: StateFlow<List<ReportSummaryColumn>> = _summaryTableColumns.asStateFlow()
+
     private val _snackbarMessage = MutableStateFlow<String?>(null)
     val snackbarMessage: StateFlow<String?> = _snackbarMessage.asStateFlow()
 
@@ -830,6 +840,19 @@ class ResultMakerViewModel(
     fun setIncludeClassHighestInReport(enabled: Boolean) {
         _includeClassHighestInReport.value = enabled
         reportPrefs.edit().putBoolean("include_class_highest", enabled).apply()
+    }
+
+    fun setIncludeSummaryTableInReport(enabled: Boolean) {
+        _includeSummaryTableInReport.value = enabled
+        reportPrefs.edit().putBoolean("include_summary_table", enabled).apply()
+    }
+
+    fun setSummaryTableColumns(columns: List<ReportSummaryColumn>) {
+        val cleaned = columns.distinct().ifEmpty { ReportSummaryColumn.DEFAULT_SELECTED }
+        _summaryTableColumns.value = cleaned
+        reportPrefs.edit()
+            .putString("summary_table_columns", ReportSummaryColumn.serializeList(cleaned))
+            .apply()
     }
 
     fun openCsvImport(initialText: String = "") {

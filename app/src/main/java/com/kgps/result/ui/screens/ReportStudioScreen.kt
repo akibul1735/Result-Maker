@@ -97,11 +97,13 @@ import com.kgps.result.CLSN
 import com.kgps.result.DPE_LOGO_LIST
 import com.kgps.result.PDF_FONT_LIST
 import com.kgps.result.PdfGen
+import com.kgps.result.ReportSummaryColumn
 import com.kgps.result.Settings
 import com.kgps.result.Student
 import com.kgps.result.bn
 import com.kgps.result.fromBn
 import com.kgps.result.ui.components.BatchReportDialog
+import com.kgps.result.ui.components.SummaryTableConfigCard
 import com.kgps.result.ui.theme.SlateBg
 import com.kgps.result.ui.theme.SlateMuted
 import com.kgps.result.ui.theme.SlateOutline
@@ -133,6 +135,10 @@ fun ReportStudioScreen(
     selectedId: String?,
     includeClassHighest: Boolean = false,
     onToggleClassHighest: (Boolean) -> Unit = {},
+    includeSummaryTable: Boolean = false,
+    summaryColumns: List<ReportSummaryColumn> = ReportSummaryColumn.DEFAULT_SELECTED,
+    onToggleSummaryTable: (Boolean) -> Unit = {},
+    onUpdateSummaryColumns: (List<ReportSummaryColumn>) -> Unit = {},
     onSelectId: (String) -> Unit,
     onUpdateSettings: (Settings) -> Unit,
     onPrintStudent: (Student) -> Unit,
@@ -203,7 +209,15 @@ fun ReportStudioScreen(
     val coverBmp = remember(active, settings, showFoldGuide) {
         PdfGen.renderCoverBitmap(ctx, active, settings, showFoldGuide = showFoldGuide, scale = 2.4f)
     }
-    val marksBmp = remember(active, settings, showFoldGuide, allSchoolStudents, includeClassHighest) {
+    val marksBmp = remember(
+        active,
+        settings,
+        showFoldGuide,
+        allSchoolStudents,
+        includeClassHighest,
+        includeSummaryTable,
+        summaryColumns
+    ) {
         PdfGen.renderMarksBitmap(
             ctx,
             active,
@@ -211,7 +225,9 @@ fun ReportStudioScreen(
             showFoldGuide = showFoldGuide,
             scale = 2.4f,
             allStudents = allSchoolStudents,
-            showClassHighest = includeClassHighest
+            showClassHighest = includeClassHighest,
+            showSummaryTable = includeSummaryTable,
+            summaryColumns = summaryColumns
         )
     }
 
@@ -459,11 +475,11 @@ fun ReportStudioScreen(
                             horizontalArrangement = Arrangement.spacedBy(4.dp)
                         ) {
                             val pageCaption = when (pageView) {
-                                "p1" -> "পৃষ্ঠা ১/৪ · ফ্রন্ট কভার"
-                                "p2" -> "পৃষ্ঠা ২/৪ · ১ম-২য় প্রান্তিক ও গুণাবলি"
-                                "p3" -> "পৃষ্ঠা ৩/৪ · ৩য়, চূড়ান্ত ও উপস্থিতি"
-                                "p4" -> "পৃষ্ঠা ৪/৪ · ব্যাক কভার"
-                                else -> "পুরো শিট (২ পাতা)"
+                                "p1" -> "পৃষ্ঠা ১/৪"
+                                "p2" -> "পৃষ্ঠা ২/৪"
+                                "p3" -> "পৃষ্ঠা ৩/৪"
+                                "p4" -> "পৃষ্ঠা ৪/৪"
+                                else -> "পুরো শিট"
                             }
                             Text(
                                 pageCaption,
@@ -483,14 +499,35 @@ fun ReportStudioScreen(
                                 modifier = Modifier.height(28.dp).testTag("studio_toggle_class_highest_chip")
                             ) {
                                 Box(
-                                    modifier = Modifier.padding(horizontal = 7.dp),
+                                    modifier = Modifier.padding(horizontal = 6.dp),
                                     contentAlignment = Alignment.Center
                                 ) {
                                     Text(
                                         if (includeClassHighest) "✓ সর্বোচ্চ" else "+ সর্বোচ্চ",
-                                        fontSize = 10.5.sp,
+                                        fontSize = 10.sp,
                                         fontWeight = FontWeight.SemiBold,
                                         color = if (includeClassHighest) Color.White else SlateText,
+                                        maxLines = 1
+                                    )
+                                }
+                            }
+
+                            Surface(
+                                onClick = { onToggleSummaryTable(!includeSummaryTable) },
+                                shape = RoundedCornerShape(6.dp),
+                                color = if (includeSummaryTable) TealPrimary else SlateBg,
+                                border = BorderStroke(1.dp, if (includeSummaryTable) TealPrimary else SlateOutline),
+                                modifier = Modifier.height(28.dp).testTag("studio_toggle_summary_chip")
+                            ) {
+                                Box(
+                                    modifier = Modifier.padding(horizontal = 6.dp),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Text(
+                                        if (includeSummaryTable) "✓ সারাংশ" else "+ সারাংশ",
+                                        fontSize = 10.sp,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = if (includeSummaryTable) Color.White else SlateText,
                                         maxLines = 1
                                     )
                                 }
@@ -825,6 +862,10 @@ fun ReportStudioScreen(
             initialClass = active.cls,
             includeClassHighest = includeClassHighest,
             onToggleClassHighest = onToggleClassHighest,
+            includeSummaryTable = includeSummaryTable,
+            summaryColumns = summaryColumns,
+            onToggleSummaryTable = onToggleSummaryTable,
+            onUpdateSummaryColumns = onUpdateSummaryColumns,
             onPrintBatch = onPrintBatch,
             onExportBatchPdf = onExportBatchPdf,
             onDismiss = { showBatchDialog = false }
@@ -1244,11 +1285,12 @@ fun ReportStudioScreen(
             Column(
                 Modifier
                     .fillMaxWidth()
+                    .verticalScroll(rememberScrollState())
                     .padding(horizontal = 16.dp, vertical = 8.dp)
                     .padding(bottom = 24.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                Text("রিপোর্ট কার্ড ফন্ট ও লোগো সেটিংস", fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                Text("রিপোর্ট কার্ড ফন্ট, লোগো ও টেবিল সেটিংস", fontWeight = FontWeight.Bold, fontSize = 16.sp)
 
                 Text("অফিসিয়াল বাংলা ফন্ট (PDF)", fontSize = 12.sp, color = SlateMuted)
                 Row(
@@ -1313,6 +1355,16 @@ fun ReportStudioScreen(
                         )
                     }
                 }
+
+                SummaryTableConfigCard(
+                    includeSummaryTable = includeSummaryTable,
+                    selectedColumns = summaryColumns,
+                    onToggleInclude = onToggleSummaryTable,
+                    onUpdateColumns = onUpdateSummaryColumns,
+                    initiallyExpanded = true,
+                    collapsibleWhenEnabled = false,
+                    testTagPrefix = "studio_summary"
+                )
             }
         }
     }

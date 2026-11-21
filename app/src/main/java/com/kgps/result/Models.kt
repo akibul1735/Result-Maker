@@ -130,6 +130,83 @@ fun createEmptyStudent(cls: Int, roll: Int, religion: String = "ইসলাম"
     religion = religion
 )
 
+enum class ReportSummaryColumn(
+    val id: String,
+    val headerBn: String,
+    val compactHeaderBn: String,
+    val shortLabelBn: String,
+    val sampleValueBn: String,
+    val tableWeight: Float
+) {
+    PERCENTAGE(
+        id = "PERCENTAGE",
+        headerBn = "প্রাপ্ত মোট নম্বরের\nশতকরা হার",
+        compactHeaderBn = "মোট নম্বরের\nশতকরা হার",
+        shortLabelBn = "শতকরা হার",
+        sampleValueBn = "৮৫%",
+        tableWeight = 1.05f
+    ),
+    GRADE_POSITION(
+        id = "GRADE_POSITION",
+        headerBn = "অবস্থানগত মান",
+        compactHeaderBn = "অবস্থানগত\nমান",
+        shortLabelBn = "অবস্থানগত মান",
+        sampleValueBn = "অতি উত্তম",
+        tableWeight = 1.22f
+    ),
+    MERIT_RANK(
+        id = "MERIT_RANK",
+        headerBn = "শ্রেণিতে মেধাক্রম",
+        compactHeaderBn = "শ্রেণিতে\nমেধাক্রম",
+        shortLabelBn = "মেধাক্রম",
+        sampleValueBn = "১",
+        tableWeight = 0.92f
+    ),
+    OVERALL_GRADE(
+        id = "OVERALL_GRADE",
+        headerBn = "সামগ্রিক গ্রেড",
+        compactHeaderBn = "সামগ্রিক\nগ্রেড",
+        shortLabelBn = "সমন্বিত গ্রেড",
+        sampleValueBn = "A",
+        tableWeight = 0.80f
+    ),
+    ATTENDANCE_RATE(
+        id = "ATTENDANCE_RATE",
+        headerBn = "গড় উপস্থিতির হার",
+        compactHeaderBn = "গড় উপস্থিতির\nহার",
+        shortLabelBn = "উপস্থিতির হার",
+        sampleValueBn = "৯৫%",
+        tableWeight = 1.00f
+    ),
+    TOTAL_AVERAGE(
+        id = "TOTAL_AVERAGE",
+        headerBn = "প্রাপ্ত গড় মোট\nনম্বর",
+        compactHeaderBn = "প্রাপ্ত গড়\nমোট নম্বর",
+        shortLabelBn = "গড় মোট নম্বর",
+        sampleValueBn = "৫৫০/৬৫০",
+        tableWeight = 1.05f
+    );
+
+    companion object {
+        val DEFAULT_SELECTED: List<ReportSummaryColumn> = listOf(
+            PERCENTAGE,
+            GRADE_POSITION,
+            MERIT_RANK
+        )
+
+        fun serializeList(cols: List<ReportSummaryColumn>): String =
+            cols.distinct().joinToString(",") { it.id }
+
+        fun deserializeList(raw: String?): List<ReportSummaryColumn> {
+            if (raw.isNullOrBlank()) return DEFAULT_SELECTED
+            val parsed = raw.split(",")
+                .mapNotNull { token -> entries.find { it.id == token.trim() } }
+                .distinct()
+            return parsed.ifEmpty { DEFAULT_SELECTED }
+        }
+    }
+}
+
 val DEFAULT_SETTINGS = Settings(
     school = "কামারখালী সরকারি প্রাথমিক বিদ্যালয়",
     schoolAddress = "আলফাডাঙ্গা, ফরিদপুর",
