@@ -73,12 +73,6 @@ object OfflineTableScanner {
             )
         }
 
-        val effectiveScript = if (digitScript == OfflineDigitScript.AUTO) {
-            detectDominantScript(grid, recognizer)
-        } else {
-            digitScript
-        }
-
         val (roles, skippedNameColIdx) = assignColumnRoles(
             grid = grid,
             cls = cls,
@@ -86,6 +80,12 @@ object OfflineTableScanner {
             importScope = importScope,
             layoutPreset = layoutPreset
         )
+
+        val effectiveScript = if (digitScript == OfflineDigitScript.AUTO) {
+            detectDominantScript(grid, recognizer, roles)
+        } else {
+            digitScript
+        }
 
         val rollColIdx = roles.indexOf(ColumnRole.ROLL)
         if (rollColIdx < 0) {
@@ -175,7 +175,7 @@ object OfflineTableScanner {
         if (skippedNameColIdx != null) {
             warnings.add("কলাম ${bn((skippedNameColIdx + 1).toString())} (শিক্ষার্থীর নাম) বাদ দিয়ে রোল অনুযায়ী অ্যাপের তালিকা থেকে নাম মেলানো হয়েছে।")
         } else {
-            warnings.add("নামের কলাম আলাদা শনাক্ত না হওয়ায় কলাম-১ কে রোল ধরে নম্বর পড়া হয়েছে।")
+            warnings.add("নামের কলাম ছাড়া টেবিল — রোল ও নম্বরগুলো পড়ে অ্যাপের তালিকা থেকে নাম মেলানো হয়েছে।")
         }
         val lowConfRows = finalRows.count { it.aiIssues.isNotEmpty() }
         if (lowConfRows > 0) {
@@ -241,7 +241,8 @@ object OfflineTableScanner {
 
     private fun detectDominantScript(
         grid: TableGridResult,
-        recognizer: DualScriptDigitRecognizer
+        recognizer: DualScriptDigitRecognizer,
+        roles: List<ColumnRole>
     ): OfflineDigitScript {
         var enScoreSum = 0.0
         var bnScoreSum = 0.0
@@ -250,7 +251,10 @@ object OfflineTableScanner {
         val sampleRows = grid.dataRowBounds.take(6)
         for (yr in sampleRows) {
             for (cIdx in grid.colBounds.indices) {
-                if (cIdx == 1 && grid.colBounds.size >= 3) continue // likely Name column
+                val role = roles.getOrNull(cIdx)
+                if (role == ColumnRole.NAME_SKIP || role == ColumnRole.SERIAL_SKIP || role == ColumnRole.EXTRA_SKIP) {
+                    continue
+                }
                 val xr = grid.colBounds[cIdx]
                 val enRes = CellDigitSegmenter.readNumericCell(
                     grid.image, xr.first, yr.first, xr.last, yr.last, recognizer, OfflineDigitScript.ENGLISH
@@ -305,33 +309,35 @@ object OfflineTableScanner {
             avgSpanPerCol[c] = if (spanCnt == 0) 0f else spanSum / spanCnt
         }
 
-        // Detect Name column (usually col 1, or col 2 if there is SL + Roll before Name)
+        // Detect Name column (usually col 1, or col 2 if SL + Roll precede Name),
+        // while avoiding false positives on Roll|Cont|Wr or Roll|Cont|Wr|Total tables without Name.
         var nameColIdx: Int? = null
         if (nCols >= 3) {
-            val rightWidthsSorted = widths.drop(1).sorted()
-            val medianWidth = rightWidthsSorted[rightWidthsSorted.size / 2].coerceAtLeast(1)
             val candidateRange = 1..min(2, nCols - 2)
             var bestScore = -1f
             var bestC = -1
             for (c in candidateRange) {
-                val widthScore = widths[c].toFloat() / medianWidth.toFloat()
-                val compBonus = if (medianCompPerCol[c] >= 4 || medianAspectPerCol[c] >= 1.65f) 0.55f else 0f
-                val spanBonus = if (avgSpanPerCol[c] > widths[0] * 1.4f) 0.35f else 0f
-                val totalScore = widthScore + compBonus + spanBonus
+                val rightMarkWidths = widths.drop(c + 1).sorted()
+                val rightMarkMedian = rightMarkWidths[rightMarkWidths.size / 2].coerceAtLeast(1)
+                val widthVsMarks = widths[c].toFloat() / rightMarkMedian.toFloat()
+                val compBonus = if (medianCompPerCol[c] >= 4 || medianAspectPerCol[c] >= 1.55f) 0.85f else 0f
+                val spanBonus = if (avgSpanPerCol[c] > widths[0] * 1.4f && widthVsMarks >= 1.32f) 0.35f else 0f
+                val totalScore = widthVsMarks + compBonus + spanBonus
                 if (totalScore > bestScore) {
                     bestScore = totalScore
                     bestC = c
                 }
             }
-            val chosenW = if (bestC >= 0) widths[bestC] else 0
-            val looksWideOrWordy = bestC >= 0 && (
-                chosenW >= widths[0] * 1.38f ||
-                    medianCompPerCol[bestC] >= 4 ||
-                    medianAspectPerCol[bestC] >= 1.65f ||
-                    (layoutPreset != OfflineTableLayoutPreset.AUTO && bestC == 1)
-                )
-            if (looksWideOrWordy) {
-                nameColIdx = bestC
+            if (bestC >= 0) {
+                val rightMarkWidths = widths.drop(bestC + 1).sorted()
+                val rightMarkMedian = rightMarkWidths[rightMarkWidths.size / 2].coerceAtLeast(1)
+                val widthVsMarks = widths[bestC].toFloat() / rightMarkMedian.toFloat()
+                val isWordy = medianCompPerCol[bestC] >= 4 || medianAspectPerCol[bestC] >= 1.55f
+                val isSignificantlyWiderThanMarks = widthVsMarks >= 1.42f &&
+                    (medianCompPerCol[bestC] >= 3 || medianAspectPerCol[bestC] >= 1.25f || widthVsMarks >= 1.72f)
+                if (isWordy || isSignificantlyWiderThanMarks) {
+                    nameColIdx = bestC
+                }
             }
         }
 

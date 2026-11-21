@@ -299,7 +299,8 @@ class OfflineTableScannerTest {
         colWidths: IntArray,
         numericRows: List<List<String>>,
         digitBank: Array<List<Pair<FloatArray, Int>>>,
-        skewDegrees: Double = 0.0
+        skewDegrees: Double = 0.0,
+        hasNameColumn: Boolean = true
     ): GrayImage {
         val margin = 44
         val headerH = 74
@@ -346,7 +347,7 @@ class OfflineTableScannerTest {
             val yTop = margin + headerH + r * rowH
             xCur = margin
             for (c in colWidths.indices) {
-                if (c == 1) {
+                if (hasNameColumn && c == 1) {
                     drawWordLikeNameAndHeader(
                         luma, width, height,
                         cx = xCur + colWidths[c] / 2,
@@ -356,7 +357,7 @@ class OfflineTableScannerTest {
                         isHeaderWord = false
                     )
                 } else {
-                    val text = numericRows[r][if (c == 0) 0 else c - 1]
+                    val text = numericRows[r][if (!hasNameColumn || c == 0) c else c - 1]
                     val digitW = 30
                     val digitH = 38
                     val spacing = 5
@@ -608,5 +609,104 @@ class OfflineTableScannerTest {
         assertEquals("26", r1.sheetContinuousTotal)
         assertEquals("62", r1.marksText["WR"])
         assertEquals("88", r1.sheetGrandTotal)
+    }
+
+    @Test
+    fun testNoNameThreeColumnRollContWr() {
+        val recognizer = createRecognizer()
+        val bank = loadRealDigitBank(isBengali = false, recognizer = recognizer)
+            ?: Array(10) { listOf(drawSyntheticEnglishDigitPatch(it)) }
+
+        val roster = listOf(
+            Student(id = "n1", cls = 3, roll = 1, name = "সাদিয়া রহমান"),
+            Student(id = "n2", cls = 3, roll = 2, name = "জাহিদ হাসান"),
+            Student(id = "n3", cls = 3, roll = 3, name = "মালিহা তাসনিম")
+        )
+
+        // [Roll, Cont, Wr] — NO Name column, narrow Roll (72px) vs Cont/Wr (120px)
+        val rows = listOf(
+            listOf("1", "24", "58"),
+            listOf("2", "27", "61"),
+            listOf("3", "21", "52")
+        )
+
+        val gray = buildHandwrittenTableGrayImage(
+            colWidths = intArrayOf(72, 120, 120),
+            numericRows = rows,
+            digitBank = bank,
+            hasNameColumn = false
+        )
+
+        val out = OfflineTableScanner.scanGrayImage(
+            grayImage = gray,
+            recognizer = recognizer,
+            clsHint = 3,
+            termHint = 1,
+            subKeyHint = "BAN",
+            importScope = ClassSheetImportScope.BOTH,
+            digitScript = OfflineDigitScript.ENGLISH,
+            layoutPreset = OfflineTableLayoutPreset.AUTO,
+            existingStudents = roster
+        )
+
+        assertEquals(null, out.diagnostics.skippedNameColumnIndex)
+        assertEquals(3, out.sheet.rows.size)
+        for (i in rows.indices) {
+            val r = out.sheet.rows[i]
+            assertEquals("Row $i roll", rows[i][0], r.rollText)
+            assertEquals("Row $i matched DB name", roster[i].name, r.name)
+            assertEquals("Row $i CONT", rows[i][1], r.sheetContinuousTotal)
+            assertEquals("Row $i WR", rows[i][2], r.marksText["WR"])
+            assertEquals("Row $i computed GRAND", (rows[i][1].toInt() + rows[i][2].toInt()).toString(), r.sheetGrandTotal)
+        }
+    }
+
+    @Test
+    fun testNoNameFourColumnRollContWrGrand() {
+        val recognizer = createRecognizer()
+        val bank = loadRealDigitBank(isBengali = true, recognizer = recognizer) ?: return
+
+        val roster = listOf(
+            Student(id = "m1", cls = 4, roll = 1, name = "নাফিস করিম"),
+            Student(id = "m2", cls = 4, roll = 2, name = "তাসফিয়া নূর"),
+            Student(id = "m3", cls = 4, roll = 3, name = "ইফতেখার আলম")
+        )
+
+        // [Roll, Cont, Wr, Grand] — NO Name column, real BHaND Bengali digits
+        val rows = listOf(
+            listOf("1", "25", "55", "80"),
+            listOf("2", "28", "62", "90"),
+            listOf("3", "20", "48", "68")
+        )
+
+        val gray = buildHandwrittenTableGrayImage(
+            colWidths = intArrayOf(74, 118, 118, 118),
+            numericRows = rows,
+            digitBank = bank,
+            hasNameColumn = false
+        )
+
+        val out = OfflineTableScanner.scanGrayImage(
+            grayImage = gray,
+            recognizer = recognizer,
+            clsHint = 4,
+            termHint = 1,
+            subKeyHint = "BAN",
+            importScope = ClassSheetImportScope.BOTH,
+            digitScript = OfflineDigitScript.BENGALI,
+            layoutPreset = OfflineTableLayoutPreset.ROLL_NAME_CONT_WR_TOTAL,
+            existingStudents = roster
+        )
+
+        assertEquals(null, out.diagnostics.skippedNameColumnIndex)
+        assertEquals(3, out.sheet.rows.size)
+        for (i in rows.indices) {
+            val r = out.sheet.rows[i]
+            assertEquals("Row $i roll", rows[i][0], r.rollText)
+            assertEquals("Row $i matched DB name", roster[i].name, r.name)
+            assertEquals("Row $i CONT", rows[i][1], r.sheetContinuousTotal)
+            assertEquals("Row $i WR", rows[i][2], r.marksText["WR"])
+            assertEquals("Row $i GRAND", rows[i][3], r.sheetGrandTotal)
+        }
     }
 }
