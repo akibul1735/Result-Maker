@@ -206,9 +206,9 @@ fun BlankSheetPdfScreen(
             .ifBlank { "সাধারণ" }
     }
 
-    val selectedTermLabel = remember(config.term, config.customTermTitle, config.numeralStyle) {
+    val selectedTermLabel = remember(config.term, config.customTermTitle) {
         when (config.term) {
-            1, 2, 3 -> BlankSheetCatalog.formatDigits(termNameBn(config.term), config.numeralStyle)
+            1, 2, 3 -> termNameBn(config.term)
             0 -> "বার্ষিক"
             -1 -> config.customTermTitle.ifBlank { "শিরোনামহীন" }
             else -> "শিরোনামহীন"
@@ -994,7 +994,7 @@ fun BlankSheetPdfScreen(
                         Text(
                             text = if (activePage != null) {
                                 val subSuffix = if (activePage.subjectTitleBn.isNotBlank()) " · ${activePage.subjectTitleBn}" else ""
-                                "পৃষ্ঠা ${bn(activePage.globalPageNumber.toString())}/${bn(activePage.totalPages.toString())} · ${activePage.classTitleBn}$subSuffix"
+                                "পৃষ্ঠা ${bn(activePage.globalPageNumber.toString())}/${bn(activePage.totalPages.toString())} · শ্রেণি: ${activePage.classTitleBn}$subSuffix"
                             } else {
                                 "কোনো পৃষ্ঠা নেই"
                             },

@@ -142,10 +142,9 @@ object BlankSheetCatalog {
 
     fun termLabelFor(
         term: Int,
-        customTermTitle: String = "",
-        numeralStyle: BlankNumeralStyle = BlankNumeralStyle.BENGALI
+        customTermTitle: String = ""
     ): String = when (term) {
-        1, 2, 3 -> formatDigits(termNameBn(term), numeralStyle)
+        1, 2, 3 -> termNameBn(term)
         0 -> "বার্ষিক মূল্যায়ন"
         -1 -> customTermTitle.trim()
         else -> ""
@@ -216,7 +215,7 @@ object BlankSheetPlanner {
         val safeCols = config.columns.ifEmpty { BlankSheetCatalog.DEFAULT_COLUMNS }
         val perPage = config.rowsPerPage.coerceIn(5, 50)
         val extraBlank = config.extraBlankRowsPerClass.coerceIn(0, 20)
-        val termTitle = BlankSheetCatalog.termLabelFor(config.term, config.customTermTitle, config.numeralStyle)
+        val termTitle = BlankSheetCatalog.termLabelFor(config.term, config.customTermTitle)
         val isAllSubjects = config.subjectKey == BlankSheetCatalog.ALL_SUBJECTS_KEY
 
         val effectiveAllowed = allowedClassIds.distinct().sorted()
@@ -313,14 +312,9 @@ object BlankSheetPlanner {
         val totalPages = rawPages.size
         return rawPages.mapIndexed { idx, raw ->
             val clsShort = classShortBn(raw.cls, settings)
-            val clsLabel = if (config.numeralStyle == BlankNumeralStyle.ENGLISH) {
-                "${fromBn(clsShort)} শ্রেণি"
-            } else {
-                "$clsShort শ্রেণি"
-            }
             BlankSheetPageSpec(
                 cls = raw.cls,
-                classTitleBn = clsLabel,
+                classTitleBn = clsShort,
                 subjectTitleBn = raw.subjectTitleBn,
                 termTitleBn = termTitle,
                 classPageIndex = raw.classPageIndex,

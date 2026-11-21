@@ -43,21 +43,21 @@ class BlankSheetPlannerTest {
 
         assertEquals(3, bnPages.size)
         assertEquals(listOf(10, 10, 5), bnPages.map { it.rows.size })
-        assertEquals("৩য় শ্রেণি", bnPages[0].classTitleBn)
+        assertEquals("৩য়", bnPages[0].classTitleBn)
         assertEquals("বিজ্ঞান", bnPages[0].subjectTitleBn)
         assertEquals("২য় প্রান্তিক", bnPages[0].termTitleBn)
         assertEquals("০১", bnPages[0].rows[0].rollText)
         assertEquals("২৫", bnPages[2].rows[4].rollText)
 
-        // Same config with English numerals
+        // Same config with English numerals: roll/count switch to English while class & term stay Bengali
         val enPages = BlankSheetPlanner.buildPages(
             students = sampleStudents(),
             settings = settings,
             config = bnCfg.copy(numeralStyle = BlankNumeralStyle.ENGLISH),
             allowedClassIds = listOf(1, 2, 3, 4, 5)
         )
-        assertEquals("3য় শ্রেণি", enPages[0].classTitleBn)
-        assertEquals("2য় প্রান্তিক", enPages[0].termTitleBn)
+        assertEquals("৩য়", enPages[0].classTitleBn)
+        assertEquals("২য় প্রান্তিক", enPages[0].termTitleBn)
         assertEquals("01", enPages[0].rows[0].rollText)
         assertEquals("25", enPages[2].rows[4].rollText)
     }
@@ -112,8 +112,8 @@ class BlankSheetPlannerTest {
         assertEquals(23, pages.size)
         assertEquals(7, pages.count { it.cls == 1 })
         assertEquals(16, pages.count { it.cls == 3 })
-        assertEquals("১ম শ্রেণি", pages[0].classTitleBn)
-        assertEquals("৩য় শ্রেণি", pages[7].classTitleBn)
+        assertEquals("১ম", pages[0].classTitleBn)
+        assertEquals("৩য়", pages[7].classTitleBn)
         assertEquals(23, pages.last().globalPageNumber)
         assertEquals(23, pages.last().totalPages)
     }
