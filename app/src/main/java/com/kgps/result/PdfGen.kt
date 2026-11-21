@@ -607,22 +607,30 @@ object PdfGen {
         val totMax = subs.sumOf { it.max }
 
         // উভয় ভেতরের পাতার শীর্ষে সংক্ষিপ্ত পরিচিতি
-        val topLeftP = tp(ctx, 8.5f, true, f, 0xFF334155.toInt())
-        val topRightP = tp(ctx, 8.5f, true, f, 0xFF334155.toInt()).apply { textAlign = Paint.Align.RIGHT }
-        c.drawText("শিক্ষার্থীর নাম: ${s.name}", 28f, 38f, topLeftP)
-        c.drawText("শ্রেণি: ${CLSN[s.cls - 1]}", 399f, 38f, topRightP)
+        val topLeftP = tp(ctx, 8.8f, true, f, 0xFF334155.toInt())
+        val topRightP = tp(ctx, 8.8f, true, f, 0xFF334155.toInt()).apply { textAlign = Paint.Align.RIGHT }
+        val page2NameText = "শিক্ষার্থীর নাম: ${s.name}"
+        while (topRightP.measureText(page2NameText) > 368f && topRightP.textSize > 6.5f) {
+            topRightP.textSize -= 0.3f
+        }
+        c.drawText(page2NameText, 399f, 38f, topRightP)
 
-        c.drawText("রোল/আইডি: ${bn(s.roll.toString())}", 443f, 38f, topLeftP)
+        val page3InfoText = "শ্রেণি: ${CLSN[s.cls - 1]}   ·   রোল/আইডি: ${bn(s.roll.toString())}"
+        while (topLeftP.measureText(page3InfoText) > 368f && topLeftP.textSize > 6.5f) {
+            topLeftP.textSize -= 0.3f
+        }
+        c.drawText(page3InfoText, 443f, 38f, topLeftP)
 
         // ---- বাম ভেতরের অর্ধেক (x: 28..399) ----
         val lx = 28f
         val sw = 125f
         val lcw = 41f // 125 + 6*41 = 371
         val ty0 = 46f
-        val hdr1H = 18f
-        val hdr2H = 26f
-        val hdrH = hdr1H + hdr2H // 44
-        val rh = 27.5f
+        val hdr1H = 19f
+        val hdr2H = 27f
+        val hdrH = hdr1H + hdr2H // 46
+        val rh = if (subs.size <= 7) 31f else 27.5f
+        val targetBottom = 561f
 
         cell(ctx, c, "বিষয় (পূর্ণমান)", lx, ty0, sw, hdrH, 8.5f, true, true, f)
         cell(ctx, c, "১ম প্রান্তিক", lx + sw, ty0, 3 * lcw, hdr1H, 8.5f, true, true, f)
@@ -654,7 +662,7 @@ object PdfGen {
 
         // বাম মোট সারি
         val ty = rowsStartY + subs.size * rh
-        val totalH = 26f
+        val totalH = 27f
         cell(ctx, c, "সর্বমোট নম্বর (${bn(totMax.toString())})", lx, ty, sw, totalH, 8f, true, true, f)
         for (t in 1..2) {
             val b = lx + sw + (t - 1) * 3 * lcw
@@ -677,16 +685,18 @@ object PdfGen {
         }
 
         // ---- নিচে বামে: ব্যক্তিগত ও সামাজিক গুণাবলি (width = 371) ----
-        val by = ty + totalH + 12f
+        val marksBottom = ty + totalH
+        val sectionGap = 20f
+        val by = marksBottom + sectionGap
         val qw = floatArrayOf(50f, 189f, 44f, 44f, 44f)
         val qTop1H = 16f
         val qTop2H = 14f
         val qLegendH = qTop1H + qTop2H // 30
-        val qGap = 7f
-        val qMainY = by + qLegendH + qGap // 37
-        val qMainHdrH = 22f
-        val qRowsY = qMainY + qMainHdrH // 59
-        val qRowH = 44f
+        val qGap = 12f
+        val qMainY = by + qLegendH + qGap // 42
+        val qMainHdrH = 23f
+        val qRowsY = qMainY + qMainHdrH
+        val qRowH = ((targetBottom - qRowsY) / 3f).coerceAtLeast(42f)
 
         // ১. উপরের নির্দেশনামূলক ছক (আলাদা ছক)
         cell(ctx, c, "ব্যক্তিগত ও সামাজিক গুণাবলি", lx, by, 177f, qLegendH, 8f, true, true, f)
@@ -700,7 +710,7 @@ object PdfGen {
             cell(ctx, c, kkgCodes[i], cx, by + qTop1H, qw[2 + i], qTop2H, 8f, true, true, f)
         }
 
-        // ২. মূল গুণাবলি ছক (মাঝখানে 7pt ফাঁকা জায়গা রেখে)
+        // ২. মূল গুণাবলি ছক (মাঝখানে 12pt ফাঁকা জায়গা রেখে)
         cell(ctx, c, "গুণাবলি", lx, qMainY, qw[0], qMainHdrH, 8.5f, true, true, f)
         cell(ctx, c, "বর্ণনা", lx + qw[0], qMainY, qw[1], qMainHdrH, 8.5f, true, true, f)
         val termShort = listOf("১ম প্রান্তিক", "২য় প্রান্তিক", "৩য় প্রান্তিক")
@@ -724,9 +734,6 @@ object PdfGen {
                 cx += qw[1 + t]
             }
         }
-        val lg = tp(ctx, 7.5f, false, f, 0xFF334155.toInt())
-        val footerY = qRowsY + 3 * qRowH + 11f
-        c.drawText("ক = উত্তম,  খ = সন্তোষজনক,  গ = উন্নতি প্রয়োজন", lx, footerY, lg)
 
         // ---- ডান ভেতরের অর্ধেক (x: 443..814) ----
         val rx = 443f
@@ -941,9 +948,10 @@ object PdfGen {
         val attRowH: Float
 
         if (activeSummaryCols.isNotEmpty()) {
-            val summaryY = ty + totalH + 7f
-            val sumHdrH = 24f
-            val sumValH = 21f
+            val summaryGap = 14f
+            val summaryY = marksBottom + summaryGap
+            val sumHdrH = 25f
+            val sumValH = 22f
 
             val totalWeight = activeSummaryCols.sumOf { it.tableWeight.toDouble() }.toFloat().coerceAtLeast(1f)
             val useCompactHeaders = activeSummaryCols.size >= 4
@@ -1004,18 +1012,17 @@ object PdfGen {
                 sx += colW
             }
 
-            attStartY = summaryY + sumHdrH + sumValH + 7f
-            attTopH = 20f
+            attStartY = summaryY + sumHdrH + sumValH + summaryGap
+            attTopH = 21f
             attSubH = 24f
             attRowsStartY = attStartY + attTopH + attSubH
-            val targetAttBottom = qRowsY + 3 * qRowH // বাম দিকের গুণাবলি ছকের নিচের সাথে হুবহু সমান
-            attRowH = ((targetAttBottom - attRowsStartY) / 3f).coerceAtLeast(24f)
+            attRowH = ((targetBottom - attRowsStartY) / 3f).coerceAtLeast(24f)
         } else {
             attStartY = by
-            attTopH = 27f
-            attSubH = 32f
-            attRowsStartY = qRowsY
-            attRowH = qRowH
+            attTopH = 28f
+            attSubH = 34f
+            attRowsStartY = attStartY + attTopH + attSubH
+            attRowH = ((targetBottom - attRowsStartY) / 3f).coerceAtLeast(42f)
         }
 
         cell(ctx, c, "উপস্থিতি", rx, attStartY, rW, attTopH, if (activeSummaryCols.isNotEmpty()) 9f else 9.5f, true, true, f)
@@ -1043,6 +1050,5 @@ object PdfGen {
                 ax += aw[t]
             }
         }
-        c.drawText("উপস্থিতির হার = (শিক্ষার্থীর উপস্থিতি ÷ মোট কার্যদিবস) × ১০০%", rx, footerY, lg)
     }
 }
