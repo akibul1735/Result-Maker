@@ -130,7 +130,7 @@ class CommentGeneratorTest {
         for (cls in 1..2) {
             val subs = subjectsFor(cls, "ইসলাম")
             assertEquals("Class $cls total full marks must be 500", 500, subs.sumOf { it.max })
-            assertEquals(listOf("BAN", "ENG", "MATH", "SOC", "REL", "ART", "PE"), subs.map { it.key })
+            assertEquals(listOf("BAN", "ENG", "MATH", "SOC", "REL", "PE", "ART"), subs.map { it.key })
 
             subs.filter { it.key in setOf("BAN", "ENG", "MATH") }.forEach { s ->
                 assertEquals(100, s.max)
@@ -149,7 +149,7 @@ class CommentGeneratorTest {
         for (cls in 3..5) {
             val subs = subjectsFor(cls, "ইসলাম")
             assertEquals("Class $cls total full marks must be 700", 700, subs.sumOf { it.max })
-            assertEquals(listOf("BAN", "ENG", "MATH", "BGW", "SCI", "REL", "ART", "PE"), subs.map { it.key })
+            assertEquals(listOf("BAN", "ENG", "MATH", "BGW", "SCI", "REL", "PE", "ART"), subs.map { it.key })
 
             subs.filter { it.key in setOf("BAN", "ENG", "MATH", "BGW", "SCI", "REL") }.forEach { s ->
                 assertEquals(100, s.max)

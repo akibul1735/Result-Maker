@@ -476,6 +476,7 @@ fun ResultMakerWorkspace(
     val includeClassHighest by vm.includeClassHighestInReport.collectAsStateWithLifecycle()
     val includeSummaryTable by vm.includeSummaryTableInReport.collectAsStateWithLifecycle()
     val summaryColumns by vm.summaryTableColumns.collectAsStateWithLifecycle()
+    val showCoverAddress by vm.showCoverAddressInReport.collectAsStateWithLifecycle()
 
     val workspaceScope = rememberCoroutineScope()
     var askSignOut by remember { mutableStateOf(false) }
@@ -527,7 +528,8 @@ fun ResultMakerWorkspace(
                                 allStudents = students,
                                 showClassHighest = includeClassHighest,
                                 showSummaryTable = includeSummaryTable,
-                                summaryColumns = summaryColumns
+                                summaryColumns = summaryColumns,
+                                showCoverAddress = showCoverAddress
                             )
                         }
                     }
@@ -738,7 +740,8 @@ fun ResultMakerWorkspace(
                                                 allStudents = students,
                                                 showClassHighest = includeClassHighest,
                                                 showSummaryTable = includeSummaryTable,
-                                                summaryColumns = summaryColumns
+                                                summaryColumns = summaryColumns,
+                                                showCoverAddress = showCoverAddress
                                             )
                                         }
                                     },
@@ -826,6 +829,9 @@ fun ResultMakerWorkspace(
                                         summaryColumns = summaryColumns,
                                         onToggleSummaryTable = vm::setIncludeSummaryTableInReport,
                                         onUpdateSummaryColumns = vm::setSummaryTableColumns,
+                                        showCoverAddress = showCoverAddress,
+                                        onToggleCoverAddress = vm::setShowCoverAddressInReport,
+                                        onSaveCoverAddress = vm::updateCoverAddress,
                                         onSelectId = vm::selectStudioStudent,
                                         onUpdateSettings = vm::updateSettings,
                                         onPrintStudent = { s ->
@@ -837,7 +843,8 @@ fun ResultMakerWorkspace(
                                                 allStudents = students,
                                                 showClassHighest = includeClassHighest,
                                                 showSummaryTable = includeSummaryTable,
-                                                summaryColumns = summaryColumns
+                                                summaryColumns = summaryColumns,
+                                                showCoverAddress = showCoverAddress
                                             )
                                         },
                                         onExportPdf = { s -> makePdf(listOf(s), "${s.name.ifBlank { "student" }}-report.pdf") },
@@ -853,7 +860,8 @@ fun ResultMakerWorkspace(
                                                     allStudents = students,
                                                     showClassHighest = includeClassHighest,
                                                     showSummaryTable = includeSummaryTable,
-                                                    summaryColumns = summaryColumns
+                                                    summaryColumns = summaryColumns,
+                                                    showCoverAddress = showCoverAddress
                                                 )
                                             }
                                         },

@@ -144,6 +144,9 @@ fun ReportStudioScreen(
     onUpdateSummaryColumns: (List<ReportSummaryColumn>) -> Unit = {},
     onSelectId: (String) -> Unit,
     onUpdateSettings: (Settings) -> Unit,
+    showCoverAddress: Boolean = true,
+    onToggleCoverAddress: (Boolean) -> Unit = {},
+    onSaveCoverAddress: (String) -> Unit = { addr -> onUpdateSettings(settings.copy(schoolAddress = addr)) },
     onPrintStudent: (Student) -> Unit,
     onExportPdf: (Student) -> Unit,
     onPrintBatch: (List<Student>, String) -> Unit = { list, _ -> list.firstOrNull()?.let(onPrintStudent) },
@@ -210,8 +213,15 @@ fun ReportStudioScreen(
         classStudents.indexOfFirst { it.id == active.id }.coerceAtLeast(0)
     }
 
-    val coverBmp = remember(active, settings, showFoldGuide) {
-        PdfGen.renderCoverBitmap(ctx, active, settings, showFoldGuide = showFoldGuide, scale = 2.4f)
+    val coverBmp = remember(active, settings, showFoldGuide, showCoverAddress) {
+        PdfGen.renderCoverBitmap(
+            ctx = ctx,
+            s = active,
+            st = settings,
+            showFoldGuide = showFoldGuide,
+            scale = 2.4f,
+            showCoverAddress = showCoverAddress
+        )
     }
     val marksBmp = remember(
         active,
@@ -1401,6 +1411,69 @@ fun ReportStudioScreen(
                                     modifier = Modifier.testTag("studio_fold_guide_checkbox")
                                 )
                                 Text("মাঝখানের ভাঁজ-রেখা দেখান (A4 → A5)", fontSize = 13.sp)
+                            }
+
+                            var addressDraft by remember(showCustomizeSheet, settings.schoolAddress) {
+                                mutableStateOf(settings.schoolAddress)
+                            }
+                            Surface(
+                                color = SlateBg,
+                                border = BorderStroke(1.dp, SlateOutline),
+                                shape = RoundedCornerShape(10.dp),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Column(
+                                    modifier = Modifier.padding(10.dp),
+                                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .clickable { onToggleCoverAddress(!showCoverAddress) }
+                                    ) {
+                                        Checkbox(
+                                            checked = showCoverAddress,
+                                            onCheckedChange = onToggleCoverAddress,
+                                            modifier = Modifier.testTag("studio_cover_address_checkbox")
+                                        )
+                                        Column(Modifier.weight(1f)) {
+                                            Text(
+                                                "পাতা-১ প্রচ্ছদে বিদ্যালয়ের ঠিকানা দেখান",
+                                                fontSize = 13.sp,
+                                                fontWeight = FontWeight.Medium,
+                                                color = SlateText
+                                            )
+                                            Text(
+                                                "বিদ্যালয়ের নামের নিচে ২ সাইজ ছোট ফন্টে দেখাবে",
+                                                fontSize = 11.sp,
+                                                color = SlateMuted
+                                            )
+                                        }
+                                    }
+                                    OutlinedTextField(
+                                        value = addressDraft,
+                                        onValueChange = { addressDraft = it },
+                                        label = { Text("বিদ্যালয়ের ঠিকানা (প্রচ্ছদ ও ব্যাক কভার)", fontSize = 12.sp) },
+                                        placeholder = { Text("যেমন: আলফাডাঙ্গা, ফরিদপুর", fontSize = 12.sp) },
+                                        singleLine = true,
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .testTag("studio_address_input")
+                                    )
+                                    val trimmedDraft = addressDraft.trim()
+                                    if (trimmedDraft != settings.schoolAddress.trim()) {
+                                        Button(
+                                            onClick = { onSaveCoverAddress(trimmedDraft) },
+                                            shape = RoundedCornerShape(8.dp),
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .testTag("studio_save_address_btn")
+                                        ) {
+                                            Text("ঠিকানা সংরক্ষণ করুন")
+                                        }
+                                    }
+                                }
                             }
 
                             Row(

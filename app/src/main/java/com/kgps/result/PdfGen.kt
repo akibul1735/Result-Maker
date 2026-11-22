@@ -317,13 +317,14 @@ object PdfGen {
         s: Student,
         st: Settings,
         showFoldGuide: Boolean = true,
-        scale: Float = 2f
+        scale: Float = 2f,
+        showCoverAddress: Boolean = true
     ): Bitmap {
         val bmp = Bitmap.createBitmap((W * scale).toInt(), (H * scale).toInt(), Bitmap.Config.ARGB_8888)
         val c = Canvas(bmp)
         c.drawColor(Color.WHITE)
         c.scale(scale, scale)
-        cover(ctx, c, s, st, showFoldGuide)
+        cover(ctx, c, s, st, showFoldGuide, showCoverAddress)
         return bmp
     }
 
@@ -342,7 +343,7 @@ object PdfGen {
         val c = Canvas(bmp)
         c.drawColor(Color.WHITE)
         c.scale(scale, scale)
-        marks(ctx, c, s, st.pdfFont, showFoldGuide, allStudents, showClassHighest, showSummaryTable, summaryColumns)
+        marks(ctx, c, s, st, showFoldGuide, allStudents, showClassHighest, showSummaryTable, summaryColumns)
         return bmp
     }
 
@@ -354,14 +355,15 @@ object PdfGen {
         allStudents: List<Student> = students,
         showClassHighest: Boolean = false,
         showSummaryTable: Boolean = false,
-        summaryColumns: List<ReportSummaryColumn> = ReportSummaryColumn.DEFAULT_SELECTED
+        summaryColumns: List<ReportSummaryColumn> = ReportSummaryColumn.DEFAULT_SELECTED,
+        showCoverAddress: Boolean = true
     ) {
         val doc = PdfDocument()
         try {
             var n = 1
             students.forEach { s ->
                 val p1 = doc.startPage(PdfDocument.PageInfo.Builder(W, H, n++).create())
-                cover(ctx, p1.canvas, s, st, showFoldGuide = false)
+                cover(ctx, p1.canvas, s, st, showFoldGuide = false, showCoverAddress = showCoverAddress)
                 doc.finishPage(p1)
 
                 val p2 = doc.startPage(PdfDocument.PageInfo.Builder(W, H, n++).create())
@@ -369,7 +371,7 @@ object PdfGen {
                     ctx,
                     p2.canvas,
                     s,
-                    st.pdfFont,
+                    st,
                     showFoldGuide = false,
                     allStudents = allStudents,
                     showClassHighest = showClassHighest,
@@ -392,7 +394,8 @@ object PdfGen {
         allStudents: List<Student> = students,
         showClassHighest: Boolean = false,
         showSummaryTable: Boolean = false,
-        summaryColumns: List<ReportSummaryColumn> = ReportSummaryColumn.DEFAULT_SELECTED
+        summaryColumns: List<ReportSummaryColumn> = ReportSummaryColumn.DEFAULT_SELECTED,
+        showCoverAddress: Boolean = true
     ) {
         if (students.isEmpty()) return
         val printManager = ctx.getSystemService(Context.PRINT_SERVICE) as? PrintManager ?: return
@@ -435,7 +438,8 @@ object PdfGen {
                             allStudents = allStudents,
                             showClassHighest = showClassHighest,
                             showSummaryTable = showSummaryTable,
-                            summaryColumns = summaryColumns
+                            summaryColumns = summaryColumns,
+                            showCoverAddress = showCoverAddress
                         )
                     }
                     callback.onWriteFinished(arrayOf(PageRange.ALL_PAGES))
@@ -452,7 +456,14 @@ object PdfGen {
     }
 
     // ================= পাতা-১: বাইরের পাশ (বাম = ব্যাক কভার, ডান = ফ্রন্ট কভার) =================
-    private fun cover(ctx: Context?, c: Canvas, s: Student, st: Settings, showFoldGuide: Boolean) {
+    private fun cover(
+        ctx: Context?,
+        c: Canvas,
+        s: Student,
+        st: Settings,
+        showFoldGuide: Boolean,
+        showCoverAddress: Boolean = true
+    ) {
         val f = st.pdfFont
         drawPanelFrames(c, showFoldGuide)
 
@@ -544,25 +555,50 @@ object PdfGen {
 
         drawDpeLogo(ctx, c, frontCx, 102f, 104f, st.dpeLogo, f)
 
-        dottedField(
-            ctx,
-            c,
-            "বিদ্যালয়ের নাম:",
-            st.school.ifBlank { "বিদ্যালয়ের নাম" },
-            456f,
-            236f,
-            801f,
-            11f,
-            f
-        )
-        dottedField(ctx, c, "শিক্ষাবর্ষ:", bn(st.year), 556f, 266f, 701f, 11f, f)
+        val schoolTitle = st.school.ifBlank { "বিদ্যালয়ের নাম" }
+        val schoolPaint = tp(ctx, 16.5f, true, f, 0xFF0F172A.toInt()).apply {
+            textAlign = Paint.Align.CENTER
+        }
+        while (schoolPaint.measureText(schoolTitle) > 354f && schoolPaint.textSize > 13.5f) {
+            schoolPaint.textSize -= 0.4f
+        }
+        val renderedSchoolSize = schoolPaint.textSize
+        val schoolLines = if (schoolPaint.measureText(schoolTitle) > 354f) {
+            wrap(schoolTitle, schoolPaint, 354f).take(2)
+        } else {
+            listOf(schoolTitle)
+        }
+        var schoolY = 238f
+        val schoolLh = renderedSchoolSize * 1.24f
+        schoolLines.forEach { line ->
+            c.drawText(line, frontCx, schoolY, schoolPaint)
+            schoolY += schoolLh
+        }
+        var headerBottomY = (schoolY - schoolLh) + renderedSchoolSize * 0.25f
 
-        val formY0 = 360f
-        val formDy = 32f
+        val coverAddress = st.schoolAddress.trim()
+        if (showCoverAddress && coverAddress.isNotBlank()) {
+            val addrSize = (renderedSchoolSize - 2f).coerceAtLeast(10f)
+            val addrPaint = tp(ctx, addrSize, false, f, 0xFF1E293B.toInt()).apply {
+                textAlign = Paint.Align.CENTER
+            }
+            val addrLines = wrap(coverAddress, addrPaint, 348f).take(2)
+            var addrY = headerBottomY + addrSize + 6f
+            val addrLh = addrSize * 1.22f
+            addrLines.forEach { line ->
+                c.drawText(line, frontCx, addrY, addrPaint)
+                addrY += addrLh
+            }
+            headerBottomY = (addrY - addrLh) + addrSize * 0.25f
+        }
+
+        val formY0 = max(326f, headerBottomY + 40f)
+        val formDy = 33f
         dottedField(ctx, c, "শিক্ষার্থীর নাম:", s.name, 456f, formY0, 801f, 10.5f, f)
 
-        dottedField(ctx, c, "শ্রেণি:", classNameBn(s.cls, st), 456f, formY0 + formDy, 622f, 10.5f, f)
-        dottedField(ctx, c, "রোল/আইডি:", bn(s.roll.toString()), 632f, formY0 + formDy, 801f, 10.5f, f)
+        dottedField(ctx, c, "শ্রেণি:", classNameBn(s.cls, st), 456f, formY0 + formDy, 574f, 10.5f, f)
+        dottedField(ctx, c, "রোল/আইডি:", bn(s.roll.toString()), 582f, formY0 + formDy, 690f, 10.5f, f)
+        dottedField(ctx, c, "শিক্ষাবর্ষ:", bn(st.year), 698f, formY0 + formDy, 801f, 10.5f, f)
 
         val unionText = s.union.trim()
         if (unionText.isNotBlank()) {
@@ -583,7 +619,7 @@ object PdfGen {
             c,
             "(${classNameBn(s.cls, st)} শ্রেণি — শিখন অগ্রগতি প্রতিবেদন)",
             frontCx,
-            536f,
+            max(524f, formY0 + formDy * 4 + 54f),
             9.5f,
             true,
             340f,
@@ -613,33 +649,28 @@ object PdfGen {
         ctx: Context?,
         c: Canvas,
         s: Student,
-        f: String,
+        st: Settings,
         showFoldGuide: Boolean,
         allStudents: List<Student>,
         showClassHighest: Boolean,
         showSummaryTable: Boolean,
         summaryColumns: List<ReportSummaryColumn>
     ) {
+        val f = st.pdfFont
         drawPanelFrames(c, showFoldGuide)
 
         val subs = s.subs()
         val anyData = (1..3).any { s.hasTerm(it) }
         val totMax = subs.sumOf { it.max }
 
-        // উভয় ভেতরের পাতার শীর্ষে সংক্ষিপ্ত পরিচিতি
-        val topLeftP = tp(ctx, 8.8f, true, f, 0xFF334155.toInt())
-        val topRightP = tp(ctx, 8.8f, true, f, 0xFF334155.toInt()).apply { textAlign = Paint.Align.RIGHT }
+        // উভয় ভেতরের পাতার শীর্ষে সংক্ষিপ্ত পরিচিতি (মাঝ বরাবর)
+        val page2Cx = 18f + 391f / 2f
+        val page3Cx = 433f + 391f / 2f
         val page2NameText = "শিক্ষার্থীর নাম: ${s.name}"
-        while (topRightP.measureText(page2NameText) > 368f && topRightP.textSize > 6.5f) {
-            topRightP.textSize -= 0.3f
-        }
-        c.drawText(page2NameText, 399f, 38f, topRightP)
+        center(ctx, c, page2NameText, page2Cx, 38f, 8.8f, true, 368f, f, 0xFF334155.toInt())
 
-        val page3InfoText = "শ্রেণি: ${classNameBn(s.cls)}   ·   রোল/আইডি: ${bn(s.roll.toString())}"
-        while (topLeftP.measureText(page3InfoText) > 368f && topLeftP.textSize > 6.5f) {
-            topLeftP.textSize -= 0.3f
-        }
-        c.drawText(page3InfoText, 443f, 38f, topLeftP)
+        val page3InfoText = "শ্রেণি: ${classNameBn(s.cls, st)}   ·   রোল/আইডি: ${bn(s.roll.toString())}"
+        center(ctx, c, page3InfoText, page3Cx, 38f, 8.8f, true, 368f, f, 0xFF334155.toInt())
 
         // ---- বাম ভেতরের অর্ধেক (x: 28..399) ----
         val lx = 28f

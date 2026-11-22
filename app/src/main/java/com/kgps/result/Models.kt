@@ -217,8 +217,8 @@ fun subjectsFor(cls: Int, religion: String): List<Sub> {
         full("MATH", "গণিত"),
         half("SOC", "সামাজিক বিজ্ঞান ও বিজ্ঞান (সমন্বিত)"),
         half("REL", rel),
-        half("ART", "শিল্পকলা"),
-        half("PE", "শারীরিক ও মানসিক স্বাস্থ্য শিক্ষা")
+        half("PE", "শারীরিক ও মানসিক স্বাস্থ্য শিক্ষা"),
+        half("ART", "শিল্পকলা")
     ) else listOf(
         full("BAN", "বাংলা"),
         full("ENG", "ইংরেজি"),
@@ -226,8 +226,8 @@ fun subjectsFor(cls: Int, religion: String): List<Sub> {
         full("BGW", "বাংলাদেশ ও বিশ্বপরিচয়"),
         full("SCI", "বিজ্ঞান"),
         full("REL", rel),
-        half("ART", "শিল্পকলা"),
-        half("PE", "শারীরিক ও মানসিক স্বাস্থ্য শিক্ষা")
+        half("PE", "শারীরিক ও মানসিক স্বাস্থ্য শিক্ষা"),
+        half("ART", "শিল্পকলা")
     )
 }
 

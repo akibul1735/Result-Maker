@@ -278,14 +278,17 @@ class ResultMakerViewModel(
         .stateIn(viewModelScope, SharingStarted.Eagerly, emptyMap())
 
     private val _localPdfFontOverride = MutableStateFlow(Repo.loadPdfFontOverride(appContext))
+    private val _localSchoolAddressOverride = MutableStateFlow(Repo.loadSchoolAddressOverride(appContext))
 
     val settings: StateFlow<Settings> = combine(
         activeSchool,
-        _localPdfFontOverride
-    ) { school, localFont ->
+        _localPdfFontOverride,
+        _localSchoolAddressOverride
+    ) { school, localFont, localAddress ->
         val base = school?.settings ?: DEFAULT_SETTINGS
         val effectiveFont = localFont?.takeIf { it.isNotBlank() } ?: base.pdfFont
-        val st = base.copy(pdfFont = effectiveFont)
+        val effectiveAddress = localAddress ?: base.schoolAddress
+        val st = base.copy(pdfFont = effectiveFont, schoolAddress = effectiveAddress)
         SchoolClassRegistry.update(st.customClasses)
         st
     }.stateIn(viewModelScope, SharingStarted.Eagerly, DEFAULT_SETTINGS)
@@ -349,6 +352,11 @@ class ResultMakerViewModel(
         ReportSummaryColumn.deserializeList(reportPrefs.getString("summary_table_columns", null))
     )
     val summaryTableColumns: StateFlow<List<ReportSummaryColumn>> = _summaryTableColumns.asStateFlow()
+
+    private val _showCoverAddressInReport = MutableStateFlow(
+        reportPrefs.getBoolean("show_cover_address", true)
+    )
+    val showCoverAddressInReport: StateFlow<Boolean> = _showCoverAddressInReport.asStateFlow()
 
     private val _snackbarMessage = MutableStateFlow<String?>(null)
     val snackbarMessage: StateFlow<String?> = _snackbarMessage.asStateFlow()
@@ -874,6 +882,11 @@ class ResultMakerViewModel(
             .apply()
     }
 
+    fun setShowCoverAddressInReport(enabled: Boolean) {
+        _showCoverAddressInReport.value = enabled
+        reportPrefs.edit().putBoolean("show_cover_address", enabled).apply()
+    }
+
     fun openCsvImport(initialText: String = "") {
         if (!activePermissions.value.canManageStudents) {
             showMessage("CSV ইমপোর্টের অনুমতি শুধুমাত্র অনুমোদিত শিক্ষক বা অ্যাডমিনের")
@@ -1248,10 +1261,40 @@ class ResultMakerViewModel(
             _localPdfFontOverride.value = newSettings.pdfFont
             Repo.savePdfFontOverride(appContext, newSettings.pdfFont)
         }
+        if (newSettings.schoolAddress != currentSettings.schoolAddress) {
+            _localSchoolAddressOverride.value = null
+            Repo.saveSchoolAddressOverride(appContext, null)
+        }
         viewModelScope.launch {
             cloudRepo.updateSchoolSettings(school, newSettings).onFailure { e ->
                 showMessage(friendlyFirestoreErrorMessage(e))
             }
+        }
+    }
+
+    fun updateCoverAddress(address: String) {
+        val clean = address.trim().take(240)
+        val school = activeSchool.value
+        if (clean.isNotEmpty() && !_showCoverAddressInReport.value) {
+            setShowCoverAddressInReport(true)
+        }
+        if (school != null && school.isAdmin(currentUserId)) {
+            _localSchoolAddressOverride.value = null
+            Repo.saveSchoolAddressOverride(appContext, null)
+            val base = school.settings
+            viewModelScope.launch {
+                cloudRepo.updateSchoolSettings(school, base.copy(schoolAddress = clean))
+                    .onSuccess {
+                        showMessage("প্রচ্ছদের ঠিকানা সংরক্ষিত হয়েছে")
+                    }
+                    .onFailure { e ->
+                        showMessage(friendlyFirestoreErrorMessage(e))
+                    }
+            }
+        } else {
+            _localSchoolAddressOverride.value = clean
+            Repo.saveSchoolAddressOverride(appContext, clean)
+            showMessage("এই ডিভাইসের প্রতিবেদনে ঠিকানা সংরক্ষিত হয়েছে")
         }
     }
 

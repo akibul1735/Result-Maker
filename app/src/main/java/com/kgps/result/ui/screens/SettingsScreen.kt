@@ -463,7 +463,7 @@ fun SettingsScreen(
                             value = s.schoolAddress,
                             onValueChange = { if (isAdmin) s = s.copy(schoolAddress = it) },
                             enabled = isAdmin,
-                            label = { Text("বিদ্যালয়ের ঠিকানা (ব্যাক কভারে মুদ্রিত হবে)") },
+                            label = { Text("বিদ্যালয়ের ঠিকানা (ফ্রন্ট ও ব্যাক কভারে মুদ্রিত হবে)") },
                             singleLine = true,
                             modifier = Modifier.fillMaxWidth().testTag("settings_address_input")
                         )

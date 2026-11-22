@@ -401,4 +401,25 @@ class CustomClassAndPromptTest {
         assertEquals("BAN_3_CONT", shortCols[6].targetKey)
         assertEquals("BAN_3_WR", shortCols[7].targetKey)
     }
+
+    @Test
+    fun artIsLastSubjectAcrossAllClassesAndSettingsRoundtrip() {
+        val customLow = CustomClassDef(id = 6, nameBn = "প্রাক-প্রাথমিক", shortBn = "প্রাক", syllabusTier = 1)
+        val customHigh = CustomClassDef(id = 7, nameBn = "ষষ্ঠ", shortBn = "৬ষ্ঠ", syllabusTier = 3)
+        val st = Settings(
+            school = "উদাহরণ সরকারি প্রাথমিক বিদ্যালয়",
+            schoolAddress = "আলফাডাঙ্গা, ফরিদপুর",
+            customClasses = listOf(customLow, customHigh)
+        )
+        SchoolClassRegistry.update(st.customClasses)
+
+        for (cls in listOf(1, 2, 3, 4, 5, 6, 7)) {
+            val subs = subjectsFor(cls, "ইসলাম")
+            assertEquals("ART should be last for class $cls", "ART", subs.last().key)
+            assertEquals("শিল্পকলা", subs.last().bn)
+        }
+
+        val updated = st.copy(schoolAddress = "বোয়ালমারী, ফরিদপুর")
+        assertEquals("বোয়ালমারী, ফরিদপুর", updated.schoolAddress)
+    }
 }

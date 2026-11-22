@@ -1157,6 +1157,7 @@ object Repo {
     private const val APP_UI_PREFS = "kgps_app_ui_prefs"
     private const val KEY_APP_UI_FONT = "app_ui_font"
     private const val KEY_PDF_FONT_OVERRIDE = "pdf_font_override"
+    private const val KEY_SCHOOL_ADDRESS_OVERRIDE = "school_address_override"
 
     fun loadAppFont(ctx: Context): String {
         val saved = ctx.getSharedPreferences(APP_UI_PREFS, Context.MODE_PRIVATE)
@@ -1189,5 +1190,21 @@ object Repo {
             .edit()
             .putString(KEY_PDF_FONT_OVERRIDE, valid)
             .apply()
+    }
+
+    fun loadSchoolAddressOverride(ctx: Context): String? {
+        val prefs = ctx.getSharedPreferences(APP_UI_PREFS, Context.MODE_PRIVATE)
+        if (!prefs.contains(KEY_SCHOOL_ADDRESS_OVERRIDE)) return null
+        return prefs.getString(KEY_SCHOOL_ADDRESS_OVERRIDE, null)
+    }
+
+    fun saveSchoolAddressOverride(ctx: Context, address: String?) {
+        val editor = ctx.getSharedPreferences(APP_UI_PREFS, Context.MODE_PRIVATE).edit()
+        if (address == null) {
+            editor.remove(KEY_SCHOOL_ADDRESS_OVERRIDE)
+        } else {
+            editor.putString(KEY_SCHOOL_ADDRESS_OVERRIDE, address.trim().take(240))
+        }
+        editor.apply()
     }
 }
