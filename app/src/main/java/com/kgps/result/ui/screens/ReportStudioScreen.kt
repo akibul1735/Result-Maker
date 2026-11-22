@@ -264,197 +264,48 @@ fun ReportStudioScreen(
             Modifier.widthIn(max = 920.dp).fillMaxSize(),
             verticalArrangement = Arrangement.spacedBy(6.dp)
         ) {
-            // Top Compact Single-Row Selection Bar: Class + Roll + Name(Search) + Prev/Next
+            // Top Page Selector Chips Row (swapped to top above preview)
             Surface(
                 color = MaterialTheme.colorScheme.surface,
                 border = BorderStroke(1.dp, SlateOutline),
-                shape = RoundedCornerShape(10.dp)
+                shape = RoundedCornerShape(9.dp)
             ) {
                 Row(
-                    Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 6.dp, vertical = 5.dp),
+                    horizontalArrangement = Arrangement.spacedBy(5.dp),
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(5.dp)
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState())
+                        .padding(horizontal = 6.dp, vertical = 5.dp)
                 ) {
-                    // Class Selector (no prefix/suffix, e.g. ৩য়)
-                    Box {
+                    listOf(
+                        "p1" to "১. কভার",
+                        "p2" to "২. ১ম-২য় ও গুণাবলি",
+                        "p3" to "৩. ৩য় ও চূড়ান্ত",
+                        "p4" to "৪. ব্যাক কভার",
+                        "both" to "পুরো শিট (২ পাতা)"
+                    ).forEach { (id, label) ->
+                        val selected = pageView == id
                         Surface(
-                            onClick = { classMenuOpen = true },
+                            onClick = { selectPage(id) },
                             shape = RoundedCornerShape(7.dp),
-                            color = TealSoft,
-                            border = BorderStroke(1.dp, TealContainer),
-                            modifier = Modifier.height(34.dp).testTag("studio_class_dropdown")
+                            color = if (selected) TealPrimary else MaterialTheme.colorScheme.surface,
+                            border = BorderStroke(1.dp, if (selected) TealPrimary else SlateOutline),
+                            modifier = Modifier.height(30.dp).testTag("studio_page_chip_$id")
                         ) {
-                            Row(
-                                modifier = Modifier.padding(start = 7.dp, end = 2.dp),
-                                verticalAlignment = Alignment.CenterVertically
+                            Box(
+                                modifier = Modifier.padding(horizontal = 9.dp),
+                                contentAlignment = Alignment.Center
                             ) {
                                 Text(
-                                    classNameBn(active.cls, settings),
-                                    fontSize = 12.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = TealPrimary,
-                                    maxLines = 1
-                                )
-                                Icon(
-                                    Icons.Rounded.ArrowDropDown,
-                                    contentDescription = "শ্রেণি পরিবর্তন",
-                                    tint = TealPrimary,
-                                    modifier = Modifier.size(17.dp)
+                                    label,
+                                    fontSize = 11.sp,
+                                    fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
+                                    color = if (selected) Color.White else SlateText,
+                                    maxLines = 1,
+                                    softWrap = false
                                 )
                             }
-                        }
-                        DropdownMenu(expanded = classMenuOpen, onDismissRequest = { classMenuOpen = false }) {
-                            availableClasses.forEach { c ->
-                                val count = sorted.count { it.cls == c }
-                                val isSel = c == active.cls
-                                DropdownMenuItem(
-                                    modifier = Modifier.background(if (isSel) TealContainer else Color.Transparent),
-                                    text = {
-                                        Text(
-                                            "${classNameBn(c, settings)} শ্রেণি (${bn(count.toString())} জন)",
-                                            fontWeight = if (isSel) FontWeight.Bold else FontWeight.Normal,
-                                            color = if (isSel) TealDark else SlateText
-                                        )
-                                    },
-                                    trailingIcon = if (isSel) {
-                                        { Icon(Icons.Rounded.Check, contentDescription = null, tint = TealPrimary, modifier = Modifier.size(16.dp)) }
-                                    } else null,
-                                    onClick = {
-                                        classMenuOpen = false
-                                        sorted.firstOrNull { it.cls == c }?.let { onSelectId(it.id) }
-                                    }
-                                )
-                            }
-                        }
-                    }
-
-                    // Roll Selector (no prefix, e.g. ০১)
-                    Box {
-                        Surface(
-                            onClick = { rollMenuOpen = true },
-                            shape = RoundedCornerShape(7.dp),
-                            color = MaterialTheme.colorScheme.surface,
-                            border = BorderStroke(1.dp, SlateOutline),
-                            modifier = Modifier.height(34.dp).testTag("studio_roll_dropdown")
-                        ) {
-                            Row(
-                                modifier = Modifier.padding(start = 7.dp, end = 2.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Text(
-                                    bn(active.roll.toString().padStart(2, '0')),
-                                    fontSize = 12.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = SlateText,
-                                    maxLines = 1
-                                )
-                                Icon(
-                                    Icons.Rounded.ArrowDropDown,
-                                    contentDescription = "রোল পরিবর্তন",
-                                    tint = SlateMuted,
-                                    modifier = Modifier.size(17.dp)
-                                )
-                            }
-                        }
-                        DropdownMenu(
-                            expanded = rollMenuOpen,
-                            onDismissRequest = { rollMenuOpen = false },
-                            modifier = Modifier.heightIn(max = 360.dp)
-                        ) {
-                            classStudents.forEach { s ->
-                                val isSel = s.id == active.id
-                                DropdownMenuItem(
-                                    modifier = Modifier.background(if (isSel) TealContainer else Color.Transparent),
-                                    text = {
-                                        Text(
-                                            "${bn(s.roll.toString().padStart(2, '0'))} — ${s.name.ifBlank { "(নাম নেই)" }}",
-                                            fontWeight = if (isSel) FontWeight.Bold else FontWeight.Normal,
-                                            color = if (isSel) TealDark else SlateText
-                                        )
-                                    },
-                                    trailingIcon = if (isSel) {
-                                        { Icon(Icons.Rounded.Check, contentDescription = null, tint = TealPrimary, modifier = Modifier.size(16.dp)) }
-                                    } else null,
-                                    onClick = {
-                                        onSelectId(s.id)
-                                        rollMenuOpen = false
-                                    }
-                                )
-                            }
-                        }
-                    }
-
-                    // Student Name + Search Trigger right beside Class & Roll
-                    Surface(
-                        onClick = { showSearchDialog = true },
-                        shape = RoundedCornerShape(7.dp),
-                        color = SlateBg,
-                        border = BorderStroke(1.dp, SlateOutline),
-                        modifier = Modifier
-                            .weight(1f)
-                            .height(34.dp)
-                            .testTag("studio_student_selector")
-                    ) {
-                        Row(
-                            modifier = Modifier.padding(horizontal = 7.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(4.dp)
-                        ) {
-                            Text(
-                                active.name.ifBlank { "(নাম নেই)" },
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.SemiBold,
-                                color = SlateText,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                                modifier = Modifier.weight(1f)
-                            )
-                            Icon(
-                                Icons.Rounded.Search,
-                                contentDescription = "নাম বা রোল দিয়ে খুঁজুন",
-                                tint = TealPrimary,
-                                modifier = Modifier.size(15.dp)
-                            )
-                        }
-                    }
-
-                    Surface(
-                        onClick = {
-                            if (classActiveIdx > 0) onSelectId(classStudents[classActiveIdx - 1].id)
-                        },
-                        enabled = classActiveIdx > 0,
-                        shape = RoundedCornerShape(7.dp),
-                        color = MaterialTheme.colorScheme.surface,
-                        border = BorderStroke(1.dp, SlateOutline),
-                        modifier = Modifier.size(34.dp).testTag("studio_prev_student_btn")
-                    ) {
-                        Box(contentAlignment = Alignment.Center) {
-                            Icon(
-                                Icons.AutoMirrored.Rounded.KeyboardArrowLeft,
-                                contentDescription = "আগের শিক্ষার্থী",
-                                tint = if (classActiveIdx > 0) SlateText else SlateOutline
-                            )
-                        }
-                    }
-
-                    Surface(
-                        onClick = {
-                            if (classActiveIdx < classStudents.lastIndex) onSelectId(classStudents[classActiveIdx + 1].id)
-                        },
-                        enabled = classActiveIdx < classStudents.lastIndex,
-                        shape = RoundedCornerShape(7.dp),
-                        color = MaterialTheme.colorScheme.surface,
-                        border = BorderStroke(1.dp, SlateOutline),
-                        modifier = Modifier.size(34.dp).testTag("studio_next_student_btn")
-                    ) {
-                        Box(contentAlignment = Alignment.Center) {
-                            Icon(
-                                Icons.AutoMirrored.Rounded.KeyboardArrowRight,
-                                contentDescription = "পরের শিক্ষার্থী",
-                                tint = if (classActiveIdx < classStudents.lastIndex) SlateText else SlateOutline
-                            )
                         }
                     }
                 }
@@ -760,48 +611,197 @@ fun ReportStudioScreen(
                 }
             }
 
-            // Page Selector Chips Row (placed below preview & right above Print/PDF bar)
+            // Compact Single-Row Selection Bar (swapped below preview, right above Print/PDF bar): Class + Roll + Name(Search) + Prev/Next
             Surface(
                 color = MaterialTheme.colorScheme.surface,
                 border = BorderStroke(1.dp, SlateOutline),
-                shape = RoundedCornerShape(9.dp)
+                shape = RoundedCornerShape(10.dp)
             ) {
                 Row(
-                    horizontalArrangement = Arrangement.spacedBy(5.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier
+                    Modifier
                         .fillMaxWidth()
-                        .horizontalScroll(rememberScrollState())
-                        .padding(horizontal = 6.dp, vertical = 5.dp)
+                        .padding(horizontal = 6.dp, vertical = 5.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(5.dp)
                 ) {
-                    listOf(
-                        "p1" to "১. কভার",
-                        "p2" to "২. ১ম-২য় ও গুণাবলি",
-                        "p3" to "৩. ৩য় ও চূড়ান্ত",
-                        "p4" to "৪. ব্যাক কভার",
-                        "both" to "পুরো শিট (২ পাতা)"
-                    ).forEach { (id, label) ->
-                        val selected = pageView == id
+                    // Class Selector (no prefix/suffix, e.g. ৩য়)
+                    Box {
                         Surface(
-                            onClick = { selectPage(id) },
+                            onClick = { classMenuOpen = true },
                             shape = RoundedCornerShape(7.dp),
-                            color = if (selected) TealPrimary else MaterialTheme.colorScheme.surface,
-                            border = BorderStroke(1.dp, if (selected) TealPrimary else SlateOutline),
-                            modifier = Modifier.height(30.dp).testTag("studio_page_chip_$id")
+                            color = TealSoft,
+                            border = BorderStroke(1.dp, TealContainer),
+                            modifier = Modifier.height(34.dp).testTag("studio_class_dropdown")
                         ) {
-                            Box(
-                                modifier = Modifier.padding(horizontal = 9.dp),
-                                contentAlignment = Alignment.Center
+                            Row(
+                                modifier = Modifier.padding(start = 7.dp, end = 2.dp),
+                                verticalAlignment = Alignment.CenterVertically
                             ) {
                                 Text(
-                                    label,
-                                    fontSize = 11.sp,
-                                    fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
-                                    color = if (selected) Color.White else SlateText,
-                                    maxLines = 1,
-                                    softWrap = false
+                                    classNameBn(active.cls, settings),
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = TealPrimary,
+                                    maxLines = 1
+                                )
+                                Icon(
+                                    Icons.Rounded.ArrowDropDown,
+                                    contentDescription = "শ্রেণি পরিবর্তন",
+                                    tint = TealPrimary,
+                                    modifier = Modifier.size(17.dp)
                                 )
                             }
+                        }
+                        DropdownMenu(expanded = classMenuOpen, onDismissRequest = { classMenuOpen = false }) {
+                            availableClasses.forEach { c ->
+                                val count = sorted.count { it.cls == c }
+                                val isSel = c == active.cls
+                                DropdownMenuItem(
+                                    modifier = Modifier.background(if (isSel) TealContainer else Color.Transparent),
+                                    text = {
+                                        Text(
+                                            "${classNameBn(c, settings)} শ্রেণি (${bn(count.toString())} জন)",
+                                            fontWeight = if (isSel) FontWeight.Bold else FontWeight.Normal,
+                                            color = if (isSel) TealDark else SlateText
+                                        )
+                                    },
+                                    trailingIcon = if (isSel) {
+                                        { Icon(Icons.Rounded.Check, contentDescription = null, tint = TealPrimary, modifier = Modifier.size(16.dp)) }
+                                    } else null,
+                                    onClick = {
+                                        classMenuOpen = false
+                                        sorted.firstOrNull { it.cls == c }?.let { onSelectId(it.id) }
+                                    }
+                                )
+                            }
+                        }
+                    }
+
+                    // Roll Selector (no prefix, e.g. ০১)
+                    Box {
+                        Surface(
+                            onClick = { rollMenuOpen = true },
+                            shape = RoundedCornerShape(7.dp),
+                            color = MaterialTheme.colorScheme.surface,
+                            border = BorderStroke(1.dp, SlateOutline),
+                            modifier = Modifier.height(34.dp).testTag("studio_roll_dropdown")
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(start = 7.dp, end = 2.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    bn(active.roll.toString().padStart(2, '0')),
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = SlateText,
+                                    maxLines = 1
+                                )
+                                Icon(
+                                    Icons.Rounded.ArrowDropDown,
+                                    contentDescription = "রোল পরিবর্তন",
+                                    tint = SlateMuted,
+                                    modifier = Modifier.size(17.dp)
+                                )
+                            }
+                        }
+                        DropdownMenu(
+                            expanded = rollMenuOpen,
+                            onDismissRequest = { rollMenuOpen = false },
+                            modifier = Modifier.heightIn(max = 360.dp)
+                        ) {
+                            classStudents.forEach { s ->
+                                val isSel = s.id == active.id
+                                DropdownMenuItem(
+                                    modifier = Modifier.background(if (isSel) TealContainer else Color.Transparent),
+                                    text = {
+                                        Text(
+                                            "${bn(s.roll.toString().padStart(2, '0'))} — ${s.name.ifBlank { "(নাম নেই)" }}",
+                                            fontWeight = if (isSel) FontWeight.Bold else FontWeight.Normal,
+                                            color = if (isSel) TealDark else SlateText
+                                        )
+                                    },
+                                    trailingIcon = if (isSel) {
+                                        { Icon(Icons.Rounded.Check, contentDescription = null, tint = TealPrimary, modifier = Modifier.size(16.dp)) }
+                                    } else null,
+                                    onClick = {
+                                        onSelectId(s.id)
+                                        rollMenuOpen = false
+                                    }
+                                )
+                            }
+                        }
+                    }
+
+                    // Student Name + Search Trigger right beside Class & Roll
+                    Surface(
+                        onClick = { showSearchDialog = true },
+                        shape = RoundedCornerShape(7.dp),
+                        color = SlateBg,
+                        border = BorderStroke(1.dp, SlateOutline),
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(34.dp)
+                            .testTag("studio_student_selector")
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 7.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            Text(
+                                active.name.ifBlank { "(নাম নেই)" },
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = SlateText,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.weight(1f)
+                            )
+                            Icon(
+                                Icons.Rounded.Search,
+                                contentDescription = "নাম বা রোল দিয়ে খুঁজুন",
+                                tint = TealPrimary,
+                                modifier = Modifier.size(15.dp)
+                            )
+                        }
+                    }
+
+                    Surface(
+                        onClick = {
+                            if (classActiveIdx > 0) onSelectId(classStudents[classActiveIdx - 1].id)
+                        },
+                        enabled = classActiveIdx > 0,
+                        shape = RoundedCornerShape(7.dp),
+                        color = MaterialTheme.colorScheme.surface,
+                        border = BorderStroke(1.dp, SlateOutline),
+                        modifier = Modifier.size(34.dp).testTag("studio_prev_student_btn")
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Icon(
+                                Icons.AutoMirrored.Rounded.KeyboardArrowLeft,
+                                contentDescription = "আগের শিক্ষার্থী",
+                                tint = if (classActiveIdx > 0) SlateText else SlateOutline
+                            )
+                        }
+                    }
+
+                    Surface(
+                        onClick = {
+                            if (classActiveIdx < classStudents.lastIndex) onSelectId(classStudents[classActiveIdx + 1].id)
+                        },
+                        enabled = classActiveIdx < classStudents.lastIndex,
+                        shape = RoundedCornerShape(7.dp),
+                        color = MaterialTheme.colorScheme.surface,
+                        border = BorderStroke(1.dp, SlateOutline),
+                        modifier = Modifier.size(34.dp).testTag("studio_next_student_btn")
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Icon(
+                                Icons.AutoMirrored.Rounded.KeyboardArrowRight,
+                                contentDescription = "পরের শিক্ষার্থী",
+                                tint = if (classActiveIdx < classStudents.lastIndex) SlateText else SlateOutline
+                            )
                         }
                     }
                 }
