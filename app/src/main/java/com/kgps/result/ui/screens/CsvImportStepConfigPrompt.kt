@@ -27,6 +27,7 @@ import androidx.compose.material.icons.rounded.AutoAwesome
 import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.ContentCopy
 import androidx.compose.material.icons.rounded.Description
+import androidx.compose.material.icons.rounded.Download
 import androidx.compose.material.icons.rounded.ExpandLess
 import androidx.compose.material.icons.rounded.ExpandMore
 import androidx.compose.material.icons.rounded.FactCheck
@@ -75,6 +76,8 @@ import com.kgps.result.Student
 import com.kgps.result.activeSchoolClasses
 import com.kgps.result.bn
 import com.kgps.result.defaultSelectedColumnKeys
+import com.kgps.result.effectiveTermsForConfig
+import com.kgps.result.mk
 import com.kgps.result.subjectsFor
 import com.kgps.result.termOrdinalBn
 import com.kgps.result.ui.theme.SlateBg
@@ -105,6 +108,8 @@ fun CsvStepOptions(
         config.targetTerm,
         config.selectedSubjectKeys,
         config.allTermsSelection,
+        config.multiTermSelection,
+        config.conciseMarks,
         config.includeCustomFields,
         customFields
     ) {
@@ -112,6 +117,9 @@ fun CsvStepOptions(
     }
     val groupedCols = remember(availableCols) { availableCols.groupBy { it.group } }
     val selectedCount = availableCols.count { it.required || config.selectedColumnKeys.contains(it.key) }
+    val headerPreview = remember(config, settings) {
+        CsvImportAssistant.buildHeaderLine(config, customFields, settings)
+    }
     var columnsExpanded by remember { mutableStateOf(false) }
 
     Column(
@@ -121,7 +129,7 @@ fun CsvStepOptions(
             .padding(horizontal = 12.dp, vertical = 8.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
-        // 1. Module selector cards (2x2 + dedicated 3-Term Subject Sheet option)
+        // 1. Module selector cards: Featured 3-Term Subject Sheet FIRST + 2x2 grid
         val gridModules = listOf(
             CsvImportModule.STUDENT_PROFILE,
             CsvImportModule.TERM_MARKS,
@@ -129,6 +137,95 @@ fun CsvStepOptions(
             CsvImportModule.FULL_RECORD
         )
         Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
+            // Top featured card for Subject-Wise 3-Term Sheet (উপরে শ্রেণি ও বিষয়; ১ম-২য়-৩য় প্রান্তিক ধারাবাহিক/সামষ্টিক)
+            val mod3T = CsvImportModule.SUBJECT_ALL_TERMS
+            val sel3T = config.module == mod3T
+            Surface(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(10.dp))
+                    .testTag("csv_module_${mod3T.id}")
+                    .clickable {
+                        val safeCls = if (config.targetCls in 1..20) config.targetCls else 1
+                        val clsSubKeys = subjectsFor(safeCls, "ইসলাম").map { it.key }
+                        val firstSubKey = config.selectedSubjectKeys.firstOrNull { it in clsSubKeys } ?: clsSubKeys.first()
+                        val nextSubs = setOf(firstSubKey)
+                        val nextTerms = config.allTermsSelection.filter { it in 1..3 }.toSet().ifEmpty { setOf(1, 2, 3) }
+                        val nextCols = defaultSelectedColumnKeys(
+                            module = mod3T,
+                            targetCls = safeCls,
+                            targetTerm = config.targetTerm,
+                            customFields = customFields,
+                            selectedSubjects = nextSubs,
+                            allTermsSelection = nextTerms,
+                            multiTermSelection = config.multiTermSelection,
+                            conciseMarks = config.conciseMarks
+                        )
+                        onConfigChange(
+                            config.copy(
+                                module = mod3T,
+                                targetCls = safeCls,
+                                selectedSubjectKeys = nextSubs,
+                                allTermsSelection = nextTerms,
+                                selectedColumnKeys = nextCols
+                            )
+                        )
+                    },
+                shape = RoundedCornerShape(10.dp),
+                color = if (sel3T) TealContainer.copy(alpha = 0.85f) else TealSoft.copy(alpha = 0.55f),
+                border = BorderStroke(
+                    width = if (sel3T) 1.7.dp else 1.dp,
+                    color = if (sel3T) TealPrimary else TealContainer
+                )
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Icon(
+                        Icons.Rounded.TableChart,
+                        contentDescription = null,
+                        tint = TealPrimary,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Column(modifier = Modifier.weight(1f)) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Text(
+                                mod3T.titleBn,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 12.5.sp,
+                                color = TealDark,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                            Surface(
+                                color = if (sel3T) TealPrimary else TealContainer,
+                                shape = RoundedCornerShape(5.dp)
+                            ) {
+                                Text(
+                                    "৩ প্রান্তিক",
+                                    fontSize = 9.5.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = if (sel3T) Color.White else TealDark,
+                                    modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.dp)
+                                )
+                            }
+                        }
+                        Text(
+                            mod3T.subtitleBn,
+                            fontSize = 10.5.sp,
+                            color = SlateMuted,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                }
+            }
+
             gridModules.chunked(2).forEach { pair ->
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -149,15 +246,24 @@ fun CsvStepOptions(
                                 .clip(RoundedCornerShape(10.dp))
                                 .testTag("csv_module_${mod.id}")
                                 .clickable {
+                                    val nextMultiTerms = config.multiTermSelection.ifEmpty { setOf(config.targetTerm) }
                                     val nextCols = defaultSelectedColumnKeys(
                                         module = mod,
                                         targetCls = config.targetCls,
                                         targetTerm = config.targetTerm,
                                         customFields = customFields,
                                         selectedSubjects = config.selectedSubjectKeys,
-                                        allTermsSelection = config.allTermsSelection
+                                        allTermsSelection = config.allTermsSelection,
+                                        multiTermSelection = nextMultiTerms,
+                                        conciseMarks = config.conciseMarks
                                     )
-                                    onConfigChange(config.copy(module = mod, selectedColumnKeys = nextCols))
+                                    onConfigChange(
+                                        config.copy(
+                                            module = mod,
+                                            multiTermSelection = nextMultiTerms,
+                                            selectedColumnKeys = nextCols
+                                        )
+                                    )
                                 },
                             shape = RoundedCornerShape(10.dp),
                             color = if (selected) TealContainer.copy(alpha = 0.75f) else Color.White,
@@ -187,74 +293,6 @@ fun CsvStepOptions(
                                 )
                             }
                         }
-                    }
-                }
-            }
-
-            // Dedicated full-width featured pill for Subject-Wise 3-Term Sheet (উপরে শ্রেণি ও বিষয়; ১ম-২য়-৩য় প্রান্তিক ধারাবাহিক/সামষ্টিক)
-            val mod3T = CsvImportModule.SUBJECT_ALL_TERMS
-            val sel3T = config.module == mod3T
-            Surface(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(10.dp))
-                    .testTag("csv_module_${mod3T.id}")
-                    .clickable {
-                        val safeCls = if (config.targetCls in 1..20) config.targetCls else 1
-                        val firstSubKey = config.selectedSubjectKeys.firstOrNull()
-                            ?: subjectsFor(safeCls, "ইসলাম").first().key
-                        val nextSubs = setOf(firstSubKey)
-                        val nextCols = defaultSelectedColumnKeys(
-                            module = mod3T,
-                            targetCls = safeCls,
-                            targetTerm = config.targetTerm,
-                            customFields = customFields,
-                            selectedSubjects = nextSubs,
-                            allTermsSelection = config.allTermsSelection
-                        )
-                        onConfigChange(
-                            config.copy(
-                                module = mod3T,
-                                targetCls = safeCls,
-                                selectedSubjectKeys = nextSubs,
-                                selectedColumnKeys = nextCols
-                            )
-                        )
-                    },
-                shape = RoundedCornerShape(10.dp),
-                color = if (sel3T) TealContainer.copy(alpha = 0.82f) else TealSoft.copy(alpha = 0.45f),
-                border = BorderStroke(
-                    width = if (sel3T) 1.6.dp else 1.dp,
-                    color = if (sel3T) TealPrimary else TealContainer
-                )
-            ) {
-                Row(
-                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    Icon(
-                        Icons.Rounded.TableChart,
-                        contentDescription = null,
-                        tint = TealPrimary,
-                        modifier = Modifier.size(18.dp)
-                    )
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            mod3T.titleBn,
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 12.5.sp,
-                            color = TealDark,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                        Text(
-                            mod3T.subtitleBn,
-                            fontSize = 10.5.sp,
-                            color = SlateMuted,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
                     }
                 }
             }
@@ -297,7 +335,9 @@ fun CsvStepOptions(
                                     targetTerm = config.targetTerm,
                                     customFields = customFields,
                                     selectedSubjects = nextSubs,
-                                    allTermsSelection = config.allTermsSelection
+                                    allTermsSelection = config.allTermsSelection,
+                                    multiTermSelection = config.multiTermSelection,
+                                    conciseMarks = config.conciseMarks
                                 )
                                 onConfigChange(
                                     config.copy(
@@ -321,7 +361,9 @@ fun CsvStepOptions(
                                     targetTerm = config.targetTerm,
                                     customFields = customFields,
                                     selectedSubjects = config.selectedSubjectKeys,
-                                    allTermsSelection = config.allTermsSelection
+                                    allTermsSelection = config.allTermsSelection,
+                                    multiTermSelection = config.multiTermSelection,
+                                    conciseMarks = config.conciseMarks
                                 )
                                 onConfigChange(config.copy(targetCls = 0, selectedColumnKeys = nextCols))
                             }
@@ -332,6 +374,11 @@ fun CsvStepOptions(
                 if (config.module == CsvImportModule.SUBJECT_ALL_TERMS) {
                     val clsSubjects = remember(effectiveCls, settings.customClasses) { subjectsFor(effectiveCls, "ইসলাম") }
                     val activeSub = CsvImportAssistant.resolveSubjectForAllTerms(config)
+                    val activeTerms = effectiveTermsForConfig(config).toSet()
+                    val all3Sel = activeTerms == setOf(1, 2, 3)
+                    val hasTotalSelected = activeTerms.any { t ->
+                        config.selectedColumnKeys.contains(mk(activeSub.key, t, "TOTAL"))
+                    }
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -354,8 +401,12 @@ fun CsvStepOptions(
                                         targetTerm = config.targetTerm,
                                         customFields = customFields,
                                         selectedSubjects = nextSubs,
-                                        allTermsSelection = config.allTermsSelection
-                                    )
+                                        allTermsSelection = activeTerms,
+                                        multiTermSelection = config.multiTermSelection,
+                                        conciseMarks = config.conciseMarks
+                                    ).let { base ->
+                                        if (hasTotalSelected) base + activeTerms.map { t -> mk(s.key, t, "TOTAL") } else base
+                                    }
                                     onConfigChange(config.copy(selectedSubjectKeys = nextSubs, selectedColumnKeys = nextCols))
                                 }
                             )
@@ -370,17 +421,38 @@ fun CsvStepOptions(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text("প্রান্তিক:", fontWeight = FontWeight.SemiBold, fontSize = 11.5.sp, color = SlateMuted)
+                        CompactOptionPill(
+                            label = "সব ৩টি",
+                            selected = all3Sel,
+                            testTag = "csv_opt_multi_term_all",
+                            onClick = {
+                                val nextTerms = setOf(1, 2, 3)
+                                val nextCols = defaultSelectedColumnKeys(
+                                    module = config.module,
+                                    targetCls = effectiveCls,
+                                    targetTerm = config.targetTerm,
+                                    customFields = customFields,
+                                    selectedSubjects = setOf(activeSub.key),
+                                    allTermsSelection = nextTerms,
+                                    multiTermSelection = config.multiTermSelection,
+                                    conciseMarks = config.conciseMarks
+                                ).let { base ->
+                                    if (hasTotalSelected) base + nextTerms.map { t -> mk(activeSub.key, t, "TOTAL") } else base
+                                }
+                                onConfigChange(config.copy(allTermsSelection = nextTerms, selectedColumnKeys = nextCols))
+                            }
+                        )
                         (1..3).forEach { t ->
-                            val isTermSel = config.allTermsSelection.contains(t)
+                            val isTermSel = activeTerms.contains(t)
                             CompactOptionPill(
                                 label = termOrdinalBn(t),
                                 selected = isTermSel,
                                 testTag = "csv_opt_multi_term_$t",
                                 onClick = {
-                                    val nextTerms = if (isTermSel && config.allTermsSelection.size > 1) {
-                                        config.allTermsSelection - t
+                                    val nextTerms = if (isTermSel && activeTerms.size > 1) {
+                                        activeTerms - t
                                     } else {
-                                        config.allTermsSelection + t
+                                        activeTerms + t
                                     }
                                     val nextCols = defaultSelectedColumnKeys(
                                         module = config.module,
@@ -388,19 +460,45 @@ fun CsvStepOptions(
                                         targetTerm = config.targetTerm,
                                         customFields = customFields,
                                         selectedSubjects = setOf(activeSub.key),
-                                        allTermsSelection = nextTerms
-                                    )
+                                        allTermsSelection = nextTerms,
+                                        multiTermSelection = config.multiTermSelection,
+                                        conciseMarks = config.conciseMarks
+                                    ).let { base ->
+                                        if (hasTotalSelected) base + nextTerms.map { tr -> mk(activeSub.key, tr, "TOTAL") } else base
+                                    }
                                     onConfigChange(config.copy(allTermsSelection = nextTerms, selectedColumnKeys = nextCols))
                                 }
                             )
                         }
-                        Spacer(Modifier.width(4.dp))
+                    }
+
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(5.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text("কাঠামো:", fontWeight = FontWeight.SemiBold, fontSize = 11.5.sp, color = SlateMuted)
                         CompactOptionPill(
-                            label = if (config.useTwoRowGroupedHeader) "২-সারি হেডার" else "১-সারি হেডার",
+                            label = if (config.useTwoRowGroupedHeader) "২-সারি হেডার ✓" else "১-সারি হেডার",
                             selected = config.useTwoRowGroupedHeader,
                             testTag = "csv_opt_2row_header",
                             onClick = {
                                 onConfigChange(config.copy(useTwoRowGroupedHeader = !config.useTwoRowGroupedHeader))
+                            }
+                        )
+                        CompactOptionPill(
+                            label = if (hasTotalSelected) "মোট কলাম সহ ✓" else "+ মোট কলাম",
+                            selected = hasTotalSelected,
+                            testTag = "csv_opt_toggle_total_col",
+                            onClick = {
+                                val nextCols = if (hasTotalSelected) {
+                                    config.selectedColumnKeys - activeTerms.map { t -> mk(activeSub.key, t, "TOTAL") }.toSet()
+                                } else {
+                                    config.selectedColumnKeys + activeTerms.map { t -> mk(activeSub.key, t, "TOTAL") }
+                                }
+                                onConfigChange(config.copy(selectedColumnKeys = nextCols))
                             }
                         )
                     }
@@ -413,6 +511,8 @@ fun CsvStepOptions(
                         )
                     }
                 } else if (config.module != CsvImportModule.STUDENT_PROFILE) {
+                    val activeMultiTerms = effectiveTermsForConfig(config).toSet()
+                    val isAll3Terms = activeMultiTerms == setOf(1, 2, 3)
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -421,21 +521,61 @@ fun CsvStepOptions(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text("প্রান্তিক:", fontWeight = FontWeight.SemiBold, fontSize = 11.5.sp, color = SlateMuted)
+                        CompactOptionPill(
+                            label = "সব ৩টি",
+                            selected = isAll3Terms,
+                            testTag = "csv_opt_term_all",
+                            onClick = {
+                                val nextTerms = setOf(1, 2, 3)
+                                val nextCols = defaultSelectedColumnKeys(
+                                    module = config.module,
+                                    targetCls = config.targetCls,
+                                    targetTerm = 1,
+                                    customFields = customFields,
+                                    selectedSubjects = config.selectedSubjectKeys,
+                                    allTermsSelection = config.allTermsSelection,
+                                    multiTermSelection = nextTerms,
+                                    conciseMarks = config.conciseMarks
+                                )
+                                onConfigChange(
+                                    config.copy(
+                                        targetTerm = 1,
+                                        multiTermSelection = nextTerms,
+                                        selectedColumnKeys = nextCols
+                                    )
+                                )
+                            }
+                        )
                         (1..3).forEach { t ->
+                            val isTermSel = activeMultiTerms.contains(t)
                             CompactOptionPill(
                                 label = termOrdinalBn(t),
-                                selected = config.targetTerm == t,
+                                selected = isTermSel,
                                 testTag = "csv_opt_term_$t",
                                 onClick = {
+                                    val nextTerms = if (isTermSel && activeMultiTerms.size > 1) {
+                                        activeMultiTerms - t
+                                    } else {
+                                        activeMultiTerms + t
+                                    }
+                                    val nextPrimary = nextTerms.minOrNull() ?: 1
                                     val nextCols = defaultSelectedColumnKeys(
                                         module = config.module,
                                         targetCls = config.targetCls,
-                                        targetTerm = t,
+                                        targetTerm = nextPrimary,
                                         customFields = customFields,
                                         selectedSubjects = config.selectedSubjectKeys,
-                                        allTermsSelection = config.allTermsSelection
+                                        allTermsSelection = config.allTermsSelection,
+                                        multiTermSelection = nextTerms,
+                                        conciseMarks = config.conciseMarks
                                     )
-                                    onConfigChange(config.copy(targetTerm = t, selectedColumnKeys = nextCols))
+                                    onConfigChange(
+                                        config.copy(
+                                            targetTerm = nextPrimary,
+                                            multiTermSelection = nextTerms,
+                                            selectedColumnKeys = nextCols
+                                        )
+                                    )
                                 }
                             )
                         }
@@ -444,6 +584,54 @@ fun CsvStepOptions(
 
                 if (config.module == CsvImportModule.TERM_MARKS || config.module == CsvImportModule.FULL_RECORD) {
                     val clsSubjects = remember(effectiveCls, settings.customClasses) { subjectsFor(effectiveCls, "ইসলাম") }
+                    val activeMultiTerms = effectiveTermsForConfig(config).toSet()
+                    val isConciseNow = config.conciseMarks || activeMultiTerms.size > 1
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(5.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text("নম্বর:", fontWeight = FontWeight.SemiBold, fontSize = 11.5.sp, color = SlateMuted)
+                        CompactOptionPill(
+                            label = "ধারাবাহিক + সামষ্টিক",
+                            selected = isConciseNow,
+                            testTag = "csv_opt_marks_concise",
+                            onClick = {
+                                val nextCols = defaultSelectedColumnKeys(
+                                    module = config.module,
+                                    targetCls = config.targetCls,
+                                    targetTerm = config.targetTerm,
+                                    customFields = customFields,
+                                    selectedSubjects = config.selectedSubjectKeys,
+                                    allTermsSelection = config.allTermsSelection,
+                                    multiTermSelection = activeMultiTerms,
+                                    conciseMarks = true
+                                )
+                                onConfigChange(config.copy(conciseMarks = true, multiTermSelection = activeMultiTerms, selectedColumnKeys = nextCols))
+                            }
+                        )
+                        CompactOptionPill(
+                            label = "বিস্তারিত (১.১–১.৪)",
+                            selected = !config.conciseMarks && activeMultiTerms.size == 1,
+                            testTag = "csv_opt_marks_detailed",
+                            onClick = {
+                                val singleTermSet = setOf(activeMultiTerms.minOrNull() ?: config.targetTerm)
+                                val nextCols = defaultSelectedColumnKeys(
+                                    module = config.module,
+                                    targetCls = config.targetCls,
+                                    targetTerm = singleTermSet.first(),
+                                    customFields = customFields,
+                                    selectedSubjects = config.selectedSubjectKeys,
+                                    allTermsSelection = config.allTermsSelection,
+                                    multiTermSelection = singleTermSet,
+                                    conciseMarks = false
+                                )
+                                onConfigChange(config.copy(conciseMarks = false, multiTermSelection = singleTermSet, selectedColumnKeys = nextCols))
+                            }
+                        )
+                    }
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -463,7 +651,9 @@ fun CsvStepOptions(
                                     targetTerm = config.targetTerm,
                                     customFields = customFields,
                                     selectedSubjects = emptySet(),
-                                    allTermsSelection = config.allTermsSelection
+                                    allTermsSelection = config.allTermsSelection,
+                                    multiTermSelection = activeMultiTerms,
+                                    conciseMarks = config.conciseMarks
                                 )
                                 onConfigChange(config.copy(selectedSubjectKeys = emptySet(), selectedColumnKeys = nextCols))
                             }
@@ -486,7 +676,9 @@ fun CsvStepOptions(
                                         targetTerm = config.targetTerm,
                                         customFields = customFields,
                                         selectedSubjects = nextSubs,
-                                        allTermsSelection = config.allTermsSelection
+                                        allTermsSelection = config.allTermsSelection,
+                                        multiTermSelection = activeMultiTerms,
+                                        conciseMarks = config.conciseMarks
                                     )
                                     onConfigChange(config.copy(selectedSubjectKeys = nextSubs, selectedColumnKeys = nextCols))
                                 }
@@ -494,6 +686,35 @@ fun CsvStepOptions(
                         }
                     }
                 }
+            }
+        }
+
+        // Live Header Structure Preview inside Step 1 so the 3-term & metadata structure is immediately visible
+        Surface(
+            color = TealSoft.copy(alpha = 0.6f),
+            border = BorderStroke(1.dp, TealContainer),
+            shape = RoundedCornerShape(10.dp),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Column(
+                modifier = Modifier.padding(horizontal = 10.dp, vertical = 7.dp),
+                verticalArrangement = Arrangement.spacedBy(3.dp)
+            ) {
+                Text(
+                    "শিট হেডার প্রিভিউ (${bn(selectedCount.toString())}টি কলাম):",
+                    fontSize = 10.5.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = TealDark
+                )
+                Text(
+                    headerPreview,
+                    fontSize = 10.5.sp,
+                    lineHeight = 14.sp,
+                    fontFamily = FontFamily.Monospace,
+                    color = SlateText,
+                    maxLines = 4,
+                    overflow = TextOverflow.Ellipsis
+                )
             }
         }
 
@@ -754,6 +975,7 @@ fun CsvStepPrompt(
     onCopyPrompt: (String) -> Unit,
     onCopyHeaderOnly: (String) -> Unit,
     onCopyRosterTemplate: (String, Boolean) -> Unit,
+    onSaveTemplateFile: (String) -> Unit = {},
     onGoToStep3: () -> Unit
 ) {
     val promptText = remember(config, settings) {
@@ -875,18 +1097,30 @@ fun CsvStepPrompt(
             ) {
                 Icon(Icons.Rounded.TableRows, contentDescription = null, modifier = Modifier.size(16.dp))
                 Spacer(Modifier.width(5.dp))
-                Text("রোল-নামসহ শিট কপি", fontSize = 11.5.sp, maxLines = 1)
+                Text("রোল-নামসহ শিট কপি", fontSize = 11.sp, maxLines = 1)
             }
 
             OutlinedButton(
                 onClick = { onCopyRosterTemplate(blankTemplate, false) },
                 shape = RoundedCornerShape(10.dp),
                 modifier = Modifier
-                    .weight(0.8f)
+                    .weight(0.78f)
                     .testTag("csv_copy_blank_sheet_btn")
             ) {
-                Text("ফাঁকা টেমপ্লেট কপি", fontSize = 11.5.sp, maxLines = 1)
+                Text("ফাঁকা টেমপ্লেট", fontSize = 11.sp, maxLines = 1)
             }
+        }
+
+        OutlinedButton(
+            onClick = { onSaveTemplateFile(prefilledTemplate) },
+            shape = RoundedCornerShape(10.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .testTag("csv_save_template_file_btn")
+        ) {
+            Icon(Icons.Rounded.Download, contentDescription = null, modifier = Modifier.size(16.dp))
+            Spacer(Modifier.width(6.dp))
+            Text("এক্সেল/CSV টেমপ্লেট ফাইল সেভ করুন (.csv)", fontSize = 12.sp, maxLines = 1)
         }
 
         Surface(

@@ -334,4 +334,71 @@ class CustomClassAndPromptTest {
         assertEquals(48.0, rafi.m["ART_3_CONT"]!!, 0.001)
         assertFalse("WR=0 on written==0 subject should not pollute keys", rafi.m.containsKey("ART_1_WR"))
     }
+
+    @Test
+    fun multiTermSelectionAcrossModulesAndMixedTsvCommaBannerWorkCleanly() {
+        // 1. TERM_MARKS with all 3 terms selected
+        val multiMarkCfg = CsvPromptConfig(
+            module = CsvImportModule.TERM_MARKS,
+            targetCls = 4,
+            selectedSubjectKeys = setOf("BAN", "MATH"),
+            multiTermSelection = setOf(1, 2, 3),
+            conciseMarks = true,
+            selectedColumnKeys = defaultSelectedColumnKeys(
+                module = CsvImportModule.TERM_MARKS,
+                targetCls = 4,
+                targetTerm = 1,
+                selectedSubjects = setOf("BAN", "MATH"),
+                multiTermSelection = setOf(1, 2, 3),
+                conciseMarks = true
+            )
+        )
+        val header = CsvImportAssistant.buildHeaderLine(multiMarkCfg, emptyList())
+        assertTrue(header.contains("BAN_1_CONT"))
+        assertTrue(header.contains("BAN_2_WR"))
+        assertTrue(header.contains("MATH_3_CONT"))
+        assertTrue(header.contains("MATH_3_WR"))
+
+        val attCfg = CsvPromptConfig(
+            module = CsvImportModule.ATTENDANCE_TRAITS,
+            targetCls = 4,
+            multiTermSelection = setOf(1, 2, 3),
+            selectedColumnKeys = defaultSelectedColumnKeys(
+                module = CsvImportModule.ATTENDANCE_TRAITS,
+                targetCls = 4,
+                targetTerm = 1,
+                multiTermSelection = setOf(1, 2, 3)
+            )
+        )
+        val attHdr = CsvImportAssistant.buildHeaderLine(attCfg, emptyList())
+        assertTrue(attHdr.contains("DAYS_1") && attHdr.contains("DAYS_2") && attHdr.contains("DAYS_3"))
+
+        // 2. Excel TSV paste where banner line has a comma, table uses tabs
+        val tsvWithCommaBanner =
+            "শ্রেণি: ৩য়, বিষয়: ইংরেজি\n" +
+                "ক্রমিক\tনাম\t১ম প্রান্তিক\t\t২য় প্রান্তিক\t\t৩য় প্রান্তিক\t\n" +
+                "\t\tধারাবাহিক\tসামস্টিক\tধারাবাহিক\tসামষ্টিক\tধারাবাহিক\tসামস্টিক\n" +
+                "১\tআরিফ\t24\t58\t25\t61\t27\t64"
+        val sheetTsv = Repo.parseSmartCsvSheet(tsvWithCommaBanner)
+        assertEquals(3, sheetTsv.detectedCls)
+        assertEquals("ENG", sheetTsv.detectedSubjectKey)
+        assertTrue(sheetTsv.usedTwoRowHeader)
+        val tsvCols = Repo.detectCsvColumns(sheetTsv.rows, emptyList(), sheetTsv.detectedSubjectKey, sheetTsv.detectedTerm)
+        assertEquals("roll", tsvCols[0].targetKey)
+        assertEquals("ENG_1_CONT", tsvCols[2].targetKey)
+        assertEquals("ENG_2_WR", tsvCols[5].targetKey)
+        assertEquals("ENG_3_CONT", tsvCols[6].targetKey)
+        assertEquals("ENG_3_WR", tsvCols[7].targetKey)
+
+        // 3. Short headers without the word "প্রান্তিক"
+        val shortHdr = "রোল,নাম,১ম ধারাবাহিক,১ম সামস্টিক,২য় ধারাবাহিক,২য় সামষ্টিক,৩য় ধারাবাহিক,৩য় সামষ্টিক\n1,মীম,22,50,24,55,26,60"
+        val shortSheet = Repo.parseSmartCsvSheet(shortHdr)
+        val shortCols = Repo.detectCsvColumns(shortSheet.rows, emptyList(), contextSubjectKey = "BAN")
+        assertEquals("BAN_1_CONT", shortCols[2].targetKey)
+        assertEquals("BAN_1_WR", shortCols[3].targetKey)
+        assertEquals("BAN_2_CONT", shortCols[4].targetKey)
+        assertEquals("BAN_2_WR", shortCols[5].targetKey)
+        assertEquals("BAN_3_CONT", shortCols[6].targetKey)
+        assertEquals("BAN_3_WR", shortCols[7].targetKey)
+    }
 }

@@ -13,7 +13,7 @@ enum class CsvImportModule(
     TERM_MARKS(
         id = "marks",
         titleBn = "বিষয়ভিত্তিক নম্বর",
-        subtitleBn = "শ্রেণি ও এক প্রান্তিকের সব বিষয়ের নম্বর"
+        subtitleBn = "শ্রেণি ও ১/২/৩ প্রান্তিকের সব বিষয়ের নম্বর"
     ),
     SUBJECT_ALL_TERMS(
         id = "subject_3terms",
@@ -23,12 +23,12 @@ enum class CsvImportModule(
     ATTENDANCE_TRAITS(
         id = "attendance",
         titleBn = "উপস্থিতি ও আচরণ",
-        subtitleBn = "কার্যদিবস, উপস্থিতি, শৃঙ্খলা ও মন্তব্য"
+        subtitleBn = "১–৩ প্রান্তিকের কার্যদিবস, উপস্থিতি, শৃঙ্খলা ও মন্তব্য"
     ),
     FULL_RECORD(
         id = "full",
         titleBn = "সম্পূর্ণ সম্মিলিত CSV",
-        subtitleBn = "প্রোফাইল + প্রান্তিক নম্বর + উপস্থিতি ও আচরণ"
+        subtitleBn = "প্রোফাইল + ১–৩ প্রান্তিকের নম্বর + উপস্থিতি"
     )
 }
 
@@ -72,8 +72,18 @@ data class CsvPromptConfig(
     val includeCustomFields: Boolean = true,
     val extraInstruction: String = "",
     val allTermsSelection: Set<Int> = setOf(1, 2, 3),
-    val useTwoRowGroupedHeader: Boolean = true
+    val useTwoRowGroupedHeader: Boolean = true,
+    val multiTermSelection: Set<Int> = emptySet(),
+    val conciseMarks: Boolean = false
 )
+
+fun effectiveTermsForConfig(config: CsvPromptConfig): List<Int> = when (config.module) {
+    CsvImportModule.SUBJECT_ALL_TERMS ->
+        config.allTermsSelection.filter { it in 1..3 }.sorted().ifEmpty { listOf(1, 2, 3) }
+    CsvImportModule.STUDENT_PROFILE -> emptyList()
+    else ->
+        config.multiTermSelection.filter { it in 1..3 }.sorted().ifEmpty { listOf(config.targetTerm.coerceIn(1, 3)) }
+}
 
 enum class CsvRowStatus { VALID, WARNING, ERROR }
 
@@ -107,13 +117,17 @@ fun defaultSelectedColumnKeys(
     targetTerm: Int,
     customFields: List<CustomFieldDef> = emptyList(),
     selectedSubjects: Set<String> = emptySet(),
-    allTermsSelection: Set<Int> = setOf(1, 2, 3)
+    allTermsSelection: Set<Int> = setOf(1, 2, 3),
+    multiTermSelection: Set<Int> = emptySet(),
+    conciseMarks: Boolean = false
 ): Set<String> {
     val effectiveCls = if (targetCls in 1..20) targetCls else 3
     val allClassSubs = subjectsFor(effectiveCls, "ইসলাম")
     val subs = allClassSubs.let { all ->
         if (selectedSubjects.isEmpty()) all else all.filter { selectedSubjects.contains(it.key) }
     }
+    val generalTerms = multiTermSelection.filter { it in 1..3 }.sorted().ifEmpty { listOf(targetTerm.coerceIn(1, 3)) }
+    val useConcise = conciseMarks || generalTerms.size > 1
     return when (module) {
         CsvImportModule.STUDENT_PROFILE -> linkedSetOf(
             "cls", "roll", "name", "guardian", "mobile", "village", "religion"
@@ -122,9 +136,15 @@ fun defaultSelectedColumnKeys(
         }
 
         CsvImportModule.TERM_MARKS -> linkedSetOf("cls", "roll", "name").apply {
-            subs.forEach { s ->
-                s.comps.forEach { c -> add(mk(s.key, targetTerm, c.key)) }
-                if (s.written > 0) add(mk(s.key, targetTerm, "WR"))
+            generalTerms.forEach { t ->
+                subs.forEach { s ->
+                    if (useConcise) {
+                        add(mk(s.key, t, "CONT"))
+                    } else {
+                        s.comps.forEach { c -> add(mk(s.key, t, c.key)) }
+                    }
+                    if (s.written > 0) add(mk(s.key, t, "WR"))
+                }
             }
         }
 
@@ -139,26 +159,27 @@ fun defaultSelectedColumnKeys(
             }
         }
 
-        CsvImportModule.ATTENDANCE_TRAITS -> linkedSetOf(
-            "cls", "roll", "name",
-            "DAYS_$targetTerm", "PRES_$targetTerm",
-            "ACT_$targetTerm", "DISC_$targetTerm", "COND_$targetTerm", "REM_$targetTerm"
-        )
+        CsvImportModule.ATTENDANCE_TRAITS -> linkedSetOf("cls", "roll", "name").apply {
+            generalTerms.forEach { t ->
+                addAll(listOf("DAYS_$t", "PRES_$t", "ACT_$t", "DISC_$t", "COND_$t", "REM_$t"))
+            }
+        }
 
         CsvImportModule.FULL_RECORD -> linkedSetOf(
             "cls", "roll", "name", "guardian", "mobile", "village", "union", "upazila", "district", "religion"
         ).apply {
             addAll(customFields.map { it.label })
-            subs.forEach { s ->
-                s.comps.forEach { c -> add(mk(s.key, targetTerm, c.key)) }
-                if (s.written > 0) add(mk(s.key, targetTerm, "WR"))
+            generalTerms.forEach { t ->
+                subs.forEach { s ->
+                    if (useConcise) {
+                        add(mk(s.key, t, "CONT"))
+                    } else {
+                        s.comps.forEach { c -> add(mk(s.key, t, c.key)) }
+                    }
+                    if (s.written > 0) add(mk(s.key, t, "WR"))
+                }
+                addAll(listOf("DAYS_$t", "PRES_$t", "ACT_$t", "DISC_$t", "COND_$t", "REM_$t"))
             }
-            addAll(
-                listOf(
-                    "DAYS_$targetTerm", "PRES_$targetTerm",
-                    "ACT_$targetTerm", "DISC_$targetTerm", "COND_$targetTerm", "REM_$targetTerm"
-                )
-            )
         }
     }
 }
@@ -178,30 +199,41 @@ object CsvImportAssistant {
         CsvColumnOption("religion", "ধর্ম (religion)", "প্রোফাইল", required = false, sampleEn = "ইসলাম", ruleHint = "ইসলাম / হিন্দু / বৌদ্ধ / খ্রীষ্ট")
     )
 
-    private fun attendanceColumns(term: Int): List<CsvColumnOption> = listOf(
-        CsvColumnOption("DAYS_$term", "মোট কার্যদিবস (DAYS_$term)", "উপস্থিতি ও আচরণ", false, "62", "পূর্ণসংখ্যা (যেমন 62)"),
-        CsvColumnOption("PRES_$term", "মোট উপস্থিতি (PRES_$term)", "উপস্থিতি ও আচরণ", false, "59", "কার্যদিবসের সমান বা কম"),
-        CsvColumnOption("ACT_$term", "সহপাঠক্রমিক (ACT_$term)", "উপস্থিতি ও আচরণ", false, "ক", "কেবল ক, খ বা গ"),
-        CsvColumnOption("DISC_$term", "শৃঙ্খলাবোধ (DISC_$term)", "উপস্থিতি ও আচরণ", false, "ক", "কেবল ক, খ বা গ"),
-        CsvColumnOption("COND_$term", "আচরণ (COND_$term)", "উপস্থিতি ও আচরণ", false, "ক", "কেবল ক, খ বা গ"),
-        CsvColumnOption("REM_$term", "শিক্ষকের মন্তব্য (REM_$term)", "উপস্থিতি ও আচরণ", false, "পাঠ্যবিষয়ে মনোযোগী ও নিয়মিত।", "সংক্ষিপ্ত মূল্যায়ন মন্তব্য")
-    )
+    private fun attendanceColumns(term: Int, includeTermPrefix: Boolean = false): List<CsvColumnOption> {
+        val groupName = if (includeTermPrefix) "${termOrdinalBn(term)} · উপস্থিতি ও আচরণ" else "উপস্থিতি ও আচরণ"
+        val pfx = if (includeTermPrefix) "${termOrdinalBn(term)} · " else ""
+        return listOf(
+            CsvColumnOption("DAYS_$term", "${pfx}মোট কার্যদিবস (DAYS_$term)", groupName, false, "62", "পূর্ণসংখ্যা (যেমন 62)"),
+            CsvColumnOption("PRES_$term", "${pfx}মোট উপস্থিতি (PRES_$term)", groupName, false, "59", "কার্যদিবসের সমান বা কম"),
+            CsvColumnOption("ACT_$term", "${pfx}সহপাঠক্রমিক (ACT_$term)", groupName, false, "ক", "কেবল ক, খ বা গ"),
+            CsvColumnOption("DISC_$term", "${pfx}শৃঙ্খলাবোধ (DISC_$term)", groupName, false, "ক", "কেবল ক, খ বা গ"),
+            CsvColumnOption("COND_$term", "${pfx}আচরণ (COND_$term)", groupName, false, "ক", "কেবল ক, খ বা গ"),
+            CsvColumnOption("REM_$term", "${pfx}শিক্ষকের মন্তব্য (REM_$term)", groupName, false, "পাঠ্যবিষয়ে মনোযোগী ও নিয়মিত।", "সংক্ষিপ্ত মূল্যায়ন মন্তব্য")
+        )
+    }
 
-    private fun markColumns(effectiveCls: Int, term: Int, selectedSubjects: Set<String>): List<CsvColumnOption> {
+    private fun markColumns(
+        effectiveCls: Int,
+        term: Int,
+        selectedSubjects: Set<String>,
+        includeTermPrefix: Boolean = false
+    ): List<CsvColumnOption> {
         val subs = subjectsFor(effectiveCls, "ইসলাম").let { list ->
             if (selectedSubjects.isEmpty()) list else list.filter { selectedSubjects.contains(it.key) }
         }
         val out = mutableListOf<CsvColumnOption>()
+        val tPfx = if (includeTermPrefix) "${termOrdinalBn(term)} · " else ""
         subs.forEach { s ->
             val subShort = s.bn.substringBefore(" (")
+            val groupName = if (includeTermPrefix) "${termOrdinalBn(term)} · $subShort" else "নম্বর ($subShort)"
             s.comps.forEach { c ->
                 val sample = ((c.max * 8) / 10).coerceAtLeast(1).toString()
                 val compLabel = if (s.key == "ART" && c.key == "TOTAL") "মোট" else c.key
                 out.add(
                     CsvColumnOption(
                         key = mk(s.key, term, c.key),
-                        labelBn = "$subShort · $compLabel (সর্বোচ্চ ${bn(c.max.toString())})",
-                        group = "নম্বর ($subShort)",
+                        labelBn = "$tPfx$subShort · $compLabel (সর্বোচ্চ ${bn(c.max.toString())})",
+                        group = groupName,
                         required = false,
                         sampleEn = sample,
                         ruleHint = "0 থেকে ${c.max}"
@@ -214,8 +246,8 @@ object CsvImportAssistant {
                 out.add(
                     CsvColumnOption(
                         key = mk(s.key, term, "CONT"),
-                        labelBn = "$subShort · মোট ধারাবাহিক (সর্বোচ্চ ${bn(contMax.toString())})",
-                        group = "নম্বর ($subShort)",
+                        labelBn = "$tPfx$subShort · মোট ধারাবাহিক (সর্বোচ্চ ${bn(contMax.toString())})",
+                        group = groupName,
                         required = false,
                         sampleEn = contSample,
                         ruleHint = "0 থেকে $contMax"
@@ -227,8 +259,8 @@ object CsvImportAssistant {
                 out.add(
                     CsvColumnOption(
                         key = mk(s.key, term, "WR"),
-                        labelBn = "$subShort · WR সামষ্টিক (সর্বোচ্চ ${bn(s.written.toString())})",
-                        group = "নম্বর ($subShort)",
+                        labelBn = "$tPfx$subShort · WR সামষ্টিক (সর্বোচ্চ ${bn(s.written.toString())})",
+                        group = groupName,
                         required = false,
                         sampleEn = sample,
                         ruleHint = "0 থেকে ${s.written}"
@@ -239,8 +271,8 @@ object CsvImportAssistant {
             out.add(
                 CsvColumnOption(
                     key = mk(s.key, term, "TOTAL"),
-                    labelBn = "$subShort · মোট (সর্বোচ্চ ${bn(s.max.toString())})",
-                    group = "নম্বর ($subShort)",
+                    labelBn = "$tPfx$subShort · মোট (সর্বোচ্চ ${bn(s.max.toString())})",
+                    group = groupName,
                     required = false,
                     sampleEn = totalSample,
                     ruleHint = "0 থেকে ${s.max}"
@@ -337,7 +369,10 @@ object CsvImportAssistant {
 
             CsvImportModule.TERM_MARKS -> {
                 list.addAll(PROFILE_COLUMNS.take(3)) // cls, roll, name
-                list.addAll(markColumns(effectiveCls, config.targetTerm, config.selectedSubjectKeys))
+                val terms = effectiveTermsForConfig(config)
+                terms.forEach { t ->
+                    list.addAll(markColumns(effectiveCls, t, config.selectedSubjectKeys, includeTermPrefix = terms.size > 1))
+                }
             }
 
             CsvImportModule.SUBJECT_ALL_TERMS -> {
@@ -346,7 +381,10 @@ object CsvImportAssistant {
 
             CsvImportModule.ATTENDANCE_TRAITS -> {
                 list.addAll(PROFILE_COLUMNS.take(3)) // cls, roll, name
-                list.addAll(attendanceColumns(config.targetTerm))
+                val terms = effectiveTermsForConfig(config)
+                terms.forEach { t ->
+                    list.addAll(attendanceColumns(t, includeTermPrefix = terms.size > 1))
+                }
             }
 
             CsvImportModule.FULL_RECORD -> {
@@ -365,8 +403,11 @@ object CsvImportAssistant {
                         )
                     }
                 }
-                list.addAll(markColumns(effectiveCls, config.targetTerm, config.selectedSubjectKeys))
-                list.addAll(attendanceColumns(config.targetTerm))
+                val terms = effectiveTermsForConfig(config)
+                terms.forEach { t ->
+                    list.addAll(markColumns(effectiveCls, t, config.selectedSubjectKeys, includeTermPrefix = terms.size > 1))
+                    list.addAll(attendanceColumns(t, includeTermPrefix = terms.size > 1))
+                }
             }
         }
         return list
@@ -549,7 +590,12 @@ object CsvImportAssistant {
         } else {
             activeClasses.joinToString(", ") { "${it.shortBn}=${it.id}" }
         }
-        val termLabel = termNameBn(config.targetTerm)
+        val activeTerms = effectiveTermsForConfig(config)
+        val termLabel = when {
+            activeTerms.size == 3 -> "সব ৩ প্রান্তিক (১ম, ২য়, ৩য়)"
+            activeTerms.size > 1 -> activeTerms.joinToString(", ") { termNameBn(it) }
+            else -> termNameBn(activeTerms.firstOrNull() ?: config.targetTerm)
+        }
 
         val rulesSummary = buildList {
             val effectiveCls = if (config.targetCls in 1..20) config.targetCls else 3
@@ -567,21 +613,24 @@ object CsvImportAssistant {
                 if (cols.any { it.key == "cls" }) add("cls=$classLabel")
                 if (cols.any { it.key == "religion" }) add("religion=ইসলাম/হিন্দু/বৌদ্ধ/খ্রীষ্ট")
                 val subs = subjectsFor(effectiveCls, "ইসলাম").filter { sub ->
-                    selectedKeys.any { it.startsWith("${sub.key}_${config.targetTerm}_") }
+                    activeTerms.any { t -> selectedKeys.any { it.startsWith("${sub.key}_${t}_") } }
                 }
                 if (subs.isNotEmpty()) {
+                    val sampleTerm = activeTerms.firstOrNull { t ->
+                        selectedKeys.any { it.contains("_${t}_") }
+                    } ?: config.targetTerm
                     val maxSummary = subs.joinToString("; ") { s ->
                         val parts = buildList {
                             s.comps.forEach { c ->
-                                if (mk(s.key, config.targetTerm, c.key) in selectedKeys) add("${c.key}≤${c.max}")
+                                if (mk(s.key, sampleTerm, c.key) in selectedKeys) add("${c.key}≤${c.max}")
                             }
-                            if (mk(s.key, config.targetTerm, "CONT") in selectedKeys) {
+                            if (mk(s.key, sampleTerm, "CONT") in selectedKeys) {
                                 add("CONT≤${s.comps.sumOf { it.max }}")
                             }
-                            if (s.written > 0 && mk(s.key, config.targetTerm, "WR") in selectedKeys) {
+                            if (s.written > 0 && mk(s.key, sampleTerm, "WR") in selectedKeys) {
                                 add("WR≤${s.written}")
                             }
-                            if (mk(s.key, config.targetTerm, "TOTAL") in selectedKeys) {
+                            if (mk(s.key, sampleTerm, "TOTAL") in selectedKeys) {
                                 add("TOTAL≤${s.max}")
                             }
                         }.joinToString(",")
@@ -599,7 +648,7 @@ object CsvImportAssistant {
             val targetInfo = buildString {
                 append("${config.module.titleBn} · $classLabel")
                 when (config.module) {
-                    CsvImportModule.SUBJECT_ALL_TERMS -> append(" · ${resolveSubjectForAllTerms(config).bn.substringBefore(" (")}")
+                    CsvImportModule.SUBJECT_ALL_TERMS -> append(" · ${resolveSubjectForAllTerms(config).bn.substringBefore(" (")} · $termLabel")
                     CsvImportModule.STUDENT_PROFILE -> {}
                     else -> append(" · $termLabel")
                 }

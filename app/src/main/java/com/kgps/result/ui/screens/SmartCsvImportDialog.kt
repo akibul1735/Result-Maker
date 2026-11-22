@@ -163,6 +163,20 @@ fun SmartCsvImportDialog(
     }
     var previewFilter by remember { mutableStateOf(CsvPreviewFilter.ALL) }
 
+    var pendingTemplateContent by remember { mutableStateOf("") }
+    val saveTemplateLauncher = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("text/csv")) { uri ->
+        if (uri != null) {
+            try {
+                ctx.contentResolver.openOutputStream(uri)?.use { out ->
+                    out.write(("\uFEFF" + pendingTemplateContent).toByteArray(Charsets.UTF_8))
+                }
+                Toast.makeText(ctx, "CSV টেমপ্লেট ফাইল সংরক্ষিত হয়েছে", Toast.LENGTH_SHORT).show()
+            } catch (e: Exception) {
+                onError("ফাইল সেভ করা যায়নি: ${e.message ?: "ত্রুটি"}")
+            }
+        }
+    }
+
     val filePicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) {
             try {
@@ -338,6 +352,16 @@ fun SmartCsvImportDialog(
                                     if (isRoster) "রোল-নামসহ শিট কপি হয়েছে" else "ফাঁকা টেমপ্লেট কপি হয়েছে",
                                     Toast.LENGTH_SHORT
                                 ).show()
+                            },
+                            onSaveTemplateFile = { csvTxt ->
+                                pendingTemplateContent = csvTxt
+                                val safeName = if (promptConfig.module == CsvImportModule.SUBJECT_ALL_TERMS) {
+                                    val subKey = CsvImportAssistant.resolveSubjectForAllTerms(promptConfig).key
+                                    "class_${promptConfig.targetCls}_${subKey}_3terms.csv"
+                                } else {
+                                    "kgps_import_template.csv"
+                                }
+                                saveTemplateLauncher.launch(safeName)
                             },
                             onGoToStep3 = { currentStep = CsvWizardStep.INPUT }
                         )

@@ -448,18 +448,23 @@ object Repo {
     }
 
     private fun detectDelimiter(t: String): Char {
-        val firstLine = t.lineSequence().firstOrNull() ?: ""
-        var inQ = false; var commas = 0; var tabs = 0; var semis = 0
-        for (c in firstLine) {
-            if (c == '"') inQ = !inQ
-            else if (!inQ) when (c) {
-                ',' -> commas++
-                '\t' -> tabs++
-                ';' -> semis++
+        val sampleLines = t.lineSequence().map { it.trimEnd() }.filter { it.isNotBlank() }.take(10).toList()
+        var commas = 0; var tabs = 0; var semis = 0
+        sampleLines.forEach { line ->
+            var inQ = false; var lC = 0; var lT = 0; var lS = 0
+            for (c in line) {
+                if (c == '"') inQ = !inQ
+                else if (!inQ) when (c) {
+                    ',' -> lC++
+                    '\t' -> lT++
+                    ';' -> lS++
+                }
             }
+            commas += lC; tabs += lT; semis += lS
         }
         return when {
-            tabs >= commas && tabs >= semis && tabs > 0 -> '\t'
+            tabs > 0 && tabs >= commas && tabs >= semis -> '\t'
+            sampleLines.any { it.count { ch -> ch == '\t' } >= 2 } -> '\t'
             semis > commas && semis > 0 -> ';'
             else -> ','
         }
@@ -608,7 +613,7 @@ object Repo {
 
     private val FIELD_ALIASES: Map<String, List<String>> = mapOf(
         "cls" to listOf("cls", "class", "class name", "শ্রেণি", "শ্রেণী", "শ্রেণি নাম"),
-        "roll" to listOf("roll", "roll no", "roll number", "রোল", "রোল নম্বর", "রোল নং"),
+        "roll" to listOf("roll", "roll no", "roll number", "রোল", "রোল নম্বর", "রোল নং", "ক্রমিক", "ক্রমিক নং", "sl", "sl no", "serial", "serial no"),
         "name" to listOf("name", "student name", "শিক্ষার্থীর নাম", "নাম", "ছাত্র ছাত্রীর নাম"),
         "guardian" to listOf("guardian", "guardian name", "father", "father name", "fathers name", "father's name", "অভিভাবক", "অভিভাবকের নাম", "পিতার নাম", "পিতা অভিভাবক", "পিতা/অভিভাবকের নাম", "পিতা অভিভাবকের নাম"),
         "mobile" to listOf("mobile", "mobile no", "mobile number", "phone", "phone number", "contact", "মোবাইল", "মোবাইল নম্বর", "মোবাইল নং", "ফোন", "অভিভাবকের মোবাইল"),
@@ -648,15 +653,15 @@ object Repo {
         val s = normHeader(fromBn(raw))
         if (s.isBlank()) return null
         return when {
-            s.contains("১ম") || s.contains("প্রথম") || s.contains("1st") ||
-                Regex("\\b(t1|term 1|1)\\b").containsMatchIn(s) && (s.contains("প্রান্তিক") || s.contains("term") || s.contains("t1")) -> 1
-            s.contains("২য়") || s.contains("২য়") || s.contains("দ্বিতীয়") || s.contains("দ্বিতীয়") || s.contains("2nd") ||
-                Regex("\\b(t2|term 2|2)\\b").containsMatchIn(s) && (s.contains("প্রান্তিক") || s.contains("term") || s.contains("t2")) -> 2
-            s.contains("৩য়") || s.contains("৩য়") || s.contains("তৃতীয়") || s.contains("তৃতীয়") || s.contains("3rd") ||
-                Regex("\\b(t3|term 3|3)\\b").containsMatchIn(s) && (s.contains("প্রান্তিক") || s.contains("term") || s.contains("t3")) -> 3
-            s.contains("১ম প্রান্তিক") || s.contains("প্রান্তিক ১") -> 1
-            s.contains("২য় প্রান্তিক") || s.contains("২য় প্রান্তিক") || s.contains("প্রান্তিক ২") -> 2
-            s.contains("৩য় প্রান্তিক") || s.contains("৩য় প্রান্তিক") || s.contains("প্রান্তিক ৩") -> 3
+            s.contains("1ম") || s.contains("১ম") || s.contains("প্রথম") || s.contains("1st") ||
+                Regex("\\b(t1|term 1|1)\\b").containsMatchIn(s) && (s.contains("প্রান্তিক") || s.contains("term") || s.contains("t1") || s.contains("ধারাবাহিক") || s.contains("সামষ্টিক") || s.contains("সামস্টিক") || s.contains("মোট")) ||
+                s.contains("প্রান্তিক 1") -> 1
+            s.contains("2য়") || s.contains("2য়") || s.contains("২য়") || s.contains("২য়") || s.contains("দ্বিতীয়") || s.contains("দ্বিতীয়") || s.contains("2nd") ||
+                Regex("\\b(t2|term 2|2)\\b").containsMatchIn(s) && (s.contains("প্রান্তিক") || s.contains("term") || s.contains("t2") || s.contains("ধারাবাহিক") || s.contains("সামষ্টিক") || s.contains("সামস্টিক") || s.contains("মোট")) ||
+                s.contains("প্রান্তিক 2") -> 2
+            s.contains("3য়") || s.contains("3য়") || s.contains("৩য়") || s.contains("৩য়") || s.contains("তৃতীয়") || s.contains("তৃতীয়") || s.contains("3rd") ||
+                Regex("\\b(t3|term 3|3)\\b").containsMatchIn(s) && (s.contains("প্রান্তিক") || s.contains("term") || s.contains("t3") || s.contains("ধারাবাহিক") || s.contains("সামষ্টিক") || s.contains("সামস্টিক") || s.contains("মোট")) ||
+                s.contains("প্রান্তিক 3") -> 3
             else -> null
         }
     }
@@ -664,12 +669,12 @@ object Repo {
     private fun isSubHeaderKeyword(cell: String): Boolean {
         val n = normHeader(fromBn(cell))
         if (n.isBlank()) return false
-        return n.contains("ধারাবাহিক") || n.contains("continuous") || n == "cont" || n == "ca" ||
-            n.contains("সামষ্টিক") || n.contains("সামস্টিক") || n.contains("লিখিত") || n.contains("summative") || n.contains("written") || n == "wr" || n == "sa" ||
-            n.contains("পাঠ্যপুস্তক") || n.contains("সহায়িকা") || n.contains("textbook") || n == "tb" ||
-            n.contains("সক্রিয়তা") || n.contains("শ্রেণিকাজ") || n.contains("activity") || n == "act" ||
-            n.contains("ভাষাদক্ষতা") || n.contains("বোধগম্যতা") || n.contains("language") || n == "lang" ||
-            n.contains("ক্লাস টেস্ট") || n.contains("class test") || n == "ct" ||
+        return n.contains("ধারাবাহিক") || n.contains("continuous") || Regex("\\b(cont|ca)\\b").containsMatchIn(n) ||
+            n.contains("সামষ্টিক") || n.contains("সামস্টিক") || n.contains("লিখিত") || n.contains("summative") || n.contains("written") || Regex("\\b(wr|sa)\\b").containsMatchIn(n) ||
+            n.contains("পাঠ্যপুস্তক") || n.contains("সহায়িকা") || n.contains("textbook") || Regex("\\btb\\b").containsMatchIn(n) ||
+            n.contains("সক্রিয়তা") || n.contains("শ্রেণিকাজ") || n.contains("activity") || Regex("\\bact\\b").containsMatchIn(n) ||
+            n.contains("ভাষাদক্ষতা") || n.contains("বোধগম্যতা") || n.contains("language") || Regex("\\blang\\b").containsMatchIn(n) ||
+            n.contains("ক্লাস টেস্ট") || n.contains("class test") || Regex("\\bct\\b").containsMatchIn(n) ||
             n == "মোট" || n == "সর্বমোট" || n == "total" || n.contains("মোট নম্বর") ||
             n.contains("কার্যদিবস") || n.contains("উপস্থিতি") || n.contains("মন্তব্য") ||
             n.contains("শৃঙ্খলা") || n.contains("আচরণ")
@@ -728,23 +733,27 @@ object Repo {
                 if (cell.isBlank()) {
                     i++; continue
                 }
-                // Check colon or equals key:value in one cell, or key|value in adjacent cells
-                val splitColon = Regex("[:=：]").split(cell, limit = 2)
-                if (splitColon.size == 2 && splitColon[1].isNotBlank()) {
-                    inspectPair(splitColon[0], splitColon[1])
+                // Split multi-part cells first (e.g. "শ্রেণি: ৩য়, বিষয়: বাংলা" or "শ্রেণি: ৩য় | বিষয়: বাংলা")
+                val chunks = cell.split("|", "•", "·", ",", ";").map { it.trim() }.filter { it.isNotBlank() }
+                if (chunks.size > 1) {
+                    chunks.forEach { chunk ->
+                        val subColon = Regex("[:=：]").split(chunk, limit = 2)
+                        if (subColon.size == 2 && subColon[1].isNotBlank()) inspectPair(subColon[0], subColon[1])
+                        else inspectPair(chunk, null)
+                    }
                 } else {
-                    val nextCell = trimmed.getOrNull(i + 1)?.takeIf { it.isNotBlank() }
-                    val cNorm = normHeader(fromBn(cell))
-                    val isKeyLabel = cNorm in setOf("শ্রেণি", "শ্রেণী", "class", "বিষয়", "বিষয়", "subject", "প্রান্তিক", "term")
-                    if (isKeyLabel && nextCell != null) {
-                        inspectPair(cell, nextCell)
-                        i++
+                    val splitColon = Regex("[:=：]").split(cell, limit = 2)
+                    if (splitColon.size == 2 && splitColon[1].isNotBlank()) {
+                        inspectPair(splitColon[0], splitColon[1])
                     } else {
-                        // Could still have multiple key:val chunks separated by | or -
-                        cell.split("|", "•", "·").forEach { chunk ->
-                            val subColon = Regex("[:=：]").split(chunk.trim(), limit = 2)
-                            if (subColon.size == 2) inspectPair(subColon[0], subColon[1])
-                            else inspectPair(chunk.trim(), null)
+                        val nextCell = trimmed.getOrNull(i + 1)?.takeIf { it.isNotBlank() }
+                        val cNorm = normHeader(fromBn(cell))
+                        val isKeyLabel = cNorm in setOf("শ্রেণি", "শ্রেণী", "class", "বিষয়", "বিষয়", "subject", "প্রান্তিক", "term")
+                        if (isKeyLabel && nextCell != null) {
+                            inspectPair(cell, nextCell)
+                            i++
+                        } else {
+                            inspectPair(cell, null)
                         }
                     }
                 }
