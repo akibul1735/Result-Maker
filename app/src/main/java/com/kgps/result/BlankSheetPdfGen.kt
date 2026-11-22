@@ -399,7 +399,7 @@ object BlankSheetPdfGen {
 
         // 3. Table Geometry
         val barcodeMatrix = if (page.barcodeText.isNotBlank()) SheetQrCodec.encodeBarcodeMatrix(page.barcodeText) else null
-        val footerReservedH = if (barcodeMatrix != null) 46f else 22f
+        val footerReservedH = if (barcodeMatrix != null) 48f else 22f
         val tableBottomLimit = pageH - marginBottom - footerReservedH
         val hasMaxSubHeader = page.showSubjectMaxInHeader && cols.any { col ->
             BlankSheetCatalog.resolveMaxHint(page.cls, page.subjectKey, col.compKey) != null
@@ -600,11 +600,11 @@ object BlankSheetPdfGen {
         val footerY = pageH - marginBottom + 2f
 
         if (barcodeMatrix != null) {
-            val barH = 16.5f
-            val barW = min(contentW * 0.44f, max(135f, barcodeMatrix.width * 1.05f))
-            val barLeft = pageW / 2f - barW / 2f
-            val barTop = footerY - 31.5f
-            val barQuietX = 6f
+            val barH = 16f
+            val barW = min(contentW * 0.40f, max(132f, barcodeMatrix.width * 1.02f))
+            val barLeft = marginX + 4f
+            val barTop = footerY - 34f
+            val barQuietX = 4f
             val barBox = RectF(
                 barLeft - barQuietX,
                 barTop - 2f,
@@ -638,7 +638,7 @@ object BlankSheetPdfGen {
             val barLabelPaint = textPaint(ctx, 5.8f, bold = false, fontId = fontId, color = 0xFF1A1A1A.toInt()).apply {
                 textAlign = Paint.Align.CENTER
             }
-            c.drawText(page.barcodeText, pageW / 2f, barTop + barH + 6.5f, barLabelPaint)
+            c.drawText(page.barcodeText, barLeft + barW / 2f, barTop + barH + 6.5f, barLabelPaint)
         }
 
         val footerLeftPaint = textPaint(ctx, 7.8f, bold = false, fontId = fontId, color = 0xFF262626.toInt()).apply {

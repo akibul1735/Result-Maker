@@ -111,6 +111,9 @@ data class AiAssistantState(
     val hasOriginalImageBackup: Boolean = false,
     val detectedSheetQr: BlankSheetQrMeta? = null,
     val sheetDetectionSource: String? = null,
+    val sheetDetection: SheetScanDetection? = null,
+    val resolvedTemplateMeta: BlankSheetQrMeta? = null,
+    val resolvedTemplateSource: String? = null,
     val resolvingSheetTemplate: Boolean = false,
     val analyzingImage: Boolean = false,
     val analysisError: String? = null,
@@ -2158,6 +2161,9 @@ class ResultMakerViewModel(
                 hasOriginalImageBackup = false,
                 detectedSheetQr = null,
                 sheetDetectionSource = null,
+                sheetDetection = null,
+                resolvedTemplateMeta = null,
+                resolvedTemplateSource = null,
                 resolvingSheetTemplate = false,
                 analysisResult = null,
                 classSheetResult = null,
@@ -2201,6 +2207,19 @@ class ResultMakerViewModel(
             else -> null
         }
 
+        val preservePreviousDetection = keepExistingOnMiss && detection.detectedCount == 0
+        val nextDetection = if (preservePreviousDetection) _aiState.value.sheetDetection else detection
+        val nextResolvedMeta = when {
+            cachedMeta != null -> cachedMeta
+            preservePreviousDetection -> _aiState.value.resolvedTemplateMeta
+            else -> null
+        }
+        val nextResolvedSource = when {
+            cachedMeta != null -> "অফলাইন ক্যাশ"
+            preservePreviousDetection -> _aiState.value.resolvedTemplateSource
+            else -> null
+        }
+
         val schoolId = activeSchool.value?.id?.trim().orEmpty()
         val needsOnlineFetch = tid != null && cachedMeta == null && schoolId.isNotEmpty()
 
@@ -2212,6 +2231,9 @@ class ResultMakerViewModel(
                 hasOriginalImageBackup = hasOriginalBackup,
                 detectedSheetQr = immediateMeta,
                 sheetDetectionSource = immediateSource,
+                sheetDetection = nextDetection,
+                resolvedTemplateMeta = nextResolvedMeta,
+                resolvedTemplateSource = nextResolvedSource,
                 resolvingSheetTemplate = needsOnlineFetch,
                 analysisResult = null,
                 classSheetResult = null,
@@ -2232,9 +2254,12 @@ class ResultMakerViewModel(
                     } else if (cloudMeta != null) {
                         val pIdx = detection.offlineQrMeta?.pageIndex ?: cloudMeta.pageIndex
                         val pTot = detection.offlineQrMeta?.totalPages ?: cloudMeta.totalPages
+                        val resolvedPage = cloudMeta.copy(pageIndex = pIdx, totalPages = pTot)
                         cur.copy(
-                            detectedSheetQr = cloudMeta.copy(pageIndex = pIdx, totalPages = pTot),
+                            detectedSheetQr = resolvedPage,
                             sheetDetectionSource = "Firestore ক্লাউড টেমপ্লেট",
+                            resolvedTemplateMeta = resolvedPage,
+                            resolvedTemplateSource = "Firestore ক্লাউড",
                             resolvingSheetTemplate = false
                         )
                     } else {

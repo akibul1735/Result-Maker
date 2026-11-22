@@ -10,6 +10,7 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -27,6 +28,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.RotateRight
@@ -39,6 +41,7 @@ import androidx.compose.material.icons.rounded.DocumentScanner
 import androidx.compose.material.icons.rounded.KeyboardArrowDown
 import androidx.compose.material.icons.rounded.KeyboardArrowUp
 import androidx.compose.material.icons.rounded.PhotoLibrary
+import androidx.compose.material.icons.rounded.QrCode
 import androidx.compose.material.icons.rounded.QrCode2
 import androidx.compose.material.icons.rounded.SwapHoriz
 import androidx.compose.material.icons.rounded.Tune
@@ -65,11 +68,15 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -81,6 +88,7 @@ import com.kgps.result.RELIGIONS
 import com.kgps.result.SheetQrCodec
 import com.kgps.result.ai.ClassSheetImportScope
 import com.kgps.result.ai.ClassSheetKind
+import com.kgps.result.ai.SheetScanDetection
 import com.kgps.result.bn
 import com.kgps.result.classNameBn
 import com.kgps.result.classShortBn
@@ -484,6 +492,9 @@ internal fun ScannerPhotoAndActionCard(
     selectedImageBitmap: Bitmap?,
     detectedSheetQr: BlankSheetQrMeta? = null,
     sheetDetectionSource: String? = null,
+    sheetDetection: SheetScanDetection? = null,
+    resolvedTemplateMeta: BlankSheetQrMeta? = null,
+    resolvedTemplateSource: String? = null,
     resolvingSheetTemplate: Boolean = false,
     documentEnhance: Boolean,
     preparedStatsLabel: String?,
@@ -559,6 +570,11 @@ internal fun ScannerPhotoAndActionCard(
 
             // Photo Preview & Edit Tools
             selectedImageBitmap?.let { bmp ->
+                var expandedCodeChannel by remember(bmp) { mutableStateOf<SheetCodeChannel?>(null) }
+                val qr1Detected = sheetDetection?.detectedFromThinQr == true
+                val qr2Detected = sheetDetection?.detectedFromOfflineQr == true
+                val bar1Detected = sheetDetection?.detectedFromBarcode == true
+
                 Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     Box(
                         Modifier
@@ -597,7 +613,7 @@ internal fun ScannerPhotoAndActionCard(
                         modifier = Modifier
                             .fillMaxWidth()
                             .horizontalScroll(rememberScrollState()),
-                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        horizontalArrangement = Arrangement.spacedBy(5.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Surface(
@@ -609,9 +625,9 @@ internal fun ScannerPhotoAndActionCard(
                                 .testTag("ai_crop_photo_btn")
                         ) {
                             Row(
-                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp),
+                                modifier = Modifier.padding(horizontal = 7.dp, vertical = 5.dp),
                                 verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                horizontalArrangement = Arrangement.spacedBy(3.dp)
                             ) {
                                 Icon(Icons.Rounded.Crop, contentDescription = "ক্রপ", tint = TealPrimary, modifier = Modifier.size(14.dp))
                                 Text("ক্রপ", fontSize = 10.5.sp, fontWeight = FontWeight.SemiBold, color = SlateText)
@@ -627,9 +643,9 @@ internal fun ScannerPhotoAndActionCard(
                                 .testTag("ai_rotate_photo_btn")
                         ) {
                             Row(
-                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp),
+                                modifier = Modifier.padding(horizontal = 7.dp, vertical = 5.dp),
                                 verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                horizontalArrangement = Arrangement.spacedBy(3.dp)
                             ) {
                                 Icon(Icons.AutoMirrored.Rounded.RotateRight, contentDescription = "ঘোরান", tint = TealPrimary, modifier = Modifier.size(14.dp))
                                 Text("৯০°", fontSize = 10.5.sp, fontWeight = FontWeight.Medium, color = SlateText)
@@ -645,9 +661,9 @@ internal fun ScannerPhotoAndActionCard(
                                 .testTag("ai_doc_enhance_toggle")
                         ) {
                             Row(
-                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp),
+                                modifier = Modifier.padding(horizontal = 7.dp, vertical = 5.dp),
                                 verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                horizontalArrangement = Arrangement.spacedBy(3.dp)
                             ) {
                                 if (documentEnhance) {
                                     Icon(Icons.Rounded.Check, contentDescription = null, tint = TealDark, modifier = Modifier.size(13.dp))
@@ -660,6 +676,38 @@ internal fun ScannerPhotoAndActionCard(
                                 )
                             }
                         }
+
+                        // তিনটি কোডের (QR 1, QR 2, Bar 1) কমপ্যাক্ট শনাক্ত আইকন (এমনিতে শুধু আইকন, ট্যাপ করলে বিস্তারিত)
+                        SheetCodeIconPill(
+                            channel = SheetCodeChannel.QR_1,
+                            detected = qr1Detected,
+                            selected = expandedCodeChannel == SheetCodeChannel.QR_1,
+                            loading = resolvingSheetTemplate,
+                            testTag = "ai_detected_icon_qr1",
+                            onClick = {
+                                expandedCodeChannel = if (expandedCodeChannel == SheetCodeChannel.QR_1) null else SheetCodeChannel.QR_1
+                            }
+                        )
+                        SheetCodeIconPill(
+                            channel = SheetCodeChannel.QR_2,
+                            detected = qr2Detected,
+                            selected = expandedCodeChannel == SheetCodeChannel.QR_2,
+                            loading = false,
+                            testTag = "ai_detected_icon_qr2",
+                            onClick = {
+                                expandedCodeChannel = if (expandedCodeChannel == SheetCodeChannel.QR_2) null else SheetCodeChannel.QR_2
+                            }
+                        )
+                        SheetCodeIconPill(
+                            channel = SheetCodeChannel.BAR_1,
+                            detected = bar1Detected,
+                            selected = expandedCodeChannel == SheetCodeChannel.BAR_1,
+                            loading = false,
+                            testTag = "ai_detected_icon_bar1",
+                            onClick = {
+                                expandedCodeChannel = if (expandedCodeChannel == SheetCodeChannel.BAR_1) null else SheetCodeChannel.BAR_1
+                            }
+                        )
                     }
 
                     preparedStatsLabel?.let { label ->
@@ -670,78 +718,22 @@ internal fun ScannerPhotoAndActionCard(
                         )
                     }
 
-                    if (resolvingSheetTemplate) {
-                        Surface(
-                            color = TealSoft.copy(alpha = 0.7f),
-                            border = BorderStroke(1.dp, TealContainer),
-                            shape = RoundedCornerShape(8.dp),
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Row(
-                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(7.dp)
-                            ) {
-                                CircularProgressIndicator(
-                                    modifier = Modifier.size(13.dp),
-                                    strokeWidth = 2.dp,
-                                    color = TealPrimary
-                                )
-                                Text(
-                                    text = "Firestore থেকে ফর্মের টেমপ্লেট মিলিয়ে নেওয়া হচ্ছে...",
-                                    fontSize = 10.sp,
-                                    fontWeight = FontWeight.Medium,
-                                    color = TealDark
-                                )
-                            }
-                        }
-                    }
-
-                    detectedSheetQr?.let { qrMeta ->
-                        val sourceText = sheetDetectionSource?.takeIf { it.isNotBlank() } ?: "QR/বারকোড"
-                        Surface(
-                            color = TealSoft,
-                            border = BorderStroke(1.dp, TealContainer),
-                            shape = RoundedCornerShape(8.dp),
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .testTag("ai_qr_detected_badge")
-                        ) {
-                            Row(
-                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(7.dp)
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Rounded.QrCode2,
-                                    contentDescription = "স্মার্ট QR ও বারকোড শনাক্ত",
-                                    tint = TealPrimary,
-                                    modifier = Modifier.size(18.dp)
-                                )
-                                Column(
-                                    modifier = Modifier.weight(1f),
-                                    verticalArrangement = Arrangement.spacedBy(1.dp)
-                                ) {
-                                    Text(
-                                        text = "শনাক্ত ($sourceText): ${SheetQrCodec.buildSummaryLabelBn(qrMeta)}",
-                                        fontSize = 10.5.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        color = TealDark,
-                                        maxLines = 2,
-                                        overflow = TextOverflow.Ellipsis
-                                    )
-                                    val colsPreview = SheetQrCodec.shortColumnsPreviewBn(qrMeta)
-                                    if (colsPreview.isNotBlank()) {
-                                        Text(
-                                            text = "কলাম: $colsPreview · AI স্ক্যানের জন্য প্রস্তুত",
-                                            fontSize = 9.5.sp,
-                                            color = TealPrimary,
-                                            maxLines = 1,
-                                            overflow = TextOverflow.Ellipsis
-                                        )
-                                    }
-                                }
-                            }
+                    AnimatedVisibility(
+                        visible = expandedCodeChannel != null,
+                        enter = expandVertically(tween(180)) + fadeIn(tween(180)),
+                        exit = shrinkVertically(tween(150)) + fadeOut(tween(150))
+                    ) {
+                        expandedCodeChannel?.let { channel ->
+                            SheetDetectedChannelDetailCard(
+                                channel = channel,
+                                detection = sheetDetection,
+                                fallbackQrMeta = detectedSheetQr,
+                                fallbackSource = sheetDetectionSource,
+                                resolvedTemplateMeta = resolvedTemplateMeta,
+                                resolvedTemplateSource = resolvedTemplateSource,
+                                resolvingSheetTemplate = resolvingSheetTemplate,
+                                onDismiss = { expandedCodeChannel = null }
+                            )
                         }
                     }
                 }
@@ -1006,4 +998,389 @@ internal fun ClassSheetHintSelectors(
         }
         }
     }
+}
+
+private enum class SheetCodeChannel(
+    val shortTag: String,
+    val titleBn: String
+) {
+    QR_1(shortTag = "১", titleBn = "QR 1 · স্মার্ট ID (বাম কোণা)"),
+    QR_2(shortTag = "২", titleBn = "QR 2 · অফলাইন কাঠামো (ডান কোণা)"),
+    BAR_1(shortTag = "বার", titleBn = "Bar 1 · নিচের বারকোড (Code-128)")
+}
+
+@Composable
+private fun SheetCodeIconPill(
+    channel: SheetCodeChannel,
+    detected: Boolean,
+    selected: Boolean,
+    loading: Boolean,
+    testTag: String,
+    onClick: () -> Unit
+) {
+    val bgColor = when {
+        selected -> TealPrimary
+        detected -> TealSoft
+        else -> SlateBg
+    }
+    val borderColor = when {
+        selected -> TealDark
+        detected -> TealPrimary.copy(alpha = 0.72f)
+        else -> SlateOutline
+    }
+    val contentColor = when {
+        selected -> Color.White
+        detected -> TealDark
+        else -> SlateMuted.copy(alpha = 0.78f)
+    }
+    val statusText = when {
+        loading -> "খোঁজা হচ্ছে"
+        detected -> "শনাক্ত"
+        else -> "পাওয়া যায়নি"
+    }
+
+    Surface(
+        color = bgColor,
+        border = BorderStroke(if (selected) 1.4.dp else 1.dp, borderColor),
+        shape = RoundedCornerShape(7.dp),
+        modifier = Modifier
+            .semantics { contentDescription = "${channel.titleBn} — $statusText" }
+            .clickable(onClick = onClick)
+            .testTag(testTag)
+    ) {
+        Box(modifier = Modifier.padding(horizontal = 6.dp, vertical = 5.dp)) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(2.dp)
+            ) {
+                when (channel) {
+                    SheetCodeChannel.QR_1 -> {
+                        Icon(
+                            imageVector = Icons.Rounded.QrCode,
+                            contentDescription = null,
+                            tint = contentColor,
+                            modifier = Modifier.size(14.dp)
+                        )
+                        Text(
+                            text = channel.shortTag,
+                            fontSize = 8.5.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = contentColor
+                        )
+                    }
+                    SheetCodeChannel.QR_2 -> {
+                        Icon(
+                            imageVector = Icons.Rounded.QrCode2,
+                            contentDescription = null,
+                            tint = contentColor,
+                            modifier = Modifier.size(14.dp)
+                        )
+                        Text(
+                            text = channel.shortTag,
+                            fontSize = 8.5.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = contentColor
+                        )
+                    }
+                    SheetCodeChannel.BAR_1 -> {
+                        BarcodeMiniGlyph(
+                            color = contentColor,
+                            modifier = Modifier.size(width = 16.dp, height = 14.dp)
+                        )
+                    }
+                }
+            }
+
+            if (loading) {
+                CircularProgressIndicator(
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .size(7.dp),
+                    strokeWidth = 1.4.dp,
+                    color = if (selected) Color.White else TealPrimary
+                )
+            } else if (detected) {
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .size(5.dp)
+                        .background(
+                            color = if (selected) Color.White else TealPrimary,
+                            shape = CircleShape
+                        )
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun BarcodeMiniGlyph(
+    color: Color,
+    modifier: Modifier = Modifier
+) {
+    Canvas(modifier = modifier) {
+        val barSpecs = listOf(
+            0.04f to 0.11f,
+            0.20f to 0.06f,
+            0.32f to 0.13f,
+            0.52f to 0.07f,
+            0.66f to 0.12f,
+            0.84f to 0.10f
+        )
+        val topPad = size.height * 0.12f
+        val barH = size.height * 0.76f
+        barSpecs.forEach { (startFrac, widthFrac) ->
+            drawRect(
+                color = color,
+                topLeft = Offset(size.width * startFrac, topPad),
+                size = Size(size.width * widthFrac, barH)
+            )
+        }
+    }
+}
+
+@Composable
+private fun SheetDetectedChannelDetailCard(
+    channel: SheetCodeChannel,
+    detection: SheetScanDetection?,
+    fallbackQrMeta: BlankSheetQrMeta?,
+    fallbackSource: String?,
+    resolvedTemplateMeta: BlankSheetQrMeta?,
+    resolvedTemplateSource: String?,
+    resolvingSheetTemplate: Boolean,
+    onDismiss: () -> Unit
+) {
+    val isDetected = when (channel) {
+        SheetCodeChannel.QR_1 -> detection?.detectedFromThinQr == true
+        SheetCodeChannel.QR_2 -> detection?.detectedFromOfflineQr == true
+        SheetCodeChannel.BAR_1 -> detection?.detectedFromBarcode == true
+    }
+
+    val statusText = when {
+        channel == SheetCodeChannel.QR_1 && resolvingSheetTemplate -> "লোড হচ্ছে..."
+        isDetected -> "শনাক্ত"
+        else -> "পাওয়া যায়নি"
+    }
+
+    val cardBg = if (isDetected) TealSoft else SlateBg
+    val cardBorder = if (isDetected) TealContainer else SlateOutline
+
+    Surface(
+        color = cardBg,
+        border = BorderStroke(1.dp, cardBorder),
+        shape = RoundedCornerShape(8.dp),
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag("ai_qr_detected_badge")
+    ) {
+        Column(
+            modifier = Modifier.padding(horizontal = 9.dp, vertical = 7.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text(
+                    text = channel.titleBn,
+                    fontSize = 10.5.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = if (isDetected) TealDark else SlateText,
+                    modifier = Modifier.weight(1f),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Surface(
+                    color = if (isDetected) TealContainer else Color.White,
+                    shape = RoundedCornerShape(5.dp),
+                    border = BorderStroke(1.dp, if (isDetected) TealPrimary.copy(alpha = 0.5f) else SlateOutline)
+                ) {
+                    Text(
+                        text = statusText,
+                        fontSize = 9.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = if (isDetected) TealDark else SlateMuted,
+                        modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.5.dp)
+                    )
+                }
+                Icon(
+                    imageVector = Icons.Rounded.Close,
+                    contentDescription = "বিস্তারিত বন্ধ করুন",
+                    tint = SlateMuted,
+                    modifier = Modifier
+                        .size(16.dp)
+                        .clickable(onClick = onDismiss)
+                )
+            }
+
+            when (channel) {
+                SheetCodeChannel.QR_1 -> {
+                    if (isDetected) {
+                        val tid = detection?.templateId ?: fallbackQrMeta?.templateId.orEmpty()
+                        val raw = detection?.thinQrRawText ?: tid.takeIf { it.isNotBlank() }?.let { "KT1:$it" }.orEmpty()
+                        if (raw.isNotBlank()) {
+                            Text(
+                                text = "কোড: $raw",
+                                fontSize = 9.5.sp,
+                                fontWeight = FontWeight.Medium,
+                                color = TealPrimary
+                            )
+                        }
+                        when {
+                            resolvingSheetTemplate -> {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
+                                    CircularProgressIndicator(
+                                        modifier = Modifier.size(11.dp),
+                                        strokeWidth = 1.6.dp,
+                                        color = TealPrimary
+                                    )
+                                    Text(
+                                        text = "Firestore থেকে ফর্মের পূর্ণ কাঠামো মিলিয়ে নেওয়া হচ্ছে...",
+                                        fontSize = 9.5.sp,
+                                        color = TealDark
+                                    )
+                                }
+                            }
+                            resolvedTemplateMeta != null -> {
+                                val src = resolvedTemplateSource ?: "ক্যাশ/Firestore"
+                                Text(
+                                    text = "উৎস: $src · ${SheetQrCodec.buildSummaryLabelBn(resolvedTemplateMeta)}",
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = TealDark
+                                )
+                                val cols = SheetQrCodec.shortColumnsPreviewBn(resolvedTemplateMeta, maxItems = 12)
+                                if (cols.isNotBlank()) {
+                                    Text(
+                                        text = "কলাম: $cols",
+                                        fontSize = 9.5.sp,
+                                        color = SlateText
+                                    )
+                                }
+                            }
+                            else -> {
+                                Text(
+                                    text = "পাতলা ID পাওয়া গেছে, তবে এই ডিভাইসের ক্যাশ বা অনলাইনে মিল পাওয়া যায়নি।",
+                                    fontSize = 9.5.sp,
+                                    color = SlateMuted
+                                )
+                            }
+                        }
+                    } else {
+                        val otherHint = buildOtherDetectedFallbackHint(detection, fallbackSource)
+                        Text(
+                            text = "ছবির উপরের বাম কোণায় পাতলা QR 1 পড়া যায়নি।$otherHint",
+                            fontSize = 9.5.sp,
+                            color = SlateMuted
+                        )
+                    }
+                }
+
+                SheetCodeChannel.QR_2 -> {
+                    val offlineMeta = detection?.offlineQrMeta
+                    if (isDetected && offlineMeta != null) {
+                        Text(
+                            text = SheetQrCodec.buildSummaryLabelBn(offlineMeta),
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = TealDark
+                        )
+                        val extraBits = buildList {
+                            if (offlineMeta.totalPages > 1) {
+                                add("পৃষ্ঠা: ${bn(offlineMeta.pageIndex.toString())}/${bn(offlineMeta.totalPages.toString())}")
+                            }
+                            if (offlineMeta.workingDaysByTerm.isNotEmpty()) {
+                                add("কার্যদিবস: ${offlineMeta.workingDaysByTerm.entries.joinToString(", ") { "${termNameBn(it.key)} ${bn(it.value)}" }}")
+                            }
+                        }
+                        if (extraBits.isNotEmpty()) {
+                            Text(
+                                text = extraBits.joinToString(" · "),
+                                fontSize = 9.5.sp,
+                                color = TealPrimary
+                            )
+                        }
+                        val cols = SheetQrCodec.shortColumnsPreviewBn(offlineMeta, maxItems = 12)
+                        if (cols.isNotBlank()) {
+                            Text(
+                                text = "কলাম: $cols",
+                                fontSize = 9.5.sp,
+                                color = SlateText
+                            )
+                        }
+                        detection?.offlineQrRawText?.takeIf { it.isNotBlank() }?.let { raw ->
+                            Text(
+                                text = "পেলোড: ${raw.take(54)}${if (raw.length > 54) "…" else ""}",
+                                fontSize = 9.sp,
+                                color = SlateMuted
+                            )
+                        }
+                    } else {
+                        val otherHint = buildOtherDetectedFallbackHint(detection, fallbackSource)
+                        Text(
+                            text = "ছবির উপরের ডান কোণায় অফলাইন QR 2 পড়া যায়নি।$otherHint",
+                            fontSize = 9.5.sp,
+                            color = SlateMuted
+                        )
+                    }
+                }
+
+                SheetCodeChannel.BAR_1 -> {
+                    val barMeta = detection?.barcodeMeta
+                    if (isDetected) {
+                        detection?.barcodeRawText?.takeIf { it.isNotBlank() }?.let { raw ->
+                            Text(
+                                text = "বারকোড: $raw",
+                                fontSize = 9.5.sp,
+                                fontWeight = FontWeight.Medium,
+                                color = TealPrimary
+                            )
+                        }
+                        val effectiveMeta = resolvedTemplateMeta ?: barMeta
+                        if (effectiveMeta != null) {
+                            Text(
+                                text = SheetQrCodec.buildSummaryLabelBn(effectiveMeta),
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = TealDark
+                            )
+                            val cols = SheetQrCodec.shortColumnsPreviewBn(effectiveMeta, maxItems = 12)
+                            if (cols.isNotBlank()) {
+                                Text(
+                                    text = "কলাম: $cols",
+                                    fontSize = 9.5.sp,
+                                    color = SlateText
+                                )
+                            }
+                        }
+                    } else {
+                        val otherHint = buildOtherDetectedFallbackHint(detection, fallbackSource)
+                        Text(
+                            text = "ছবির নিচের অংশে Code-128 বারকোড পড়া যায়নি।$otherHint",
+                            fontSize = 9.5.sp,
+                            color = SlateMuted
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+private fun buildOtherDetectedFallbackHint(
+    detection: SheetScanDetection?,
+    fallbackSource: String?
+): String {
+    if (detection == null || detection.detectedCount == 0) {
+        return " পুরো পাতার কোণা বা নিচের অংশ স্পষ্টভাবে ফ্রেমে রেখে চেষ্টা করুন।"
+    }
+    val activeSource = fallbackSource?.takeIf { it.isNotBlank() } ?: detection.sourceLabelBn
+    return if (activeSource.isNotBlank()) {
+        " তবে '$activeSource' থেকে কাঠামো শনাক্ত হয়ে গেছে।"
+    } else ""
 }

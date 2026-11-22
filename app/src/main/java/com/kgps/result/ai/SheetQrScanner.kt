@@ -16,7 +16,10 @@ import kotlin.math.roundToInt
 
 data class SheetScanDetection(
     val templateId: String? = null,
+    val thinQrRawText: String? = null,
+    val offlineQrRawText: String? = null,
     val offlineQrMeta: BlankSheetQrMeta? = null,
+    val barcodeRawText: String? = null,
     val barcodeMeta: BlankSheetQrMeta? = null,
     val detectedFromThinQr: Boolean = false,
     val detectedFromOfflineQr: Boolean = false,
@@ -24,6 +27,11 @@ data class SheetScanDetection(
 ) {
     val bestLocalMeta: BlankSheetQrMeta?
         get() = offlineQrMeta ?: barcodeMeta
+
+    val detectedCount: Int
+        get() = (if (detectedFromThinQr) 1 else 0) +
+            (if (detectedFromOfflineQr) 1 else 0) +
+            (if (detectedFromBarcode) 1 else 0)
 
     val sourceLabelBn: String
         get() = when {
@@ -39,7 +47,7 @@ data class SheetScanDetection(
  * নির্বাচিত/তোলা শীটের ছবি থেকে সম্পূর্ণ অফলাইনে ZXing দিয়ে ৩টি চ্যানেল স্ক্যান করে:
  * ১) শীর্ষ-বাম অতি-পাতলা Firestore/Cache ID QR (`KT1:...`)
  * ২) শীর্ষ-ডান কমপ্যাক্ট অফলাইন QR (`K2/...` বা পুরনো JSON)
- * ৩) নিচের ফুটার Code-128 বারকোড (`C3-BAN-T1-FULL-TID`)
+ * ৩) নিচের-বাম ফুটার Code-128 বারকোড (`C3-BAN-T1-FULL-TID`)
  */
 object SheetQrScanner {
 
@@ -61,14 +69,14 @@ object SheetQrScanner {
     )
 
     private val barcodeHorizontalRegions = listOf(
-        CropRegion(0.14f, 0.78f, 0.86f, 1.00f),
-        CropRegion(0.00f, 0.70f, 1.00f, 1.00f),
-        CropRegion(0.08f, 0.00f, 0.92f, 0.24f) // উল্টানো ছবির জন্য
+        CropRegion(0.00f, 0.78f, 0.72f, 1.00f), // নিচের বাম দিকে সরানো বারকোড
+        CropRegion(0.00f, 0.70f, 1.00f, 1.00f), // পুরো নিচের স্ট্রিপ (যদি মাঝখানে বা ডানে থাকে)
+        CropRegion(0.00f, 0.00f, 1.00f, 0.24f)  // উল্টানো ছবির জন্য
     )
 
     private val barcodeSideRegions = listOf(
-        CropRegion(0.00f, 0.14f, 0.24f, 0.86f), // ৯০° বাঁকা ছবির বাম পাশ
-        CropRegion(0.76f, 0.14f, 1.00f, 0.86f)  // ৯০° বাঁকা ছবির ডান পাশ
+        CropRegion(0.00f, 0.08f, 0.24f, 0.88f), // ৯০° বাঁকা ছবির বাম পাশ
+        CropRegion(0.76f, 0.08f, 1.00f, 0.88f)  // ৯০° বাঁকা ছবির ডান পাশ
     )
 
     private val qrHints = mapOf(
@@ -89,7 +97,10 @@ object SheetQrScanner {
         if (bitmap.width < 32 || bitmap.height < 32) return SheetScanDetection()
 
         var templateId: String? = null
+        var thinQrRaw: String? = null
+        var offlineQrRaw: String? = null
         var offlineMeta: BlankSheetQrMeta? = null
+        var barcodeRaw: String? = null
         var barcodeMeta: BlankSheetQrMeta? = null
         var fromThinQr = false
         var fromOfflineQr = false
@@ -99,11 +110,15 @@ object SheetQrScanner {
             val ch = SheetQrCodec.decodeChannel(raw)
             if (ch.templateId != null && templateId == null) {
                 templateId = ch.templateId
-                if (ch.meta == null) fromThinQr = true
+            }
+            if (ch.meta == null && ch.templateId != null && !fromThinQr) {
+                fromThinQr = true
+                thinQrRaw = raw.trim()
             }
             if (ch.meta != null && offlineMeta == null) {
                 offlineMeta = ch.meta
                 fromOfflineQr = true
+                offlineQrRaw = raw.trim()
                 if (templateId == null && ch.meta.templateId.isNotBlank()) {
                     templateId = ch.meta.templateId
                 }
@@ -116,55 +131,61 @@ object SheetQrScanner {
         }
 
         // ২) যদি উপরের কোনো একটি বাকি থাকে, সেকেন্ডারি/ঘোরানো কোণা পরীক্ষা
-        if (templateId == null || offlineMeta == null) {
+        if (!fromThinQr || !fromOfflineQr) {
             for (region in qrSecondaryRegions) {
-                if (templateId != null && offlineMeta != null) break
+                if (fromThinQr && fromOfflineQr) break
                 scanQrInRegion(bitmap, region)?.let(::handleDecodedQrText)
             }
         }
 
-        // ৩) নিচের ফুটার Code-128 বারকোড (সব সময় বিকল্প হিসেবে অথবা templateId/offline না পেলে)
-        if (offlineMeta == null || templateId == null) {
-            for (region in barcodeHorizontalRegions) {
-                val rawBar = scanBarcodeInRegion(bitmap, region, rotate90 = false) ?: continue
-                val ch = SheetQrCodec.decodeChannel(rawBar)
-                if (ch.templateId != null && templateId == null) {
-                    templateId = ch.templateId
-                }
-                if (ch.meta != null && barcodeMeta == null) {
-                    barcodeMeta = ch.meta
-                    fromBarcode = true
-                }
-                if (barcodeMeta != null || templateId != null) break
+        // ৩) নিচের ফুটার Code-128 বারকোড (সব সময় যাচাই করা হয় যাতে Bar 1 আইকন সঠিকভাবে জ্বলে)
+        val regionsToScan = if (fromThinQr || fromOfflineQr) {
+            barcodeHorizontalRegions.take(2)
+        } else {
+            barcodeHorizontalRegions
+        }
+        for (region in regionsToScan) {
+            val rawBar = scanBarcodeInRegion(bitmap, region, rotate90 = false) ?: continue
+            val ch = SheetQrCodec.decodeChannel(rawBar)
+            if (ch.templateId != null && templateId == null) {
+                templateId = ch.templateId
             }
-            // ৯০° বাঁকা ছবির ক্ষেত্রে পাশের স্ট্রিপ ঘুরে চেষ্টা
-            if (barcodeMeta == null && templateId == null) {
-                for (region in barcodeSideRegions) {
-                    val rawBar = scanBarcodeInRegion(bitmap, region, rotate90 = true) ?: continue
-                    val ch = SheetQrCodec.decodeChannel(rawBar)
-                    if (ch.templateId != null && templateId == null) templateId = ch.templateId
-                    if (ch.meta != null && barcodeMeta == null) {
-                        barcodeMeta = ch.meta
-                        fromBarcode = true
-                    }
-                    if (barcodeMeta != null) break
+            if (ch.meta != null || ch.templateId != null) {
+                barcodeMeta = ch.meta
+                barcodeRaw = rawBar.trim()
+                fromBarcode = true
+                break
+            }
+        }
+        // ৯০° বাঁকা ছবির ক্ষেত্রে পাশের স্ট্রিপ ঘুরে চেষ্টা
+        if (!fromBarcode && (!fromOfflineQr || !fromThinQr)) {
+            for (region in barcodeSideRegions) {
+                val rawBar = scanBarcodeInRegion(bitmap, region, rotate90 = true) ?: continue
+                val ch = SheetQrCodec.decodeChannel(rawBar)
+                if (ch.templateId != null && templateId == null) templateId = ch.templateId
+                if (ch.meta != null || ch.templateId != null) {
+                    barcodeMeta = ch.meta
+                    barcodeRaw = rawBar.trim()
+                    fromBarcode = true
+                    break
                 }
             }
         }
 
         // ৪) শেষ চেষ্টা: পূর্ণ ছবিতে QR/Barcode (যেমন কেউ শুধু QR বা বারকোড অংশ ক্রপ করলে)
-        if (templateId == null && offlineMeta == null && barcodeMeta == null) {
+        if (!fromThinQr && !fromOfflineQr && !fromBarcode) {
             val fullScaled = downscaleIfTooLarge(bitmap, maxLongestSide = 1600)
             try {
                 val working = upscaleIfSmall(fullScaled, minSideTarget = 420)
                 try {
                     decodeQrRaw(working)?.let(::handleDecodedQrText)
-                    if (offlineMeta == null && templateId == null) {
+                    if (!fromOfflineQr && !fromThinQr) {
                         decodeBarcodeRaw(working)?.let { rawBar ->
                             val ch = SheetQrCodec.decodeChannel(rawBar)
                             if (ch.templateId != null) templateId = ch.templateId
-                            if (ch.meta != null) {
+                            if (ch.meta != null || ch.templateId != null) {
                                 barcodeMeta = ch.meta
+                                barcodeRaw = rawBar.trim()
                                 fromBarcode = true
                             }
                         }
@@ -179,7 +200,10 @@ object SheetQrScanner {
 
         return SheetScanDetection(
             templateId = templateId,
+            thinQrRawText = thinQrRaw,
+            offlineQrRawText = offlineQrRaw,
             offlineQrMeta = offlineMeta,
+            barcodeRawText = barcodeRaw,
             barcodeMeta = barcodeMeta,
             detectedFromThinQr = fromThinQr,
             detectedFromOfflineQr = fromOfflineQr,
