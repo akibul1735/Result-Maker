@@ -47,9 +47,9 @@ enum class BlankSheetPreset(val labelBn: String, val columnIds: List<String>) {
         "৩ প্রান্তিক উপস্থিতি ও গুণাবলি",
         listOf(
             "ROLL", "NAME",
-            "T1_DAYS", "T1_PRES", "T1_ACT", "T1_DISC", "T1_COND",
-            "T2_DAYS", "T2_PRES", "T2_ACT", "T2_DISC", "T2_COND",
-            "T3_DAYS", "T3_PRES", "T3_ACT", "T3_DISC", "T3_COND"
+            "T1_PRES", "T1_ACT", "T1_DISC", "T1_COND",
+            "T2_PRES", "T2_ACT", "T2_DISC", "T2_COND",
+            "T3_PRES", "T3_ACT", "T3_DISC", "T3_COND"
         )
     ),
     FULL_MARKS(
@@ -279,6 +279,27 @@ object BlankSheetCatalog {
         }
         return maxVal.takeIf { it > 0 }
     }
+
+    fun resolveCommonWorkingDaysByTerm(
+        students: List<Student>,
+        selectedClass: Int?
+    ): Map<Int, String> {
+        val pool = if (selectedClass != null) {
+            students.filter { it.cls == selectedClass }.ifEmpty { students }
+        } else {
+            students
+        }
+        val out = linkedMapOf<Int, String>()
+        for (t in 1..3) {
+            val counts = pool.mapNotNull { st ->
+                val clean = fromBn(st.x["DAYS_$t"].orEmpty()).filter { it.isDigit() }
+                clean.takeIf { it.isNotEmpty() }
+            }.groupingBy { it }.eachCount()
+            val top = counts.maxByOrNull { it.value }?.key
+            if (!top.isNullOrBlank()) out[t] = top
+        }
+        return out
+    }
 }
 
 data class BlankSheetConfig(
@@ -294,7 +315,9 @@ data class BlankSheetConfig(
     val autoFillRollAndName: Boolean = true,
     val showSubjectMaxInHeader: Boolean = true,
     val extraBlankRowsPerClass: Int = 0,
-    val fillRemainingPageRows: Boolean = false
+    val fillRemainingPageRows: Boolean = false,
+    val showSharedWorkingDaysHeader: Boolean = true,
+    val workingDaysByTerm: Map<Int, String> = emptyMap()
 )
 
 data class BlankSheetRow(
@@ -318,8 +341,13 @@ data class BlankSheetPageSpec(
     val showSubjectMaxInHeader: Boolean,
     val subjectKey: String?,
     val numeralStyle: BlankNumeralStyle = BlankNumeralStyle.BENGALI,
-    val isClassLevelForm: Boolean = false
-)
+    val isClassLevelForm: Boolean = false,
+    val sharedWorkingDaysTerms: List<Int> = emptyList(),
+    val workingDaysByTerm: Map<Int, String> = emptyMap()
+) {
+    val showSharedWorkingDaysStrip: Boolean
+        get() = sharedWorkingDaysTerms.isNotEmpty()
+}
 
 object BlankSheetPlanner {
 
@@ -335,6 +363,17 @@ object BlankSheetPlanner {
         val isThreeTermMarks = BlankSheetCatalog.isThreeTermMarksActive(safeCols)
         val isThreeTermTraits = BlankSheetCatalog.isThreeTermAttendanceTraitsActive(safeCols)
         val isClassLevelTraitsOnly = isThreeTermTraits && !isThreeTermMarks && safeCols.none { it.compKey != null }
+        val hasPerRowDaysCol = safeCols.any { it.id in setOf("T1_DAYS", "T2_DAYS", "T3_DAYS") }
+        val hasSingleAttCol = safeCols.any { it.id == "ATT" }
+        val sharedWorkingDaysTerms = if (config.showSharedWorkingDaysHeader) {
+            when {
+                isThreeTermTraits && !hasPerRowDaysCol -> listOf(1, 2, 3)
+                !isThreeTermTraits && hasSingleAttCol && config.term in 1..3 -> listOf(config.term)
+                else -> emptyList()
+            }
+        } else {
+            emptyList()
+        }
         val termTitle = if (isThreeTermMarks || isThreeTermTraits) {
             "৩ প্রান্তিক"
         } else {
@@ -452,7 +491,9 @@ object BlankSheetPlanner {
                 showSubjectMaxInHeader = if (isClassLevelTraitsOnly) false else config.showSubjectMaxInHeader,
                 subjectKey = raw.subjectKey,
                 numeralStyle = config.numeralStyle,
-                isClassLevelForm = isClassLevelTraitsOnly
+                isClassLevelForm = isClassLevelTraitsOnly,
+                sharedWorkingDaysTerms = sharedWorkingDaysTerms,
+                workingDaysByTerm = config.workingDaysByTerm
             )
         }
     }

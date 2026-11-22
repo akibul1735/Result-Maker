@@ -458,17 +458,28 @@ class CustomClassAndPromptTest {
         assertEquals("৩ প্রান্তিক", marksPages.first().termTitleBn)
         assertFalse(marksPages.first().isClassLevelForm)
 
-        // 2. 3-term attendance & traits: Roll, Name + 3*(DAYS, PRES, ACT, DISC, COND) = 17 cols on single page
+        // 2. 3-term attendance & traits: Roll, Name + 3*(PRES, ACT, DISC, COND) = 14 cols + shared header strip
         val traitsCols = BlankSheetCatalog.presetColumns(BlankSheetPreset.THREE_TERM_ATTENDANCE_TRAITS)
-        assertEquals(17, traitsCols.size)
+        assertEquals(14, traitsCols.size)
         assertTrue(BlankSheetCatalog.isThreeTermAttendanceTraitsActive(traitsCols))
+        assertFalse(traitsCols.any { it.id.endsWith("_DAYS") })
+
+        val sampleWithDays = listOf(
+            Student(id = "s1", cls = 4, roll = 1, name = "তানভীর", x = mapOf("DAYS_1" to "62", "DAYS_2" to "65")),
+            Student(id = "s2", cls = 4, roll = 2, name = "নুসরাত", x = mapOf("DAYS_1" to "62"))
+        )
+        val resolvedCommon = BlankSheetCatalog.resolveCommonWorkingDaysByTerm(sampleWithDays, 4)
+        assertEquals("62", resolvedCommon[1])
+        assertEquals("65", resolvedCommon[2])
+
         val traitsPages = BlankSheetPlanner.buildPages(
-            students = sample,
+            students = sampleWithDays,
             settings = settings,
             config = BlankSheetConfig(
                 selectedClass = 4,
                 subjectKey = BlankSheetCatalog.ALL_SUBJECTS_KEY,
-                columns = traitsCols
+                columns = traitsCols,
+                workingDaysByTerm = resolvedCommon
             ),
             allowedClassIds = listOf(4)
         )
@@ -476,5 +487,66 @@ class CustomClassAndPromptTest {
         assertTrue(traitsPages.first().isClassLevelForm)
         assertEquals("উপস্থিতি ও গুণাবলি", traitsPages.first().subjectTitleBn)
         assertEquals("৩ প্রান্তিক", traitsPages.first().termTitleBn)
+        assertTrue(traitsPages.first().showSharedWorkingDaysStrip)
+        assertEquals(listOf(1, 2, 3), traitsPages.first().sharedWorkingDaysTerms)
+        assertEquals("62", traitsPages.first().workingDaysByTerm[1])
+
+        // Adding explicit per-row T1_DAYS column disables duplicate shared strip
+        val perRowDaysCols = traitsCols + listOfNotNull(BlankSheetCatalog.byId("T1_DAYS"))
+        val perRowPages = BlankSheetPlanner.buildPages(
+            students = sampleWithDays,
+            settings = settings,
+            config = BlankSheetConfig(selectedClass = 4, columns = perRowDaysCols),
+            allowedClassIds = listOf(4)
+        )
+        assertFalse(perRowPages.first().showSharedWorkingDaysStrip)
+    }
+
+    @Test
+    fun topBannerSharedWorkingDaysParseAndImportAcrossStudents() {
+        val csv = """
+            শ্রেণি: ৩য়, শিক্ষাবর্ষ: ২০২৬
+            মোট কার্যদিবস — ১ম প্রান্তিক: ৬২ দিন | ২য় প্রান্তিক: ৬৫ দিন | ৩য় প্রান্তিক: ৬৪ দিন
+            রোল,নাম,১ম প্রান্তিক - উপস্থিতি,১ম প্রান্তিক - সক্রিয়তা,২য় প্রান্তিক - উপস্থিতি
+            ১,তানভীর হাসান,৫৯,ক,৬৩
+            ২,নুসরাত জাহান,৫৮,খ,৬২
+        """.trimIndent()
+
+        val sheet = Repo.parseSmartCsvSheet(csv)
+        assertEquals(3, sheet.detectedCls)
+        assertEquals("62", sheet.detectedWorkingDaysByTerm[1])
+        assertEquals("65", sheet.detectedWorkingDaysByTerm[2])
+        assertEquals("64", sheet.detectedWorkingDaysByTerm[3])
+
+        val cols = Repo.detectCsvColumns(sheet.rows, emptyList(), sheet.detectedSubjectKey, sheet.detectedTerm)
+        val report = CsvImportAssistant.validateCsvData(
+            parsedRows = sheet.rows,
+            columns = cols,
+            existingStudents = emptyList(),
+            fallbackCls = sheet.detectedCls ?: 3,
+            sharedWorkingDaysByTerm = sheet.detectedWorkingDaysByTerm
+        )
+        assertEquals(2, report.validAddCount)
+        assertEquals(0, report.warningCount)
+
+        val summary = Repo.applyMappedCsvImport(
+            rows = sheet.rows,
+            columns = cols,
+            existingStudents = emptyList(),
+            existingSettings = DEFAULT_SETTINGS,
+            defaultCls = sheet.detectedCls ?: 3,
+            sharedWorkingDaysByTerm = sheet.detectedWorkingDaysByTerm
+        )
+        assertEquals(2, summary.students.size)
+        val s1 = summary.students.first { it.roll == 1 }
+        val s2 = summary.students.first { it.roll == 2 }
+        assertEquals("62", s1.x["DAYS_1"])
+        assertEquals("65", s1.x["DAYS_2"])
+        assertEquals("64", s1.x["DAYS_3"])
+        assertEquals("৫৯", s1.x["PRES_1"])
+        assertEquals("ক", s1.x["ACT_1"])
+        assertEquals("62", s2.x["DAYS_1"])
+        assertEquals("65", s2.x["DAYS_2"])
+        assertEquals("64", s2.x["DAYS_3"])
     }
 }

@@ -646,7 +646,8 @@ object Repo {
         val detectedSubjectKey: String?,
         val detectedTerm: Int?,
         val usedTwoRowHeader: Boolean,
-        val skippedMetadataLines: Int
+        val skippedMetadataLines: Int,
+        val detectedWorkingDaysByTerm: Map<Int, String> = emptyMap()
     )
 
     private fun parseTermFromToken(raw: String): Int? {
@@ -689,21 +690,54 @@ object Repo {
         if (hasRollCol || hasNameCol) return false
         val hasKnownMarkOrTextKey = nonBlank.any { MARK_KEYS.contains(it) || TEXT_KEYS.contains(it) || FRIENDLY_HEADER_REVERSE.containsKey(normHeader(it)) }
         if (hasKnownMarkOrTextKey) return false
-        // Top rows like "শ্রেণি: ৩য়, বিষয়: বাংলা" or "শ্রেণি, ৩য়, বিষয়, বাংলা" or school name title
+        // Top rows like "শ্রেণি: ৩য়, বিষয়: বাংলা" or "মোট কার্যদিবস — ১ম প্রান্তিক: ৬২ দিন" or school name title
         return joined.contains("শ্রেণি") || joined.contains("শ্রেণী") || joined.contains("class") ||
             joined.contains("বিষয়") || joined.contains("বিষয়") || joined.contains("subject") ||
-            joined.contains("প্রান্তিক") || joined.contains("বিদ্যালয়") || joined.contains("বিদ্যালয়") ||
+            joined.contains("প্রান্তিক") || joined.contains("কার্যদিবস") || joined.contains("working day") ||
+            joined.contains("বিদ্যালয়") || joined.contains("বিদ্যালয়") ||
             joined.contains("স্কুল") || joined.contains("school") || nonBlank.size <= 2
     }
 
-    private fun extractMetadataFromTopRows(metaRows: List<List<String>>): Triple<Int?, String?, Int?> {
+    private data class TopBannerMetadata(
+        val cls: Int?,
+        val subjectKey: String?,
+        val term: Int?,
+        val workingDaysByTerm: Map<Int, String>
+    )
+
+    private fun extractMetadataFromTopRows(metaRows: List<List<String>>): TopBannerMetadata {
         var clsFound: Int? = null
         var subFound: String? = null
         var termFound: Int? = null
+        var genericDays: String? = null
+        val wdByTerm = linkedMapOf<Int, String>()
 
-        fun inspectPair(labelRaw: String, valueRaw: String?) {
+        fun extractDaysDigits(raw: String?): String? {
+            val clean = fromBn(raw.orEmpty()).filter { it.isDigit() }
+            val num = clean.toIntOrNull() ?: return null
+            return if (num in 1..365) num.toString() else null
+        }
+
+        fun inspectPair(labelRaw: String, valueRaw: String?, rowHasWorkingDaysHint: Boolean) {
             val lNorm = normHeader(fromBn(labelRaw))
             val combined = if (valueRaw != null) "$labelRaw $valueRaw" else labelRaw
+            val hasWdKeyword = lNorm.contains("কার্যদিবস") || lNorm.contains("working day") || lNorm.contains("workingday")
+            val chunkTerm = parseTermFromToken(labelRaw) ?: parseTermFromToken(valueRaw.orEmpty())
+
+            if (hasWdKeyword || (rowHasWorkingDaysHint && chunkTerm != null)) {
+                val daysVal = extractDaysDigits(valueRaw)
+                    ?: extractDaysDigits(labelRaw.substringAfter(":", "").ifBlank { null })
+                    ?: extractDaysDigits(labelRaw.substringAfter("=", "").ifBlank { null })
+                if (daysVal != null) {
+                    if (chunkTerm != null && chunkTerm in 1..3) {
+                        wdByTerm.putIfAbsent(chunkTerm, daysVal)
+                    } else if (genericDays == null) {
+                        genericDays = daysVal
+                    }
+                    return
+                }
+            }
+
             if (lNorm.contains("শ্রেণি") || lNorm.contains("শ্রেণী") || lNorm.contains("class")) {
                 val cand = valueRaw?.takeIf { it.isNotBlank() } ?: labelRaw.substringAfter(":", "").ifBlank { labelRaw }
                 parseClassNum(cand)?.let { if (clsFound == null) clsFound = it }
@@ -727,40 +761,47 @@ object Repo {
 
         metaRows.forEach { row ->
             val trimmed = row.map { it.trim() }
+            val rowNorm = normHeader(fromBn(trimmed.joinToString(" ")))
+            val rowHasWorkingDaysHint = rowNorm.contains("কার্যদিবস") || rowNorm.contains("working day")
             var i = 0
             while (i < trimmed.size) {
                 val cell = trimmed[i]
                 if (cell.isBlank()) {
                     i++; continue
                 }
-                // Split multi-part cells first (e.g. "শ্রেণি: ৩য়, বিষয়: বাংলা" or "শ্রেণি: ৩য় | বিষয়: বাংলা")
+                // Split multi-part cells first (e.g. "শ্রেণি: ৩য়, বিষয়: বাংলা" or "মোট কার্যদিবস — ১ম প্রান্তিক: ৬২ দিন | ২য় প্রান্তিক: ৬৫ দিন")
                 val chunks = cell.split("|", "•", "·", ",", ";").map { it.trim() }.filter { it.isNotBlank() }
                 if (chunks.size > 1) {
                     chunks.forEach { chunk ->
                         val subColon = Regex("[:=：]").split(chunk, limit = 2)
-                        if (subColon.size == 2 && subColon[1].isNotBlank()) inspectPair(subColon[0], subColon[1])
-                        else inspectPair(chunk, null)
+                        if (subColon.size == 2 && subColon[1].isNotBlank()) inspectPair(subColon[0], subColon[1], rowHasWorkingDaysHint)
+                        else inspectPair(chunk, null, rowHasWorkingDaysHint)
                     }
                 } else {
                     val splitColon = Regex("[:=：]").split(cell, limit = 2)
                     if (splitColon.size == 2 && splitColon[1].isNotBlank()) {
-                        inspectPair(splitColon[0], splitColon[1])
+                        inspectPair(splitColon[0], splitColon[1], rowHasWorkingDaysHint)
                     } else {
                         val nextCell = trimmed.getOrNull(i + 1)?.takeIf { it.isNotBlank() }
                         val cNorm = normHeader(fromBn(cell))
-                        val isKeyLabel = cNorm in setOf("শ্রেণি", "শ্রেণী", "class", "বিষয়", "বিষয়", "subject", "প্রান্তিক", "term")
+                        val isKeyLabel = cNorm in setOf("শ্রেণি", "শ্রেণী", "class", "বিষয়", "বিষয়", "subject", "প্রান্তিক", "term", "কার্যদিবস", "মোট কার্যদিবস", "working day", "working days") ||
+                            ((cNorm.contains("কার্যদিবস") || cNorm.contains("working day")) && nextCell != null && extractDaysDigits(nextCell) != null)
                         if (isKeyLabel && nextCell != null) {
-                            inspectPair(cell, nextCell)
+                            inspectPair(cell, nextCell, rowHasWorkingDaysHint)
                             i++
                         } else {
-                            inspectPair(cell, null)
+                            inspectPair(cell, null, rowHasWorkingDaysHint)
                         }
                     }
                 }
                 i++
             }
         }
-        return Triple(clsFound, subFound, termFound)
+        val gen = genericDays
+        if (gen != null && wdByTerm.isEmpty()) {
+            wdByTerm[(termFound ?: 1).coerceIn(1, 3)] = gen
+        }
+        return TopBannerMetadata(clsFound, subFound, termFound, wdByTerm)
     }
 
     fun parseSmartCsvSheet(rawText: String): CsvParsedSheet {
@@ -803,11 +844,15 @@ object Repo {
             }
         }
 
-        val (detectedCls, detectedSubjectKey, detectedTerm) = if (headerIdx > 0) {
+        val topMeta = if (headerIdx > 0) {
             extractMetadataFromTopRows(rawRows.take(headerIdx))
         } else {
-            Triple(null, null, null)
+            TopBannerMetadata(null, null, null, emptyMap())
         }
+        val detectedCls = topMeta.cls
+        val detectedSubjectKey = topMeta.subjectKey
+        val detectedTerm = topMeta.term
+        val detectedWorkingDaysByTerm = topMeta.workingDaysByTerm
 
         val hRow = rawRows[headerIdx]
         val subRow = rawRows.getOrNull(headerIdx + 1)
@@ -826,7 +871,8 @@ object Repo {
                 detectedSubjectKey = detectedSubjectKey,
                 detectedTerm = detectedTerm,
                 usedTwoRowHeader = false,
-                skippedMetadataLines = headerIdx
+                skippedMetadataLines = headerIdx,
+                detectedWorkingDaysByTerm = detectedWorkingDaysByTerm
             )
         }
 
@@ -872,7 +918,8 @@ object Repo {
             detectedSubjectKey = detectedSubjectKey,
             detectedTerm = detectedTerm,
             usedTwoRowHeader = true,
-            skippedMetadataLines = headerIdx
+            skippedMetadataLines = headerIdx,
+            detectedWorkingDaysByTerm = detectedWorkingDaysByTerm
         )
     }
 
@@ -920,10 +967,12 @@ object Repo {
 
         // Attendance / Traits / Comments with optional term
         if (term != null) {
+            val hasSubjectContext = parseSubjectKey(header) != null || contextSubjectKey != null
             when {
                 norm.contains("কার্যদিবস") || norm.contains("working day") -> return "text" to "DAYS_$term"
                 norm.contains("উপস্থিত") || norm.contains("attendance") || norm.contains("present") -> return "text" to "PRES_$term"
-                norm.contains("সহপাঠক্রমিক") || norm.contains("সহপাঠ্য") || norm.contains("co curricular") -> return "text" to "ACT_$term"
+                norm.contains("সহপাঠক্রমিক") || norm.contains("সহপাঠ্য") || norm.contains("co curricular") ||
+                    (!hasSubjectContext && (norm.contains("সক্রিয়তা") || norm.contains("সক্রিয়তা"))) -> return "text" to "ACT_$term"
                 norm.contains("শৃঙ্খলা") || norm.contains("discipline") -> return "text" to "DISC_$term"
                 norm.contains("আচরণ") || norm.contains("conduct") -> return "text" to "COND_$term"
                 norm.contains("মন্তব্য") || norm.contains("মতামত") || norm.contains("remark") || norm.contains("comment") -> return "text" to "REM_$term"
@@ -1008,7 +1057,8 @@ object Repo {
         columns: List<CsvColMapping>,
         existingStudents: List<Student>,
         existingSettings: Settings,
-        defaultCls: Int = 1
+        defaultCls: Int = 1,
+        sharedWorkingDaysByTerm: Map<Int, String> = emptyMap()
     ): CsvImportSummary {
         if (rows.size < 2) return CsvImportSummary(existingStudents, existingSettings, 0, 0, emptyList())
 
@@ -1065,6 +1115,16 @@ object Repo {
                     "text", "custom" -> {
                         val prev = x[col.targetKey]
                         x[col.targetKey] = if (prev != null && prev != raw) "$prev, $raw" else raw
+                    }
+                }
+            }
+
+            sharedWorkingDaysByTerm.forEach { (termNum, rawDays) ->
+                if (termNum in 1..3) {
+                    val cleanDays = fromBn(rawDays).filter { it.isDigit() }
+                    val dKey = "DAYS_$termNum"
+                    if (cleanDays.isNotEmpty() && x[dKey].isNullOrBlank()) {
+                        x[dKey] = cleanDays
                     }
                 }
             }
@@ -1151,7 +1211,14 @@ object Repo {
         val sheet = parseSmartCsvSheet(txt)
         if (sheet.rows.size < 2) return existing
         val cols = detectCsvColumns(sheet.rows, emptyList(), sheet.detectedSubjectKey, sheet.detectedTerm)
-        return applyMappedCsvImport(sheet.rows, cols, existing, DEFAULT_SETTINGS, sheet.detectedCls ?: 1).students
+        return applyMappedCsvImport(
+            rows = sheet.rows,
+            columns = cols,
+            existingStudents = existing,
+            existingSettings = DEFAULT_SETTINGS,
+            defaultCls = sheet.detectedCls ?: 1,
+            sharedWorkingDaysByTerm = sheet.detectedWorkingDaysByTerm
+        ).students
     }
 
     private const val APP_UI_PREFS = "kgps_app_ui_prefs"

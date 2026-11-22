@@ -28,6 +28,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.KeyboardArrowLeft
@@ -77,6 +78,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -98,6 +100,7 @@ import com.kgps.result.activeClassIds
 import com.kgps.result.bn
 import com.kgps.result.classNameBn
 import com.kgps.result.cloud.TeacherPermissions
+import com.kgps.result.fromBn
 import com.kgps.result.termNameBn
 import com.kgps.result.ui.theme.SlateBg
 import com.kgps.result.ui.theme.SlateMuted
@@ -217,6 +220,22 @@ fun BlankSheetPdfScreen(
     }
     val isClassLevelTraitsOnly = remember(config.columns) {
         isThreeTermTraits && !isThreeTermMarks && config.columns.none { it.compKey != null }
+    }
+    val hasPerRowDaysCol = remember(config.columns) {
+        config.columns.any { it.id in setOf("T1_DAYS", "T2_DAYS", "T3_DAYS") }
+    }
+    val hasSingleAttCol = remember(config.columns) {
+        config.columns.any { it.id == "ATT" }
+    }
+    val sharedWorkingDaysTerms = remember(isThreeTermTraits, hasPerRowDaysCol, hasSingleAttCol, config.term) {
+        when {
+            isThreeTermTraits && !hasPerRowDaysCol -> listOf(1, 2, 3)
+            !isThreeTermTraits && hasSingleAttCol && config.term in 1..3 -> listOf(config.term)
+            else -> emptyList()
+        }
+    }
+    val commonWorkingDays = remember(students, config.selectedClass) {
+        BlankSheetCatalog.resolveCommonWorkingDaysByTerm(students, config.selectedClass)
     }
 
     val selectedSubjectLabel = remember(config.subjectKey, config.customSubjectTitle, isClassLevelTraitsOnly) {
@@ -786,6 +805,18 @@ fun BlankSheetPdfScreen(
                                             border = appFilterChipBorder(config.fillRemainingPageRows),
                                             label = { Text("পেজ পূর্ণ সারি", fontSize = 10.5.sp) }
                                         )
+                                        if (sharedWorkingDaysTerms.isNotEmpty()) {
+                                            FilterChip(
+                                                selected = config.showSharedWorkingDaysHeader,
+                                                onClick = {
+                                                    config = config.copy(showSharedWorkingDaysHeader = !config.showSharedWorkingDaysHeader)
+                                                },
+                                                colors = appFilterChipColors(),
+                                                border = appFilterChipBorder(config.showSharedWorkingDaysHeader),
+                                                label = { Text("উপরে মোট কার্যদিবস", fontSize = 10.5.sp) },
+                                                modifier = Modifier.testTag("blank_shared_wd_toggle_chip")
+                                            )
+                                        }
                                     }
                                 }
                             }
@@ -885,6 +916,106 @@ fun BlankSheetPdfScreen(
                                         fontWeight = if (hasThreeTermTotal) FontWeight.Bold else FontWeight.Medium,
                                         color = if (hasThreeTermTotal) TealDark else SlateText
                                     )
+                                }
+                            }
+                        }
+
+                        // Shared Working Days strip setup (when 3-term traits or single-term ATT without per-row DAYS column)
+                        if (sharedWorkingDaysTerms.isNotEmpty() && config.showSharedWorkingDaysHeader) {
+                            Surface(
+                                shape = RoundedCornerShape(8.dp),
+                                color = SlateBg,
+                                border = BorderStroke(1.dp, SlateOutline),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Column(
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
+                                    verticalArrangement = Arrangement.spacedBy(5.dp)
+                                ) {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                    ) {
+                                        Text(
+                                            "প্রান্তিকের মোট কার্যদিবস (উপরে এক জায়গায় ছাপাবে):",
+                                            fontSize = 10.5.sp,
+                                            fontWeight = FontWeight.SemiBold,
+                                            color = TealDark,
+                                            modifier = Modifier.weight(1f)
+                                        )
+                                        val hasAnyFromData = sharedWorkingDaysTerms.any { !commonWorkingDays[it].isNullOrBlank() }
+                                        if (hasAnyFromData) {
+                                            Surface(
+                                                onClick = {
+                                                    val next = config.workingDaysByTerm.toMutableMap()
+                                                    sharedWorkingDaysTerms.forEach { t ->
+                                                        commonWorkingDays[t]?.let { next[t] = it }
+                                                    }
+                                                    config = config.copy(workingDaysByTerm = next)
+                                                },
+                                                shape = RoundedCornerShape(6.dp),
+                                                color = TealSoft,
+                                                border = BorderStroke(1.dp, TealContainer),
+                                                modifier = Modifier.testTag("blank_wd_autofill_btn")
+                                            ) {
+                                                Text(
+                                                    "ডাটা থেকে নিন",
+                                                    fontSize = 10.sp,
+                                                    fontWeight = FontWeight.Bold,
+                                                    color = TealPrimary,
+                                                    modifier = Modifier.padding(horizontal = 7.dp, vertical = 3.dp)
+                                                )
+                                            }
+                                        }
+                                        if (sharedWorkingDaysTerms.any { !config.workingDaysByTerm[it].isNullOrBlank() }) {
+                                            Surface(
+                                                onClick = {
+                                                    val next = config.workingDaysByTerm.toMutableMap()
+                                                    sharedWorkingDaysTerms.forEach { t -> next.remove(t) }
+                                                    config = config.copy(workingDaysByTerm = next)
+                                                },
+                                                shape = RoundedCornerShape(6.dp),
+                                                color = MaterialTheme.colorScheme.surface,
+                                                border = BorderStroke(1.dp, SlateOutline),
+                                                modifier = Modifier.testTag("blank_wd_clear_btn")
+                                            ) {
+                                                Text(
+                                                    "লাইন রাখুন",
+                                                    fontSize = 10.sp,
+                                                    fontWeight = FontWeight.Medium,
+                                                    color = SlateMuted,
+                                                    modifier = Modifier.padding(horizontal = 7.dp, vertical = 3.dp)
+                                                )
+                                            }
+                                        }
+                                    }
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                    ) {
+                                        sharedWorkingDaysTerms.forEach { t ->
+                                            val rawVal = config.workingDaysByTerm[t].orEmpty()
+                                            val displayVal = if (rawVal.isEmpty()) "" else BlankSheetCatalog.formatDigits(rawVal, config.numeralStyle)
+                                            OutlinedTextField(
+                                                value = displayVal,
+                                                onValueChange = { txt ->
+                                                    val clean = fromBn(txt).filter { it.isDigit() }.take(3)
+                                                    val next = config.workingDaysByTerm.toMutableMap()
+                                                    if (clean.isEmpty()) next.remove(t) else next[t] = clean
+                                                    config = config.copy(workingDaysByTerm = next)
+                                                },
+                                                label = { Text(termNameBn(t), fontSize = 10.sp) },
+                                                placeholder = { Text("ফাঁকা=লাইন", fontSize = 10.sp) },
+                                                singleLine = true,
+                                                textStyle = TextStyle(fontSize = 11.5.sp),
+                                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                                                modifier = Modifier
+                                                    .weight(1f)
+                                                    .testTag("blank_wd_input_$t")
+                                            )
+                                        }
+                                    }
                                 }
                             }
                         }

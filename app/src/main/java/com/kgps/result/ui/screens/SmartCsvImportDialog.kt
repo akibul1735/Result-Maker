@@ -121,6 +121,7 @@ fun SmartCsvImportDialog(
     }
     val parsedRows = parsedSheet.rows
     var contextSubjectKey by remember { mutableStateOf<String?>(null) }
+    var sharedWorkingDaysByTerm by remember { mutableStateOf<Map<Int, String>>(emptyMap()) }
     LaunchedEffect(promptConfig.targetCls) {
         if (promptConfig.targetCls > 0 && parsedSheet.detectedCls == null) {
             fallbackCls = promptConfig.targetCls
@@ -133,6 +134,7 @@ fun SmartCsvImportDialog(
         } else if (promptConfig.module == CsvImportModule.SUBJECT_ALL_TERMS) {
             contextSubjectKey = CsvImportAssistant.resolveSubjectForAllTerms(promptConfig).key
         }
+        sharedWorkingDaysByTerm = parsedSheet.detectedWorkingDaysByTerm
     }
     var columns by remember(parsedRows, contextSubjectKey, parsedSheet.detectedTerm, settings.customFields) {
         mutableStateOf(
@@ -145,12 +147,13 @@ fun SmartCsvImportDialog(
         )
     }
 
-    val validationReport = remember(parsedRows, columns, students, fallbackCls) {
+    val validationReport = remember(parsedRows, columns, students, fallbackCls, sharedWorkingDaysByTerm) {
         CsvImportAssistant.validateCsvData(
             parsedRows = parsedRows,
             columns = columns,
             existingStudents = students,
-            fallbackCls = fallbackCls
+            fallbackCls = fallbackCls,
+            sharedWorkingDaysByTerm = sharedWorkingDaysByTerm
         )
     }
 
@@ -196,14 +199,15 @@ fun SmartCsvImportDialog(
         }
     }
 
-    val finalSummary = remember(parsedRows, columns, selectedRowIndices, students, settings, fallbackCls) {
+    val finalSummary = remember(parsedRows, columns, selectedRowIndices, students, settings, fallbackCls, sharedWorkingDaysByTerm) {
         CsvImportAssistant.buildFilteredImportSummary(
             parsedRows = parsedRows,
             columns = columns,
             selectedDataRowIndices = selectedRowIndices,
             existingStudents = students,
             existingSettings = settings,
-            fallbackCls = fallbackCls
+            fallbackCls = fallbackCls,
+            sharedWorkingDaysByTerm = sharedWorkingDaysByTerm
         )
     }
 
@@ -377,6 +381,8 @@ fun SmartCsvImportDialog(
                             onFallbackClsChange = { fallbackCls = it },
                             contextSubjectKey = contextSubjectKey,
                             onContextSubjectKeyChange = { contextSubjectKey = it },
+                            sharedWorkingDaysByTerm = sharedWorkingDaysByTerm,
+                            onSharedWorkingDaysChange = { sharedWorkingDaysByTerm = it },
                             settings = settings,
                             onPickFile = { filePicker.launch(arrayOf("*/*")) },
                             onPasteClipboard = {

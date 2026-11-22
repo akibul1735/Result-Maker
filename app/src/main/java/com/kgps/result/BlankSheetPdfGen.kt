@@ -286,9 +286,52 @@ object BlankSheetPdfGen {
         val cols = page.columns.ifEmpty { BlankSheetCatalog.DEFAULT_COLUMNS }
         val hasGroupedHeader = cols.any { !it.groupBn.isNullOrBlank() }
 
+        // Optional shared single-place মোট কার্যদিবস strip (replaces repeating কার্যদিবস on every row)
+        val tableTop = if (page.showSharedWorkingDaysStrip) {
+            val wdTop = metaTop + metaH + 5f
+            val wdH = 19f
+            val wdRect = RectF(marginX, wdTop, marginX + contentW, wdTop + wdH)
+            c.drawRoundRect(wdRect, 2.5f, 2.5f, metaFillPaint)
+            c.drawRoundRect(wdRect, 2.5f, 2.5f, borderPaint)
+
+            val wdText = if (page.sharedWorkingDaysTerms.size == 1) {
+                val t = page.sharedWorkingDaysTerms.first()
+                val raw = page.workingDaysByTerm[t]?.let { fromBn(it).trim() }.orEmpty()
+                val valStr = if (raw.isNotEmpty()) {
+                    "${BlankSheetCatalog.formatDigits(raw, numStyle)} দিন"
+                } else {
+                    ".............. দিন"
+                }
+                "মোট কার্যদিবস (${termNameBn(t)}): $valStr"
+            } else {
+                val termParts = page.sharedWorkingDaysTerms.joinToString("    |    ") { t ->
+                    val raw = page.workingDaysByTerm[t]?.let { fromBn(it).trim() }.orEmpty()
+                    val valStr = if (raw.isNotEmpty()) {
+                        "${BlankSheetCatalog.formatDigits(raw, numStyle)} দিন"
+                    } else {
+                        "......... দিন"
+                    }
+                    "${termNameBn(t)}: $valStr"
+                }
+                "মোট কার্যদিবস —   $termParts"
+            }
+
+            val wdPaint = textPaint(ctx, 8.8f, bold = true, fontId = fontId, color = 0xFF000000.toInt()).apply {
+                textAlign = Paint.Align.CENTER
+            }
+            val maxWdTextW = max(40f, contentW - 14f)
+            while (wdPaint.measureText(wdText) > maxWdTextW && wdPaint.textSize > 6.4f) {
+                wdPaint.textSize -= 0.25f
+            }
+            val wdBaseline = wdTop + (wdH + wdPaint.textSize * 0.72f) / 2f
+            c.drawText(wdText, pageW / 2f, wdBaseline, wdPaint)
+            wdTop + wdH + 5f
+        } else {
+            metaTop + metaH + 7f
+        }
+
         // 3. Table Geometry
         val footerReservedH = 22f
-        val tableTop = metaTop + metaH + 7f
         val tableBottomLimit = pageH - marginBottom - footerReservedH
         val hasMaxSubHeader = page.showSubjectMaxInHeader && cols.any { col ->
             BlankSheetCatalog.resolveMaxHint(page.cls, page.subjectKey, col.compKey) != null

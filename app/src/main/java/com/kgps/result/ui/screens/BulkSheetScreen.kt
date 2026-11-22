@@ -881,7 +881,7 @@ fun BulkSheetScreen(
                                     modifier = Modifier.size(14.dp)
                                 )
                                 Text(
-                                    if (attBatchFillMode) "ফিল শেষ" else "ব্যাচ ফিল",
+                                    if (attBatchFillMode) "ফিল শেষ" else "কার্যদিবস/ব্যাচ",
                                     fontSize = 11.sp,
                                     fontWeight = FontWeight.Bold,
                                     color = if (attBatchFillMode) Color.White else TealPrimary,
@@ -1059,6 +1059,61 @@ fun BulkSheetScreen(
                                 }
                             }
                         }
+                    }
+                }
+            }
+        }
+
+        if (mode == "attendance" && !attBatchFillMode && permissions.canEditAttendance && classStudents.isNotEmpty()) {
+            val commonDays = remember(classStudents, term) {
+                classStudents.mapNotNull { st ->
+                    fromBn(st.x["DAYS_$term"].orEmpty()).filter { it.isDigit() }.takeIf { it.isNotEmpty() }
+                }.groupingBy { it }.eachCount().maxByOrNull { it.value }?.key
+            }
+            Surface(
+                color = TealSoft,
+                border = BorderStroke(1.dp, TealContainer),
+                shape = RoundedCornerShape(8.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable {
+                        if (batchWorkingDaysInput.isBlank() && !commonDays.isNullOrBlank()) {
+                            batchWorkingDaysInput = fmtSheetDigits(commonDays)
+                        }
+                        selectedAttStudentIds = classStudents.map { it.id }.toSet()
+                        attBatchFillMode = true
+                    }
+                    .testTag("sheet_att_quick_days_btn")
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 9.dp, vertical = 5.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    Text(
+                        text = if (commonDays != null) {
+                            "${termNameBn(term)}র কার্যদিবস: ${fmtSheetDigits(commonDays)} দিন · সবার জন্য একসাথে বদলাতে ট্যাপ করুন"
+                        } else {
+                            "সবার মোট কার্যদিবস বারবার লিখতে হবে না — এখানে একবার বসালেই সবার হবে"
+                        },
+                        fontSize = 10.5.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = TealDark,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f)
+                    )
+                    Surface(
+                        shape = RoundedCornerShape(6.dp),
+                        color = TealPrimary
+                    ) {
+                        Text(
+                            "একসাথে বসান",
+                            fontSize = 10.5.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color.White,
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+                        )
                     }
                 }
             }

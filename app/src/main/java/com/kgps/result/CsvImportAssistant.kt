@@ -642,6 +642,9 @@ object CsvImportAssistant {
             if (selectedKeys.any { it.startsWith("ACT_") || it.startsWith("DISC_") || it.startsWith("COND_") }) {
                 add("ACT/DISC/COND=ক/খ/গ")
             }
+            if (config.module == CsvImportModule.ATTENDANCE_TRAITS) {
+                add("মোট কার্যদিবস কাগজের উপরে এক জায়গায় থাকলে ১ম সারি বা '১ম কার্যদিবস: ৬২' আকারে দিন অথবা সব সারিতে বসান")
+            }
         }.joinToString(" | ")
 
         return buildString {
@@ -676,7 +679,8 @@ object CsvImportAssistant {
         parsedRows: List<List<String>>,
         columns: List<Repo.CsvColMapping>,
         existingStudents: List<Student>,
-        fallbackCls: Int
+        fallbackCls: Int,
+        sharedWorkingDaysByTerm: Map<Int, String> = emptyMap()
     ): CsvValidationReport {
         if (parsedRows.size < 2 || columns.isEmpty()) {
             return CsvValidationReport(
@@ -874,6 +878,12 @@ object CsvImportAssistant {
                 }
             }
 
+            sharedWorkingDaysByTerm.forEach { (termNum, rawDays) ->
+                if (termNum in 1..3 && !termDays.containsKey(termNum)) {
+                    fromBn(rawDays).filter { it.isDigit() }.toIntOrNull()?.let { termDays[termNum] = it }
+                }
+            }
+
             // Check attendance consistency
             termPres.forEach { (term, pres) ->
                 val days = termDays[term]
@@ -955,7 +965,8 @@ object CsvImportAssistant {
         selectedDataRowIndices: Set<Int>,
         existingStudents: List<Student>,
         existingSettings: Settings,
-        fallbackCls: Int
+        fallbackCls: Int,
+        sharedWorkingDaysByTerm: Map<Int, String> = emptyMap()
     ): Repo.CsvImportSummary? {
         if (parsedRows.size < 2 || columns.isEmpty()) return null
         val header = parsedRows.first()
@@ -967,7 +978,8 @@ object CsvImportAssistant {
             columns = columns,
             existingStudents = existingStudents,
             existingSettings = existingSettings,
-            defaultCls = fallbackCls
+            defaultCls = fallbackCls,
+            sharedWorkingDaysByTerm = sharedWorkingDaysByTerm
         )
     }
 }

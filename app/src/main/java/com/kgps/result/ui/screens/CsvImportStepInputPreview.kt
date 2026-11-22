@@ -22,6 +22,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Check
@@ -56,7 +57,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -68,7 +71,9 @@ import com.kgps.result.Settings
 import com.kgps.result.activeSchoolClasses
 import com.kgps.result.bn
 import com.kgps.result.classShortBn
+import com.kgps.result.fromBn
 import com.kgps.result.subjectsFor
+import com.kgps.result.termNameBn
 import com.kgps.result.ui.theme.AmberBg
 import com.kgps.result.ui.theme.AmberBorder
 import com.kgps.result.ui.theme.AmberNotice
@@ -106,6 +111,8 @@ fun CsvStepInputAndMapping(
     onFallbackClsChange: (Int) -> Unit,
     contextSubjectKey: String?,
     onContextSubjectKeyChange: (String?) -> Unit,
+    sharedWorkingDaysByTerm: Map<Int, String> = emptyMap(),
+    onSharedWorkingDaysChange: (Map<Int, String>) -> Unit = {},
     settings: Settings,
     onPickFile: () -> Unit,
     onPasteClipboard: () -> Unit,
@@ -187,6 +194,7 @@ fun CsvStepInputAndMapping(
         val hasSmartDetections = hasCodeFences ||
             parsedSheet.detectedCls != null ||
             parsedSheet.detectedSubjectKey != null ||
+            parsedSheet.detectedWorkingDaysByTerm.isNotEmpty() ||
             parsedSheet.usedTwoRowHeader
         if (hasSmartDetections && parsedRows.isNotEmpty()) {
             val parts = buildList {
@@ -194,6 +202,12 @@ fun CsvStepInputAndMapping(
                 parsedSheet.detectedSubjectKey?.let { sk ->
                     val sName = clsSubjects.find { it.key == sk }?.bn?.substringBefore(" (") ?: sk
                     add("বিষয়: $sName")
+                }
+                if (parsedSheet.detectedWorkingDaysByTerm.isNotEmpty()) {
+                    val wdSummary = parsedSheet.detectedWorkingDaysByTerm.entries
+                        .sortedBy { it.key }
+                        .joinToString(", ") { (t, d) -> "${termNameBn(t)}: ${bn(d)}" }
+                    add("কার্যদিবস ($wdSummary)")
                 }
                 if (parsedSheet.usedTwoRowHeader) add("২-সারি প্রান্তিক হেডার")
                 if (hasCodeFences) add("AI কোড ব্লক পরিষ্কার")
@@ -210,6 +224,58 @@ fun CsvStepInputAndMapping(
                     color = TealDark,
                     modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
                 )
+            }
+        }
+
+        val hasAttendanceOrTraitCol = columns.any {
+            it.targetType == "text" && (
+                it.targetKey.startsWith("PRES_") ||
+                    it.targetKey.startsWith("ACT_") ||
+                    it.targetKey.startsWith("DISC_") ||
+                    it.targetKey.startsWith("COND_") ||
+                    it.targetKey.startsWith("DAYS_")
+                )
+        }
+        if (parsedRows.isNotEmpty() && (hasAttendanceOrTraitCol || sharedWorkingDaysByTerm.isNotEmpty())) {
+            Surface(
+                color = SlateBg,
+                shape = RoundedCornerShape(10.dp),
+                border = BorderStroke(1.dp, SlateOutline)
+            ) {
+                Column(
+                    modifier = Modifier.padding(10.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    Text(
+                        "সবার প্রান্তিক কার্যদিবস (CSV-তে কলাম না থাকলে একবার এখানে দিন):",
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = TealDark
+                    )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        listOf(1, 2, 3).forEach { t ->
+                            val raw = sharedWorkingDaysByTerm[t].orEmpty()
+                            OutlinedTextField(
+                                value = if (raw.isEmpty()) "" else bn(raw),
+                                onValueChange = { txt ->
+                                    val clean = fromBn(txt).filter { it.isDigit() }.take(3)
+                                    val next = sharedWorkingDaysByTerm.toMutableMap()
+                                    if (clean.isEmpty()) next.remove(t) else next[t] = clean
+                                    onSharedWorkingDaysChange(next)
+                                },
+                                label = { Text(termNameBn(t), fontSize = 10.sp) },
+                                placeholder = { Text("ফাঁকা", fontSize = 10.sp) },
+                                singleLine = true,
+                                textStyle = TextStyle(fontSize = 11.5.sp),
+                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                                modifier = Modifier.weight(1f).testTag("csv_shared_wd_$t")
+                            )
+                        }
+                    }
+                }
             }
         }
 
