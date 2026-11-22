@@ -219,16 +219,21 @@ object PdfGen {
         c.drawRect(l, top, l + w, top + h, stroke)
         if (t.isEmpty()) return
         val p = tp(ctx, size, false, fontId)
-        var lines = wrap(t, p, w - 7f)
-        while (lines.size * (p.textSize * 1.25f) > h - 5f && p.textSize > 5.2f) {
-            p.textSize -= 0.3f
-            lines = wrap(t, p, w - 7f)
+        val availW = w - 6f
+        val availH = h - 4f
+        fun lineHeightFor(textSize: Float): Float =
+            textSize * if (textSize < 6.8f) 1.18f else 1.24f
+
+        var lines = wrap(t, p, availW)
+        while (lines.size * lineHeightFor(p.textSize) > availH && p.textSize > 4.4f) {
+            p.textSize -= 0.25f
+            lines = wrap(t, p, availW)
         }
-        val lh = p.textSize * 1.25f
+        val lh = lineHeightFor(p.textSize)
         val totalH = lines.size * lh
-        var y = top + max(p.textSize + 2f, (h - totalH) / 2 + p.textSize * 0.88f)
+        var y = top + max(p.textSize + 1.5f, (h - totalH) / 2f + p.textSize * 0.88f)
         lines.forEach {
-            if (y < top + h - 2f) c.drawText(it, l + 3.5f, y, p)
+            if (y <= top + h - 1.5f) c.drawText(it, l + 3f, y, p)
             y += lh
         }
     }

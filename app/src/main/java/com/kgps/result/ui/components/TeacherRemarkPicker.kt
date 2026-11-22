@@ -71,6 +71,7 @@ import com.kgps.result.bn
 import com.kgps.result.classShortBn
 import com.kgps.result.fmt
 import com.kgps.result.termNameBn
+import com.kgps.result.util.CommentGenerator
 import com.kgps.result.ui.theme.AmberBg
 import com.kgps.result.ui.theme.AmberBorder
 import com.kgps.result.ui.theme.AmberNotice
@@ -194,7 +195,9 @@ fun InlineTeacherRemarkSection(
     val profile = remember(student, term) { TeacherRemarkEngine.analyzeProfile(student, term) }
     val rankedOptions = remember(student, term) { TeacherRemarkEngine.getRankedAlternatives(student, term) }
     val topOption = rankedOptions.firstOrNull()
-    val nearbyOptions = remember(rankedOptions) { rankedOptions.take(5) }
+    val nearbyOptions = remember(rankedOptions) { rankedOptions.take(8) }
+    val wordCount = remember(remarkText) { CommentGenerator.countWords(remarkText) }
+    val isOverWordLimit = wordCount > CommentGenerator.MAX_WORDS
 
     var showPickerDialog by remember { mutableStateOf(false) }
 
@@ -202,11 +205,11 @@ fun InlineTeacherRemarkSection(
         modifier = modifier.fillMaxWidth(),
         verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
-        // Header Row: Title + Auto Status Badge + Auto Reset / Next Alt
+        // Header Row: Title + Word Count Pill + Auto Status Badge
         Row(
             modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
         ) {
             Row(
                 verticalAlignment = Alignment.CenterVertically,
@@ -223,7 +226,28 @@ fun InlineTeacherRemarkSection(
                     "শ্রেণি শিক্ষকের সার্বিক মতামত",
                     fontSize = 12.5.sp,
                     fontWeight = FontWeight.Bold,
-                    color = SlateText
+                    color = SlateText,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+
+            // Live Word Counter (e.g. ২৪/৩০ শব্দ), turning red above 30
+            Surface(
+                color = if (isOverWordLimit) RoseBg else SlateSurfaceVariant,
+                shape = RoundedCornerShape(999.dp),
+                border = BorderStroke(
+                    1.dp,
+                    if (isOverWordLimit) RoseDanger else SlateOutline
+                ),
+                modifier = Modifier.testTag("editor_remark_word_count_$term")
+            ) {
+                Text(
+                    text = "${bn(wordCount.toString())}/${bn(CommentGenerator.MAX_WORDS.toString())} শব্দ",
+                    fontSize = 10.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = if (isOverWordLimit) RoseDanger else SlateText,
+                    modifier = Modifier.padding(horizontal = 7.dp, vertical = 2.dp)
                 )
             }
 
@@ -254,13 +278,23 @@ fun InlineTeacherRemarkSection(
         // Detected Signals Strip (Result + Attendance + Traits)
         StudentRemarkContextSummary(profile = profile)
 
-        // Editable Text Box (Prefilled automatically — no typing needed)
+        // Editable Text Box (Prefilled automatically — teacher can edit anytime)
         OutlinedTextField(
             value = remarkText,
             onValueChange = { if (enabled) onManualEditRemark(it) },
             enabled = enabled,
-            label = { Text("মতামত (প্রিফিলকৃত — প্রয়োজনে বদলান)", fontSize = 11.5.sp) },
+            isError = isOverWordLimit,
+            label = { Text("মতামত (অটো প্রিফিল — প্রয়োজনে এডিট করুন)", fontSize = 11.5.sp) },
             placeholder = { Text("উপরের তথ্য দিলে এখানে অটো মন্তব্য চলে আসবে", fontSize = 12.sp) },
+            supportingText = if (isOverWordLimit) {
+                {
+                    Text(
+                        "৩০ শব্দের বেশি (${bn(wordCount.toString())} শব্দ) — PDF ছকে জায়গা ছোট হওয়ায় ফন্ট আরও ছোট হবে",
+                        color = RoseDanger,
+                        fontSize = 10.5.sp
+                    )
+                }
+            } else null,
             minLines = 2,
             maxLines = 4,
             shape = RoundedCornerShape(10.dp),
@@ -270,7 +304,7 @@ fun InlineTeacherRemarkSection(
         )
 
         if (enabled && nearbyOptions.isNotEmpty()) {
-            // Quick-swap nearby alternatives bar
+            // Quick-swap nearby alternatives bar + Auto Generate Button
             Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -278,39 +312,38 @@ fun InlineTeacherRemarkSection(
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
                     Text(
-                        "কাছাকাছি অল্টারনেটিভ (১ ট্যাপে বাছুন):",
+                        "বিষয়ভিত্তিক ও সমন্বিত বিকল্প (${bn(rankedOptions.size.toString())}টি):",
                         fontSize = 11.sp,
                         fontWeight = FontWeight.SemiBold,
-                        color = SlateMuted
+                        color = SlateMuted,
+                        modifier = Modifier.weight(1f)
                     )
-                    if (topOption != null && remarkText.trim() != topOption.text.trim()) {
-                        Surface(
-                            color = TealSoft,
-                            shape = RoundedCornerShape(6.dp),
-                            border = BorderStroke(1.dp, TealContainer),
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(6.dp))
-                                .clickable { onResetAutoRemark() }
-                                .testTag("editor_remark_auto_reset_$term")
+                    Surface(
+                        color = TealSoft,
+                        shape = RoundedCornerShape(6.dp),
+                        border = BorderStroke(1.dp, TealContainer),
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(6.dp))
+                            .clickable { onResetAutoRemark() }
+                            .testTag("editor_remark_auto_reset_$term")
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
                         ) {
-                            Row(
-                                modifier = Modifier.padding(horizontal = 7.dp, vertical = 3.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(3.dp)
-                            ) {
-                                Icon(
-                                    Icons.Rounded.Refresh,
-                                    contentDescription = "অটো প্রিফিলে ফিরুন",
-                                    tint = TealPrimary,
-                                    modifier = Modifier.size(12.dp)
-                                )
-                                Text(
-                                    "সেরা অটো বাছাই",
-                                    fontSize = 10.5.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = TealPrimary
-                                )
-                            }
+                            Icon(
+                                Icons.Rounded.AutoFixHigh,
+                                contentDescription = "অটো মন্তব্য তৈরি করুন",
+                                tint = TealPrimary,
+                                modifier = Modifier.size(13.dp)
+                            )
+                            Text(
+                                "অটো মন্তব্য",
+                                fontSize = 10.5.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = TealPrimary
+                            )
                         }
                     }
                 }
@@ -704,6 +737,22 @@ fun TeacherRemarkPickerDialog(
                                             verticalAlignment = Alignment.CenterVertically,
                                             horizontalArrangement = Arrangement.spacedBy(5.dp)
                                         ) {
+                                            Surface(
+                                                color = if (opt.wordCount > CommentGenerator.MAX_WORDS) RoseBg else SlateBg,
+                                                shape = RoundedCornerShape(5.dp),
+                                                border = BorderStroke(
+                                                    1.dp,
+                                                    if (opt.wordCount > CommentGenerator.MAX_WORDS) RoseDanger.copy(alpha = 0.5f) else SlateOutline
+                                                )
+                                            ) {
+                                                Text(
+                                                    text = "${bn(opt.wordCount.toString())} শব্দ",
+                                                    fontSize = 9.5.sp,
+                                                    fontWeight = FontWeight.SemiBold,
+                                                    color = if (opt.wordCount > CommentGenerator.MAX_WORDS) RoseDanger else SlateMuted,
+                                                    modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.dp)
+                                                )
+                                            }
                                             Text(
                                                 text = "${bn(opt.matchScore.toString())}% মিল",
                                                 fontSize = 11.sp,

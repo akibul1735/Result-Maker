@@ -45,6 +45,7 @@ import androidx.compose.material.icons.rounded.Lock
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.SwapHoriz
 import androidx.compose.material.icons.rounded.Tune
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -63,6 +64,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -122,6 +124,7 @@ import com.kgps.result.ui.components.TeacherRemarkPickerDialog
 import com.kgps.result.ui.theme.AmberBg
 import com.kgps.result.ui.theme.AmberNotice
 import com.kgps.result.ui.theme.EmeraldGrade
+import com.kgps.result.ui.theme.RoseBg
 import com.kgps.result.ui.theme.RoseDanger
 import com.kgps.result.ui.theme.SlateBg
 import com.kgps.result.ui.theme.SlateMuted
@@ -132,6 +135,7 @@ import com.kgps.result.ui.theme.TealContainer
 import com.kgps.result.ui.theme.TealDark
 import com.kgps.result.ui.theme.TealPrimary
 import com.kgps.result.ui.theme.TealSoft
+import com.kgps.result.util.CommentGenerator
 
 private data class SheetColDef(
     val key: String,
@@ -1408,12 +1412,14 @@ fun BulkSheetScreen(
                     onOpenPicker = { student -> remarkPickerStudent = student },
                     onBatchFillAllWithData = {
                         val updates = classStudents.mapNotNull { st ->
+                            val existingRem = st.x["REM_$term"]?.trim().orEmpty()
+                            if (existingRem.isNotEmpty()) return@mapNotNull null // Never overwrite manually edited or existing comments
                             val autoRem = TeacherRemarkEngine.autoPrefillIfApplicable(st, term)
                                 ?: return@mapNotNull null
                             st.id to autoRem
                         }.toMap()
                         if (updates.isEmpty()) {
-                            onShowMessage("নম্বর, উপস্থিতি বা গুণাবলির তথ্য যুক্ত কোনো শিক্ষার্থী নেই")
+                            onShowMessage("ফাঁকা মন্তব্যযুক্ত ও তথ্যসম্পন্ন কোনো শিক্ষার্থী নেই")
                         } else {
                             onBatchPatchRemarks(term, updates)
                         }
@@ -1988,48 +1994,62 @@ private fun BulkRemarksPanel(
     val filledCount = remember(classStudents, term) {
         classStudents.count { !it.x["REM_$term"].isNullOrBlank() }
     }
+    val emptyReadyCount = remember(classStudents, term) {
+        classStudents.count { st ->
+            st.x["REM_$term"].isNullOrBlank() &&
+                TeacherRemarkEngine.autoPrefillIfApplicable(st, term) != null
+        }
+    }
+    var askBatchAutoGenerate by remember { mutableStateOf(false) }
 
     Column(Modifier.fillMaxSize()) {
         Surface(color = SlateSurfaceVariant) {
-            Row(
+            Column(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = 10.dp, vertical = 7.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween
+                verticalArrangement = Arrangement.spacedBy(5.dp)
             ) {
-                Text(
-                    "${termNameBn(term)} · মন্তব্য সম্পন্ন: ${bn(filledCount.toString())}/${bn(classStudents.size.toString())} জন",
-                    fontSize = 11.5.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    color = SlateText,
-                    modifier = Modifier.weight(1f)
-                )
-                if (canEdit) {
-                    Surface(
-                        onClick = onBatchFillAllWithData,
-                        shape = RoundedCornerShape(7.dp),
-                        color = TealSoft,
-                        border = BorderStroke(1.dp, TealContainer),
-                        modifier = Modifier.testTag("sheet_remarks_reset_all_btn")
-                    ) {
-                        Row(
-                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text(
+                        "${termNameBn(term)} · মন্তব্য সম্পন্ন: ${bn(filledCount.toString())}/${bn(classStudents.size.toString())} জন",
+                        fontSize = 11.5.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = SlateText,
+                        modifier = Modifier.weight(1f)
+                    )
+                    if (canEdit) {
+                        Surface(
+                            onClick = { askBatchAutoGenerate = true },
+                            shape = RoundedCornerShape(7.dp),
+                            color = TealSoft,
+                            border = BorderStroke(1.dp, TealContainer),
+                            modifier = Modifier.testTag("sheet_remarks_reset_all_btn")
                         ) {
-                            Icon(
-                                Icons.Rounded.Refresh,
-                                contentDescription = null,
-                                tint = TealPrimary,
-                                modifier = Modifier.size(13.dp)
-                            )
-                            Text(
-                                "সবার সেরা অটো হালনাগাদ",
-                                fontSize = 10.5.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = TealPrimary
-                            )
+                            Row(
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                Icon(
+                                    Icons.Rounded.AutoFixHigh,
+                                    contentDescription = null,
+                                    tint = TealPrimary,
+                                    modifier = Modifier.size(13.dp)
+                                )
+                                Text(
+                                    "সব শিক্ষার্থীর জন্য অটো মন্তব্য তৈরি করুন",
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = TealPrimary,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
                         }
                     }
                 }
@@ -2131,19 +2151,36 @@ private fun BulkRemarksPanel(
                         StudentRemarkContextSummary(profile = profile)
 
                         if (currentRem.isNotEmpty()) {
+                            val curWc = CommentGenerator.countWords(currentRem)
+                            val curOver = curWc > CommentGenerator.MAX_WORDS
                             Surface(
                                 color = SlateBg,
                                 shape = RoundedCornerShape(8.dp),
-                                border = BorderStroke(1.dp, SlateOutline),
+                                border = BorderStroke(1.dp, if (curOver) RoseDanger else SlateOutline),
                                 modifier = Modifier.fillMaxWidth()
                             ) {
-                                Text(
-                                    text = currentRem,
-                                    fontSize = 12.sp,
-                                    lineHeight = 17.sp,
-                                    color = SlateText,
-                                    modifier = Modifier.padding(horizontal = 9.dp, vertical = 7.dp)
-                                )
+                                Column(
+                                    modifier = Modifier.padding(horizontal = 9.dp, vertical = 7.dp),
+                                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                                ) {
+                                    Text(
+                                        text = currentRem,
+                                        fontSize = 12.sp,
+                                        lineHeight = 17.sp,
+                                        color = SlateText
+                                    )
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.End
+                                    ) {
+                                        Text(
+                                            text = "${bn(curWc.toString())}/${bn(CommentGenerator.MAX_WORDS.toString())} শব্দ",
+                                            fontSize = 10.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = if (curOver) RoseDanger else SlateMuted
+                                        )
+                                    }
+                                }
                             }
                         } else if (topOpt != null) {
                             Surface(
@@ -2272,6 +2309,38 @@ private fun BulkRemarksPanel(
                 }
             }
         }
+    }
+
+    if (askBatchAutoGenerate) {
+        AlertDialog(
+            onDismissRequest = { askBatchAutoGenerate = false },
+            title = { Text("অটো মন্তব্য তৈরি করবেন?") },
+            text = {
+                Text(
+                    buildString {
+                        append("${termNameBn(term)}-এ যে ${bn(emptyReadyCount.toString())} জন শিক্ষার্থীর মন্তব্য এখনো খালি আছে ও নম্বর/উপস্থিতি দেওয়া আছে, তাদের জন্য অটো মন্তব্য তৈরি হবে।\n\n")
+                        append("আগে থেকে থাকা বা ম্যানুয়ালি এডিট করা ${bn(filledCount.toString())}টি মন্তব্য অপরিবর্তিত থাকবে।")
+                    }
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        askBatchAutoGenerate = false
+                        onBatchFillAllWithData()
+                    },
+                    enabled = emptyReadyCount > 0,
+                    modifier = Modifier.testTag("sheet_remarks_confirm_batch_btn")
+                ) {
+                    Text("তৈরি করুন (${bn(emptyReadyCount.toString())} জন)")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { askBatchAutoGenerate = false }) {
+                    Text("বাতিল")
+                }
+            }
+        )
     }
 }
 

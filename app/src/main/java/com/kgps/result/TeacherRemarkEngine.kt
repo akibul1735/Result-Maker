@@ -1,10 +1,13 @@
 package com.kgps.result
 
+import com.kgps.result.util.CommentCategory
+import com.kgps.result.util.CommentGenerator
 import kotlin.math.abs
 
 enum class RemarkCategory(val labelBn: String) {
     ALL("সব কাছাকাছি"),
     COMBINED("সমন্বিত"),
+    SUBJECT_DETAIL("বিষয় খুঁটিনাটি"),
     ACADEMIC("ফলাফল ও প্রগতি"),
     ATTENDANCE("উপস্থিতি"),
     TRAITS("গুণাবলি ও আচরণ"),
@@ -61,7 +64,8 @@ data class TeacherRemarkOption(
     val category: RemarkCategory,
     val toneLabel: String,
     val matchScore: Int,
-    val isTopPick: Boolean = false
+    val isTopPick: Boolean = false,
+    val wordCount: Int = CommentGenerator.countWords(text)
 )
 
 object TeacherRemarkEngine {
@@ -189,9 +193,7 @@ object TeacherRemarkEngine {
     }
 
     fun autoPrefillIfApplicable(student: Student, term: Int): String? {
-        val profile = analyzeProfile(student, term)
-        if (!profile.hasAnyData) return null
-        return getRankedAlternatives(student, term).firstOrNull()?.text
+        return CommentGenerator.generateComment(student, term)
     }
 
     fun getRankedAlternatives(
@@ -200,27 +202,51 @@ object TeacherRemarkEngine {
         category: RemarkCategory = RemarkCategory.ALL
     ): List<TeacherRemarkOption> {
         val profile = analyzeProfile(student, term)
-        val templates = buildTemplates(profile)
 
-        val scored = templates.map { tpl ->
+        val generated = CommentGenerator.generateDetailedAlternatives(student, term).map { g ->
+            val mappedCat = when (g.category) {
+                CommentCategory.COMBINED -> RemarkCategory.COMBINED
+                CommentCategory.SUBJECT_ANALYSIS -> RemarkCategory.SUBJECT_DETAIL
+                CommentCategory.ACADEMIC -> RemarkCategory.ACADEMIC
+                CommentCategory.ATTENDANCE -> RemarkCategory.ATTENDANCE
+                CommentCategory.TRAITS -> RemarkCategory.TRAITS
+                CommentCategory.ENCOURAGEMENT -> RemarkCategory.ENCOURAGEMENT
+            }
+            TeacherRemarkOption(
+                id = g.id,
+                text = g.text,
+                category = mappedCat,
+                toneLabel = g.toneLabel,
+                matchScore = g.matchScore,
+                isTopPick = g.id == "gen_comb_var_0",
+                wordCount = g.wordCount
+            )
+        }
+
+        val templates = buildTemplates(profile)
+        val curated = templates.map { tpl ->
             val score = computeMatchScore(profile, tpl)
             TeacherRemarkOption(
                 id = tpl.id,
                 text = tpl.text,
                 category = tpl.category,
                 toneLabel = tpl.toneLabel,
-                matchScore = score,
-                isTopPick = false
+                matchScore = score.coerceAtMost(94),
+                isTopPick = false,
+                wordCount = CommentGenerator.countWords(tpl.text)
             )
         }
+
+        val merged = (generated + curated)
             .distinctBy { it.text.trim() }
             .sortedWith(
-                compareByDescending<TeacherRemarkOption> { it.matchScore }
+                compareByDescending<TeacherRemarkOption> { it.isTopPick }
+                    .thenByDescending { it.matchScore }
                     .thenBy { it.category.ordinal }
             )
 
-        val topText = scored.firstOrNull()?.text
-        val marked = scored.mapIndexed { idx, opt ->
+        val topText = merged.firstOrNull()?.text
+        val marked = merged.mapIndexed { idx, opt ->
             opt.copy(isTopPick = idx == 0 || opt.text == topText)
         }
 
@@ -676,7 +702,7 @@ object TeacherRemarkEngine {
         // ============================================================
         list += CandidateTemplate(
             id = "att_reg_1",
-            text = "বিদ্যালয়ে নিয়মিত ও সময়মতো উপস্থিতি অত্যন্ত প্রশংসনীয়। তার এই নিষ্ঠা পড়াশোনা ও সার্বিক বিকাশে সহায়ক হয়েছে।",
+            text = "বিদ্যালয়ে নিয়মিত ও সময়মতো উপস্থিতি অত্যন্ত প্রশংসনীয়। এই নিষ্ঠা পড়াশোনা ও সার্বিক বিকাশে সহায়ক হয়েছে।",
             category = RemarkCategory.ATTENDANCE,
             toneLabel = "নিয়মিত উপস্থিতি",
             idealAttendance = setOf(AttendanceBand.REGULAR),
@@ -747,7 +773,7 @@ object TeacherRemarkEngine {
         if (actGood) {
             list += CandidateTemplate(
                 id = "trait_act_good",
-                text = "শ্রেণিকাজ ও সহপাঠক্রমিক কার্যক্রমে দারুণ সক্রিয় ও প্রাণবন্ত। তার নেতৃত্বগুণ ও সৃজনশীল আগ্রহ আরও বিকশিত হোক।",
+                text = "শ্রেণিকাজ ও সহপাঠক্রমিক কার্যক্রমে দারুণ সক্রিয় ও প্রাণবন্ত। নেতৃত্বগুণ ও সৃজনশীল আগ্রহ আরও বিকশিত হোক।",
                 category = RemarkCategory.TRAITS,
                 toneLabel = "সক্রিয়তা ও নেতৃত্ব",
                 idealTraits = setOf(TraitsBand.EXEMPLARY, TraitsBand.GOOD),
@@ -811,7 +837,7 @@ object TeacherRemarkEngine {
         )
         list += CandidateTemplate(
             id = "enc_top_2",
-            text = "তার পরিশ্রম, সততা ও শেখার আগ্রহ প্রশংসনীয়। ভবিষ্যতে আরও বড় সাফল্যের জন্য আন্তরিক দোয়া ও শুভকামনা।",
+            text = "পরিশ্রম, সততা ও শেখার আগ্রহ প্রশংসনীয়। ভবিষ্যতে আরও বড় সাফল্যের জন্য আন্তরিক দোয়া ও শুভকামনা।",
             category = RemarkCategory.ENCOURAGEMENT,
             toneLabel = "শুভকামনামূলক",
             idealResults = setOf(ResultBand.EXCELLENT, ResultBand.GOOD),
@@ -852,7 +878,7 @@ object TeacherRemarkEngine {
         )
         list += CandidateTemplate(
             id = "enc_supp_2",
-            text = "ব্যক্তিগত যত্ন ও আনন্দময় পরিবেশে শেখার সুযোগ পেলে তার সুপ্ত প্রতিভা বিকশিত হবে। নিয়মিত পাঠাভ্যাস গড়ে তোলা প্রয়োজন।",
+            text = "ব্যক্তিগত যত্ন ও আনন্দময় পরিবেশে শেখার সুযোগ পেলে সুপ্ত প্রতিভা বিকশিত হবে। নিয়মিত পাঠাভ্যাস গড়ে তোলা প্রয়োজন।",
             category = RemarkCategory.ENCOURAGEMENT,
             toneLabel = "ইতিবাচক পরামর্শ",
             idealResults = setOf(ResultBand.NEEDS_SUPPORT, ResultBand.AVERAGE)
