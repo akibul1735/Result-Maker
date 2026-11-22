@@ -422,4 +422,59 @@ class CustomClassAndPromptTest {
         val updated = st.copy(schoolAddress = "বোয়ালমারী, ফরিদপুর")
         assertEquals("বোয়ালমারী, ফরিদপুর", updated.schoolAddress)
     }
+
+    @Test
+    fun threeTermBlankSheetsPlanMarksWithOptionalTotalAndAttendanceTraits() {
+        val sample = listOf(
+            Student(id = "s1", cls = 4, roll = 1, name = "তানভীর"),
+            Student(id = "s2", cls = 4, roll = 2, name = "নুসরাত")
+        )
+        val settings = Settings(school = "কামারখালী সরকারি প্রাথমিক বিদ্যালয়", year = "২০২৬")
+
+        // 1. 3-term marks without total: Roll, Name + 3*(CONT, WR) = 8 cols
+        val baseMarksCols = BlankSheetCatalog.presetColumns(BlankSheetPreset.THREE_TERM_MARKS)
+        assertEquals(8, baseMarksCols.size)
+        assertTrue(BlankSheetCatalog.isThreeTermMarksActive(baseMarksCols))
+        assertFalse(BlankSheetCatalog.hasThreeTermTotals(baseMarksCols))
+        assertEquals(listOf("১ম প্রান্তিক", "২য় প্রান্তিক", "৩য় প্রান্তিক"), baseMarksCols.mapNotNull { it.groupBn }.distinct())
+
+        // Toggle optional total -> Roll, Name + 3*(CONT, WR, TOTAL) = 11 cols
+        val withTotalsCols = BlankSheetCatalog.toggleThreeTermTotals(baseMarksCols, true)
+        assertEquals(11, withTotalsCols.size)
+        assertTrue(BlankSheetCatalog.hasThreeTermTotals(withTotalsCols))
+        assertEquals(
+            listOf("ROLL", "NAME", "T1_CONT", "T1_WR", "T1_TOTAL", "T2_CONT", "T2_WR", "T2_TOTAL", "T3_CONT", "T3_WR", "T3_TOTAL"),
+            withTotalsCols.map { it.id }
+        )
+
+        val marksPages = BlankSheetPlanner.buildPages(
+            students = sample,
+            settings = settings,
+            config = BlankSheetConfig(selectedClass = 4, subjectKey = "MATH", columns = withTotalsCols),
+            allowedClassIds = listOf(4)
+        )
+        assertEquals(1, marksPages.size)
+        assertEquals("গণিত", marksPages.first().subjectTitleBn)
+        assertEquals("৩ প্রান্তিক", marksPages.first().termTitleBn)
+        assertFalse(marksPages.first().isClassLevelForm)
+
+        // 2. 3-term attendance & traits: Roll, Name + 3*(DAYS, PRES, ACT, DISC, COND) = 17 cols on single page
+        val traitsCols = BlankSheetCatalog.presetColumns(BlankSheetPreset.THREE_TERM_ATTENDANCE_TRAITS)
+        assertEquals(17, traitsCols.size)
+        assertTrue(BlankSheetCatalog.isThreeTermAttendanceTraitsActive(traitsCols))
+        val traitsPages = BlankSheetPlanner.buildPages(
+            students = sample,
+            settings = settings,
+            config = BlankSheetConfig(
+                selectedClass = 4,
+                subjectKey = BlankSheetCatalog.ALL_SUBJECTS_KEY,
+                columns = traitsCols
+            ),
+            allowedClassIds = listOf(4)
+        )
+        assertEquals(1, traitsPages.size)
+        assertTrue(traitsPages.first().isClassLevelForm)
+        assertEquals("উপস্থিতি ও গুণাবলি", traitsPages.first().subjectTitleBn)
+        assertEquals("৩ প্রান্তিক", traitsPages.first().termTitleBn)
+    }
 }

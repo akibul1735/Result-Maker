@@ -206,26 +206,47 @@ fun BlankSheetPdfScreen(
         }
     }
 
-    val selectedSubjectLabel = remember(config.subjectKey, config.customSubjectTitle) {
-        BlankSheetCatalog.subjectTitleFor(config.subjectKey, config.customSubjectTitle)
-            .ifBlank { "সাধারণ" }
+    val isThreeTermMarks = remember(config.columns) {
+        BlankSheetCatalog.isThreeTermMarksActive(config.columns)
+    }
+    val hasThreeTermTotal = remember(config.columns) {
+        BlankSheetCatalog.hasThreeTermTotals(config.columns)
+    }
+    val isThreeTermTraits = remember(config.columns) {
+        BlankSheetCatalog.isThreeTermAttendanceTraitsActive(config.columns)
+    }
+    val isClassLevelTraitsOnly = remember(config.columns) {
+        isThreeTermTraits && !isThreeTermMarks && config.columns.none { it.compKey != null }
     }
 
-    val selectedTermLabel = remember(config.term, config.customTermTitle) {
-        when (config.term) {
-            1, 2, 3 -> termNameBn(config.term)
-            0 -> "বার্ষিক"
-            -1 -> config.customTermTitle.ifBlank { "শিরোনামহীন" }
-            else -> "শিরোনামহীন"
+    val selectedSubjectLabel = remember(config.subjectKey, config.customSubjectTitle, isClassLevelTraitsOnly) {
+        if (isClassLevelTraitsOnly) {
+            "উপস্থিতি ও গুণাবলি"
+        } else {
+            BlankSheetCatalog.subjectTitleFor(config.subjectKey, config.customSubjectTitle)
+                .ifBlank { "সাধারণ" }
         }
     }
 
-    val exportFileName = remember(config, selectedClassLabel, selectedSubjectLabel) {
-        val clsPart = if (config.selectedClass == null) "সব-শ্রেণি" else "শ্রেণি-${config.selectedClass}"
-        val subPart = if (config.subjectKey == BlankSheetCatalog.ALL_SUBJECTS_KEY) {
-            "সব-বিষয়"
+    val selectedTermLabel = remember(config.term, config.customTermTitle, isThreeTermMarks, isThreeTermTraits) {
+        if (isThreeTermMarks || isThreeTermTraits) {
+            "৩ প্রান্তিক"
         } else {
-            selectedSubjectLabel.replace(" ", "-")
+            when (config.term) {
+                1, 2, 3 -> termNameBn(config.term)
+                0 -> "বার্ষিক"
+                -1 -> config.customTermTitle.ifBlank { "শিরোনামহীন" }
+                else -> "শিরোনামহীন"
+            }
+        }
+    }
+
+    val exportFileName = remember(config, selectedClassLabel, selectedSubjectLabel, isClassLevelTraitsOnly) {
+        val clsPart = if (config.selectedClass == null) "সব-শ্রেণি" else "শ্রেণি-${config.selectedClass}"
+        val subPart = when {
+            isClassLevelTraitsOnly -> "৩-প্রান্তিক-উপস্থিতি-গুণাবলি"
+            config.subjectKey == BlankSheetCatalog.ALL_SUBJECTS_KEY -> "সব-বিষয়"
+            else -> selectedSubjectLabel.replace(" ", "-")
         }
         "ফাঁকা-শিট-$clsPart-$subPart.pdf"
     }
@@ -355,37 +376,46 @@ fun BlankSheetPdfScreen(
 
                             // Subject Selector
                             Box(Modifier.weight(1.1f)) {
-                                CompactDropdownPill(
-                                    label = "বিষয়: $selectedSubjectLabel",
-                                    highlighted = config.subjectKey == BlankSheetCatalog.ALL_SUBJECTS_KEY,
-                                    testTag = "blank_subject_dropdown",
-                                    onClick = { subjectMenuOpen = true }
-                                )
-                                DropdownMenu(
-                                    expanded = subjectMenuOpen,
-                                    onDismissRequest = { subjectMenuOpen = false },
-                                    modifier = Modifier.heightIn(max = 320.dp)
-                                ) {
-                                    BlankSheetCatalog.SUBJECT_OPTIONS.forEach { opt ->
-                                        val isSel = config.subjectKey == opt.key
-                                        DropdownMenuItem(
-                                            modifier = Modifier.background(if (isSel) TealContainer else Color.Transparent),
-                                            text = {
-                                                Text(
-                                                    opt.labelBn,
-                                                    fontWeight = if (isSel) FontWeight.Bold else FontWeight.Normal,
-                                                    color = if (isSel) TealDark else SlateText
-                                                )
-                                            },
-                                            trailingIcon = if (isSel) {
-                                                { Icon(Icons.Rounded.Check, contentDescription = null, tint = TealPrimary, modifier = Modifier.size(16.dp)) }
-                                            } else null,
-                                            onClick = {
-                                                subjectMenuOpen = false
-                                                config = config.copy(subjectKey = opt.key)
-                                                previewPageIdx = 0
-                                            }
-                                        )
+                                if (isClassLevelTraitsOnly) {
+                                    CompactDropdownPill(
+                                        label = "ধরন: উপস্থিতি ও গুণাবলি",
+                                        highlighted = true,
+                                        testTag = "blank_subject_dropdown",
+                                        onClick = { /* Class-level form applies to all subjects */ }
+                                    )
+                                } else {
+                                    CompactDropdownPill(
+                                        label = "বিষয়: $selectedSubjectLabel",
+                                        highlighted = config.subjectKey == BlankSheetCatalog.ALL_SUBJECTS_KEY,
+                                        testTag = "blank_subject_dropdown",
+                                        onClick = { subjectMenuOpen = true }
+                                    )
+                                    DropdownMenu(
+                                        expanded = subjectMenuOpen,
+                                        onDismissRequest = { subjectMenuOpen = false },
+                                        modifier = Modifier.heightIn(max = 320.dp)
+                                    ) {
+                                        BlankSheetCatalog.SUBJECT_OPTIONS.forEach { opt ->
+                                            val isSel = config.subjectKey == opt.key
+                                            DropdownMenuItem(
+                                                modifier = Modifier.background(if (isSel) TealContainer else Color.Transparent),
+                                                text = {
+                                                    Text(
+                                                        opt.labelBn,
+                                                        fontWeight = if (isSel) FontWeight.Bold else FontWeight.Normal,
+                                                        color = if (isSel) TealDark else SlateText
+                                                    )
+                                                },
+                                                trailingIcon = if (isSel) {
+                                                    { Icon(Icons.Rounded.Check, contentDescription = null, tint = TealPrimary, modifier = Modifier.size(16.dp)) }
+                                                } else null,
+                                                onClick = {
+                                                    subjectMenuOpen = false
+                                                    config = config.copy(subjectKey = opt.key)
+                                                    previewPageIdx = 0
+                                                }
+                                            )
+                                        }
                                     }
                                 }
                             }
@@ -394,9 +424,13 @@ fun BlankSheetPdfScreen(
                             Box(Modifier.weight(0.95f)) {
                                 CompactDropdownPill(
                                     label = selectedTermLabel,
-                                    highlighted = false,
+                                    highlighted = isThreeTermMarks || isThreeTermTraits,
                                     testTag = "blank_term_dropdown",
-                                    onClick = { termMenuOpen = true }
+                                    onClick = {
+                                        if (!isThreeTermMarks && !isThreeTermTraits) {
+                                            termMenuOpen = true
+                                        }
+                                    }
                                 )
                                 DropdownMenu(
                                     expanded = termMenuOpen,
@@ -433,12 +467,12 @@ fun BlankSheetPdfScreen(
                         }
 
                         // Inline Custom Subject / Custom Term Input (only when selected)
-                        if (config.subjectKey == null || config.term == -1) {
+                        if ((!isClassLevelTraitsOnly && config.subjectKey == null) || (!isThreeTermMarks && !isThreeTermTraits && config.term == -1)) {
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
                                 horizontalArrangement = Arrangement.spacedBy(6.dp)
                             ) {
-                                if (config.subjectKey == null) {
+                                if (!isClassLevelTraitsOnly && config.subjectKey == null) {
                                     OutlinedTextField(
                                         value = config.customSubjectTitle,
                                         onValueChange = { config = config.copy(customSubjectTitle = it) },
@@ -448,7 +482,7 @@ fun BlankSheetPdfScreen(
                                         modifier = Modifier.weight(1f).testTag("blank_custom_subject_input")
                                     )
                                 }
-                                if (config.term == -1) {
+                                if (!isThreeTermMarks && !isThreeTermTraits && config.term == -1) {
                                     OutlinedTextField(
                                         value = config.customTermTitle,
                                         onValueChange = { config = config.copy(customTermTitle = it) },
@@ -769,17 +803,23 @@ fun BlankSheetPdfScreen(
                         ) {
                             Text("টেমপ্লেট:", fontSize = 10.5.sp, fontWeight = FontWeight.SemiBold, color = SlateMuted)
                             BlankSheetPreset.entries.forEach { preset ->
-                                val isExact = config.columns.map { it.id } == preset.columnIds
+                                val isExact = when (preset) {
+                                    BlankSheetPreset.THREE_TERM_MARKS -> isThreeTermMarks
+                                    BlankSheetPreset.THREE_TERM_ATTENDANCE_TRAITS -> isThreeTermTraits && !isThreeTermMarks
+                                    else -> config.columns.map { it.id } == preset.columnIds
+                                }
                                 Surface(
                                     onClick = {
                                         val cols = BlankSheetCatalog.presetColumns(preset)
                                         val suggestedOri = if (cols.size >= 8) BlankSheetOrientation.LANDSCAPE else BlankSheetOrientation.PORTRAIT
                                         config = config.copy(columns = cols, orientation = suggestedOri)
                                         focusedColId = null
+                                        previewPageIdx = 0
                                     },
                                     shape = RoundedCornerShape(6.dp),
                                     color = if (isExact) TealSoft else SlateBg,
-                                    border = BorderStroke(1.dp, if (isExact) TealPrimary else SlateOutline)
+                                    border = BorderStroke(1.dp, if (isExact) TealPrimary else SlateOutline),
+                                    modifier = Modifier.testTag("blank_preset_${preset.name.lowercase()}")
                                 ) {
                                     Text(
                                         preset.labelBn,
@@ -804,6 +844,47 @@ fun BlankSheetPdfScreen(
                                 ) {
                                     Icon(Icons.Rounded.Add, contentDescription = null, tint = TealPrimary, modifier = Modifier.size(13.dp))
                                     Text("কাস্টম কলাম", fontSize = 10.5.sp, fontWeight = FontWeight.Bold, color = TealPrimary)
+                                }
+                            }
+                        }
+
+                        // Optional Total Column Toggle for 3-Term Marks Sheet
+                        if (isThreeTermMarks) {
+                            Surface(
+                                onClick = {
+                                    val nextCols = BlankSheetCatalog.toggleThreeTermTotals(
+                                        config.columns,
+                                        !hasThreeTermTotal
+                                    )
+                                    config = config.copy(columns = nextCols)
+                                },
+                                shape = RoundedCornerShape(7.dp),
+                                color = if (hasThreeTermTotal) TealSoft else SlateBg,
+                                border = BorderStroke(1.dp, if (hasThreeTermTotal) TealPrimary else SlateOutline),
+                                modifier = Modifier.fillMaxWidth().testTag("blank_3term_total_toggle")
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
+                                    Checkbox(
+                                        checked = hasThreeTermTotal,
+                                        onCheckedChange = { checked ->
+                                            val nextCols = BlankSheetCatalog.toggleThreeTermTotals(
+                                                config.columns,
+                                                checked
+                                            )
+                                            config = config.copy(columns = nextCols)
+                                        },
+                                        modifier = Modifier.size(28.dp)
+                                    )
+                                    Text(
+                                        "প্রতি প্রান্তিকে ঐচ্ছিক 'মোট' কলাম যোগ করুন (ধারাবাহিক + সামষ্টিক + মোট)",
+                                        fontSize = 11.sp,
+                                        fontWeight = if (hasThreeTermTotal) FontWeight.Bold else FontWeight.Medium,
+                                        color = if (hasThreeTermTotal) TealDark else SlateText
+                                    )
                                 }
                             }
                         }
@@ -843,7 +924,10 @@ fun BlankSheetPdfScreen(
                             }
                         }
 
-                        // Column Picker Strip (Roll -> Name -> TB..CT -> CONT -> WR -> Total -> Grade..Sign)
+                        // Column Picker Strip (context-aware: standard, 3-term marks, or 3-term traits)
+                        val pickerColumns = remember(config.columns) {
+                            BlankSheetCatalog.pickerColumnsFor(config.columns)
+                        }
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -851,7 +935,7 @@ fun BlankSheetPdfScreen(
                             horizontalArrangement = Arrangement.spacedBy(4.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            BlankSheetCatalog.ALL_COLUMNS.forEach { catalogCol ->
+                            pickerColumns.forEach { catalogCol ->
                                 val isAdded = config.columns.any { it.id == catalogCol.id }
                                 Surface(
                                     onClick = {
@@ -878,7 +962,7 @@ fun BlankSheetPdfScreen(
                                             Icon(Icons.Rounded.Check, contentDescription = null, tint = Color.White, modifier = Modifier.size(12.dp))
                                         }
                                         Text(
-                                            catalogCol.titleBn,
+                                            catalogCol.pickerLabelBn,
                                             fontSize = 11.sp,
                                             fontWeight = if (isAdded) FontWeight.Bold else FontWeight.Medium,
                                             color = if (isAdded) Color.White else SlateText,
@@ -917,7 +1001,7 @@ fun BlankSheetPdfScreen(
                                         modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp)
                                     ) {
                                         Text(
-                                            "${bn((idx + 1).toString())}.${col.titleBn}",
+                                            "${bn((idx + 1).toString())}.${col.pickerLabelBn}",
                                             fontSize = 10.sp,
                                             fontWeight = if (isFocused) FontWeight.Bold else FontWeight.Medium,
                                             color = if (isFocused) TealDark else SlateText

@@ -28,10 +28,30 @@ data class BlankSheetColumn(
     val fillWith: BlankColFill = BlankColFill.NONE,
     val align: BlankColAlign = BlankColAlign.CENTER,
     val compKey: String? = null,
-    val isCustom: Boolean = false
+    val isCustom: Boolean = false,
+    val groupBn: String? = null,
+    val pickerLabelBn: String = titleBn
 )
 
 enum class BlankSheetPreset(val labelBn: String, val columnIds: List<String>) {
+    THREE_TERM_MARKS(
+        "৩ প্রান্তিক নম্বর",
+        listOf(
+            "ROLL", "NAME",
+            "T1_CONT", "T1_WR",
+            "T2_CONT", "T2_WR",
+            "T3_CONT", "T3_WR"
+        )
+    ),
+    THREE_TERM_ATTENDANCE_TRAITS(
+        "৩ প্রান্তিক উপস্থিতি ও গুণাবলি",
+        listOf(
+            "ROLL", "NAME",
+            "T1_DAYS", "T1_PRES", "T1_ACT", "T1_DISC", "T1_COND",
+            "T2_DAYS", "T2_PRES", "T2_ACT", "T2_DISC", "T2_COND",
+            "T3_DAYS", "T3_PRES", "T3_ACT", "T3_DISC", "T3_COND"
+        )
+    ),
     FULL_MARKS(
         "পূর্ণাঙ্গ নম্বর",
         listOf("ROLL", "NAME", "TB", "ACT", "LANG", "CT", "CONT", "WR", "TOTAL")
@@ -58,23 +78,63 @@ data class BlankSubjectOption(
 object BlankSheetCatalog {
     const val ALL_SUBJECTS_KEY = "__ALL__"
 
+    val THREE_TERM_MARK_IDS: Set<String> = setOf(
+        "T1_CONT", "T1_WR", "T1_TOTAL",
+        "T2_CONT", "T2_WR", "T2_TOTAL",
+        "T3_CONT", "T3_WR", "T3_TOTAL"
+    )
+
+    val THREE_TERM_TOTAL_IDS: Set<String> = setOf("T1_TOTAL", "T2_TOTAL", "T3_TOTAL")
+
+    val THREE_TERM_TRAIT_IDS: Set<String> = setOf(
+        "T1_DAYS", "T1_PRES", "T1_ACT", "T1_DISC", "T1_COND",
+        "T2_DAYS", "T2_PRES", "T2_ACT", "T2_DISC", "T2_COND",
+        "T3_DAYS", "T3_PRES", "T3_ACT", "T3_DISC", "T3_COND"
+    )
+
+    private fun threeTermMarkColsFor(term: Int): List<BlankSheetColumn> {
+        val tOrd = termOrdinalBn(term)
+        val grp = termNameBn(term)
+        return listOf(
+            BlankSheetColumn("T${term}_CONT", "ধারাবাহিক", widthWeight = 1.00f, compKey = "CONT", groupBn = grp, pickerLabelBn = "$tOrd-ধারাবাহিক"),
+            BlankSheetColumn("T${term}_WR", "সামষ্টিক", widthWeight = 0.92f, compKey = "WR", groupBn = grp, pickerLabelBn = "$tOrd-সামষ্টিক"),
+            BlankSheetColumn("T${term}_TOTAL", "মোট", widthWeight = 0.84f, compKey = "TOTAL", groupBn = grp, pickerLabelBn = "$tOrd-মোট")
+        )
+    }
+
+    private fun threeTermTraitColsFor(term: Int): List<BlankSheetColumn> {
+        val tOrd = termOrdinalBn(term)
+        val grp = termNameBn(term)
+        return listOf(
+            BlankSheetColumn("T${term}_DAYS", "কার্যদিবস", widthWeight = 0.78f, groupBn = grp, pickerLabelBn = "$tOrd-কার্যদিবস"),
+            BlankSheetColumn("T${term}_PRES", "উপস্থিতি", widthWeight = 0.78f, groupBn = grp, pickerLabelBn = "$tOrd-উপস্থিতি"),
+            BlankSheetColumn("T${term}_ACT", "সক্রিয়তা", widthWeight = 0.85f, groupBn = grp, pickerLabelBn = "$tOrd-সক্রিয়তা"),
+            BlankSheetColumn("T${term}_DISC", "শৃঙ্খলা", widthWeight = 0.82f, groupBn = grp, pickerLabelBn = "$tOrd-শৃঙ্খলা"),
+            BlankSheetColumn("T${term}_COND", "আচরণ", widthWeight = 0.82f, groupBn = grp, pickerLabelBn = "$tOrd-আচরণ")
+        )
+    }
+
     val ALL_COLUMNS: List<BlankSheetColumn> = listOf(
-        BlankSheetColumn("ROLL", "রোল", widthWeight = 0.68f, fillWith = BlankColFill.ROLL, align = BlankColAlign.CENTER),
-        BlankSheetColumn("NAME", "নাম", widthWeight = 2.40f, fillWith = BlankColFill.NAME, align = BlankColAlign.LEFT),
+        BlankSheetColumn("ROLL", "রোল", widthWeight = 0.65f, fillWith = BlankColFill.ROLL, align = BlankColAlign.CENTER),
+        BlankSheetColumn("NAME", "নাম", widthWeight = 2.35f, fillWith = BlankColFill.NAME, align = BlankColAlign.LEFT),
         BlankSheetColumn("TB", "পাঠ্যবই", widthWeight = 0.90f, compKey = "TB"),
         BlankSheetColumn("ACT", "কাজ", widthWeight = 0.80f, compKey = "ACT"),
         BlankSheetColumn("LANG", "ভাষা", widthWeight = 0.80f, compKey = "LANG"),
         BlankSheetColumn("CT", "অভীক্ষা", widthWeight = 0.90f, compKey = "CT"),
         BlankSheetColumn("CONT", "ধারাবাহিক", widthWeight = 1.05f, compKey = "CONT"),
         BlankSheetColumn("WR", "লিখিত", widthWeight = 0.88f, compKey = "WR"),
-        BlankSheetColumn("TOTAL", "মোট", widthWeight = 0.88f, compKey = "TOTAL"),
-        BlankSheetColumn("GRADE", "গ্রেড", widthWeight = 0.78f),
-        BlankSheetColumn("GP", "জিপি", widthWeight = 0.72f),
-        BlankSheetColumn("MERIT", "মেধাক্রম", widthWeight = 0.88f),
-        BlankSheetColumn("ATT", "উপস্থিতি", widthWeight = 0.90f),
-        BlankSheetColumn("REMARK", "মন্তব্য", widthWeight = 1.50f, align = BlankColAlign.LEFT),
-        BlankSheetColumn("SIGN", "স্বাক্ষর", widthWeight = 1.00f)
-    )
+        BlankSheetColumn("TOTAL", "মোট", widthWeight = 0.88f, compKey = "TOTAL")
+    ) +
+        threeTermMarkColsFor(1) + threeTermMarkColsFor(2) + threeTermMarkColsFor(3) +
+        threeTermTraitColsFor(1) + threeTermTraitColsFor(2) + threeTermTraitColsFor(3) +
+        listOf(
+            BlankSheetColumn("GRADE", "গ্রেড", widthWeight = 0.78f),
+            BlankSheetColumn("GP", "জিপি", widthWeight = 0.72f),
+            BlankSheetColumn("MERIT", "মেধাক্রম", widthWeight = 0.88f),
+            BlankSheetColumn("ATT", "উপস্থিতি", widthWeight = 0.90f),
+            BlankSheetColumn("REMARK", "মন্তব্য", widthWeight = 1.50f, align = BlankColAlign.LEFT),
+            BlankSheetColumn("SIGN", "স্বাক্ষর", widthWeight = 1.00f)
+        )
 
     val DEFAULT_COLUMNS: List<BlankSheetColumn> =
         BlankSheetPreset.COMPACT_MARKS.columnIds.mapNotNull { id -> ALL_COLUMNS.find { it.id == id } }
@@ -97,6 +157,62 @@ object BlankSheetCatalog {
 
     fun presetColumns(preset: BlankSheetPreset): List<BlankSheetColumn> =
         preset.columnIds.mapNotNull { byId(it) }
+
+    fun threeTermMarksColumns(includeTotal: Boolean): List<BlankSheetColumn> {
+        val ids = buildList {
+            add("ROLL")
+            add("NAME")
+            for (t in 1..3) {
+                add("T${t}_CONT")
+                add("T${t}_WR")
+                if (includeTotal) add("T${t}_TOTAL")
+            }
+        }
+        return ids.mapNotNull { byId(it) }
+    }
+
+    fun isThreeTermMarksActive(columns: List<BlankSheetColumn>): Boolean =
+        columns.any { it.id in THREE_TERM_MARK_IDS }
+
+    fun hasThreeTermTotals(columns: List<BlankSheetColumn>): Boolean =
+        columns.any { it.id in THREE_TERM_TOTAL_IDS }
+
+    fun isThreeTermAttendanceTraitsActive(columns: List<BlankSheetColumn>): Boolean =
+        columns.any { it.id in THREE_TERM_TRAIT_IDS }
+
+    fun isThreeTermGroupedActive(columns: List<BlankSheetColumn>): Boolean =
+        isThreeTermMarksActive(columns) || isThreeTermAttendanceTraitsActive(columns)
+
+    fun toggleThreeTermTotals(columns: List<BlankSheetColumn>, includeTotal: Boolean): List<BlankSheetColumn> {
+        val withoutTotals = columns.filterNot { it.id in THREE_TERM_TOTAL_IDS }
+        if (!includeTotal) return withoutTotals
+        val out = mutableListOf<BlankSheetColumn>()
+        val catalogIdx = ALL_COLUMNS.mapIndexed { idx, col -> col.id to idx }.toMap()
+        val extraTotals = mutableListOf<BlankSheetColumn>()
+        for (t in 1..3) {
+            val hasTermCol = withoutTotals.any { it.id.startsWith("T${t}_") }
+            if (hasTermCol) byId("T${t}_TOTAL")?.let { extraTotals.add(it) }
+        }
+        out.addAll(withoutTotals)
+        extraTotals.forEach { totCol ->
+            val targetPos = catalogIdx[totCol.id] ?: return@forEach
+            val insertAt = out.indexOfFirst { (catalogIdx[it.id] ?: Int.MAX_VALUE) > targetPos }
+            if (insertAt < 0) out.add(totCol) else out.add(insertAt, totCol)
+        }
+        return out
+    }
+
+    fun pickerColumnsFor(current: List<BlankSheetColumn>): List<BlankSheetColumn> = when {
+        isThreeTermAttendanceTraitsActive(current) -> ALL_COLUMNS.filter { col ->
+            col.id in setOf("ROLL", "NAME", "REMARK", "SIGN") || col.id in THREE_TERM_TRAIT_IDS
+        }
+        isThreeTermMarksActive(current) -> ALL_COLUMNS.filter { col ->
+            col.id in setOf("ROLL", "NAME", "GRADE", "GP", "MERIT", "REMARK", "SIGN") || col.id in THREE_TERM_MARK_IDS
+        }
+        else -> ALL_COLUMNS.filter { col ->
+            col.id !in THREE_TERM_MARK_IDS && col.id !in THREE_TERM_TRAIT_IDS
+        }
+    }
 
     fun createCustomColumn(title: String): BlankSheetColumn {
         val clean = title.trim()
@@ -201,7 +317,8 @@ data class BlankSheetPageSpec(
     val columns: List<BlankSheetColumn>,
     val showSubjectMaxInHeader: Boolean,
     val subjectKey: String?,
-    val numeralStyle: BlankNumeralStyle = BlankNumeralStyle.BENGALI
+    val numeralStyle: BlankNumeralStyle = BlankNumeralStyle.BENGALI,
+    val isClassLevelForm: Boolean = false
 )
 
 object BlankSheetPlanner {
@@ -215,8 +332,15 @@ object BlankSheetPlanner {
         val safeCols = config.columns.ifEmpty { BlankSheetCatalog.DEFAULT_COLUMNS }
         val perPage = config.rowsPerPage.coerceIn(5, 50)
         val extraBlank = config.extraBlankRowsPerClass.coerceIn(0, 20)
-        val termTitle = BlankSheetCatalog.termLabelFor(config.term, config.customTermTitle)
-        val isAllSubjects = config.subjectKey == BlankSheetCatalog.ALL_SUBJECTS_KEY
+        val isThreeTermMarks = BlankSheetCatalog.isThreeTermMarksActive(safeCols)
+        val isThreeTermTraits = BlankSheetCatalog.isThreeTermAttendanceTraitsActive(safeCols)
+        val isClassLevelTraitsOnly = isThreeTermTraits && !isThreeTermMarks && safeCols.none { it.compKey != null }
+        val termTitle = if (isThreeTermMarks || isThreeTermTraits) {
+            "৩ প্রান্তিক"
+        } else {
+            BlankSheetCatalog.termLabelFor(config.term, config.customTermTitle)
+        }
+        val isAllSubjects = config.subjectKey == BlankSheetCatalog.ALL_SUBJECTS_KEY && !isClassLevelTraitsOnly
 
         val effectiveAllowed = allowedClassIds.distinct().sorted()
         val targetClasses = if (config.selectedClass != null) {
@@ -284,12 +408,12 @@ object BlankSheetPlanner {
 
             val chunks = mappedRows.chunked(perPage)
 
-            val subjectPairs: List<Pair<String?, String>> = if (isAllSubjects) {
-                subjectsFor(cls, "ইসলাম").map { sub ->
+            val subjectPairs: List<Pair<String?, String>> = when {
+                isClassLevelTraitsOnly -> listOf(null to "উপস্থিতি ও গুণাবলি")
+                isAllSubjects -> subjectsFor(cls, "ইসলাম").map { sub ->
                     sub.key to BlankSheetCatalog.shortSubjectTitleForSub(sub)
                 }
-            } else {
-                listOf(config.subjectKey to BlankSheetCatalog.subjectTitleFor(config.subjectKey, config.customSubjectTitle))
+                else -> listOf(config.subjectKey to BlankSheetCatalog.subjectTitleFor(config.subjectKey, config.customSubjectTitle))
             }
 
             subjectPairs.forEach { (subKey, subTitle) ->
@@ -325,9 +449,10 @@ object BlankSheetPlanner {
                 rowsPerPageCapacity = perPage,
                 rows = raw.rows,
                 columns = safeCols,
-                showSubjectMaxInHeader = config.showSubjectMaxInHeader,
+                showSubjectMaxInHeader = if (isClassLevelTraitsOnly) false else config.showSubjectMaxInHeader,
                 subjectKey = raw.subjectKey,
-                numeralStyle = config.numeralStyle
+                numeralStyle = config.numeralStyle,
+                isClassLevelForm = isClassLevelTraitsOnly
             )
         }
     }

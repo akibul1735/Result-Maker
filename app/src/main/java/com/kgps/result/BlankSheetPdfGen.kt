@@ -241,10 +241,10 @@ object BlankSheetPdfGen {
 
         val metaY = metaTop + 15.8f
         val classBannerText = "শ্রেণি: ${page.classTitleBn}"
-        val subjectBannerText = if (page.subjectTitleBn.isNotBlank()) {
-            "বিষয়: ${page.subjectTitleBn}"
-        } else {
-            "বিষয়: ......................"
+        val subjectBannerText = when {
+            page.isClassLevelForm -> page.subjectTitleBn
+            page.subjectTitleBn.isNotBlank() -> "বিষয়: ${page.subjectTitleBn}"
+            else -> "বিষয়: ......................"
         }
         val rightBannerText = buildString {
             if (page.termTitleBn.isNotBlank()) {
@@ -283,14 +283,25 @@ object BlankSheetPdfGen {
         c.drawText(subjectBannerText, pageW / 2f, metaY, centerBannerPaint)
         c.drawText(rightBannerText, marginX + contentW - 8f, metaY, rightBannerPaint)
 
+        val cols = page.columns.ifEmpty { BlankSheetCatalog.DEFAULT_COLUMNS }
+        val hasGroupedHeader = cols.any { !it.groupBn.isNullOrBlank() }
+
         // 3. Table Geometry
         val footerReservedH = 22f
         val tableTop = metaTop + metaH + 7f
         val tableBottomLimit = pageH - marginBottom - footerReservedH
-        val hasMaxSubHeader = page.showSubjectMaxInHeader && page.columns.any { col ->
+        val hasMaxSubHeader = page.showSubjectMaxInHeader && cols.any { col ->
             BlankSheetCatalog.resolveMaxHint(page.cls, page.subjectKey, col.compKey) != null
         }
-        val tableHeaderH = if (hasMaxSubHeader) 30f else 24f
+        val groupRowH = 17f
+        val subRowH = if (hasMaxSubHeader) 27f else 21f
+        val tableHeaderH = if (hasGroupedHeader) {
+            groupRowH + subRowH
+        } else if (hasMaxSubHeader) {
+            30f
+        } else {
+            24f
+        }
         val bodyAvailH = max(80f, tableBottomLimit - tableTop - tableHeaderH)
 
         val capacity = page.rowsPerPageCapacity.coerceIn(5, 50)
@@ -300,48 +311,125 @@ object BlankSheetPdfGen {
             max(16f, min(38f, bodyAvailH / capacity.toFloat()))
         )
 
-        val cols = page.columns.ifEmpty { BlankSheetCatalog.DEFAULT_COLUMNS }
         val totalWeight = cols.sumOf { it.widthWeight.toDouble() }.toFloat().coerceAtLeast(1f)
         val colWidths = cols.map { (it.widthWeight / totalWeight) * contentW }
 
-        // 4. Draw Table Header Row (Very Light Gray Shade + Black Borders + Concise Bengali Text)
-        c.drawRect(marginX, tableTop, marginX + contentW, tableTop + tableHeaderH, headerFillPaint)
-        var x = marginX
-        cols.forEachIndexed { idx, col ->
-            val w = colWidths[idx]
-            c.drawRect(x, tableTop, x + w, tableTop + tableHeaderH, headerStrokePaint)
-
-            val maxHint = if (page.showSubjectMaxInHeader) {
-                BlankSheetCatalog.resolveMaxHint(page.cls, page.subjectKey, col.compKey)
-            } else {
-                null
-            }
-            val lines = if (maxHint != null) {
-                listOf(col.titleBn, "(${BlankSheetCatalog.formatInt(maxHint, numStyle)})")
-            } else {
-                listOf(col.titleBn)
-            }
-
+        fun drawHeaderLines(
+            lines: List<String>,
+            cellX: Float,
+            cellY: Float,
+            cellW: Float,
+            cellH: Float,
+            baseTextSize: Float
+        ) {
             val hp = textPaint(
                 ctx = ctx,
-                size = if (cols.size >= 9) 8.2f else 9.0f,
+                size = baseTextSize,
                 bold = true,
                 fontId = fontId,
                 color = 0xFF000000.toInt()
             ).apply {
                 textAlign = Paint.Align.CENTER
             }
-            val maxLineW = max(8f, w - 4f)
-            while (lines.maxOf { hp.measureText(it) } > maxLineW && hp.textSize > 5.0f) {
-                hp.textSize -= 0.3f
+            val maxLineW = max(6f, cellW - 3.5f)
+            while (lines.maxOf { hp.measureText(it) } > maxLineW && hp.textSize > 4.6f) {
+                hp.textSize -= 0.25f
             }
-            val lineH = hp.textSize * 1.18f
-            var ty = tableTop + (tableHeaderH - lineH * lines.size) / 2f + hp.textSize * 0.88f
+            val lineH = hp.textSize * 1.16f
+            var ty = cellY + (cellH - lineH * lines.size) / 2f + hp.textSize * 0.88f
             lines.forEach { line ->
-                c.drawText(line, x + w / 2f, ty, hp)
+                c.drawText(line, cellX + cellW / 2f, ty, hp)
                 ty += lineH
             }
-            x += w
+        }
+
+        // 4. Draw Table Header Row(s) (Very Light Gray Shade + Black Borders + Concise Bengali Text)
+        c.drawRect(marginX, tableTop, marginX + contentW, tableTop + tableHeaderH, headerFillPaint)
+        val colXPositions = FloatArray(cols.size)
+        run {
+            var accX = marginX
+            cols.indices.forEach { i ->
+                colXPositions[i] = accX
+                accX += colWidths[i]
+            }
+        }
+
+        if (!hasGroupedHeader) {
+            cols.forEachIndexed { idx, col ->
+                val cx = colXPositions[idx]
+                val w = colWidths[idx]
+                c.drawRect(cx, tableTop, cx + w, tableTop + tableHeaderH, headerStrokePaint)
+
+                val maxHint = if (page.showSubjectMaxInHeader) {
+                    BlankSheetCatalog.resolveMaxHint(page.cls, page.subjectKey, col.compKey)
+                } else {
+                    null
+                }
+                val lines = if (maxHint != null) {
+                    col.titleBn.split("\n") + "(${BlankSheetCatalog.formatInt(maxHint, numStyle)})"
+                } else {
+                    col.titleBn.split("\n")
+                }
+                val baseSize = if (cols.size >= 9) 8.2f else 9.0f
+                drawHeaderLines(lines, cx, tableTop, w, tableHeaderH, baseSize)
+            }
+        } else {
+            val baseSubSize = when {
+                cols.size >= 15 -> 7.6f
+                cols.size >= 10 -> 8.2f
+                else -> 8.8f
+            }
+            var idx = 0
+            while (idx < cols.size) {
+                val col = cols[idx]
+                val grp = col.groupBn?.trim().orEmpty()
+                if (grp.isEmpty()) {
+                    val cx = colXPositions[idx]
+                    val w = colWidths[idx]
+                    c.drawRect(cx, tableTop, cx + w, tableTop + tableHeaderH, headerStrokePaint)
+                    val maxHint = if (page.showSubjectMaxInHeader) {
+                        BlankSheetCatalog.resolveMaxHint(page.cls, page.subjectKey, col.compKey)
+                    } else {
+                        null
+                    }
+                    val lines = if (maxHint != null) {
+                        col.titleBn.split("\n") + "(${BlankSheetCatalog.formatInt(maxHint, numStyle)})"
+                    } else {
+                        col.titleBn.split("\n")
+                    }
+                    drawHeaderLines(lines, cx, tableTop, w, tableHeaderH, 9.0f)
+                    idx++
+                } else {
+                    var endIdx = idx
+                    while (endIdx + 1 < cols.size && cols[endIdx + 1].groupBn?.trim() == grp) {
+                        endIdx++
+                    }
+                    val groupX = colXPositions[idx]
+                    var groupW = 0f
+                    for (k in idx..endIdx) groupW += colWidths[k]
+                    c.drawRect(groupX, tableTop, groupX + groupW, tableTop + groupRowH, headerStrokePaint)
+                    drawHeaderLines(listOf(grp), groupX, tableTop, groupW, groupRowH, 9.0f)
+
+                    for (k in idx..endIdx) {
+                        val subCol = cols[k]
+                        val subX = colXPositions[k]
+                        val subW = colWidths[k]
+                        c.drawRect(subX, tableTop + groupRowH, subX + subW, tableTop + tableHeaderH, headerStrokePaint)
+                        val maxHint = if (page.showSubjectMaxInHeader) {
+                            BlankSheetCatalog.resolveMaxHint(page.cls, page.subjectKey, subCol.compKey)
+                        } else {
+                            null
+                        }
+                        val lines = if (maxHint != null) {
+                            subCol.titleBn.split("\n") + "(${BlankSheetCatalog.formatInt(maxHint, numStyle)})"
+                        } else {
+                            subCol.titleBn.split("\n")
+                        }
+                        drawHeaderLines(lines, subX, tableTop + groupRowH, subW, subRowH, baseSubSize)
+                    }
+                    idx = endIdx + 1
+                }
+            }
         }
 
         // 5. Draw Table Body Rows (Only Roll & Name filled; all other cells blank)
@@ -409,5 +497,22 @@ object BlankSheetPdfGen {
         val rightFooter = "তারিখ: ......................   শিক্ষকের স্বাক্ষর: ..........................."
         c.drawText(leftFooter, marginX, footerY, footerLeftPaint)
         c.drawText(rightFooter, marginX + contentW, footerY, footerRightPaint)
+
+        if (BlankSheetCatalog.isThreeTermAttendanceTraitsActive(cols)) {
+            val legendText = "গুণাবলি: ক = উত্তম · খ = সন্তোষজনক · গ = উন্নতি প্রয়োজন"
+            val legendPaint = textPaint(ctx, 7.6f, bold = false, fontId = fontId, color = 0xFF333333.toInt()).apply {
+                textAlign = Paint.Align.CENTER
+            }
+            val leftW = footerLeftPaint.measureText(leftFooter)
+            val rightW = footerRightPaint.measureText(rightFooter)
+            val freeCenterW = contentW - leftW - rightW - 20f
+            if (freeCenterW > 80f) {
+                while (legendPaint.measureText(legendText) > freeCenterW && legendPaint.textSize > 5.8f) {
+                    legendPaint.textSize -= 0.2f
+                }
+                val centerX = marginX + leftW + 10f + freeCenterW / 2f
+                c.drawText(legendText, centerX, footerY, legendPaint)
+            }
+        }
     }
 }
