@@ -26,6 +26,7 @@ import com.kgps.result.ai.PlaceholderAiRepository
 import com.kgps.result.ai.PreparedImageStats
 import com.kgps.result.ai.ScanConstraintSolver
 import com.kgps.result.ai.ScannedStudentRow
+import com.kgps.result.ai.SheetQrScanner
 import com.kgps.result.ai.VisionImageOptimizer
 import com.kgps.result.ai.validateScannedStudentRow
 import com.kgps.result.backup.AutoBackupManager
@@ -106,6 +107,7 @@ data class AiAssistantState(
     val documentEnhance: Boolean = true,
     val preparedImageStats: PreparedImageStats? = null,
     val hasOriginalImageBackup: Boolean = false,
+    val detectedSheetQr: BlankSheetQrMeta? = null,
     val analyzingImage: Boolean = false,
     val analysisError: String? = null,
     val analysisResult: ExtractedMarksheet? = null,
@@ -2003,12 +2005,13 @@ class ResultMakerViewModel(
             val loaded = withContext(Dispatchers.IO) {
                 val bmp = decodeAndScaleBitmap(uri, 2200) ?: return@withContext null
                 val stats = VisionImageOptimizer.computeStatsOnly(bmp, _aiState.value.documentEnhance)
-                bmp to stats
+                val qrMeta = SheetQrScanner.decodeFromBitmap(bmp)
+                Triple(bmp, stats, qrMeta)
             }
             if (loaded == null) {
                 showMessage("ছবি পড়া যায়নি")
             } else {
-                val (bmp, stats) = loaded
+                val (bmp, stats, qrMeta) = loaded
                 originalMarksheetBitmap = bmp
                 _aiState.update {
                     it.copy(
@@ -2016,6 +2019,7 @@ class ResultMakerViewModel(
                         selectedImageBitmap = bmp,
                         preparedImageStats = stats,
                         hasOriginalImageBackup = false,
+                        detectedSheetQr = qrMeta,
                         analysisResult = null,
                         classSheetResult = null,
                         analysisError = null
@@ -2044,15 +2048,20 @@ class ResultMakerViewModel(
         val current = _aiState.value.selectedImageBitmap ?: return
         val enhance = _aiState.value.documentEnhance
         viewModelScope.launch {
-            val (rotated, stats) = withContext(Dispatchers.Default) {
+            val (rotated, stats, qrMeta) = withContext(Dispatchers.Default) {
                 val r = VisionImageOptimizer.rotate90Clockwise(current)
-                r to VisionImageOptimizer.computeStatsOnly(r, enhance)
+                Triple(
+                    r,
+                    VisionImageOptimizer.computeStatsOnly(r, enhance),
+                    SheetQrScanner.decodeFromBitmap(r)
+                )
             }
             _aiState.update {
                 it.copy(
                     selectedImageBitmap = rotated,
                     preparedImageStats = stats,
                     hasOriginalImageBackup = true,
+                    detectedSheetQr = qrMeta ?: it.detectedSheetQr,
                     analysisResult = null,
                     classSheetResult = null,
                     analysisError = null
@@ -2065,15 +2074,20 @@ class ResultMakerViewModel(
         val current = _aiState.value.selectedImageBitmap ?: return
         val enhance = _aiState.value.documentEnhance
         viewModelScope.launch {
-            val (cropped, stats) = withContext(Dispatchers.Default) {
+            val (cropped, stats, qrMeta) = withContext(Dispatchers.Default) {
                 val c = VisionImageOptimizer.cropNormalized(current, leftFrac, topFrac, rightFrac, bottomFrac)
-                c to VisionImageOptimizer.computeStatsOnly(c, enhance)
+                Triple(
+                    c,
+                    VisionImageOptimizer.computeStatsOnly(c, enhance),
+                    SheetQrScanner.decodeFromBitmap(c)
+                )
             }
             _aiState.update {
                 it.copy(
                     selectedImageBitmap = cropped,
                     preparedImageStats = stats,
                     hasOriginalImageBackup = true,
+                    detectedSheetQr = qrMeta ?: it.detectedSheetQr,
                     analysisResult = null,
                     classSheetResult = null,
                     analysisError = null
@@ -2086,14 +2100,15 @@ class ResultMakerViewModel(
         val orig = originalMarksheetBitmap ?: return
         val enhance = _aiState.value.documentEnhance
         viewModelScope.launch {
-            val stats = withContext(Dispatchers.Default) {
-                VisionImageOptimizer.computeStatsOnly(orig, enhance)
+            val (stats, qrMeta) = withContext(Dispatchers.Default) {
+                VisionImageOptimizer.computeStatsOnly(orig, enhance) to SheetQrScanner.decodeFromBitmap(orig)
             }
             _aiState.update {
                 it.copy(
                     selectedImageBitmap = orig,
                     preparedImageStats = stats,
                     hasOriginalImageBackup = false,
+                    detectedSheetQr = qrMeta,
                     analysisResult = null,
                     classSheetResult = null,
                     analysisError = null
@@ -2109,6 +2124,7 @@ class ResultMakerViewModel(
                 selectedImageBitmap = null,
                 preparedImageStats = null,
                 hasOriginalImageBackup = false,
+                detectedSheetQr = null,
                 analysisResult = null,
                 classSheetResult = null,
                 analysisError = null
@@ -2149,6 +2165,7 @@ class ResultMakerViewModel(
         val bmp = _aiState.value.selectedImageBitmap ?: return
         if (_aiState.value.analyzingImage) return
         val enhance = _aiState.value.documentEnhance
+        val qrMeta = _aiState.value.detectedSheetQr
 
         _aiState.update {
             it.copy(
@@ -2160,7 +2177,7 @@ class ResultMakerViewModel(
         viewModelScope.launch {
             try {
                 val result = aiRepository.analyzeClassSheetImage(
-                    bmp, clsHint, termHint, subKeyHint, teacherNote, importScope, enhance, sheetKindHint
+                    bmp, clsHint, termHint, subKeyHint, teacherNote, importScope, enhance, sheetKindHint, qrMeta
                 )
                 _aiState.update { it.copy(analyzingImage = false, classSheetResult = result) }
             } catch (e: CancellationException) {

@@ -5,7 +5,10 @@ import android.graphics.Bitmap
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
 import android.util.Base64
+import com.kgps.result.BlankSheetCatalog
+import com.kgps.result.BlankSheetQrMeta
 import com.kgps.result.RELIGIONS
+import com.kgps.result.SheetQrCodec
 import com.kgps.result.bn
 import com.kgps.result.classNameBn
 import com.kgps.result.fmtEn
@@ -383,7 +386,8 @@ interface AiRepository {
         teacherNote: String,
         importScope: ClassSheetImportScope = ClassSheetImportScope.AUTO,
         documentEnhance: Boolean = true,
-        sheetKindHint: ClassSheetKind? = null
+        sheetKindHint: ClassSheetKind? = null,
+        qrMeta: BlankSheetQrMeta? = null
     ): ExtractedClassSheet
 
     suspend fun draftRemark(
@@ -573,9 +577,11 @@ internal fun parseExtractedClassSheetJson(
     termHint: Int?,
     subKeyHint: String?,
     requestedScope: ClassSheetImportScope = ClassSheetImportScope.AUTO,
-    sheetKindHint: ClassSheetKind? = null
+    sheetKindHint: ClassSheetKind? = null,
+    qrMeta: BlankSheetQrMeta? = null
 ): ExtractedClassSheet {
     val refCode = json.optString("refCode", "").trim().uppercase()
+        .ifBlank { qrMeta?.refCode.orEmpty() }
     val refMatch = Regex("REF\\s*:\\s*C(\\d{1,2})-([A-Z]+)-([A-Z0-9]+)(?:-([A-Z0-9]+))?").find(refCode)
     val refCls = refMatch?.groupValues?.getOrNull(1)?.toIntOrNull()?.takeIf { it in 1..20 }
     val refSub = refMatch?.groupValues?.getOrNull(2)?.takeIf { it.isNotBlank() && it != "ATT" && it != "GEN" }
@@ -587,9 +593,9 @@ internal fun parseExtractedClassSheetJson(
     }
     val refLayout = refMatch?.groupValues?.getOrNull(4).orEmpty()
 
-    val detectedCls = (clsHint ?: refCls ?: json.optInt("cls", 3)).coerceIn(1, 20)
-    val detectedTerm = (termHint ?: refTerm ?: json.optInt("term", 1)).coerceIn(1, 3)
-    val rawSub = (refSub ?: json.optString("subKey")).trim().uppercase()
+    val detectedCls = (clsHint ?: qrMeta?.cls ?: refCls ?: json.optInt("cls", 3)).coerceIn(1, 20)
+    val detectedTerm = (termHint ?: qrMeta?.term?.takeIf { it in 1..3 } ?: refTerm ?: json.optInt("term", 1)).coerceIn(1, 3)
+    val rawSub = (qrMeta?.subjectKey?.takeIf { it.isNotBlank() } ?: refSub ?: json.optString("subKey")).trim().uppercase()
     val validSubs = subjectsFor(detectedCls, RELIGIONS.first()).map { it.key }.toSet()
     val detectedSub = when {
         !subKeyHint.isNullOrBlank() && subKeyHint in validSubs -> subKeyHint
@@ -611,7 +617,13 @@ internal fun parseExtractedClassSheetJson(
             sharedWdObj.optString("T$t", "")
         }
         val cleanWd = fromBn(rawWd).filter { it.isDigit() }.toIntOrNull()?.takeIf { it in 1..365 }?.toString()
-        if (!cleanWd.isNullOrBlank()) sharedWorkingDays[t] = cleanWd
+        if (!cleanWd.isNullOrBlank()) {
+            sharedWorkingDays[t] = cleanWd
+        } else {
+            qrMeta?.workingDaysByTerm?.get(t)?.takeIf { it.isNotBlank() }?.let { qrWd ->
+                sharedWorkingDays[t] = qrWd
+            }
+        }
     }
 
     val rawSheetKind = json.optString("sheetKind", "").trim().uppercase()
@@ -691,6 +703,7 @@ internal fun parseExtractedClassSheetJson(
 
     val resolvedSheetKind = when {
         sheetKindHint != null -> sheetKindHint
+        qrMeta != null -> qrMeta.sheetKind
         refLayout == "TRAITS" || refLayout == "ATT" -> ClassSheetKind.ATTENDANCE_TRAITS
         refLayout == "3MARKS" -> ClassSheetKind.THREE_TERM_MARKS
         rawSheetKind == "THREE_TERM_MARKS" -> ClassSheetKind.THREE_TERM_MARKS
@@ -703,12 +716,13 @@ internal fun parseExtractedClassSheetJson(
 
     val metaFound = json.optJSONObject("metaFound")
     val missingMeta = mutableListOf<String>()
-    if (clsHint == null && refCls == null && metaFound != null && !metaFound.optBoolean("cls", true)) missingMeta.add("শ্রেণি")
+    if (clsHint == null && qrMeta == null && refCls == null && metaFound != null && !metaFound.optBoolean("cls", true)) missingMeta.add("শ্রেণি")
     if (resolvedSheetKind == ClassSheetKind.SINGLE_TERM_MARKS) {
-        if (termHint == null && refTerm == null && metaFound != null && !metaFound.optBoolean("term", true)) missingMeta.add("প্রান্তিক")
+        if (termHint == null && qrMeta?.term !in 1..3 && refTerm == null && metaFound != null && !metaFound.optBoolean("term", true)) missingMeta.add("প্রান্তিক")
     }
     if (resolvedSheetKind != ClassSheetKind.ATTENDANCE_TRAITS) {
-        if (subKeyHint.isNullOrBlank() && refSub == null && (metaFound != null && !metaFound.optBoolean("sub", true) || rawSub !in validSubs)) {
+        val qrHasSub = !qrMeta?.subjectKey.isNullOrBlank()
+        if (subKeyHint.isNullOrBlank() && !qrHasSub && refSub == null && (metaFound != null && !metaFound.optBoolean("sub", true) || rawSub !in validSubs)) {
             missingMeta.add("বিষয়")
         }
     }
@@ -719,6 +733,11 @@ internal fun parseExtractedClassSheetJson(
     }
 
     val compKeysSet = setOf("TB", "ACT", "LANG", "CT")
+    val qrHasBreakdownCol = qrMeta?.columnIds?.any { it in compKeysSet }
+    val qrHasContCol = qrMeta?.columnIds?.any { it == "CONT" || it in compKeysSet }
+    val qrHasWrCol = qrMeta?.columnIds?.any { it == "WR" }
+    val qrHasTotalCol = qrMeta?.columnIds?.any { it == "TOTAL" }
+
     val sheetHasAnyName = rawParsed.any { it.name.isNotBlank() }
     val sheetHasAnyBreakdown = rawParsed.any { r -> compKeysSet.any { !r.marksText[it].isNullOrBlank() } }
     val sheetHasAnyCont = sheetHasAnyBreakdown || rawParsed.any { !it.sheetContinuousTotal.isNullOrBlank() }
@@ -730,6 +749,8 @@ internal fun parseExtractedClassSheetJson(
         requestedScope == ClassSheetImportScope.CONT_ONLY -> ClassSheetImportScope.CONT_ONLY
         requestedScope == ClassSheetImportScope.WR_ONLY -> if (hasWritten) ClassSheetImportScope.WR_ONLY else ClassSheetImportScope.BOTH
         requestedScope == ClassSheetImportScope.BOTH -> ClassSheetImportScope.BOTH
+        qrMeta != null && qrMeta.importScope == ClassSheetImportScope.CONT_ONLY -> ClassSheetImportScope.CONT_ONLY
+        qrMeta != null && qrMeta.importScope == ClassSheetImportScope.WR_ONLY -> if (hasWritten) ClassSheetImportScope.WR_ONLY else ClassSheetImportScope.BOTH
         hasWritten && sheetHasAnyCont && !sheetHasAnyWr -> ClassSheetImportScope.CONT_ONLY
         hasWritten && sheetHasAnyWr && !sheetHasAnyCont -> ClassSheetImportScope.WR_ONLY
         else -> ClassSheetImportScope.BOTH
@@ -739,8 +760,10 @@ internal fun parseExtractedClassSheetJson(
         val cleanedIssues = row.aiIssues.filterKeys { key ->
             when {
                 key == "name" && !sheetHasAnyName && row.name.isBlank() -> false
-                resolvedSheetKind == ClassSheetKind.SINGLE_TERM_MARKS && key in compKeysSet && !sheetHasAnyBreakdown && row.marksText[key].isNullOrBlank() -> false
-                resolvedSheetKind == ClassSheetKind.SINGLE_TERM_MARKS && key == "GRAND" && !sheetHasAnyGrand && row.sheetGrandTotal.isNullOrBlank() -> false
+                resolvedSheetKind == ClassSheetKind.SINGLE_TERM_MARKS && key in compKeysSet && ((qrHasBreakdownCol == false) || (!sheetHasAnyBreakdown && row.marksText[key].isNullOrBlank())) -> false
+                resolvedSheetKind == ClassSheetKind.SINGLE_TERM_MARKS && key == "CONT" && qrHasContCol == false -> false
+                resolvedSheetKind == ClassSheetKind.SINGLE_TERM_MARKS && key == "WR" && qrHasWrCol == false -> false
+                resolvedSheetKind == ClassSheetKind.SINGLE_TERM_MARKS && key == "GRAND" && ((qrHasTotalCol == false) || (!sheetHasAnyGrand && row.sheetGrandTotal.isNullOrBlank())) -> false
                 resolvedSheetKind == ClassSheetKind.SINGLE_TERM_MARKS && resolvedScope == ClassSheetImportScope.CONT_ONLY && (key == "WR" || key == "GRAND") -> false
                 resolvedSheetKind == ClassSheetKind.SINGLE_TERM_MARKS && resolvedScope == ClassSheetImportScope.WR_ONLY && (key in compKeysSet || key == "CONT" || key == "GRAND") -> false
                 else -> true
@@ -1113,23 +1136,40 @@ class DirectGeminiAiRepository(
         teacherNote: String,
         importScope: ClassSheetImportScope,
         documentEnhance: Boolean,
-        sheetKindHint: ClassSheetKind?
+        sheetKindHint: ClassSheetKind?,
+        qrMeta: BlankSheetQrMeta?
     ): ExtractedClassSheet {
         val apiKey = requireApiKey()
         val modelId = resolveModelId(null)
-        val encoded = withContext(Dispatchers.Default) {
-            VisionImageOptimizer.prepareForVisionUpload(bitmap, documentEnhance)
+        val (encoded, resolvedQr) = withContext(Dispatchers.Default) {
+            val qr = qrMeta ?: SheetQrScanner.decodeFromBitmap(bitmap)
+            val enc = VisionImageOptimizer.prepareForVisionUpload(bitmap, documentEnhance)
+            enc to qr
         }
+
+        val effClsHint = clsHint ?: resolvedQr?.cls
+        val effTermHint = termHint ?: resolvedQr?.term?.takeIf { it in 1..3 }
+        val effSubHint = subKeyHint ?: resolvedQr?.subjectKey?.takeIf {
+            it.isNotBlank() && it != BlankSheetCatalog.ALL_SUBJECTS_KEY
+        }
+        val effKindHint = sheetKindHint ?: resolvedQr?.sheetKind
+        val effScope = if (importScope == ClassSheetImportScope.AUTO && resolvedQr != null && resolvedQr.importScope != ClassSheetImportScope.AUTO) {
+            resolvedQr.importScope
+        } else {
+            importScope
+        }
+
         val cleanNote = teacherNote.trim()
-        val cacheKey = "$modelId|${encoded.sha256Hex}|$documentEnhance|$clsHint|$termHint|$subKeyHint|${importScope.name}|${sheetKindHint?.name}|$cleanNote"
+        val qrKeyPart = resolvedQr?.let { "${it.refCode}|${it.columnIds.joinToString(",")}|${it.workingDaysByTerm}" }.orEmpty()
+        val cacheKey = "$modelId|${encoded.sha256Hex}|$documentEnhance|$effClsHint|$effTermHint|$effSubHint|${effScope.name}|${effKindHint?.name}|$qrKeyPart|$cleanNote"
         synchronized(cacheLock) {
             classSheetCache[cacheKey]?.let { return it }
         }
 
-        val targetCls = clsHint ?: 3
+        val targetCls = effClsHint ?: 3
         val allSubs = subjectsFor(targetCls, RELIGIONS.first())
-        val scopedSubs = if (!subKeyHint.isNullOrBlank()) {
-            allSubs.filter { it.key == subKeyHint }.ifEmpty { allSubs }
+        val scopedSubs = if (!effSubHint.isNullOrBlank()) {
+            allSubs.filter { it.key == effSubHint }.ifEmpty { allSubs }
         } else {
             allSubs
         }
@@ -1139,7 +1179,7 @@ class DirectGeminiAiRepository(
             "${s.key}(${s.bn}):$compDesc$wrDesc"
         }
 
-        val scopeRule = when (importScope) {
+        val scopeRule = when (effScope) {
             ClassSheetImportScope.CONT_ONLY ->
                 "4. একক প্রান্তিক নম্বর হলে কেবল রোল (ও থাকলে নাম) এবং ধারাবাহিক নম্বর (`sheetContinuousTotal` বা `TB`/`ACT`/`LANG`/`CT`) পড়ুন — `WR` ও `sheetGrandTotal` ফাঁকা রাখুন।"
             ClassSheetImportScope.WR_ONLY ->
@@ -1154,41 +1194,46 @@ class DirectGeminiAiRepository(
                    (গ) "ATTENDANCE_TRAITS": উপস্থিতি ও গুণাবলি/হাজিরা শিট → উপরের মোট কার্যদিবস স্ট্রিপ থাকলে `sharedWorkingDays: {"1":"","2":"","3":""}`-এ দিন, এবং প্রতি সারিতে `traits`-এ `DAYS_1..3`, `PRES_1..3`, `ACT_1..3`, `DISC_1..3`, `COND_1..3`, `REM_1..3` দিন (১ প্রান্তিকের হাজিরা হলে কেবল সংশ্লিষ্ট প্রান্তিকের কী যেমন `PRES_1`, `REM_1` দিন; গুণাবলি `ক`/`খ`/`গ`)।
                 """.trimIndent()
         }
-        val forcedKindHint = sheetKindHint?.let { "ফরম্যাট অবশ্যই: ${it.name}" } ?: "ফরম্যাট: ছবি অনুযায়ী স্বয়ংক্রিয়"
+        val forcedKindHint = effKindHint?.let { "ফরম্যাট অবশ্যই: ${it.name}" } ?: "ফরম্যাট: ছবি অনুযায়ী স্বয়ংক্রিয়"
+        val qrInstructionsBlock = resolvedQr?.let { SheetQrCodec.buildAiPromptInstructions(it) }.orEmpty()
 
-        val prompt = """
-            বাংলাদেশ প্রাথমিক শ্রেণি-ফর্ম/নম্বরপত্র OCR। নিচের ফুটারে `REF:C...` কোড বা উপরের ব্যানার ও কলাম পড়ে সব সারির তথ্য শুধু JSON-এ দিন।
-            ইঙ্গিত: শ্রেণি=${clsHint ?: "ছবি_থেকে_শনাক্ত(1-20)"}, প্রান্তিক=${termHint ?: "ছবি_থেকে_শনাক্ত(1-3)"}, বিষয়=${subKeyHint ?: "ছবি_থেকে_শনাক্ত"}, $forcedKindHint, নোট=${cleanNote.ifBlank { "নেই" }}
-            বিষয় কাঠামো: $subsInfo
-            নিয়ম:
-            1. সব সংখ্যা ইংরেজি অঙ্কে (০৭->"7"); নাম ও মন্তব্য থাকলে বাংলায়, না থাকলে ""।
-            2. CT ঘরে "০৬+০৭=১৩/২=০৭" থাকলে "=" পরের গড় মান ("7") ও `rawNotes`-এ সংক্ষেপে লিখুন।
-            3. `A`/`অনু` থাকলে "0" ও `rawNotes`-এ "অনুপস্থিত (A)"; ফাঁকা ঘর ""। গ্রেড/জিপি/স্বাক্ষর কলাম বাদ দিন।
-            $scopeRule
-            5. অনুপস্থিত বা ফাঁকা কীগুলো বাদ দিন। `refCode`-এ ফুটারে `REF:...` পেলে সেটি দিন, নাহলে ""।
-            6. ছবিতে আসলে কোনো লেখা/সংখ্যা অস্পষ্ট হলে তবেই `uncertainFields`-এ কারণ দিন। `metaFound`-এ শ্রেণি/প্রান্তিক/বিষয় পেলে true দিন।
-            JSON: {"sheetKind":"${sheetKindHint?.name ?: "SINGLE_TERM_MARKS"}","refCode":"","cls":${clsHint ?: 3},"term":${termHint ?: 1},"subKey":"${subKeyHint ?: "MATH"}","metaFound":{"cls":${clsHint != null},"term":${termHint != null},"sub":${!subKeyHint.isNullOrBlank()}},"sharedWorkingDays":{"1":"","2":"","3":""},"summary":"","warnings":[],"rows":[{"roll":"1","name":"","marks":{"TB":"","ACT":"","LANG":"","CT":"","WR":"","T1_CONT":"","T1_WR":""},"sheetContinuousTotal":"","sheetGrandTotal":"","remark":"","traits":{"PRES_1":"","ACT_1":"","DISC_1":"","COND_1":"","REM_1":""},"rawNotes":"","uncertainFields":{}}]}
-        """.trimIndent()
+        val prompt = buildString {
+            appendLine("বাংলাদেশ প্রাথমিক শ্রেণি-ফর্ম/নম্বরপত্র OCR। নিচের ফুটারে `REF:C...` কোড বা উপরের ব্যানার ও কলাম পড়ে সব সারির তথ্য শুধু JSON-এ দিন।")
+            appendLine("ইঙ্গিত: শ্রেণি=${effClsHint ?: "ছবি_থেকে_শনাক্ত(1-20)"}, প্রান্তিক=${effTermHint ?: "ছবি_থেকে_শনাক্ত(1-3)"}, বিষয়=${effSubHint ?: "ছবি_থেকে_শনাক্ত"}, $forcedKindHint, নোট=${cleanNote.ifBlank { "নেই" }}")
+            if (qrInstructionsBlock.isNotBlank()) {
+                appendLine(qrInstructionsBlock)
+            }
+            appendLine("বিষয় কাঠামো: $subsInfo")
+            appendLine("নিয়ম:")
+            appendLine("1. সব সংখ্যা ইংরেজি অঙ্কে (০৭->\"7\"); নাম ও মন্তব্য থাকলে বাংলায়, না থাকলে \"\"।")
+            appendLine("2. CT ঘরে \"০৬+০৭=১৩/২=০৭\" থাকলে \"=\" পরের গড় মান (\"7\") ও `rawNotes`-এ সংক্ষেপে লিখুন।")
+            appendLine("3. `A`/`অনু` থাকলে \"0\" ও `rawNotes`-এ \"অনুপস্থিত (A)\"; ফাঁকা ঘর \"\"। গ্রেড/জিপি/স্বাক্ষর কলাম বাদ দিন।")
+            appendLine(scopeRule)
+            appendLine("5. অনুপস্থিত বা ফাঁকা কীগুলো বাদ দিন। `refCode`-এ ফুটারে `REF:...` পেলে সেটি দিন, নাহলে \"${resolvedQr?.refCode.orEmpty()}\"।")
+            appendLine("6. ছবিতে আসলে কোনো লেখা/সংখ্যা অস্পষ্ট হলে তবেই `uncertainFields`-এ কারণ দিন। `metaFound`-এ শ্রেণি/প্রান্তিক/বিষয় পেলে true দিন।")
+            append("JSON: {\"sheetKind\":\"${effKindHint?.name ?: "SINGLE_TERM_MARKS"}\",\"refCode\":\"${resolvedQr?.refCode.orEmpty()}\",\"cls\":${effClsHint ?: 3},\"term\":${effTermHint ?: 1},\"subKey\":\"${effSubHint ?: "MATH"}\",\"metaFound\":{\"cls\":${effClsHint != null},\"term\":${effTermHint != null},\"sub\":${!effSubHint.isNullOrBlank()}},\"sharedWorkingDays\":{\"1\":\"\",\"2\":\"\",\"3\":\"\"},\"summary\":\"\",\"warnings\":[],\"rows\":[{\"roll\":\"1\",\"name\":\"\",\"marks\":{\"TB\":\"\",\"ACT\":\"\",\"LANG\":\"\",\"CT\":\"\",\"WR\":\"\",\"T1_CONT\":\"\",\"T1_WR\":\"\"},\"sheetContinuousTotal\":\"\",\"sheetGrandTotal\":\"\",\"remark\":\"\",\"traits\":{\"PRES_1\":\"\",\"ACT_1\":\"\",\"DISC_1\":\"\",\"COND_1\":\"\",\"REM_1\":\"\"},\"rawNotes\":\"\",\"uncertainFields\":{}}]}")
+        }
 
         val payload = buildVisionJsonPayload(encoded.base64, prompt, maxOutputTokens = 8192)
         val (raw, usedModel) = callGenerateContentResilient(apiKey, modelId, payload)
         return try {
             val parsed = parseExtractedClassSheetJson(
-                json = parseClassSheetJsonRobust(raw, clsHint, termHint, subKeyHint),
-                clsHint = clsHint,
-                termHint = termHint,
-                subKeyHint = subKeyHint,
-                requestedScope = importScope,
-                sheetKindHint = sheetKindHint
+                json = parseClassSheetJsonRobust(raw, effClsHint, effTermHint, effSubHint),
+                clsHint = effClsHint,
+                termHint = effTermHint,
+                subKeyHint = effSubHint,
+                requestedScope = effScope,
+                sheetKindHint = effKindHint,
+                qrMeta = resolvedQr
             )
-            val withFallbackWarning = if (usedModel != modelId) {
+            val withExtraInfo = if (usedModel != modelId) {
                 parsed.copy(
                     warnings = parsed.warnings +
                         "নির্বাচিত মডেল ($modelId) ব্যস্ত থাকায় বিকল্প মডেল ($usedModel) দিয়ে স্ক্যান সম্পন্ন হয়েছে।"
                 )
             } else parsed
-            synchronized(cacheLock) { classSheetCache[cacheKey] = withFallbackWarning }
-            withFallbackWarning
+            synchronized(cacheLock) { classSheetCache[cacheKey] = withExtraInfo }
+            withExtraInfo
         } catch (e: IllegalStateException) {
             throw e
         } catch (e: Exception) {
@@ -1705,13 +1750,14 @@ class PlaceholderAiRepository : AiRepository {
         teacherNote: String,
         importScope: ClassSheetImportScope,
         documentEnhance: Boolean,
-        sheetKindHint: ClassSheetKind?
+        sheetKindHint: ClassSheetKind?,
+        qrMeta: BlankSheetQrMeta?
     ): ExtractedClassSheet {
         delay(500)
-        val cls = (clsHint ?: 3).coerceIn(1, 20)
-        val term = (termHint ?: 1).coerceIn(1, 3)
-        val sub = subKeyHint ?: "MATH"
-        val resolvedKind = sheetKindHint ?: ClassSheetKind.SINGLE_TERM_MARKS
+        val cls = (clsHint ?: qrMeta?.cls ?: 3).coerceIn(1, 20)
+        val term = (termHint ?: qrMeta?.term?.takeIf { it in 1..3 } ?: 1).coerceIn(1, 3)
+        val sub = subKeyHint ?: qrMeta?.subjectKey ?: "MATH"
+        val resolvedKind = sheetKindHint ?: qrMeta?.sheetKind ?: ClassSheetKind.SINGLE_TERM_MARKS
         if (resolvedKind == ClassSheetKind.THREE_TERM_MARKS) {
             val rows3T = listOf(
                 ScannedStudentRow(

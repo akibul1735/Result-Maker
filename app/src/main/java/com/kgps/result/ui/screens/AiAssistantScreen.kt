@@ -120,6 +120,7 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.core.content.FileProvider
 import com.kgps.result.AiAssistantState
+import com.kgps.result.BlankSheetCatalog
 import com.kgps.result.RELIGIONS
 import com.kgps.result.Student
 import com.kgps.result.ai.AiModelMode
@@ -243,6 +244,18 @@ fun AiAssistantScreen(
         if (state.classSheetResult != null || state.analysisResult != null) {
             activeConfigMenu = null
         }
+    }
+
+    LaunchedEffect(state.detectedSheetQr) {
+        val qr = state.detectedSheetQr ?: return@LaunchedEffect
+        scanMode = "class"
+        clsHint = qr.cls
+        if (qr.term in 1..3) termHint = qr.term
+        subKeyHint = qr.subjectKey?.takeIf {
+            it.isNotBlank() && it != BlankSheetCatalog.ALL_SUBJECTS_KEY
+        }
+        sheetKindHint = qr.sheetKind
+        importScope = qr.importScope
     }
 
     val photoPicker = rememberLauncherForActivityResult(
@@ -823,6 +836,7 @@ fun AiAssistantScreen(
                     ScannerPhotoAndActionCard(
                         scanMode = scanMode,
                         selectedImageBitmap = state.selectedImageBitmap,
+                        detectedSheetQr = state.detectedSheetQr,
                         documentEnhance = state.documentEnhance,
                         preparedStatsLabel = preparedStatsInfo?.first,
                         preparedStatsGood = preparedStatsInfo?.second == true,

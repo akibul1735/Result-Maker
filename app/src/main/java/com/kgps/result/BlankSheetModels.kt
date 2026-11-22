@@ -405,7 +405,12 @@ object BlankSheetCatalog {
             appendLine("৩) এরপর টেবিলের হেডার হুবহু এই কলামে রাখুন:")
             appendLine(headers.joinToString(","))
             appendLine("৪) সব সংখ্যা ইংরেজি অঙ্কে (0-9) দিন; ফাঁকা ঘর ফাঁকা রাখুন এবং গ্রেড/জিপি/স্বাক্ষর কলাম বাদ দিন।")
-            append("৫) কেবল ```csv ... ``` ব্লকের ভেতর আউটপুট দিন, বাড়তি ব্যাখ্যা নয়।")
+            if (config.includeQrCode) {
+                appendLine("৫) ছবির উপরে ডান কোণায় থাকা QR কোডে কলাম-ক্রম ও ফর্মের মেটাডেটা দেওয়া আছে — প্রয়োজনে সেটিও মিলিয়ে নিন।")
+                append("৬) কেবল ```csv ... ``` ব্লকের ভেতর আউটপুট দিন, বাড়তি ব্যাখ্যা নয়।")
+            } else {
+                append("৫) কেবল ```csv ... ``` ব্লকের ভেতর আউটপুট দিন, বাড়তি ব্যাখ্যা নয়।")
+            }
         }.trim()
     }
 }
@@ -425,7 +430,8 @@ data class BlankSheetConfig(
     val extraBlankRowsPerClass: Int = 0,
     val fillRemainingPageRows: Boolean = false,
     val showSharedWorkingDaysHeader: Boolean = true,
-    val workingDaysByTerm: Map<Int, String> = emptyMap()
+    val workingDaysByTerm: Map<Int, String> = emptyMap(),
+    val includeQrCode: Boolean = true
 )
 
 data class BlankSheetRow(
@@ -452,7 +458,8 @@ data class BlankSheetPageSpec(
     val isClassLevelForm: Boolean = false,
     val sharedWorkingDaysTerms: List<Int> = emptyList(),
     val workingDaysByTerm: Map<Int, String> = emptyMap(),
-    val sheetRefCode: String = ""
+    val sheetRefCode: String = "",
+    val qrPayload: String = ""
 ) {
     val showSharedWorkingDaysStrip: Boolean
         get() = sharedWorkingDaysTerms.isNotEmpty()
@@ -584,7 +591,7 @@ object BlankSheetPlanner {
         val totalPages = rawPages.size
         return rawPages.mapIndexed { idx, raw ->
             val clsShort = classShortBn(raw.cls, settings)
-            BlankSheetPageSpec(
+            val baseSpec = BlankSheetPageSpec(
                 cls = raw.cls,
                 classTitleBn = clsShort,
                 subjectTitleBn = raw.subjectTitleBn,
@@ -610,6 +617,12 @@ object BlankSheetPlanner {
                     columns = safeCols
                 )
             )
+            if (config.includeQrCode) {
+                val meta = SheetQrCodec.fromPageConfig(baseSpec, config.term)
+                baseSpec.copy(qrPayload = SheetQrCodec.encodePayload(meta))
+            } else {
+                baseSpec
+            }
         }
     }
 }

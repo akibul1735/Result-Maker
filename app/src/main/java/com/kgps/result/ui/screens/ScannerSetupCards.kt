@@ -39,6 +39,7 @@ import androidx.compose.material.icons.rounded.DocumentScanner
 import androidx.compose.material.icons.rounded.KeyboardArrowDown
 import androidx.compose.material.icons.rounded.KeyboardArrowUp
 import androidx.compose.material.icons.rounded.PhotoLibrary
+import androidx.compose.material.icons.rounded.QrCode2
 import androidx.compose.material.icons.rounded.SwapHoriz
 import androidx.compose.material.icons.rounded.Tune
 import androidx.compose.material.icons.rounded.UploadFile
@@ -75,7 +76,9 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.kgps.result.BlankSheetQrMeta
 import com.kgps.result.RELIGIONS
+import com.kgps.result.SheetQrCodec
 import com.kgps.result.ai.ClassSheetImportScope
 import com.kgps.result.ai.ClassSheetKind
 import com.kgps.result.bn
@@ -92,6 +95,7 @@ import com.kgps.result.ui.theme.SlateText
 import com.kgps.result.ui.theme.TealContainer
 import com.kgps.result.ui.theme.TealDark
 import com.kgps.result.ui.theme.TealPrimary
+import com.kgps.result.ui.theme.TealSoft
 
 internal enum class ScannerConfigMenu {
     MODE,
@@ -478,6 +482,7 @@ private fun ConfigTopMenuChip(
 internal fun ScannerPhotoAndActionCard(
     scanMode: String,
     selectedImageBitmap: Bitmap?,
+    detectedSheetQr: BlankSheetQrMeta? = null,
     documentEnhance: Boolean,
     preparedStatsLabel: String?,
     preparedStatsGood: Boolean,
@@ -661,6 +666,39 @@ internal fun ScannerPhotoAndActionCard(
                             fontSize = 10.sp,
                             color = if (preparedStatsGood) TealDark else SlateMuted
                         )
+                    }
+
+                    detectedSheetQr?.let { qrMeta ->
+                        Surface(
+                            color = TealSoft,
+                            border = BorderStroke(1.dp, TealContainer),
+                            shape = RoundedCornerShape(8.dp),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .testTag("ai_qr_detected_badge")
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Rounded.QrCode2,
+                                    contentDescription = "স্মার্ট QR শনাক্ত",
+                                    tint = TealPrimary,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                Text(
+                                    text = "QR শনাক্ত: ${SheetQrCodec.buildSummaryLabelBn(qrMeta)}",
+                                    fontSize = 10.5.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = TealDark,
+                                    maxLines = 2,
+                                    overflow = TextOverflow.Ellipsis,
+                                    modifier = Modifier.weight(1f)
+                                )
+                            }
+                        }
                     }
                 }
             }

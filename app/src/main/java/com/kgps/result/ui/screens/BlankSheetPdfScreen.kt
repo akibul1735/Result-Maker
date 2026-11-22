@@ -836,6 +836,14 @@ fun BlankSheetPdfScreen(
                                             )
                                         }
                                         FilterChip(
+                                            selected = config.includeQrCode,
+                                            onClick = { config = config.copy(includeQrCode = !config.includeQrCode) },
+                                            colors = appFilterChipColors(),
+                                            border = appFilterChipBorder(config.includeQrCode),
+                                            label = { Text("স্মার্ট QR কোড", fontSize = 10.5.sp) },
+                                            modifier = Modifier.testTag("blank_sheet_qr_toggle")
+                                        )
+                                        FilterChip(
                                             selected = config.fillRemainingPageRows,
                                             onClick = { config = config.copy(fillRemainingPageRows = !config.fillRemainingPageRows) },
                                             colors = appFilterChipColors(),

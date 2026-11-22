@@ -192,7 +192,7 @@ object BlankSheetPdfGen {
         val fontId = st.pdfFont
         val numStyle = page.numeralStyle
 
-        // 1. Monochrome Black-and-White DPE Logo on top-left + School Title & Subtitle
+        // 1. Monochrome Black-and-White DPE Logo on top-left + School Title & Subtitle + Top-Right QR Code
         val logoSize = 27f
         val logoBmp = PdfGen.resolveLogoBitmap(ctx, "simple")
         if (logoBmp != null) {
@@ -204,15 +204,62 @@ object BlankSheetPdfGen {
             )
         }
 
+        val qrMatrix = if (page.qrPayload.isNotBlank()) SheetQrCodec.encodeQrMatrix(page.qrPayload) else null
+        val qrBoxSize = 40f
+        if (qrMatrix != null) {
+            val qrLeft = marginX + contentW - qrBoxSize
+            val qrTop = marginTop - 3f
+            val qrBox = RectF(qrLeft, qrTop, qrLeft + qrBoxSize, qrTop + qrBoxSize)
+            val whitePaint = Paint().apply {
+                color = Color.WHITE
+                style = Paint.Style.FILL
+            }
+            val qrFramePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                color = Color.BLACK
+                style = Paint.Style.STROKE
+                strokeWidth = 0.55f
+            }
+            val qrModulePaint = Paint().apply {
+                color = Color.BLACK
+                style = Paint.Style.FILL
+            }
+            c.drawRoundRect(qrBox, 2f, 2f, whitePaint)
+            c.drawRoundRect(qrBox, 2f, 2f, qrFramePaint)
+
+            val quietPad = 2.6f
+            val matrixW = qrMatrix.width.coerceAtLeast(1)
+            val matrixH = qrMatrix.height.coerceAtLeast(1)
+            val drawArea = qrBoxSize - quietPad * 2f
+            val modW = drawArea / matrixW.toFloat()
+            val modH = drawArea / matrixH.toFloat()
+            val originX = qrLeft + quietPad
+            val originY = qrTop + quietPad
+            for (my in 0 until matrixH) {
+                val topY = originY + my * modH
+                val bottomY = originY + (my + 1) * modH
+                for (mx in 0 until matrixW) {
+                    if (qrMatrix.get(mx, my)) {
+                        val leftX = originX + mx * modW
+                        val rightX = originX + (mx + 1) * modW
+                        c.drawRect(leftX, topY, rightX, bottomY, qrModulePaint)
+                    }
+                }
+            }
+        }
+
+        val leftClearance = if (logoBmp != null) logoSize + 8f else 0f
+        val rightClearance = if (qrMatrix != null) qrBoxSize + 8f else 0f
+        val sideReserve = max(leftClearance, rightClearance)
+
         val schoolName = st.school.trim().ifBlank { "প্রাথমিক বিদ্যালয়" }
         val schoolPaint = textPaint(ctx, 13.5f, bold = true, fontId = fontId, color = 0xFF000000.toInt()).apply {
             textAlign = Paint.Align.CENTER
         }
-        val titleMaxW = contentW - (if (logoBmp != null) logoSize * 2f + 12f else 0f)
+        val titleMaxW = max(120f, contentW - sideReserve * 2f)
         while (schoolPaint.measureText(schoolName) > titleMaxW && schoolPaint.textSize > 8.5f) {
             schoolPaint.textSize -= 0.5f
         }
-        c.drawText(schoolName, pageW / 2f, marginTop + 12.5f, schoolPaint)
+        c.drawText(schoolName, pageW / 2f, marginTop + 13.5f, schoolPaint)
 
         val yearFormatted = BlankSheetCatalog.formatDigits(st.year.ifBlank { "২০২৬" }, numStyle)
         val addressAndYear = buildString {
@@ -230,10 +277,10 @@ object BlankSheetPdfGen {
         while (subPaint.measureText(addressAndYear) > titleMaxW && subPaint.textSize > 6.8f) {
             subPaint.textSize -= 0.3f
         }
-        c.drawText(addressAndYear, pageW / 2f, marginTop + 25.5f, subPaint)
+        c.drawText(addressAndYear, pageW / 2f, marginTop + 26.5f, subPaint)
 
         // 2. Concise Bengali Class + Subject + Term Title Banner (White + Very Light Gray Shade + Black Border)
-        val metaTop = marginTop + 34f
+        val metaTop = if (qrMatrix != null) marginTop + 40f else marginTop + 34f
         val metaH = 24f
         val metaRect = RectF(marginX, metaTop, marginX + contentW, metaTop + metaH)
         c.drawRoundRect(metaRect, 3f, 3f, metaFillPaint)
