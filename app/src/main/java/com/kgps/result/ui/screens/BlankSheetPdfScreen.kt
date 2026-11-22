@@ -9,6 +9,11 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.calculatePan
+import androidx.compose.foundation.gestures.calculateZoom
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -64,6 +69,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
@@ -71,15 +77,21 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
@@ -115,6 +127,18 @@ import com.kgps.result.ui.theme.appFilterChipBorder
 import com.kgps.result.ui.theme.appFilterChipColors
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import kotlin.math.abs
+import kotlin.math.roundToInt
+
+private fun clampBlankPanOffset(offset: Offset, scale: Float, size: IntSize): Offset {
+    if (scale <= 1.02f || size.width <= 0 || size.height <= 0) return Offset.Zero
+    val maxX = (size.width * (scale - 1f)) / 2f
+    val maxY = (size.height * (scale - 1f)) / 2f + size.height * 0.25f
+    return Offset(
+        x = offset.x.coerceIn(-maxX, maxX),
+        y = offset.y.coerceIn(-maxY, maxY)
+    )
+}
 
 @Composable
 fun BlankSheetPdfScreen(
@@ -172,10 +196,18 @@ fun BlankSheetPdfScreen(
     }
 
     var previewPageIdx by remember { mutableIntStateOf(0) }
+    var zoomScale by remember { mutableFloatStateOf(1f) }
+    var panOffset by remember { mutableStateOf(Offset.Zero) }
+    var previewSize by remember { mutableStateOf(IntSize.Zero) }
+
     LaunchedEffect(pages.size) {
         if (previewPageIdx >= pages.size) {
             previewPageIdx = (pages.size - 1).coerceAtLeast(0)
         }
+    }
+    LaunchedEffect(previewPageIdx, pages.size, config.orientation) {
+        zoomScale = 1f
+        panOffset = Offset.Zero
     }
     val activePage = pages.getOrNull(previewPageIdx)
 
@@ -1260,6 +1292,70 @@ fun BlankSheetPdfScreen(
                             }
                         }
                         Surface(
+                            onClick = {
+                                val next = (zoomScale - 0.5f).coerceAtLeast(1f)
+                                zoomScale = next
+                                panOffset = clampBlankPanOffset(panOffset, next, previewSize)
+                            },
+                            enabled = zoomScale > 1.02f,
+                            shape = RoundedCornerShape(6.dp),
+                            color = SlateBg,
+                            border = BorderStroke(1.dp, SlateOutline),
+                            modifier = Modifier.size(28.dp).testTag("blank_zoom_out_btn")
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(
+                                    Icons.Rounded.Remove,
+                                    contentDescription = "জুম আউট",
+                                    tint = if (zoomScale > 1.02f) SlateText else SlateOutline,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                            }
+                        }
+                        Surface(
+                            onClick = {
+                                zoomScale = 1f
+                                panOffset = Offset.Zero
+                            },
+                            shape = RoundedCornerShape(6.dp),
+                            color = if (zoomScale > 1.02f) TealSoft else SlateBg,
+                            border = BorderStroke(1.dp, if (zoomScale > 1.02f) TealContainer else SlateOutline),
+                            modifier = Modifier.height(28.dp).testTag("blank_reset_zoom_btn")
+                        ) {
+                            Box(
+                                modifier = Modifier.padding(horizontal = 6.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    "${bn((zoomScale * 100).roundToInt().toString())}%",
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = if (zoomScale > 1.02f) TealPrimary else SlateText
+                                )
+                            }
+                        }
+                        Surface(
+                            onClick = {
+                                val next = (zoomScale + 0.5f).coerceAtMost(4f)
+                                zoomScale = next
+                                panOffset = clampBlankPanOffset(panOffset, next, previewSize)
+                            },
+                            enabled = zoomScale < 3.98f,
+                            shape = RoundedCornerShape(6.dp),
+                            color = SlateBg,
+                            border = BorderStroke(1.dp, SlateOutline),
+                            modifier = Modifier.size(28.dp).testTag("blank_zoom_in_btn")
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(
+                                    Icons.Rounded.Add,
+                                    contentDescription = "জুম ইন",
+                                    tint = if (zoomScale < 3.98f) SlateText else SlateOutline,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                            }
+                        }
+                        Surface(
                             onClick = { if (previewBitmap != null) showFullscreen = true },
                             enabled = previewBitmap != null,
                             shape = RoundedCornerShape(6.dp),
@@ -1285,41 +1381,111 @@ fun BlankSheetPdfScreen(
                     modifier = Modifier
                         .weight(1f)
                         .fillMaxWidth()
-                        .verticalScroll(rememberScrollState())
-                        .padding(8.dp),
-                    contentAlignment = Alignment.TopCenter
-                ) {
-                    val bmp = previewBitmap
-                    if (bmp != null) {
-                        val ratio = if (config.orientation == BlankSheetOrientation.PORTRAIT) {
-                            595f / 842f
-                        } else {
-                            842f / 595f
+                        .clipToBounds()
+                        .onSizeChanged { previewSize = it }
+                        .pointerInput(previewPageIdx, pages.size, previewSize) {
+                            awaitEachGesture {
+                                awaitFirstDown(requireUnconsumed = false)
+                                var swipeDx = 0f
+                                var swipeDy = 0f
+                                var swipeTriggered = false
+                                do {
+                                    val event = awaitPointerEvent()
+                                    val pressedCount = event.changes.count { it.pressed }
+                                    if (pressedCount >= 2) {
+                                        swipeTriggered = true
+                                        val zoomChange = event.calculateZoom()
+                                        val panChange = event.calculatePan()
+                                        if (zoomChange != 1f || panChange != Offset.Zero) {
+                                            val newScale = (zoomScale * zoomChange).coerceIn(1f, 4f)
+                                            zoomScale = newScale
+                                            panOffset = clampBlankPanOffset(panOffset + panChange, newScale, previewSize)
+                                            event.changes.forEach { it.consume() }
+                                        }
+                                    } else if (zoomScale > 1.02f && pressedCount == 1) {
+                                        val panChange = event.calculatePan()
+                                        if (panChange != Offset.Zero) {
+                                            panOffset = clampBlankPanOffset(panOffset + panChange, zoomScale, previewSize)
+                                            event.changes.forEach { it.consume() }
+                                        }
+                                    } else if (!swipeTriggered && pressedCount == 1) {
+                                        val panChange = event.calculatePan()
+                                        swipeDx += panChange.x
+                                        swipeDy += panChange.y
+                                        if (abs(swipeDx) > 75f && abs(swipeDx) > abs(swipeDy) * 1.4f) {
+                                            swipeTriggered = true
+                                            event.changes.forEach { it.consume() }
+                                            if (swipeDx < 0f) {
+                                                if (previewPageIdx < pages.lastIndex) previewPageIdx++
+                                            } else {
+                                                if (previewPageIdx > 0) previewPageIdx--
+                                            }
+                                        }
+                                    }
+                                } while (event.changes.any { it.pressed })
+                            }
                         }
-                        Surface(
-                            color = Color.White,
-                            shape = RoundedCornerShape(6.dp),
-                            shadowElevation = 3.dp,
-                            border = BorderStroke(1.dp, SlateOutline),
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .widthIn(max = 560.dp)
-                                .aspectRatio(ratio)
-                                .clickable { showFullscreen = true }
-                        ) {
-                            Image(
-                                bitmap = bmp.asImageBitmap(),
-                                contentDescription = "ফাঁকা শিট PDF প্রিভিউ",
-                                contentScale = ContentScale.Fit,
-                                modifier = Modifier.fillMaxSize()
+                        .pointerInput(previewPageIdx, previewBitmap != null) {
+                            detectTapGestures(
+                                onTap = {
+                                    if (previewBitmap != null) showFullscreen = true
+                                },
+                                onDoubleTap = {
+                                    if (zoomScale > 1.05f) {
+                                        zoomScale = 1f
+                                        panOffset = Offset.Zero
+                                    } else {
+                                        zoomScale = 2.2f
+                                        panOffset = Offset.Zero
+                                    }
+                                }
                             )
                         }
-                    } else {
-                        Box(
-                            modifier = Modifier.fillMaxWidth().height(200.dp),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            CircularProgressIndicator(color = TealPrimary, modifier = Modifier.size(28.dp))
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .verticalScroll(rememberScrollState(), enabled = zoomScale <= 1.02f)
+                            .padding(8.dp)
+                            .graphicsLayer {
+                                scaleX = zoomScale
+                                scaleY = zoomScale
+                                translationX = panOffset.x
+                                translationY = panOffset.y
+                            },
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        val bmp = previewBitmap
+                        if (bmp != null) {
+                            val ratio = if (config.orientation == BlankSheetOrientation.PORTRAIT) {
+                                595f / 842f
+                            } else {
+                                842f / 595f
+                            }
+                            Surface(
+                                color = Color.White,
+                                shape = RoundedCornerShape(6.dp),
+                                shadowElevation = 3.dp,
+                                border = BorderStroke(1.dp, SlateOutline),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .widthIn(max = 560.dp)
+                                    .aspectRatio(ratio)
+                            ) {
+                                Image(
+                                    bitmap = bmp.asImageBitmap(),
+                                    contentDescription = "ফাঁকা শিট PDF প্রিভিউ",
+                                    contentScale = ContentScale.Fit,
+                                    modifier = Modifier.fillMaxSize()
+                                )
+                            }
+                        } else {
+                            Box(
+                                modifier = Modifier.fillMaxWidth().height(200.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                CircularProgressIndicator(color = TealPrimary, modifier = Modifier.size(28.dp))
+                            }
                         }
                     }
                 }
@@ -1391,49 +1557,197 @@ fun BlankSheetPdfScreen(
         }
     }
 
-    if (showFullscreen && previewBitmap != null) {
+    if (showFullscreen) {
+        var fsScale by remember(previewPageIdx) { mutableFloatStateOf(1f) }
+        var fsPan by remember(previewPageIdx) { mutableStateOf(Offset.Zero) }
+        var fsBoxSize by remember { mutableStateOf(IntSize.Zero) }
+
         Dialog(
             onDismissRequest = { showFullscreen = false },
             properties = DialogProperties(usePlatformDefaultWidth = false)
         ) {
             Surface(
-                color = Color(0xFF0F172A),
+                color = MaterialTheme.colorScheme.background,
                 modifier = Modifier.fillMaxSize()
             ) {
-                Column(Modifier.fillMaxSize().padding(10.dp)) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
+                Column(Modifier.fillMaxSize()) {
+                    Surface(
+                        color = MaterialTheme.colorScheme.surface,
+                        border = BorderStroke(1.dp, SlateOutline)
                     ) {
-                        Text(
-                            activePage?.let { "${it.classTitleBn} · পৃষ্ঠা ${bn(it.globalPageNumber.toString())}/${bn(it.totalPages.toString())}" }.orEmpty(),
-                            color = Color.White,
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 13.sp
-                        )
-                        IconButton(onClick = { showFullscreen = false }) {
-                            Icon(Icons.Rounded.Close, contentDescription = "বন্ধ করুন", tint = Color.White)
+                        Row(
+                            modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            Text(
+                                activePage?.let {
+                                    val subSuffix = if (it.subjectTitleBn.isNotBlank()) " · ${it.subjectTitleBn}" else ""
+                                    "${it.classTitleBn}$subSuffix · পৃষ্ঠা ${bn(it.globalPageNumber.toString())}/${bn(it.totalPages.toString())}"
+                                }.orEmpty(),
+                                color = SlateText,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 12.sp,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.weight(1f)
+                            )
+                            IconButton(
+                                onClick = {
+                                    val next = (fsScale - 0.5f).coerceAtLeast(1f)
+                                    fsScale = next
+                                    fsPan = clampBlankPanOffset(fsPan, next, fsBoxSize)
+                                },
+                                enabled = fsScale > 1.02f,
+                                modifier = Modifier.size(36.dp)
+                            ) {
+                                Icon(Icons.Rounded.Remove, contentDescription = "জুম আউট")
+                            }
+                            Text(
+                                "${bn((fsScale * 100).roundToInt().toString())}%",
+                                fontSize = 11.5.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = TealPrimary,
+                                modifier = Modifier.clickable {
+                                    fsScale = 1f
+                                    fsPan = Offset.Zero
+                                }
+                            )
+                            IconButton(
+                                onClick = {
+                                    val next = (fsScale + 0.5f).coerceAtMost(4.5f)
+                                    fsScale = next
+                                    fsPan = clampBlankPanOffset(fsPan, next, fsBoxSize)
+                                },
+                                enabled = fsScale < 4.45f,
+                                modifier = Modifier.size(36.dp)
+                            ) {
+                                Icon(Icons.Rounded.Add, contentDescription = "জুম ইন")
+                            }
+                            IconButton(
+                                onClick = { showFullscreen = false },
+                                modifier = Modifier.size(36.dp)
+                            ) {
+                                Icon(Icons.Rounded.Close, contentDescription = "বন্ধ করুন")
+                            }
                         }
                     }
+
                     Box(
                         modifier = Modifier
                             .weight(1f)
                             .fillMaxWidth()
-                            .verticalScroll(rememberScrollState()),
+                            .background(SlateBg)
+                            .clipToBounds()
+                            .onSizeChanged { fsBoxSize = it }
+                            .pointerInput(previewPageIdx, pages.size, fsBoxSize) {
+                                awaitEachGesture {
+                                    awaitFirstDown(requireUnconsumed = false)
+                                    var swipeDx = 0f
+                                    var swipeDy = 0f
+                                    var swipeHandled = false
+                                    do {
+                                        val event = awaitPointerEvent()
+                                        val pressed = event.changes.count { it.pressed }
+                                        if (pressed >= 2) {
+                                            swipeHandled = true
+                                            val z = event.calculateZoom()
+                                            val p = event.calculatePan()
+                                            if (z != 1f || p != Offset.Zero) {
+                                                val ns = (fsScale * z).coerceIn(1f, 4.5f)
+                                                fsScale = ns
+                                                fsPan = clampBlankPanOffset(fsPan + p, ns, fsBoxSize)
+                                                event.changes.forEach { it.consume() }
+                                            }
+                                        } else if (fsScale > 1.02f && pressed == 1) {
+                                            val p = event.calculatePan()
+                                            if (p != Offset.Zero) {
+                                                fsPan = clampBlankPanOffset(fsPan + p, fsScale, fsBoxSize)
+                                                event.changes.forEach { it.consume() }
+                                            }
+                                        } else if (!swipeHandled && pressed == 1) {
+                                            val p = event.calculatePan()
+                                            swipeDx += p.x
+                                            swipeDy += p.y
+                                            if (abs(swipeDx) > 75f && abs(swipeDx) > abs(swipeDy) * 1.4f) {
+                                                swipeHandled = true
+                                                event.changes.forEach { it.consume() }
+                                                if (swipeDx < 0f) {
+                                                    if (previewPageIdx < pages.lastIndex) previewPageIdx++
+                                                } else {
+                                                    if (previewPageIdx > 0) previewPageIdx--
+                                                }
+                                            }
+                                        }
+                                    } while (event.changes.any { it.pressed })
+                                }
+                            }
+                            .pointerInput(previewPageIdx) {
+                                detectTapGestures(
+                                    onDoubleTap = {
+                                        if (fsScale > 1.05f) {
+                                            fsScale = 1f
+                                            fsPan = Offset.Zero
+                                        } else {
+                                            fsScale = 2.4f
+                                            fsPan = Offset.Zero
+                                        }
+                                    }
+                                )
+                            },
                         contentAlignment = Alignment.Center
                     ) {
-                        previewBitmap?.let { bmp ->
-                            val ratio = if (config.orientation == BlankSheetOrientation.PORTRAIT) 595f / 842f else 842f / 595f
+                        val bmp = previewBitmap
+                        if (bmp != null) {
                             Image(
                                 bitmap = bmp.asImageBitmap(),
                                 contentDescription = "পূর্ণ পৃষ্ঠা প্রিভিউ",
                                 contentScale = ContentScale.Fit,
                                 modifier = Modifier
-                                    .fillMaxWidth()
-                                    .aspectRatio(ratio)
-                                    .background(Color.White)
+                                    .fillMaxSize()
+                                    .padding(6.dp)
+                                    .graphicsLayer {
+                                        scaleX = fsScale
+                                        scaleY = fsScale
+                                        translationX = fsPan.x
+                                        translationY = fsPan.y
+                                    }
                             )
+                        } else {
+                            CircularProgressIndicator(color = TealPrimary, modifier = Modifier.size(32.dp))
+                        }
+                    }
+
+                    Surface(
+                        color = MaterialTheme.colorScheme.surface,
+                        border = BorderStroke(1.dp, SlateOutline)
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            OutlinedButton(
+                                onClick = { if (previewPageIdx > 0) previewPageIdx-- },
+                                enabled = previewPageIdx > 0
+                            ) {
+                                Icon(Icons.AutoMirrored.Rounded.KeyboardArrowLeft, contentDescription = null)
+                                Text("আগের পাতা")
+                            }
+                            Text(
+                                if (pages.isEmpty()) "০ / ০"
+                                else "পৃষ্ঠা ${bn((previewPageIdx + 1).toString())} / ${bn(pages.size.toString())}",
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 12.5.sp,
+                                color = TealPrimary
+                            )
+                            OutlinedButton(
+                                onClick = { if (previewPageIdx < pages.lastIndex) previewPageIdx++ },
+                                enabled = previewPageIdx < pages.lastIndex
+                            ) {
+                                Text("পরের পাতা")
+                                Icon(Icons.AutoMirrored.Rounded.KeyboardArrowRight, contentDescription = null)
+                            }
                         }
                     }
                 }

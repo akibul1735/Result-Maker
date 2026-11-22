@@ -613,19 +613,6 @@ object PdfGen {
 
         dottedField(ctx, c, "অভিভাবকের নাম:", s.guardian, 456f, formY0 + formDy * 4, 656f, 10.5f, f)
         dottedField(ctx, c, "মোবাইল:", bn(s.mobile), 664f, formY0 + formDy * 4, 801f, 10.5f, f)
-
-        center(
-            ctx,
-            c,
-            "(${classNameBn(s.cls, st)} শ্রেণি — শিখন অগ্রগতি প্রতিবেদন)",
-            frontCx,
-            max(524f, formY0 + formDy * 4 + 54f),
-            9.5f,
-            true,
-            340f,
-            f,
-            0xFF334155.toInt()
-        )
     }
 
     private fun drawCellRow(
