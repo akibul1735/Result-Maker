@@ -123,6 +123,8 @@ internal fun ScannerConfigMenuBar(
     subKeyHint: String?,
     teacherNote: String,
     permissions: TeacherPermissions,
+    autoDetectedActive: Boolean = false,
+    onResetToAuto: () -> Unit = {},
     onChangeScanMode: (String) -> Unit,
     onOpenCsvImport: () -> Unit,
     onChangeScope: (ClassSheetImportScope) -> Unit,
@@ -138,35 +140,51 @@ internal fun ScannerConfigMenuBar(
         subjectsFor(previewCls, RELIGIONS.first()).filter { permissions.canEditSubject(it.key) }
     }
     val subLabel = subKeyHint?.let { k -> subs.find { it.key == k }?.bn ?: k }
-    val targetSubtitle = if (scanMode == "class") {
-        val cText = clsHint?.let { classShortBn(it) } ?: "অটো"
-        when (sheetKindHint) {
-            ClassSheetKind.ATTENDANCE_TRAITS -> "$cText · উপস্থিতি"
-            ClassSheetKind.THREE_TERM_MARKS -> "$cText · ৩ প্রান্তিক · ${subLabel ?: "বিষয় অটো"}"
-            else -> {
-                val tText = termHint?.let { bn(it.toString()) } ?: "অটো"
-                if (subLabel != null) "$cText · $tText · $subLabel" else "$cText · $tText · বিষয় অটো"
+    val modeSubtitle = when (scanMode) {
+        "auto" -> "অটো শনাক্ত"
+        "class" -> when (sheetKindHint) {
+            ClassSheetKind.SINGLE_TERM_MARKS -> "শ্রেণি · ১ প্রা."
+            ClassSheetKind.THREE_TERM_MARKS -> "শ্রেণি · ৩ প্রা."
+            ClassSheetKind.ATTENDANCE_TRAITS -> "শ্রেণি · হাজিরা"
+            null -> "শ্রেণি তালিকা"
+        }
+        else -> "একক (১ জন)"
+    }
+    val hasAnyTargetHint = clsHint != null || termHint != null || subKeyHint != null || sheetKindHint != null
+    val targetSubtitle = when {
+        scanMode == "auto" && !hasAnyTargetHint ->
+            if (teacherNote.isNotBlank()) "অটো · নির্দেশনা" else "অটো শনাক্ত"
+        scanMode == "single" && !hasAnyTargetHint ->
+            if (teacherNote.isNotBlank()) "নির্দেশনা যুক্ত" else "অটো / নির্দেশনা"
+        else -> {
+            val cText = clsHint?.let { classShortBn(it) } ?: "অটো"
+            when (sheetKindHint) {
+                ClassSheetKind.ATTENDANCE_TRAITS -> "$cText · উপস্থিতি"
+                ClassSheetKind.THREE_TERM_MARKS -> "$cText · ৩ প্রা. · ${subLabel ?: "অটো"}"
+                else -> {
+                    val tText = termHint?.let { "${bn(it.toString())} প্রা." } ?: "অটো"
+                    if (subLabel != null) "$cText · $tText · $subLabel" else "$cText · $tText · অটো"
+                }
             }
         }
-    } else {
-        if (teacherNote.isNotBlank()) "নির্দেশনা যুক্ত" else "নির্দেশনা (ঐচ্ছিক)"
     }
 
     Column(
         modifier = Modifier.fillMaxWidth(),
-        verticalArrangement = Arrangement.spacedBy(6.dp)
+        verticalArrangement = Arrangement.spacedBy(5.dp)
     ) {
         // 1. Single top row menu: ধরন | লক্ষ্য | CSV
         Row(
             modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            horizontalArrangement = Arrangement.spacedBy(5.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             ConfigTopMenuChip(
                 title = "ধরন",
-                subtitle = if (scanMode == "class") "শ্রেণি তালিকা" else "একক (১ জন)",
+                subtitle = modeSubtitle,
                 icon = Icons.Rounded.SwapHoriz,
                 expanded = activeMenu == ScannerConfigMenu.MODE,
+                isAutoBadge = autoDetectedActive,
                 testTag = "scanner_menu_mode",
                 modifier = Modifier.weight(0.95f),
                 onClick = {
@@ -178,6 +196,7 @@ internal fun ScannerConfigMenuBar(
                 subtitle = targetSubtitle,
                 icon = Icons.Rounded.Tune,
                 expanded = activeMenu == ScannerConfigMenu.TARGET,
+                isAutoBadge = autoDetectedActive && hasAnyTargetHint,
                 testTag = "scanner_menu_target",
                 modifier = Modifier.weight(1.35f),
                 onClick = {
@@ -188,15 +207,15 @@ internal fun ScannerConfigMenuBar(
                 Surface(
                     color = MaterialTheme.colorScheme.surface,
                     border = BorderStroke(1.dp, SlateOutline),
-                    shape = RoundedCornerShape(10.dp),
+                    shape = RoundedCornerShape(9.dp),
                     modifier = Modifier
                         .heightIn(min = 48.dp)
-                        .clip(RoundedCornerShape(10.dp))
+                        .clip(RoundedCornerShape(9.dp))
                         .clickable { onOpenCsvImport() }
                         .testTag("scanner_open_csv_btn")
                 ) {
                     Column(
-                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                        modifier = Modifier.padding(horizontal = 9.dp, vertical = 5.dp),
                         horizontalAlignment = Alignment.CenterHorizontally,
                         verticalArrangement = Arrangement.Center
                     ) {
@@ -208,7 +227,7 @@ internal fun ScannerConfigMenuBar(
                         )
                         Text(
                             "CSV",
-                            fontSize = 10.sp,
+                            fontSize = 9.5.sp,
                             fontWeight = FontWeight.SemiBold,
                             color = SlateText
                         )
@@ -227,7 +246,7 @@ internal fun ScannerConfigMenuBar(
                 Card(
                     colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
                     border = BorderStroke(1.dp, TealPrimary.copy(alpha = 0.4f)),
-                    shape = RoundedCornerShape(11.dp),
+                    shape = RoundedCornerShape(10.dp),
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     AnimatedContent(
@@ -236,8 +255,8 @@ internal fun ScannerConfigMenuBar(
                         label = "scanner_config_panel"
                     ) { current ->
                         Column(
-                            modifier = Modifier.padding(10.dp),
-                            verticalArrangement = Arrangement.spacedBy(7.dp)
+                            modifier = Modifier.padding(8.dp),
+                            verticalArrangement = Arrangement.spacedBy(6.dp)
                         ) {
                             when (current) {
                                 ScannerConfigMenu.MODE -> {
@@ -250,57 +269,76 @@ internal fun ScannerConfigMenuBar(
                                         Row(
                                             Modifier
                                                 .fillMaxWidth()
-                                                .padding(3.dp),
-                                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                                .padding(2.dp),
+                                            horizontalArrangement = Arrangement.spacedBy(3.dp)
                                         ) {
-                                            val isClassMode = scanMode == "class"
-                                            Surface(
-                                                color = if (isClassMode) TealPrimary else Color.Transparent,
-                                                shape = RoundedCornerShape(6.dp),
-                                                modifier = Modifier
-                                                    .weight(1f)
-                                                    .clickable {
-                                                        onChangeScanMode("class")
-                                                        onToggleMenu(null)
-                                                    }
-                                                    .testTag("scan_mode_class_chip")
-                                            ) {
-                                                Text(
-                                                    "শ্রেণি তালিকা",
-                                                    fontSize = 11.5.sp,
-                                                    fontWeight = if (isClassMode) FontWeight.Bold else FontWeight.Medium,
-                                                    color = if (isClassMode) Color.White else SlateText,
-                                                    textAlign = TextAlign.Center,
-                                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 8.dp)
-                                                )
-                                            }
-                                            val isSingleMode = scanMode == "single"
-                                            Surface(
-                                                color = if (isSingleMode) TealPrimary else Color.Transparent,
-                                                shape = RoundedCornerShape(6.dp),
-                                                modifier = Modifier
-                                                    .weight(1f)
-                                                    .clickable {
-                                                        onChangeScanMode("single")
-                                                        onToggleMenu(null)
-                                                    }
-                                                    .testTag("scan_mode_single_chip")
-                                            ) {
-                                                Text(
-                                                    "একক (১ জন)",
-                                                    fontSize = 11.5.sp,
-                                                    fontWeight = if (isSingleMode) FontWeight.Bold else FontWeight.Medium,
-                                                    color = if (isSingleMode) Color.White else SlateText,
-                                                    textAlign = TextAlign.Center,
-                                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 8.dp)
-                                                )
+                                            listOf(
+                                                Triple("auto", "অটো", "scan_mode_auto_chip"),
+                                                Triple("class", "শ্রেণি তালিকা", "scan_mode_class_chip"),
+                                                Triple("single", "একক (১ জন)", "scan_mode_single_chip")
+                                            ).forEach { (modeKey, modeLabel, tag) ->
+                                                val isSel = scanMode == modeKey
+                                                Surface(
+                                                    color = if (isSel) TealPrimary else Color.Transparent,
+                                                    shape = RoundedCornerShape(6.dp),
+                                                    modifier = Modifier
+                                                        .weight(if (modeKey == "auto") 0.85f else 1f)
+                                                        .clickable {
+                                                            onChangeScanMode(modeKey)
+                                                            onToggleMenu(null)
+                                                        }
+                                                        .testTag(tag)
+                                                ) {
+                                                    Text(
+                                                        modeLabel,
+                                                        fontSize = 11.sp,
+                                                        fontWeight = if (isSel) FontWeight.Bold else FontWeight.Medium,
+                                                        color = if (isSel) Color.White else SlateText,
+                                                        textAlign = TextAlign.Center,
+                                                        maxLines = 1,
+                                                        overflow = TextOverflow.Ellipsis,
+                                                        modifier = Modifier.padding(horizontal = 5.dp, vertical = 7.dp)
+                                                    )
+                                                }
                                             }
                                         }
                                     }
                                 }
 
                                 ScannerConfigMenu.TARGET -> {
-                                    if (scanMode == "class") {
+                                    val canResetToAuto = scanMode != "auto" || hasAnyTargetHint || importScope != ClassSheetImportScope.AUTO
+                                    if (canResetToAuto) {
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.SpaceBetween,
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Text(
+                                                if (autoDetectedActive) "স্ক্যান থেকে অটো-ফিল হয়েছে" else "ম্যানুয়াল লক্ষ্য সেট করা",
+                                                fontSize = 10.sp,
+                                                fontWeight = FontWeight.Medium,
+                                                color = if (autoDetectedActive) TealDark else SlateMuted
+                                            )
+                                            Surface(
+                                                color = TealSoft,
+                                                border = BorderStroke(1.dp, TealContainer),
+                                                shape = RoundedCornerShape(6.dp),
+                                                modifier = Modifier
+                                                    .clickable { onResetToAuto() }
+                                                    .testTag("scan_target_reset_auto_btn")
+                                            ) {
+                                                Text(
+                                                    "অটো রিসেট",
+                                                    fontSize = 10.sp,
+                                                    fontWeight = FontWeight.Bold,
+                                                    color = TealDark,
+                                                    modifier = Modifier.padding(horizontal = 7.dp, vertical = 3.dp)
+                                                )
+                                            }
+                                        }
+                                    }
+
+                                    if (scanMode != "single") {
                                         // শীটের ধরন (অটো / ১ প্রান্তিক / ৩ প্রান্তিক / উপস্থিতি)
                                         Surface(
                                             color = SlateSurfaceVariant,
@@ -338,7 +376,7 @@ internal fun ScannerConfigMenuBar(
                                                             textAlign = TextAlign.Center,
                                                             maxLines = 1,
                                                             overflow = TextOverflow.Ellipsis,
-                                                            modifier = Modifier.padding(horizontal = 3.dp, vertical = 6.dp)
+                                                            modifier = Modifier.padding(horizontal = 3.dp, vertical = 5.dp)
                                                         )
                                                     }
                                                 }
@@ -371,8 +409,8 @@ internal fun ScannerConfigMenuBar(
                                                     horizontalArrangement = Arrangement.spacedBy(2.dp)
                                                 ) {
                                                     listOf(
-                                                        ClassSheetImportScope.AUTO to "স্বয়ংক্রিয়",
-                                                        ClassSheetImportScope.BOTH to "ধারাবাহিক+সামষ্টিক",
+                                                        ClassSheetImportScope.AUTO to "অটো",
+                                                        ClassSheetImportScope.BOTH to "সব অংশ",
                                                         ClassSheetImportScope.CONT_ONLY to "ধারাবাহিক",
                                                         ClassSheetImportScope.WR_ONLY to "সামষ্টিক"
                                                     ).forEach { (scopeOpt, label) ->
@@ -381,7 +419,7 @@ internal fun ScannerConfigMenuBar(
                                                             color = if (isSel) TealPrimary else Color.Transparent,
                                                             shape = RoundedCornerShape(6.dp),
                                                             modifier = Modifier
-                                                                .weight(if (scopeOpt == ClassSheetImportScope.BOTH) 1.35f else 1f)
+                                                                .weight(1f)
                                                                 .clickable { onChangeScope(scopeOpt) }
                                                                 .testTag("scan_scope_${scopeOpt.name.lowercase()}_btn")
                                                         ) {
@@ -393,7 +431,7 @@ internal fun ScannerConfigMenuBar(
                                                                 textAlign = TextAlign.Center,
                                                                 maxLines = 1,
                                                                 overflow = TextOverflow.Ellipsis,
-                                                                modifier = Modifier.padding(horizontal = 3.dp, vertical = 6.dp)
+                                                                modifier = Modifier.padding(horizontal = 3.dp, vertical = 5.dp)
                                                             )
                                                         }
                                                     }
@@ -434,6 +472,7 @@ private fun ConfigTopMenuChip(
     subtitle: String,
     icon: ImageVector,
     expanded: Boolean,
+    isAutoBadge: Boolean = false,
     testTag: String,
     modifier: Modifier = Modifier,
     onClick: () -> Unit
@@ -441,32 +480,51 @@ private fun ConfigTopMenuChip(
     Surface(
         color = if (expanded) TealPrimary else MaterialTheme.colorScheme.surface,
         border = BorderStroke(1.dp, if (expanded) TealPrimary else SlateOutline),
-        shape = RoundedCornerShape(10.dp),
+        shape = RoundedCornerShape(9.dp),
         modifier = modifier
             .heightIn(min = 48.dp)
-            .clip(RoundedCornerShape(10.dp))
+            .clip(RoundedCornerShape(9.dp))
             .clickable(onClick = onClick)
             .testTag(testTag)
     ) {
         Row(
-            modifier = Modifier.padding(horizontal = 9.dp, vertical = 6.dp),
+            modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(6.dp)
+            horizontalArrangement = Arrangement.spacedBy(5.dp)
         ) {
             Icon(
                 imageVector = icon,
                 contentDescription = null,
                 tint = if (expanded) Color.White else TealPrimary,
-                modifier = Modifier.size(15.dp)
+                modifier = Modifier.size(14.dp)
             )
             Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = title,
-                    fontSize = 10.sp,
-                    fontWeight = FontWeight.Medium,
-                    color = if (expanded) Color.White.copy(alpha = 0.85f) else SlateMuted,
-                    maxLines = 1
-                )
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    Text(
+                        text = title,
+                        fontSize = 9.5.sp,
+                        fontWeight = FontWeight.Medium,
+                        color = if (expanded) Color.White.copy(alpha = 0.85f) else SlateMuted,
+                        maxLines = 1
+                    )
+                    if (isAutoBadge) {
+                        Surface(
+                            color = if (expanded) Color.White.copy(alpha = 0.22f) else TealSoft,
+                            shape = RoundedCornerShape(4.dp)
+                        ) {
+                            Text(
+                                text = "অটো",
+                                fontSize = 8.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = if (expanded) Color.White else TealDark,
+                                modifier = Modifier.padding(horizontal = 4.dp, vertical = 0.5.dp)
+                            )
+                        }
+                    }
+                }
                 Text(
                     text = subtitle,
                     fontSize = 11.sp,
@@ -480,7 +538,7 @@ private fun ConfigTopMenuChip(
                 imageVector = if (expanded) Icons.Rounded.KeyboardArrowUp else Icons.Rounded.KeyboardArrowDown,
                 contentDescription = null,
                 tint = if (expanded) Color.White else SlateMuted,
-                modifier = Modifier.size(16.dp)
+                modifier = Modifier.size(15.dp)
             )
         }
     }
@@ -515,12 +573,12 @@ internal fun ScannerPhotoAndActionCard(
     Card(
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
         border = BorderStroke(1.dp, SlateOutline),
-        shape = RoundedCornerShape(12.dp),
+        shape = RoundedCornerShape(11.dp),
         modifier = Modifier.fillMaxWidth()
     ) {
         Column(
-            modifier = Modifier.padding(10.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp)
+            modifier = Modifier.padding(8.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp)
         ) {
             // Compact Photo Capture Row
             Row(
@@ -533,7 +591,7 @@ internal fun ScannerPhotoAndActionCard(
                     contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
                     modifier = Modifier
                         .weight(1f)
-                        .height(38.dp)
+                        .height(36.dp)
                         .testTag("ai_camera_photo_btn"),
                     shape = RoundedCornerShape(8.dp)
                 ) {
@@ -546,7 +604,7 @@ internal fun ScannerPhotoAndActionCard(
                     contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
                     modifier = Modifier
                         .weight(1f)
-                        .height(38.dp)
+                        .height(36.dp)
                         .testTag("ai_pick_photo_btn"),
                     shape = RoundedCornerShape(8.dp)
                 ) {
@@ -560,7 +618,7 @@ internal fun ScannerPhotoAndActionCard(
                         contentPadding = PaddingValues(0.dp),
                         shape = RoundedCornerShape(8.dp),
                         modifier = Modifier
-                            .size(38.dp)
+                            .size(36.dp)
                             .testTag("ai_clear_photo_btn")
                     ) {
                         Icon(Icons.Rounded.Close, contentDescription = "ছবি সরান", modifier = Modifier.size(16.dp))
@@ -575,7 +633,7 @@ internal fun ScannerPhotoAndActionCard(
                 val qr2Detected = sheetDetection?.detectedFromOfflineQr == true
                 val bar1Detected = sheetDetection?.detectedFromBarcode == true
 
-                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
                     Box(
                         Modifier
                             .fillMaxWidth()
@@ -588,7 +646,7 @@ internal fun ScannerPhotoAndActionCard(
                             contentScale = ContentScale.Fit,
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .heightIn(max = 136.dp)
+                                .heightIn(max = 124.dp)
                                 .background(SlateSurfaceVariant)
                         )
                         Surface(
@@ -784,17 +842,17 @@ internal fun ScannerPhotoAndActionCard(
                     }
                 }
 
-                if (scanMode == "class") {
+                if (scanMode != "single") {
                     OutlinedButton(
                         onClick = onLoadSample,
                         enabled = !analyzingImage,
-                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp),
                         shape = RoundedCornerShape(10.dp),
                         modifier = Modifier
                             .heightIn(min = 44.dp)
                             .testTag("ai_sample_preview_btn")
                     ) {
-                        Text("নমুনা", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                        Text("নমুনা", fontSize = 11.5.sp, fontWeight = FontWeight.SemiBold)
                     }
                 }
             }
@@ -826,7 +884,7 @@ internal fun ClassSheetHintSelectors(
 
     Row(
         Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(6.dp)
+        horizontalArrangement = Arrangement.spacedBy(5.dp)
     ) {
         // Class selector
         Box(Modifier.weight(1f)) {
@@ -834,18 +892,18 @@ internal fun ClassSheetHintSelectors(
                 onClick = { clsMenu = true },
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(36.dp),
+                    .height(34.dp),
                 shape = RoundedCornerShape(8.dp),
-                contentPadding = PaddingValues(horizontal = 7.dp, vertical = 4.dp)
+                contentPadding = PaddingValues(horizontal = 6.dp, vertical = 3.dp)
             ) {
                 Text(
                     clsHint?.let { "${classShortBn(it)} শ্রেণি" } ?: "শ্রেণি: অটো",
-                    fontSize = 11.sp,
+                    fontSize = 10.5.sp,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f)
                 )
-                Icon(Icons.Rounded.ArrowDropDown, contentDescription = null, modifier = Modifier.size(15.dp))
+                Icon(Icons.Rounded.ArrowDropDown, contentDescription = null, modifier = Modifier.size(14.dp))
             }
             DropdownMenu(expanded = clsMenu, onDismissRequest = { clsMenu = false }) {
                 val isClsAuto = clsHint == null
@@ -890,18 +948,18 @@ internal fun ClassSheetHintSelectors(
                 onClick = { termMenu = true },
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(36.dp),
+                    .height(34.dp),
                 shape = RoundedCornerShape(8.dp),
-                contentPadding = PaddingValues(horizontal = 7.dp, vertical = 4.dp)
+                contentPadding = PaddingValues(horizontal = 6.dp, vertical = 3.dp)
             ) {
                 Text(
                     termHint?.let { termNameBn(it) } ?: "প্রান্তিক: অটো",
-                    fontSize = 11.sp,
+                    fontSize = 10.5.sp,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f)
                 )
-                Icon(Icons.Rounded.ArrowDropDown, contentDescription = null, modifier = Modifier.size(15.dp))
+                Icon(Icons.Rounded.ArrowDropDown, contentDescription = null, modifier = Modifier.size(14.dp))
             }
             DropdownMenu(expanded = termMenu, onDismissRequest = { termMenu = false }) {
                 val isTermAuto = termHint == null
@@ -948,18 +1006,18 @@ internal fun ClassSheetHintSelectors(
                 onClick = { subMenu = true },
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(36.dp),
+                    .height(34.dp),
                 shape = RoundedCornerShape(8.dp),
-                contentPadding = PaddingValues(horizontal = 7.dp, vertical = 4.dp)
+                contentPadding = PaddingValues(horizontal = 6.dp, vertical = 3.dp)
             ) {
                 Text(
                     activeSubName ?: "বিষয়: অটো",
-                    fontSize = 11.sp,
+                    fontSize = 10.5.sp,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f)
                 )
-                Icon(Icons.Rounded.ArrowDropDown, contentDescription = null, modifier = Modifier.size(15.dp))
+                Icon(Icons.Rounded.ArrowDropDown, contentDescription = null, modifier = Modifier.size(14.dp))
             }
             DropdownMenu(expanded = subMenu, onDismissRequest = { subMenu = false }) {
                 val isSubAuto = subKeyHint == null

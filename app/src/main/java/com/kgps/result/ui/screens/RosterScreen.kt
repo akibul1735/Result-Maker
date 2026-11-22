@@ -94,7 +94,7 @@ fun RosterScreen(
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .padding(horizontal = 12.dp, vertical = 8.dp),
+            .padding(horizontal = 10.dp, vertical = 6.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         Column(Modifier.widthIn(max = 880.dp).fillMaxSize()) {
@@ -188,8 +188,8 @@ fun RosterScreen(
             // Pure Class -> Student List Tree (all collapsed by default until tapped)
             LazyColumn(
                 modifier = Modifier.weight(1f),
-                verticalArrangement = Arrangement.spacedBy(10.dp),
-                contentPadding = PaddingValues(bottom = 84.dp)
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+                contentPadding = PaddingValues(bottom = 76.dp)
             ) {
                 items(visibleClasses, key = { it }) { c ->
                     val allInClass = remember(students, c) {
@@ -298,9 +298,9 @@ fun RosterScreen(
                                         Row(
                                             modifier = Modifier
                                                 .fillMaxWidth()
-                                                .padding(horizontal = 10.dp, vertical = 10.dp),
+                                                .padding(horizontal = 9.dp, vertical = 7.dp),
                                             verticalAlignment = Alignment.CenterVertically,
-                                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                            horizontalArrangement = Arrangement.spacedBy(8.dp)
                                         ) {
                                             Surface(
                                                 color = SlateSurfaceVariant,
@@ -309,16 +309,16 @@ fun RosterScreen(
                                                 Text(
                                                     bn(s.roll.toString().padStart(2, '0')),
                                                     fontWeight = FontWeight.Bold,
-                                                    fontSize = 12.5.sp,
+                                                    fontSize = 12.sp,
                                                     color = SlateText,
-                                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp)
+                                                    modifier = Modifier.padding(horizontal = 7.dp, vertical = 4.dp)
                                                 )
                                             }
-                                            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(1.dp)) {
                                                 Text(
                                                     s.name.ifBlank { "(নাম নেই)" },
                                                     fontWeight = FontWeight.SemiBold,
-                                                    fontSize = 14.sp,
+                                                    fontSize = 13.sp,
                                                     color = SlateText,
                                                     maxLines = 1,
                                                     overflow = TextOverflow.Ellipsis
@@ -331,7 +331,7 @@ fun RosterScreen(
                                                 if (subLine.isNotBlank()) {
                                                     Text(
                                                         subLine,
-                                                        fontSize = 11.sp,
+                                                        fontSize = 10.5.sp,
                                                         color = SlateMuted,
                                                         maxLines = 1,
                                                         overflow = TextOverflow.Ellipsis

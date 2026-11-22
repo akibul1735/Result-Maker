@@ -97,57 +97,57 @@ private fun buildResultMakerTypography(fontFamily: FontFamily): Typography {
         headlineSmall = TextStyle(
             fontFamily = fontFamily,
             fontWeight = FontWeight.Bold,
-            fontSize = 22.sp,
-            lineHeight = 28.sp
+            fontSize = 21.sp,
+            lineHeight = 26.sp
         ),
         titleLarge = TextStyle(
             fontFamily = fontFamily,
             fontWeight = FontWeight.Bold,
-            fontSize = 18.sp,
-            lineHeight = 24.sp
+            fontSize = 17.5.sp,
+            lineHeight = 22.sp
         ),
         titleMedium = TextStyle(
             fontFamily = fontFamily,
             fontWeight = FontWeight.SemiBold,
-            fontSize = 15.sp,
-            lineHeight = 22.sp
+            fontSize = 14.5.sp,
+            lineHeight = 19.sp
         ),
         titleSmall = base.titleSmall.copy(fontFamily = fontFamily),
         bodyLarge = TextStyle(
             fontFamily = fontFamily,
             fontWeight = FontWeight.Normal,
-            fontSize = 15.sp,
-            lineHeight = 22.sp
+            fontSize = 14.5.sp,
+            lineHeight = 20.sp
         ),
         bodyMedium = TextStyle(
             fontFamily = fontFamily,
             fontWeight = FontWeight.Normal,
             fontSize = 13.sp,
-            lineHeight = 19.sp
+            lineHeight = 17.5.sp
         ),
         bodySmall = TextStyle(
             fontFamily = fontFamily,
             fontWeight = FontWeight.Normal,
-            fontSize = 11.5.sp,
-            lineHeight = 16.sp
+            fontSize = 11.sp,
+            lineHeight = 15.sp
         ),
         labelLarge = TextStyle(
             fontFamily = fontFamily,
             fontWeight = FontWeight.SemiBold,
-            fontSize = 13.sp,
-            lineHeight = 18.sp
+            fontSize = 12.5.sp,
+            lineHeight = 16.sp
         ),
         labelMedium = TextStyle(
             fontFamily = fontFamily,
             fontWeight = FontWeight.Medium,
-            fontSize = 12.sp,
-            lineHeight = 16.sp
+            fontSize = 11.5.sp,
+            lineHeight = 15.sp
         ),
         labelSmall = TextStyle(
             fontFamily = fontFamily,
             fontWeight = FontWeight.Medium,
-            fontSize = 11.sp,
-            lineHeight = 14.sp
+            fontSize = 10.5.sp,
+            lineHeight = 13.sp
         )
     )
 }

@@ -88,7 +88,7 @@ fun TreeGroupCard(
             width = 1.dp,
             color = if (expanded) TealPrimary.copy(alpha = 0.45f) else SlateOutline
         ),
-        shape = RoundedCornerShape(14.dp)
+        shape = RoundedCornerShape(12.dp)
     ) {
         Column(Modifier.fillMaxWidth()) {
             val headerMod = Modifier
@@ -97,23 +97,23 @@ fun TreeGroupCard(
                 .then(if (headerTestTag != null) Modifier.testTag(headerTestTag) else Modifier)
                 .clickable(onClick = onToggle)
                 .background(if (expanded) TealSoft.copy(alpha = 0.45f) else Color.Transparent)
-                .padding(horizontal = 12.dp, vertical = 10.dp)
+                .padding(horizontal = 10.dp, vertical = 7.dp)
 
             Row(
                 modifier = headerMod,
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(10.dp)
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 if (icon != null) {
                     Surface(
                         color = if (expanded) TealContainer else MaterialTheme.colorScheme.surfaceVariant,
-                        shape = RoundedCornerShape(10.dp)
+                        shape = RoundedCornerShape(8.dp)
                     ) {
                         Icon(
                             imageVector = icon,
                             contentDescription = null,
                             tint = if (expanded) TealDark else SlateMuted,
-                            modifier = Modifier.padding(8.dp).size(18.dp)
+                            modifier = Modifier.padding(6.dp).size(16.dp)
                         )
                     }
                 }
@@ -122,7 +122,7 @@ fun TreeGroupCard(
                     Text(
                         text = title,
                         fontWeight = FontWeight.SemiBold,
-                        fontSize = 14.5.sp,
+                        fontSize = 13.5.sp,
                         color = SlateText,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
@@ -130,7 +130,7 @@ fun TreeGroupCard(
                     if (!subtitle.isNullOrBlank()) {
                         Text(
                             text = subtitle,
-                            fontSize = 11.5.sp,
+                            fontSize = 11.sp,
                             color = SlateMuted,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis
@@ -141,14 +141,14 @@ fun TreeGroupCard(
                 if (!badgeText.isNullOrBlank()) {
                     Surface(
                         color = badgeContainerColor,
-                        shape = RoundedCornerShape(8.dp)
+                        shape = RoundedCornerShape(7.dp)
                     ) {
                         Text(
                             text = badgeText,
-                            fontSize = 11.sp,
+                            fontSize = 10.5.sp,
                             fontWeight = FontWeight.SemiBold,
                             color = badgeColor,
-                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                            modifier = Modifier.padding(horizontal = 7.dp, vertical = 3.dp),
                             maxLines = 1
                         )
                     }
@@ -166,7 +166,7 @@ fun TreeGroupCard(
                     imageVector = Icons.Rounded.KeyboardArrowDown,
                     contentDescription = if (expanded) "গুটিয়ে রাখুন" else "বিস্তারিত খুলুন",
                     tint = SlateMuted,
-                    modifier = Modifier.size(22.dp).rotate(rotation)
+                    modifier = Modifier.size(20.dp).rotate(rotation)
                 )
             }
 
@@ -180,8 +180,8 @@ fun TreeGroupCard(
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(start = 6.dp, end = 8.dp, top = 8.dp, bottom = 10.dp),
-                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                            .padding(start = 5.dp, end = 7.dp, top = 6.dp, bottom = 8.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp),
                         content = content
                     )
                 }
@@ -205,7 +205,7 @@ fun TreeBranchItem(
         modifier = modifier
             .fillMaxWidth()
             .drawBehind {
-                val railW = 10.dp.toPx()
+                val railW = 8.dp.toPx()
                 val x = railW * 0.4f
                 val midY = size.height * 0.5f
                 val endY = if (isLast) midY else size.height
@@ -222,7 +222,7 @@ fun TreeBranchItem(
                     strokeWidth = 2f
                 )
             }
-            .padding(start = 10.dp)
+            .padding(start = 8.dp)
     ) {
         content()
     }

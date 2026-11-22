@@ -363,6 +363,11 @@ data class AiDraftRemarkResult(
     val isPlaceholder: Boolean = false
 )
 
+sealed class AutoScanResult {
+    data class ClassSheet(val sheet: ExtractedClassSheet) : AutoScanResult()
+    data class SingleStudent(val marksheet: ExtractedMarksheet) : AutoScanResult()
+}
+
 interface AiRepository {
     val isPlaceholderBackend: Boolean
     suspend fun chat(
@@ -389,6 +394,18 @@ interface AiRepository {
         sheetKindHint: ClassSheetKind? = null,
         qrMeta: BlankSheetQrMeta? = null
     ): ExtractedClassSheet
+
+    suspend fun analyzeAutoSheetImage(
+        bitmap: Bitmap,
+        clsHint: Int? = null,
+        termHint: Int? = null,
+        subKeyHint: String? = null,
+        teacherNote: String = "",
+        importScope: ClassSheetImportScope = ClassSheetImportScope.AUTO,
+        documentEnhance: Boolean = true,
+        sheetKindHint: ClassSheetKind? = null,
+        qrMeta: BlankSheetQrMeta? = null
+    ): AutoScanResult
 
     suspend fun draftRemark(
         studentSummary: String,
@@ -524,6 +541,35 @@ internal fun parseClassSheetJsonRobust(
     }
 }
 
+internal fun normalizeDetectedSubjectKey(
+    raw: String,
+    cls: Int,
+    validSubs: Set<String> = subjectsFor(cls, RELIGIONS.first()).map { it.key }.toSet()
+): String? {
+    val cleaned = raw.trim()
+    if (cleaned.isBlank()) return null
+    val upper = cleaned.uppercase()
+    if (upper in validSubs) return upper
+    val lower = cleaned.lowercase()
+    val candidate = when {
+        upper == "BAN" || lower.contains("বাংলা") || lower.contains("bangla") || lower.contains("bengali") -> "BAN"
+        upper == "ENG" || lower.contains("ইংরেজ") || lower.contains("english") -> "ENG"
+        upper == "MATH" || lower.contains("গণিত") || lower.contains("গনিত") || lower.contains("math") -> "MATH"
+        upper == "BGW" || lower.contains("বাওবি") || lower.contains("বিশ্বপরিচয়") || lower.contains("বিশ্ব পরিচয়") || lower.contains("bgs") ->
+            if ("BGW" in validSubs) "BGW" else "SOC"
+        upper == "SCI" || lower == "বিজ্ঞান" || lower.contains("প্রাথমিক বিজ্ঞান") || lower.contains("science") ->
+            if ("SCI" in validSubs) "SCI" else "SOC"
+        upper == "SOC" || lower.contains("সামাজিক") || lower.contains("সমন্বিত") ->
+            if ("SOC" in validSubs) "SOC" else if ("BGW" in validSubs) "BGW" else "SCI"
+        upper == "REL" || lower.contains("ধর্ম") || lower.contains("ইসলাম") || lower.contains("হিন্দু") ||
+            lower.contains("বৌদ্ধ") || lower.contains("খ্রীষ্ট") || lower.contains("religion") -> "REL"
+        upper == "PE" || lower.contains("শারীরিক") || lower.contains("স্বাস্থ্য") -> "PE"
+        upper == "ART" || lower.contains("শিল্প") || lower.contains("চারু") || lower.contains("কারু") -> "ART"
+        else -> null
+    }
+    return candidate?.takeIf { it in validSubs }
+}
+
 internal fun parseExtractedMarksheetJson(json: JSONObject): ExtractedMarksheet {
     val sObj = json.optJSONObject("student") ?: JSONObject()
     val marksArr = json.optJSONArray("marks") ?: JSONArray()
@@ -546,7 +592,7 @@ internal fun parseExtractedMarksheetJson(json: JSONObject): ExtractedMarksheet {
         summary = json.optString("summary", "ছবি থেকে তথ্য শনাক্ত হয়েছে।").ifBlank { "ছবি থেকে তথ্য শনাক্ত হয়েছে।" },
         student = ExtractedStudentInfo(
             name = sObj.optString("name").takeIf { it.isNotBlank() },
-            cls = sObj.optInt("cls", 0).takeIf { it in 1..5 },
+            cls = sObj.optInt("cls", 0).takeIf { it in 1..20 },
             roll = sObj.optInt("roll", 0).takeIf { it > 0 },
             guardian = sObj.optString("guardian").takeIf { it.isNotBlank() },
             village = sObj.optString("village").takeIf { it.isNotBlank() },
@@ -569,6 +615,47 @@ internal fun parseExtractedMarksheetJson(json: JSONObject): ExtractedMarksheet {
         uncertainNotes = notes,
         isPlaceholder = false
     )
+}
+
+internal fun parseAutoScanJson(
+    raw: String,
+    clsHint: Int?,
+    termHint: Int?,
+    subKeyHint: String?,
+    requestedScope: ClassSheetImportScope = ClassSheetImportScope.AUTO,
+    sheetKindHint: ClassSheetKind? = null,
+    qrMeta: BlankSheetQrMeta? = null
+): AutoScanResult {
+    val json = parseClassSheetJsonRobust(raw, clsHint, termHint, subKeyHint)
+    val rawMode = json.optString("scanMode", "").trim().uppercase()
+    val rowsArr = json.optJSONArray("rows")
+    val marksArr = json.optJSONArray("marks")
+    val hasStudentObj = json.optJSONObject("student")?.let { st ->
+        st.optString("name", "").isNotBlank() || st.optInt("roll", 0) > 0
+    } == true
+
+    val isSingle = when {
+        rawMode.contains("SINGLE") -> true
+        rawMode.contains("CLASS") -> false
+        (rowsArr == null || rowsArr.length() == 0) && ((marksArr?.length() ?: 0) > 0 || hasStudentObj) -> true
+        else -> false
+    }
+
+    return if (isSingle) {
+        AutoScanResult.SingleStudent(parseExtractedMarksheetJson(json))
+    } else {
+        AutoScanResult.ClassSheet(
+            parseExtractedClassSheetJson(
+                json = json,
+                clsHint = clsHint,
+                termHint = termHint,
+                subKeyHint = subKeyHint,
+                requestedScope = requestedScope,
+                sheetKindHint = sheetKindHint,
+                qrMeta = qrMeta
+            )
+        )
+    }
 }
 
 internal fun parseExtractedClassSheetJson(
@@ -595,11 +682,12 @@ internal fun parseExtractedClassSheetJson(
 
     val detectedCls = (clsHint ?: qrMeta?.cls ?: refCls ?: json.optInt("cls", 3)).coerceIn(1, 20)
     val detectedTerm = (termHint ?: qrMeta?.term?.takeIf { it in 1..3 } ?: refTerm ?: json.optInt("term", 1)).coerceIn(1, 3)
-    val rawSub = (qrMeta?.subjectKey?.takeIf { it.isNotBlank() } ?: refSub ?: json.optString("subKey")).trim().uppercase()
+    val rawSub = (qrMeta?.subjectKey?.takeIf { it.isNotBlank() } ?: refSub ?: json.optString("subKey")).trim()
     val validSubs = subjectsFor(detectedCls, RELIGIONS.first()).map { it.key }.toSet()
+    val normalizedSub = normalizeDetectedSubjectKey(rawSub, detectedCls, validSubs)
     val detectedSub = when {
         !subKeyHint.isNullOrBlank() && subKeyHint in validSubs -> subKeyHint
-        rawSub in validSubs -> rawSub
+        normalizedSub != null -> normalizedSub
         else -> validSubs.first()
     }
     val activeSub = subjectsFor(detectedCls, RELIGIONS.first()).find { it.key == detectedSub }
@@ -722,7 +810,7 @@ internal fun parseExtractedClassSheetJson(
     }
     if (resolvedSheetKind != ClassSheetKind.ATTENDANCE_TRAITS) {
         val qrHasSub = !qrMeta?.subjectKey.isNullOrBlank()
-        if (subKeyHint.isNullOrBlank() && !qrHasSub && refSub == null && (metaFound != null && !metaFound.optBoolean("sub", true) || rawSub !in validSubs)) {
+        if (subKeyHint.isNullOrBlank() && !qrHasSub && refSub == null && (metaFound != null && !metaFound.optBoolean("sub", true) || normalizedSub == null)) {
             missingMeta.add("বিষয়")
         }
     }
@@ -839,6 +927,9 @@ class DirectGeminiAiRepository(
     }
     private val classSheetCache = object : LinkedHashMap<String, ExtractedClassSheet>(8, 0.75f, true) {
         override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, ExtractedClassSheet>?): Boolean = size > 8
+    }
+    private val autoScanCache = object : LinkedHashMap<String, AutoScanResult>(8, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, AutoScanResult>?): Boolean = size > 8
     }
     private val remarkCache = object : LinkedHashMap<String, AiDraftRemarkResult>(16, 0.75f, true) {
         override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, AiDraftRemarkResult>?): Boolean = size > 16
@@ -1238,6 +1329,102 @@ class DirectGeminiAiRepository(
             throw e
         } catch (e: Exception) {
             throw IllegalStateException("ছবিটি থেকে শ্রেণি-নম্বরপত্র পড়া যায়নি ($usedModel)। আরও স্পষ্ট ও সোজা ছবি তুলে আবার চেষ্টা করুন।", e)
+        }
+    }
+
+    override suspend fun analyzeAutoSheetImage(
+        bitmap: Bitmap,
+        clsHint: Int?,
+        termHint: Int?,
+        subKeyHint: String?,
+        teacherNote: String,
+        importScope: ClassSheetImportScope,
+        documentEnhance: Boolean,
+        sheetKindHint: ClassSheetKind?,
+        qrMeta: BlankSheetQrMeta?
+    ): AutoScanResult {
+        val resolvedQr = qrMeta ?: withContext(Dispatchers.Default) {
+            SheetQrScanner.decodeFromBitmap(bitmap)
+        }
+        if (resolvedQr != null) {
+            return AutoScanResult.ClassSheet(
+                analyzeClassSheetImage(
+                    bitmap = bitmap,
+                    clsHint = clsHint,
+                    termHint = termHint,
+                    subKeyHint = subKeyHint,
+                    teacherNote = teacherNote,
+                    importScope = importScope,
+                    documentEnhance = documentEnhance,
+                    sheetKindHint = sheetKindHint,
+                    qrMeta = resolvedQr
+                )
+            )
+        }
+
+        val apiKey = requireApiKey()
+        val modelId = resolveModelId(null)
+        val encoded = withContext(Dispatchers.Default) {
+            VisionImageOptimizer.prepareForVisionUpload(bitmap, documentEnhance)
+        }
+        val cleanNote = teacherNote.trim()
+        val cacheKey = "auto|$modelId|${encoded.sha256Hex}|$documentEnhance|$clsHint|$termHint|$subKeyHint|${importScope.name}|${sheetKindHint?.name}|$cleanNote"
+        synchronized(cacheLock) {
+            autoScanCache[cacheKey]?.let { return it }
+        }
+
+        val targetCls = clsHint ?: 3
+        val subsInfo = subjectsFor(targetCls, RELIGIONS.first()).joinToString("; ") { s ->
+            val compDesc = s.comps.joinToString(",") { "${it.key}=${it.max}" }
+            val wrDesc = if (s.written > 0) ",WR=${s.written}" else ""
+            "${s.key}(${s.bn}):$compDesc$wrDesc"
+        }
+
+        val prompt = buildString {
+            appendLine("বাংলাদেশ প্রাথমিক বিদ্যালয়ের নম্বরপত্র / শ্রেণি-তালিকা অটো-ডিটেক্ট OCR। শুধু JSON দিন।")
+            appendLine("প্রথমে ছবির ধরন (`scanMode`) এবং লক্ষ্য (`sheetKind`, `cls`, `term`, `subKey`) স্বয়ংক্রিয়ভাবে শনাক্ত করুন:")
+            appendLine("• বহু-শিক্ষার্থীর শ্রেণি তালিকা / রোল-ভিত্তিক নম্বর শিট / হাজিরা ও গুণাবলি শিট হলে `scanMode`: \"CLASS_SHEET\" দিন এবং সব সারি `rows`-এ দিন।")
+            appendLine("• শুধুমাত্র ১ জন শিক্ষার্থীর একক প্রগ্রেসিভ রিপোর্ট কার্ড / একক নম্বরপত্র হলে `scanMode`: \"SINGLE_STUDENT\" দিন এবং `student`, `marks`, `attendanceAndTraits` পূরণ করুন।")
+            appendLine("ঐচ্ছিক ইঙ্গিত: শ্রেণি=${clsHint ?: "ছবি_থেকে_শনাক্ত(1-20)"}, প্রান্তিক=${termHint ?: "ছবি_থেকে_শনাক্ত(1-3)"}, বিষয়=${subKeyHint ?: "ছবি_থেকে_শনাক্ত(BAN/ENG/MATH/SOC/SCI/BGW/REL/PE/ART)"}, শিট=${sheetKindHint?.name ?: "অটো"}, নোট=${cleanNote.ifBlank { "নেই" }}")
+            appendLine("বিষয় কাঠামো: $subsInfo")
+            appendLine("নিয়ম: সব সংখ্যা ইংরেজি অঙ্কে (০৭->\"7\"); CLASS_SHEET হলে `sheetKind`=\"SINGLE_TERM_MARKS\"|\"THREE_TERM_MARKS\"|\"ATTENDANCE_TRAITS\", এবং প্রয়োজনে `metaFound`, `sharedWorkingDays`, `rows`, `uncertainFields` দিন।")
+            append("JSON স্কিমা: {\"scanMode\":\"CLASS_SHEET\",\"sheetKind\":\"SINGLE_TERM_MARKS\",\"refCode\":\"\",\"cls\":3,\"term\":1,\"subKey\":\"MATH\",\"metaFound\":{\"cls\":true,\"term\":true,\"sub\":true},\"sharedWorkingDays\":{\"1\":\"\",\"2\":\"\",\"3\":\"\"},\"summary\":\"\",\"warnings\":[],\"rows\":[{\"roll\":\"1\",\"name\":\"\",\"marks\":{\"TB\":\"\",\"ACT\":\"\",\"LANG\":\"\",\"CT\":\"\",\"WR\":\"\",\"T1_CONT\":\"\",\"T1_WR\":\"\"},\"sheetContinuousTotal\":\"\",\"sheetGrandTotal\":\"\",\"remark\":\"\",\"traits\":{\"PRES_1\":\"\",\"ACT_1\":\"\",\"DISC_1\":\"\",\"COND_1\":\"\",\"REM_1\":\"\"},\"rawNotes\":\"\",\"uncertainFields\":{}}],\"student\":{\"name\":\"\",\"cls\":3,\"roll\":1,\"guardian\":\"\",\"religion\":\"ইসলাম\"},\"marks\":[],\"attendanceAndTraits\":{\"days\":\"\",\"present\":\"\",\"act\":\"\",\"disc\":\"\",\"cond\":\"\",\"remark\":\"\"},\"uncertainNotes\":[]}")
+        }
+
+        val payload = buildVisionJsonPayload(encoded.base64, prompt, maxOutputTokens = 8192)
+        val (raw, usedModel) = callGenerateContentResilient(apiKey, modelId, payload)
+        return try {
+            val result = parseAutoScanJson(
+                raw = raw,
+                clsHint = clsHint,
+                termHint = termHint,
+                subKeyHint = subKeyHint,
+                requestedScope = importScope,
+                sheetKindHint = sheetKindHint,
+                qrMeta = null
+            )
+            val enriched = if (usedModel != modelId) {
+                when (result) {
+                    is AutoScanResult.ClassSheet -> AutoScanResult.ClassSheet(
+                        result.sheet.copy(
+                            warnings = result.sheet.warnings +
+                                "নির্বাচিত মডেল ($modelId) ব্যস্ত থাকায় বিকল্প মডেল ($usedModel) দিয়ে স্ক্যান সম্পন্ন হয়েছে।"
+                        )
+                    )
+                    is AutoScanResult.SingleStudent -> AutoScanResult.SingleStudent(
+                        result.marksheet.copy(
+                            uncertainNotes = result.marksheet.uncertainNotes +
+                                "মূল মডেল ($modelId) ব্যস্ত থাকায় বিকল্প মডেল ($usedModel) দিয়ে স্ক্যান সম্পন্ন হয়েছে।"
+                        )
+                    )
+                }
+            } else result
+            synchronized(cacheLock) { autoScanCache[cacheKey] = enriched }
+            enriched
+        } catch (e: IllegalStateException) {
+            throw e
+        } catch (e: Exception) {
+            throw IllegalStateException("ছবিটি অটো-স্ক্যান করা যায়নি ($usedModel)। আরও স্পষ্ট ও সোজা ছবি তুলে আবার চেষ্টা করুন।", e)
         }
     }
 
@@ -1878,6 +2065,30 @@ class PlaceholderAiRepository : AiRepository {
             sheetKind = ClassSheetKind.SINGLE_TERM_MARKS
         )
     }
+
+    override suspend fun analyzeAutoSheetImage(
+        bitmap: Bitmap,
+        clsHint: Int?,
+        termHint: Int?,
+        subKeyHint: String?,
+        teacherNote: String,
+        importScope: ClassSheetImportScope,
+        documentEnhance: Boolean,
+        sheetKindHint: ClassSheetKind?,
+        qrMeta: BlankSheetQrMeta?
+    ): AutoScanResult = AutoScanResult.ClassSheet(
+        analyzeClassSheetImage(
+            bitmap = bitmap,
+            clsHint = clsHint,
+            termHint = termHint,
+            subKeyHint = subKeyHint,
+            teacherNote = teacherNote,
+            importScope = importScope,
+            documentEnhance = documentEnhance,
+            sheetKindHint = sheetKindHint,
+            qrMeta = qrMeta
+        )
+    )
 
     override suspend fun draftRemark(studentSummary: String, term: Int): AiDraftRemarkResult {
         delay(350)

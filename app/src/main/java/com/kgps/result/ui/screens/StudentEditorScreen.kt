@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -312,12 +313,12 @@ fun StudentEditorScreen(
             modifier = Modifier
                 .weight(1f)
                 .verticalScroll(rememberScrollState())
-                .padding(12.dp),
+                .padding(10.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
             Column(
                 Modifier.widthIn(max = 760.dp).fillMaxWidth(),
-                verticalArrangement = Arrangement.spacedBy(10.dp)
+                verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 when (tab) {
                     0 -> {
@@ -365,13 +366,14 @@ fun StudentEditorScreen(
                                                 onClick = { if (canEditProfile) s = s.copy(cls = c) },
                                                 colors = appFilterChipColors(),
                                                 border = appFilterChipBorder(isSel, enabled = canEditProfile),
-                                                label = { Text(classShortBn(c, settings), fontWeight = if (isSel) FontWeight.Bold else FontWeight.Normal) }
+                                                modifier = Modifier.height(32.dp),
+                                                label = { Text(classShortBn(c, settings), fontSize = 11.5.sp, fontWeight = if (isSel) FontWeight.Bold else FontWeight.Normal) }
                                             )
                                         }
                                     }
                                     Text("ধর্ম", style = MaterialTheme.typography.labelMedium, color = SlateMuted)
                                     Row(
-                                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                        horizontalArrangement = Arrangement.spacedBy(5.dp),
                                         modifier = Modifier.horizontalScroll(rememberScrollState())
                                     ) {
                                         RELIGIONS.forEach { r ->
@@ -382,7 +384,8 @@ fun StudentEditorScreen(
                                                 onClick = { if (canEditProfile) s = s.copy(religion = r) },
                                                 colors = appFilterChipColors(),
                                                 border = appFilterChipBorder(isSel, enabled = canEditProfile),
-                                                label = { Text(r, fontWeight = if (isSel) FontWeight.Bold else FontWeight.Normal) }
+                                                modifier = Modifier.height(32.dp),
+                                                label = { Text(r, fontSize = 11.5.sp, fontWeight = if (isSel) FontWeight.Bold else FontWeight.Normal) }
                                             )
                                         }
                                     }
@@ -495,7 +498,7 @@ fun StudentEditorScreen(
                                 border = BorderStroke(1.dp, TealPrimary.copy(alpha = 0.35f))
                             ) {
                                 Row(
-                                    Modifier.fillMaxWidth().padding(12.dp),
+                                    Modifier.fillMaxWidth().padding(10.dp),
                                     horizontalArrangement = Arrangement.SpaceBetween,
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
@@ -692,7 +695,8 @@ fun StudentEditorScreen(
                                                         onClick = { if (canEditAtt) setX(k, if (isSel) "" else opt) },
                                                         colors = appFilterChipColors(),
                                                         border = appFilterChipBorder(isSel, enabled = canEditAtt),
-                                                        label = { Text(opt, fontWeight = if (isSel) FontWeight.Bold else FontWeight.Normal) }
+                                                        modifier = Modifier.height(32.dp),
+                                                        label = { Text(opt, fontSize = 11.5.sp, fontWeight = if (isSel) FontWeight.Bold else FontWeight.Normal) }
                                                     )
                                                 }
                                             }
@@ -797,7 +801,7 @@ private fun EditorTextField(
         singleLine = lines == 1,
         minLines = lines,
         keyboardOptions = KeyboardOptions(keyboardType = if (number) KeyboardType.Number else KeyboardType.Text),
-        modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp)
+        modifier = Modifier.fillMaxWidth().padding(vertical = 1.dp)
     )
 }
 
@@ -822,11 +826,11 @@ private fun MarkField(
             else fromBn(it).toDoubleOrNull()?.let { d -> if (d in 0.0..max) onValue(d) }
         },
         enabled = enabled,
-        label = { Text(label, fontSize = 11.5.sp, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+        label = { Text(label, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis) },
         isError = err,
         singleLine = true,
         supportingText = if (err) ({ Text("সর্বোচ্চ ${fmt(max)}") }) else null,
         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-        modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp)
+        modifier = Modifier.fillMaxWidth().padding(vertical = 1.dp)
     )
 }

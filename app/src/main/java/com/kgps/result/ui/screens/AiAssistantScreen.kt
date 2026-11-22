@@ -201,6 +201,9 @@ fun AiAssistantScreen(
     onAnalyzeImage: (String) -> Unit,
     onApplyExtracted: (ExtractedMarksheet) -> Unit,
     onAnalyzeClassSheet: (clsHint: Int?, termHint: Int?, subKeyHint: String?, teacherNote: String, importScope: ClassSheetImportScope, sheetKindHint: ClassSheetKind?) -> Unit,
+    onAnalyzeAutoSheet: (clsHint: Int?, termHint: Int?, subKeyHint: String?, teacherNote: String, importScope: ClassSheetImportScope, sheetKindHint: ClassSheetKind?) -> Unit = { c, t, s, note, scope, kind ->
+        onAnalyzeClassSheet(c, t, s, note, scope, kind)
+    },
     onLoadSampleClassPreview: (clsHint: Int?, termHint: Int?, subKeyHint: String?, importScope: ClassSheetImportScope, sheetKindHint: ClassSheetKind?) -> Unit,
     onUpdateClassSheetMeta: (cls: Int, term: Int, subKey: String) -> Unit,
     onUpdateClassSheetScope: (ClassSheetImportScope) -> Unit = {},
@@ -223,13 +226,24 @@ fun AiAssistantScreen(
     var askClearImage by remember { mutableStateOf(false) }
     var showModelPicker by remember { mutableStateOf(false) }
 
-    // Scanner mode & selectors
-    var scanMode by remember { mutableStateOf("class") } // "class" | "single"
+    // Scanner mode & selectors (auto-detect until scanned or manually overridden)
+    var scanMode by remember { mutableStateOf("auto") } // "auto" | "class" | "single"
     var importScope by remember { mutableStateOf(ClassSheetImportScope.AUTO) }
     var sheetKindHint by remember { mutableStateOf<ClassSheetKind?>(null) } // null = অটো
-    var clsHint by remember(selectedClass) { mutableStateOf<Int?>(selectedClass) }
-    var termHint by remember { mutableStateOf<Int?>(1) }
+    var clsHint by remember { mutableStateOf<Int?>(null) }
+    var termHint by remember { mutableStateOf<Int?>(null) }
     var subKeyHint by remember { mutableStateOf<String?>(null) } // null = ছবির উপর থেকে স্বয়ংক্রিয়
+    var autoFilledFromScan by remember { mutableStateOf(false) }
+
+    val resetToAuto: () -> Unit = {
+        scanMode = "auto"
+        sheetKindHint = null
+        clsHint = null
+        termHint = null
+        subKeyHint = null
+        importScope = ClassSheetImportScope.AUTO
+        autoFilledFromScan = false
+    }
 
     var zoomDialogOpen by remember { mutableStateOf(false) }
     var cropDialogOpen by remember { mutableStateOf(false) }
@@ -246,16 +260,54 @@ fun AiAssistantScreen(
         }
     }
 
+    LaunchedEffect(state.selectedImageBitmap) {
+        if (state.selectedImageBitmap != null &&
+            !state.hasOriginalImageBackup &&
+            state.detectedSheetQr == null &&
+            state.classSheetResult == null &&
+            state.analysisResult == null &&
+            autoFilledFromScan
+        ) {
+            resetToAuto()
+        }
+    }
+
     LaunchedEffect(state.detectedSheetQr) {
         val qr = state.detectedSheetQr ?: return@LaunchedEffect
         scanMode = "class"
-        clsHint = qr.cls
-        if (qr.term in 1..3) termHint = qr.term
+        clsHint = qr.cls.takeIf { it in 1..20 }
+        termHint = qr.term.takeIf { it in 1..3 }
         subKeyHint = qr.subjectKey?.takeIf {
             it.isNotBlank() && it != BlankSheetCatalog.ALL_SUBJECTS_KEY
         }
         sheetKindHint = qr.sheetKind
         importScope = qr.importScope
+        autoFilledFromScan = true
+    }
+
+    LaunchedEffect(state.classSheetResult) {
+        val sheet = state.classSheetResult ?: return@LaunchedEffect
+        scanMode = "class"
+        sheetKindHint = sheet.sheetKind
+        clsHint = sheet.cls.takeIf { it in 1..20 }
+        termHint = if (sheet.sheetKind == ClassSheetKind.SINGLE_TERM_MARKS) sheet.term.takeIf { it in 1..3 } else null
+        subKeyHint = if (sheet.sheetKind == ClassSheetKind.ATTENDANCE_TRAITS) null else sheet.subKey.takeIf { it.isNotBlank() }
+        importScope = sheet.scope
+        autoFilledFromScan = true
+    }
+
+    LaunchedEffect(state.analysisResult) {
+        val single = state.analysisResult ?: return@LaunchedEffect
+        scanMode = "single"
+        clsHint = single.student.cls?.takeIf { it in 1..20 }
+        termHint = single.term.takeIf { it in 1..3 }
+        subKeyHint = single.marks
+            .mapNotNull { it.key.substringBefore('_').takeIf { k -> k.isNotBlank() } }
+            .distinct()
+            .singleOrNull()
+        sheetKindHint = null
+        importScope = ClassSheetImportScope.AUTO
+        autoFilledFromScan = true
     }
 
     val photoPicker = rememberLauncherForActivityResult(
@@ -287,8 +339,8 @@ fun AiAssistantScreen(
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 10.dp, vertical = 4.dp),
-                verticalArrangement = Arrangement.spacedBy(5.dp)
+                    .padding(horizontal = 8.dp, vertical = 3.dp),
+                verticalArrangement = Arrangement.spacedBy(4.dp)
             ) {
                 if (!isGeminiConfigured) {
                     Surface(
@@ -786,8 +838,8 @@ fun AiAssistantScreen(
                     Modifier
                         .fillMaxSize()
                         .verticalScroll(rememberScrollState())
-                        .padding(horizontal = 10.dp, vertical = 6.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                        .padding(horizontal = 8.dp, vertical = 5.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
                     val preparedStatsInfo = state.preparedImageStats?.let { st ->
                         val kb = ((st.byteSize + 512) / 1024).coerceAtLeast(1)
@@ -798,10 +850,10 @@ fun AiAssistantScreen(
 
                     val triggerScan: () -> Unit = {
                         showOnlyIssues = false
-                        if (scanMode == "class") {
-                            onAnalyzeClassSheet(clsHint, termHint, subKeyHint, teacherNote, importScope, sheetKindHint)
-                        } else {
-                            onAnalyzeImage(teacherNote)
+                        when (scanMode) {
+                            "auto" -> onAnalyzeAutoSheet(clsHint, termHint, subKeyHint, teacherNote, importScope, sheetKindHint)
+                            "class" -> onAnalyzeClassSheet(clsHint, termHint, subKeyHint, teacherNote, importScope, sheetKindHint)
+                            else -> onAnalyzeImage(teacherNote)
                         }
                     }
 
@@ -817,19 +869,37 @@ fun AiAssistantScreen(
                         subKeyHint = subKeyHint,
                         teacherNote = teacherNote,
                         permissions = permissions,
-                        onChangeScanMode = { scanMode = it },
+                        autoDetectedActive = autoFilledFromScan,
+                        onResetToAuto = resetToAuto,
+                        onChangeScanMode = {
+                            scanMode = it
+                            autoFilledFromScan = false
+                        },
                         onOpenCsvImport = onOpenCsvImport,
-                        onChangeScope = { importScope = it },
-                        onChangeSheetKind = { sheetKindHint = it },
+                        onChangeScope = {
+                            importScope = it
+                            autoFilledFromScan = false
+                        },
+                        onChangeSheetKind = {
+                            sheetKindHint = it
+                            autoFilledFromScan = false
+                        },
                         onChangeCls = { newCls ->
                             clsHint = newCls
+                            autoFilledFromScan = false
                             if (newCls != null && subKeyHint != null) {
                                 val validKeys = subjectsFor(newCls, RELIGIONS.first()).map { it.key }
                                 if (subKeyHint !in validKeys) subKeyHint = null
                             }
                         },
-                        onChangeTerm = { termHint = it },
-                        onChangeSub = { subKeyHint = it },
+                        onChangeTerm = {
+                            termHint = it
+                            autoFilledFromScan = false
+                        },
+                        onChangeSub = {
+                            subKeyHint = it
+                            autoFilledFromScan = false
+                        },
                         onChangeTeacherNote = { teacherNote = it }
                     )
 
@@ -900,11 +970,7 @@ fun AiAssistantScreen(
                                     OutlinedButton(
                                         onClick = {
                                             showOnlyIssues = false
-                                            if (scanMode == "class") {
-                                                onAnalyzeClassSheet(clsHint, termHint, subKeyHint, teacherNote, importScope, sheetKindHint)
-                                            } else {
-                                                onAnalyzeImage(teacherNote)
-                                            }
+                                            triggerScan()
                                         },
                                         contentPadding = PaddingValues(horizontal = 10.dp, vertical = 3.dp),
                                         shape = RoundedCornerShape(8.dp),
@@ -1135,6 +1201,7 @@ fun AiAssistantScreen(
                 Button(
                     onClick = {
                         askClearImage = false
+                        resetToAuto()
                         onClearImage()
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = RoseDanger),
@@ -1474,9 +1541,9 @@ private fun ClassSheetPreviewSection(
     Card(
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
         border = BorderStroke(1.5.dp, TealPrimary.copy(alpha = 0.45f)),
-        shape = RoundedCornerShape(14.dp)
+        shape = RoundedCornerShape(12.dp)
     ) {
-        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Column(Modifier.padding(9.dp), verticalArrangement = Arrangement.spacedBy(7.dp)) {
             Row(
                 Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
@@ -1788,17 +1855,18 @@ private fun ClassSheetPreviewSection(
 
                     Row(
                         Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        horizontalArrangement = Arrangement.spacedBy(5.dp)
                     ) {
                         FilterChip(
                             selected = !showOnlyIssues,
                             onClick = { if (showOnlyIssues) onToggleShowOnlyIssues() },
                             colors = appFilterChipColors(),
                             border = appFilterChipBorder(!showOnlyIssues),
+                            modifier = Modifier.height(30.dp),
                             label = {
                                 Text(
                                     "সবগুলো (${bn(sheet.rows.size.toString())})",
-                                    fontSize = 11.sp,
+                                    fontSize = 10.5.sp,
                                     fontWeight = if (!showOnlyIssues) FontWeight.Bold else FontWeight.Normal
                                 )
                             }
@@ -1809,11 +1877,11 @@ private fun ClassSheetPreviewSection(
                                 onClick = { if (!showOnlyIssues) onToggleShowOnlyIssues() },
                                 colors = appFilterChipColors(),
                                 border = appFilterChipBorder(showOnlyIssues),
-                                modifier = Modifier.testTag("preview_filter_issues_chip"),
+                                modifier = Modifier.height(30.dp).testTag("preview_filter_issues_chip"),
                                 label = {
                                     Text(
-                                        "শুধু অস্পষ্ট/সমস্যা (${bn(issueRows.size.toString())})",
-                                        fontSize = 11.sp,
+                                        "অস্পষ্ট/সমস্যা (${bn(issueRows.size.toString())})",
+                                        fontSize = 10.5.sp,
                                         fontWeight = if (showOnlyIssues) FontWeight.Bold else FontWeight.Normal
                                     )
                                 }
@@ -1821,23 +1889,26 @@ private fun ClassSheetPreviewSection(
                         }
                         AssistChip(
                             onClick = { onSetAllSelected(selectedRows.size < sheet.rows.size) },
+                            modifier = Modifier.height(30.dp),
                             label = {
                                 Text(
                                     if (selectedRows.size < sheet.rows.size) "সব নির্বাচন" else "সব বাতিল",
-                                    fontSize = 11.sp
+                                    fontSize = 10.5.sp
                                 )
                             }
                         )
                         AssistChip(
                             onClick = onAddBlankRow,
-                            leadingIcon = { Icon(Icons.Rounded.Add, contentDescription = null, modifier = Modifier.size(14.dp)) },
-                            label = { Text("সারি যোগ", fontSize = 11.sp) }
+                            modifier = Modifier.height(30.dp),
+                            leadingIcon = { Icon(Icons.Rounded.Add, contentDescription = null, modifier = Modifier.size(13.dp)) },
+                            label = { Text("সারি যোগ", fontSize = 10.5.sp) }
                         )
                         if (unreviewedIssueRows > 0) {
                             AssistChip(
                                 onClick = onMarkAllVerified,
-                                leadingIcon = { Icon(Icons.Rounded.Check, contentDescription = null, modifier = Modifier.size(14.dp)) },
-                                label = { Text("সব ঠিক আছে", fontSize = 11.sp) }
+                                modifier = Modifier.height(30.dp),
+                                leadingIcon = { Icon(Icons.Rounded.Check, contentDescription = null, modifier = Modifier.size(13.dp)) },
+                                label = { Text("সব ঠিক আছে", fontSize = 10.5.sp) }
                             )
                         }
                     }
@@ -1953,19 +2024,19 @@ private fun ScannedStudentPreviewCard(
         modifier = Modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(containerColor = cardBg),
         border = BorderStroke(if (row.selected) 1.5.dp else 1.dp, borderColor),
-        shape = RoundedCornerShape(10.dp)
+        shape = RoundedCornerShape(9.dp)
     ) {
-        Column(Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Column(Modifier.padding(8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             // Header row: Checkbox + Badge + Delete
             Row(
                 Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                horizontalArrangement = Arrangement.spacedBy(5.dp)
             ) {
                 Checkbox(
                     checked = row.selected,
                     onCheckedChange = { onToggleSelected() },
-                    modifier = Modifier.size(22.dp)
+                    modifier = Modifier.size(20.dp)
                 )
                 val statusLabel = when {
                     isNewUnauthorized -> "নতুন (অনুমতি নেই)"
@@ -1979,31 +2050,31 @@ private fun ScannedStudentPreviewCard(
                 }
                 Surface(
                     color = statusColor.copy(alpha = 0.12f),
-                    shape = RoundedCornerShape(6.dp)
+                    shape = RoundedCornerShape(5.dp)
                 ) {
                     Text(
                         statusLabel,
-                        fontSize = 10.5.sp,
+                        fontSize = 10.sp,
                         fontWeight = FontWeight.SemiBold,
                         color = statusColor,
-                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                        modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.5.dp)
                     )
                 }
                 Spacer(Modifier.weight(1f))
                 if (report.hasHardError) {
-                    Text("ত্রুটি", fontSize = 10.5.sp, fontWeight = FontWeight.Bold, color = RoseDanger)
+                    Text("ত্রুটি", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = RoseDanger)
                 } else if (hasSuspect) {
-                    Text("সন্দেহযুক্ত", fontSize = 10.5.sp, fontWeight = FontWeight.Bold, color = RoseDanger)
+                    Text("সন্দেহযুক্ত", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = RoseDanger)
                 } else {
-                    Text("সব নিশ্চিত", fontSize = 10.5.sp, fontWeight = FontWeight.Bold, color = EmeraldGrade)
+                    Text("সব নিশ্চিত", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = EmeraldGrade)
                 }
-                IconButton(onClick = onRemoveRow, modifier = Modifier.size(26.dp)) {
-                    Icon(Icons.Rounded.DeleteOutline, contentDescription = "সারি মুছুন", tint = SlateMuted, modifier = Modifier.size(16.dp))
+                IconButton(onClick = onRemoveRow, modifier = Modifier.size(24.dp)) {
+                    Icon(Icons.Rounded.DeleteOutline, contentDescription = "সারি মুছুন", tint = SlateMuted, modifier = Modifier.size(15.dp))
                 }
             }
 
             // Roll + Name editable row
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 EditableCellField(
                     value = row.rollText,
                     onValueChange = onUpdateRoll,
@@ -2014,7 +2085,7 @@ private fun ScannedStudentPreviewCard(
                     deducedHint = row.deducedFields["roll"],
                     onVerify = { onVerifyField("roll") },
                     isNumeric = true,
-                    modifier = Modifier.width(80.dp)
+                    modifier = Modifier.width(64.dp)
                 )
                 val hasDbName = isExistingStudent && !existingName.isNullOrBlank()
                 val useDbName = hasDbName && !row.useScannedNameForExisting
@@ -2351,13 +2422,13 @@ private fun ScannedStudentPreviewCard(
                         }
                     } else {
                         if (showBreakdownRow) {
-                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                                 activeSub.comps.forEach { c ->
                                     val shortLabel = when (c.key) {
-                                        "TB" -> "পাঠ্যবই"
-                                        "ACT" -> "সক্রিয়তা"
+                                        "TB" -> "পাঠ্য"
+                                        "ACT" -> "সক্রিয়"
                                         "LANG" -> "ভাষা"
-                                        "CT" -> "ক্লাস টেস্ট"
+                                        "CT" -> "টেস্ট"
                                         else -> "মোট"
                                     }
                                     EditableCellField(
@@ -2376,12 +2447,12 @@ private fun ScannedStudentPreviewCard(
                             }
                         }
 
-                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(5.dp)) {
                             if (showContinuous) {
                                 EditableCellField(
                                     value = row.sheetContinuousTotal ?: "",
                                     onValueChange = { onUpdateMark("CONT", it) },
-                                    label = "ধারাবাহিক মোট (${bn(maxCont.toString())})",
+                                    label = "ধারা. (${bn(maxCont.toString())})",
                                     confidence = report.fieldConfidences["CONT"] ?: FieldConfidence.SURE,
                                     hardError = report.hardErrors["CONT"],
                                     uncertainWarning = report.uncertainWarnings["CONT"],
@@ -2617,7 +2688,7 @@ private fun EditableCellField(
             readOnly = readOnly,
             singleLine = true,
             textStyle = TextStyle(
-                fontSize = 14.sp,
+                fontSize = 13.sp,
                 fontWeight = if (isSure || isSuspect) FontWeight.SemiBold else FontWeight.Normal,
                 color = if (isSuspect) RoseDanger else SlateText,
                 textAlign = if (centered) TextAlign.Center else TextAlign.Start
@@ -2640,23 +2711,23 @@ private fun EditableCellField(
                 label = {
                     Text(
                         label,
-                        fontSize = 9.5.sp,
+                        fontSize = 9.sp,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                         color = labelColor
                     )
                 },
                 colors = fieldColors,
-                contentPadding = PaddingValues(horizontal = 6.dp, vertical = 10.dp),
+                contentPadding = PaddingValues(horizontal = 5.dp, vertical = 6.dp),
                 container = {
                     OutlinedTextFieldDefaults.Container(
                         enabled = true,
                         isError = isSuspect,
                         interactionSource = interactionSource,
                         colors = fieldColors,
-                        shape = RoundedCornerShape(8.dp),
-                        focusedBorderThickness = 1.6.dp,
-                        unfocusedBorderThickness = if (isSuspect || isSure) 1.3.dp else 1.dp
+                        shape = RoundedCornerShape(7.dp),
+                        focusedBorderThickness = 1.5.dp,
+                        unfocusedBorderThickness = if (isSuspect || isSure) 1.2.dp else 1.dp
                     )
                 }
             )

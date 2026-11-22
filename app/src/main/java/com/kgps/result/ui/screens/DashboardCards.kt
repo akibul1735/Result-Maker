@@ -46,6 +46,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -84,7 +85,7 @@ fun ProgressTrackerCard(
         border = BorderStroke(1.dp, SlateOutline),
         shape = RoundedCornerShape(14.dp)
     ) {
-        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Column(Modifier.padding(11.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -94,19 +95,19 @@ fun ProgressTrackerCard(
                         Icons.Rounded.Assessment,
                         contentDescription = null,
                         tint = TealPrimary,
-                        modifier = Modifier.padding(6.dp).size(18.dp)
+                        modifier = Modifier.padding(5.dp).size(16.dp)
                     )
                 }
                 Column(Modifier.weight(1f)) {
                     Text(
                         "মূল্যায়ন ও উপস্থিতির অগ্রগতি",
                         fontWeight = FontWeight.Bold,
-                        fontSize = 14.5.sp,
+                        fontSize = 13.5.sp,
                         color = SlateText
                     )
                     Text(
                         "প্রান্তিক নম্বর, উপস্থিতি ও গুণাবলি পূরণের হার",
-                        fontSize = 11.sp,
+                        fontSize = 10.5.sp,
                         color = SlateMuted
                     )
                 }
@@ -174,28 +175,28 @@ fun ProgressTrackerCard(
                             onClick = { onSelectClassFilter(item.cls) },
                             color = SlateBg,
                             border = BorderStroke(1.dp, SlateOutline),
-                            shape = RoundedCornerShape(10.dp),
+                            shape = RoundedCornerShape(9.dp),
                             modifier = Modifier.testTag("dash_cls_breakdown_${item.cls}")
                         ) {
                             Column(
-                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 7.dp),
-                                verticalArrangement = Arrangement.spacedBy(2.dp)
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp),
+                                verticalArrangement = Arrangement.spacedBy(1.dp)
                             ) {
                                 Text(
                                     "${classNameBn(item.cls)} (${bn(item.totalStudents.toString())})",
                                     fontWeight = FontWeight.Bold,
-                                    fontSize = 11.5.sp,
+                                    fontSize = 11.sp,
                                     color = SlateText
                                 )
                                 Text(
                                     "মূল্যায়িত ${bn(item.evaluatedCount.toString())} (${fmt(pct)}%)",
-                                    fontSize = 10.5.sp,
+                                    fontSize = 10.sp,
                                     color = TealPrimary
                                 )
                                 if (item.evaluatedCount > 0) {
                                     Text(
                                         "গড় ${fmt(item.avgPct)}%",
-                                        fontSize = 10.5.sp,
+                                        fontSize = 10.sp,
                                         color = SlateMuted
                                     )
                                 }
@@ -217,7 +218,7 @@ private fun ProgressRowItem(
 ) {
     val ratio = if (total > 0) (done.toFloat() / total.toFloat()).coerceIn(0f, 1f) else 0f
     val pct = (ratio * 100f)
-    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+    Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
@@ -225,7 +226,7 @@ private fun ProgressRowItem(
         ) {
             Text(
                 label,
-                fontSize = 12.sp,
+                fontSize = 11.5.sp,
                 fontWeight = FontWeight.Medium,
                 color = SlateText,
                 modifier = Modifier.weight(1f),
@@ -234,7 +235,7 @@ private fun ProgressRowItem(
             )
             Text(
                 "${bn(done.toString())}/${bn(total.toString())} (${fmt(pct.toDouble())}%)",
-                fontSize = 11.5.sp,
+                fontSize = 11.sp,
                 fontWeight = FontWeight.Bold,
                 color = barColor
             )
@@ -243,7 +244,7 @@ private fun ProgressRowItem(
             progress = { ratio },
             modifier = Modifier
                 .fillMaxWidth()
-                .height(7.dp)
+                .height(6.dp)
                 .clip(RoundedCornerShape(4.dp)),
             color = barColor,
             trackColor = SlateSurfaceVariant,
@@ -269,7 +270,7 @@ fun MeritAndResultsCard(
         border = BorderStroke(1.dp, SlateOutline),
         shape = RoundedCornerShape(14.dp)
     ) {
-        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Column(Modifier.padding(11.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -279,14 +280,14 @@ fun MeritAndResultsCard(
                         Icons.Rounded.EmojiEvents,
                         contentDescription = null,
                         tint = AmberNotice,
-                        modifier = Modifier.padding(6.dp).size(18.dp)
+                        modifier = Modifier.padding(5.dp).size(16.dp)
                     )
                 }
                 Column(Modifier.weight(1f)) {
                     Text(
                         "ফলাফল ও মেধাতালিকা ($termLabel)",
                         fontWeight = FontWeight.Bold,
-                        fontSize = 14.5.sp,
+                        fontSize = 13.5.sp,
                         color = SlateText
                     )
                     Text(
@@ -295,7 +296,7 @@ fun MeritAndResultsCard(
                         } else {
                             "এই পরিসরে এখনো নম্বর এন্ট্রি হয়নি"
                         },
-                        fontSize = 11.sp,
+                        fontSize = 10.5.sp,
                         color = SlateMuted
                     )
                 }
@@ -310,9 +311,9 @@ fun MeritAndResultsCard(
                 ) {
                     Text(
                         "শুধুমাত্র আপনার অনুমোদিত বিষয়গুলোর ভিত্তিতে হিসাব দেখানো হচ্ছে।",
-                        fontSize = 11.sp,
+                        fontSize = 10.5.sp,
                         color = TealDark,
-                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp)
                     )
                 }
             }
@@ -320,18 +321,18 @@ fun MeritAndResultsCard(
             if (summary.evaluatedInScope > 0) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
-                    GradeStatPill("A (অতি উত্তম)", summary.gradeCounts["A"] ?: 0, EmeraldGrade, Modifier.weight(1f))
-                    GradeStatPill("B (উত্তম)", summary.gradeCounts["B"] ?: 0, TealPrimary, Modifier.weight(1f))
-                    GradeStatPill("C (সন্তোষজনক)", summary.gradeCounts["C"] ?: 0, AmberNotice, Modifier.weight(1f))
-                    GradeStatPill("D (সহায়তা)", summary.gradeCounts["D"] ?: 0, RoseDanger, Modifier.weight(1f))
+                    GradeStatPill("A", "অতি উত্তম", summary.gradeCounts["A"] ?: 0, EmeraldGrade, Modifier.weight(1f))
+                    GradeStatPill("B", "উত্তম", summary.gradeCounts["B"] ?: 0, TealPrimary, Modifier.weight(1f))
+                    GradeStatPill("C", "সন্তোষজনক", summary.gradeCounts["C"] ?: 0, AmberNotice, Modifier.weight(1f))
+                    GradeStatPill("D", "সহায়তা", summary.gradeCounts["D"] ?: 0, RoseDanger, Modifier.weight(1f))
                 }
 
                 HorizontalDivider(color = SlateOutline)
 
                 val visibleMerit = if (showAllMerit) summary.meritList else summary.meritList.take(5)
-                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
                     visibleMerit.forEach { entry ->
                         val rankBg = when (entry.rank) {
                             1 -> AmberBg
@@ -355,39 +356,39 @@ fun MeritAndResultsCard(
                             onClick = { onOpenStudent(entry.student) },
                             color = SlateBg,
                             border = BorderStroke(1.dp, SlateOutline),
-                            shape = RoundedCornerShape(10.dp),
+                            shape = RoundedCornerShape(9.dp),
                             modifier = Modifier.fillMaxWidth().testTag("dash_merit_row_${entry.student.id}")
                         ) {
                             Row(
-                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 7.dp),
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp),
                                 verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
                             ) {
                                 Surface(
                                     color = rankBg,
-                                    shape = RoundedCornerShape(7.dp),
+                                    shape = RoundedCornerShape(6.dp),
                                     border = BorderStroke(1.dp, rankFg.copy(alpha = 0.25f))
                                 ) {
                                     Text(
                                         bn(entry.rank.toString()),
                                         fontWeight = FontWeight.Bold,
-                                        fontSize = 12.sp,
+                                        fontSize = 11.5.sp,
                                         color = rankFg,
-                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                                        modifier = Modifier.padding(horizontal = 7.dp, vertical = 3.dp)
                                     )
                                 }
                                 Column(Modifier.weight(1f)) {
                                     Text(
                                         entry.student.name.ifBlank { "(নাম নেই)" },
                                         fontWeight = FontWeight.SemiBold,
-                                        fontSize = 13.sp,
+                                        fontSize = 12.5.sp,
                                         color = SlateText,
                                         maxLines = 1,
                                         overflow = TextOverflow.Ellipsis
                                     )
                                     Text(
                                         "${classShortLabel(entry.student.cls)} · রোল ${bn(entry.student.roll.toString().padStart(2, '0'))} · ${fmt(entry.obtained)}/${fmt(entry.maxMarks)}",
-                                        fontSize = 11.sp,
+                                        fontSize = 10.5.sp,
                                         color = SlateMuted,
                                         maxLines = 1,
                                         overflow = TextOverflow.Ellipsis
@@ -399,10 +400,10 @@ fun MeritAndResultsCard(
                                 ) {
                                     Text(
                                         "${entry.grade} · ${fmt(entry.pct)}%",
-                                        fontSize = 11.sp,
+                                        fontSize = 10.5.sp,
                                         fontWeight = FontWeight.Bold,
                                         color = gradeColor,
-                                        modifier = Modifier.padding(horizontal = 7.dp, vertical = 4.dp)
+                                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp)
                                     )
                                 }
                                 if (canPreviewReport) {
@@ -426,11 +427,12 @@ fun MeritAndResultsCard(
                 if (summary.meritList.size > 5) {
                     TextButton(
                         onClick = { showAllMerit = !showAllMerit },
-                        modifier = Modifier.align(Alignment.End)
+                        modifier = Modifier.align(Alignment.End),
+                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
                     ) {
                         Text(
                             if (showAllMerit) "সংক্ষিপ্ত করুন" else "সম্পূর্ণ মেধাতালিকা (${bn(summary.meritList.size.toString())} জন)",
-                            fontSize = 12.sp,
+                            fontSize = 11.5.sp,
                             fontWeight = FontWeight.SemiBold
                         )
                     }
@@ -442,7 +444,8 @@ fun MeritAndResultsCard(
 
 @Composable
 private fun GradeStatPill(
-    label: String,
+    gradeLetter: String,
+    caption: String,
     count: Int,
     color: Color,
     modifier: Modifier = Modifier
@@ -450,24 +453,26 @@ private fun GradeStatPill(
     Surface(
         color = color.copy(alpha = 0.10f),
         border = BorderStroke(1.dp, color.copy(alpha = 0.28f)),
-        shape = RoundedCornerShape(9.dp),
+        shape = RoundedCornerShape(8.dp),
         modifier = modifier
     ) {
         Column(
-            modifier = Modifier.padding(horizontal = 6.dp, vertical = 7.dp),
+            modifier = Modifier.padding(horizontal = 4.dp, vertical = 5.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(2.dp)
+            verticalArrangement = Arrangement.spacedBy(1.dp)
         ) {
             Text(
-                bn(count.toString()),
+                "$gradeLetter · ${bn(count.toString())}",
                 fontWeight = FontWeight.Bold,
-                fontSize = 15.sp,
-                color = color
+                fontSize = 13.sp,
+                color = color,
+                maxLines = 1
             )
             Text(
-                label,
+                caption,
                 fontSize = 9.5.sp,
                 color = SlateText,
+                textAlign = TextAlign.Center,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
@@ -500,7 +505,7 @@ fun IncompleteStudentsCard(
         border = BorderStroke(1.dp, if (gapItems.isNotEmpty()) AmberBorder else SlateOutline),
         shape = RoundedCornerShape(14.dp)
     ) {
-        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Column(Modifier.padding(11.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -513,20 +518,20 @@ fun IncompleteStudentsCard(
                         if (gapItems.isNotEmpty()) Icons.Rounded.WarningAmber else Icons.Rounded.CheckCircle,
                         contentDescription = null,
                         tint = if (gapItems.isNotEmpty()) AmberNotice else EmeraldGrade,
-                        modifier = Modifier.padding(6.dp).size(18.dp)
+                        modifier = Modifier.padding(5.dp).size(16.dp)
                     )
                 }
                 Column(Modifier.weight(1f)) {
                     Text(
                         "অপূর্ণ নম্বর ও ঘাটতি তালিকা",
                         fontWeight = FontWeight.Bold,
-                        fontSize = 14.5.sp,
+                        fontSize = 13.5.sp,
                         color = SlateText
                     )
                     Text(
                         if (gapItems.isEmpty()) "নির্বাচিত পরিসরে কোনো ঘাটতি নেই"
                         else "${bn(gapItems.size.toString())} জন শিক্ষার্থীর তথ্য বা নম্বর অসম্পূর্ণ",
-                        fontSize = 11.sp,
+                        fontSize = 10.5.sp,
                         color = if (gapItems.isEmpty()) EmeraldGrade else AmberNotice
                     )
                 }
@@ -539,12 +544,12 @@ fun IncompleteStudentsCard(
                         modifier = Modifier.testTag("dash_gaps_open_sheet_btn")
                     ) {
                         Row(
-                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp),
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(4.dp)
                         ) {
-                            Icon(Icons.Rounded.GridOn, contentDescription = null, tint = TealPrimary, modifier = Modifier.size(14.dp))
-                            Text("ব্যাচ এন্ট্রি", fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = TealPrimary)
+                            Icon(Icons.Rounded.GridOn, contentDescription = null, tint = TealPrimary, modifier = Modifier.size(13.dp))
+                            Text("ব্যাচ এন্ট্রি", fontSize = 10.5.sp, fontWeight = FontWeight.SemiBold, color = TealPrimary)
                         }
                     }
                 }
@@ -553,7 +558,7 @@ fun IncompleteStudentsCard(
             if (gapItems.isNotEmpty()) {
                 Row(
                     modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    horizontalArrangement = Arrangement.spacedBy(5.dp)
                 ) {
                     GapFilter.entries.forEach { f ->
                         val count = when (f) {
@@ -568,7 +573,8 @@ fun IncompleteStudentsCard(
                             onClick = { activeFilter = f },
                             colors = appFilterChipColors(),
                             border = appFilterChipBorder(sel),
-                            label = { Text("${f.labelBn} (${bn(count.toString())})", fontSize = 11.sp) }
+                            modifier = Modifier.height(32.dp),
+                            label = { Text("${f.labelBn} (${bn(count.toString())})", fontSize = 10.5.sp) }
                         )
                     }
                 }
@@ -576,24 +582,24 @@ fun IncompleteStudentsCard(
                 if (filtered.isEmpty()) {
                     Text(
                         "এই ক্যাটাগরিতে কোনো ঘাটতি নেই।",
-                        fontSize = 12.sp,
+                        fontSize = 11.5.sp,
                         color = SlateMuted
                     )
                 } else {
                     val shown = if (showAll) filtered else filtered.take(6)
-                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
                         shown.forEach { item ->
                             Surface(
                                 onClick = { onOpenStudent(item.student) },
                                 color = SlateBg,
                                 border = BorderStroke(1.dp, SlateOutline),
-                                shape = RoundedCornerShape(10.dp),
+                                shape = RoundedCornerShape(9.dp),
                                 modifier = Modifier.fillMaxWidth().testTag("dash_gap_row_${item.student.id}")
                             ) {
                                 Row(
-                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
                                     verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
                                 ) {
                                     Surface(
                                         color = if (item.missingMarks) RoseBg else AmberBg,
@@ -602,16 +608,16 @@ fun IncompleteStudentsCard(
                                         Text(
                                             "${classShortLabel(item.student.cls)} · ${bn(item.student.roll.toString().padStart(2, '0'))}",
                                             fontWeight = FontWeight.Bold,
-                                            fontSize = 11.sp,
+                                            fontSize = 10.5.sp,
                                             color = if (item.missingMarks) RoseDanger else AmberNotice,
-                                            modifier = Modifier.padding(horizontal = 7.dp, vertical = 4.dp)
+                                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp)
                                         )
                                     }
-                                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                                         Text(
                                             item.student.name.ifBlank { "(নাম লেখা হয়নি)" },
                                             fontWeight = FontWeight.SemiBold,
-                                            fontSize = 13.sp,
+                                            fontSize = 12.5.sp,
                                             color = SlateText,
                                             maxLines = 1,
                                             overflow = TextOverflow.Ellipsis
@@ -626,13 +632,13 @@ fun IncompleteStudentsCard(
                                                     modifier = Modifier
                                                         .background(
                                                             if (isUrgent) RoseBg else AmberBg,
-                                                            RoundedCornerShape(5.dp)
+                                                            RoundedCornerShape(4.dp)
                                                         )
-                                                        .padding(horizontal = 6.dp, vertical = 2.dp)
+                                                        .padding(horizontal = 5.dp, vertical = 1.dp)
                                                 ) {
                                                     Text(
                                                         tag,
-                                                        fontSize = 10.sp,
+                                                        fontSize = 9.5.sp,
                                                         color = if (isUrgent) RoseDanger else AmberNotice,
                                                         maxLines = 1
                                                     )
@@ -644,7 +650,7 @@ fun IncompleteStudentsCard(
                                         Icons.AutoMirrored.Rounded.KeyboardArrowRight,
                                         contentDescription = "সম্পাদনা করুন",
                                         tint = SlateMuted,
-                                        modifier = Modifier.size(18.dp)
+                                        modifier = Modifier.size(17.dp)
                                     )
                                 }
                             }

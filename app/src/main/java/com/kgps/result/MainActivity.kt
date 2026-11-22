@@ -637,7 +637,7 @@ fun ResultMakerWorkspace(
                                 label = {
                                     Text(
                                         item.shortLabel,
-                                        fontSize = 10.5.sp,
+                                        fontSize = 10.sp,
                                         softWrap = false,
                                         maxLines = 1,
                                         overflow = TextOverflow.Ellipsis
@@ -977,6 +977,9 @@ fun ResultMakerWorkspace(
                                     onRestoreOriginalImage = vm::restoreOriginalMarksheetImage,
                                     onAnalyzeImage = vm::analyzeSelectedMarksheet,
                                     onApplyExtracted = { ext -> vm.applyExtractedMarksheet(ext) },
+                                    onAnalyzeAutoSheet = { c, t, s, note, scope, kind ->
+                                        vm.analyzeAutoSheet(c, t, s, note, scope, kind)
+                                    },
                                     onAnalyzeClassSheet = { c, t, s, note, scope, kind ->
                                         vm.analyzeClassSheet(c, t, s, note, scope, kind)
                                     },
@@ -1260,12 +1263,12 @@ private fun ResultMakerTopBar(
             Column {
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    horizontalArrangement = Arrangement.spacedBy(5.dp)
                 ) {
                     Text(
                         secondaryTitle ?: "Result Maker",
                         fontWeight = FontWeight.Bold,
-                        fontSize = 18.sp,
+                        fontSize = 17.sp,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                         modifier = Modifier.testTag("top_bar_title")
@@ -1278,10 +1281,10 @@ private fun ResultMakerTopBar(
                         ) {
                             Text(
                                 text = "● লাইভ · ${bn(activeSchool.memberUids.size.toString())} জন",
-                                fontSize = 10.sp,
+                                fontSize = 9.5.sp,
                                 fontWeight = FontWeight.SemiBold,
                                 color = EmeraldGrade,
-                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.5.dp)
                             )
                         }
                     }
@@ -1289,7 +1292,7 @@ private fun ResultMakerTopBar(
                 if (!isSecondary) {
                     Text(
                         "${settings.school.ifBlank { "প্রাথমিক বিদ্যালয়" }} · ${if (isAdmin) "অ্যাডমিন" else "শিক্ষক"}",
-                        fontSize = 11.sp,
+                        fontSize = 10.5.sp,
                         color = SlateMuted,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis

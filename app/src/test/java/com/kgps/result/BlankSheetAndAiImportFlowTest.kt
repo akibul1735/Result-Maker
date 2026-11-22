@@ -1,10 +1,13 @@
 package com.kgps.result
 
+import com.kgps.result.ai.AutoScanResult
 import com.kgps.result.ai.ClassSheetImportScope
 import com.kgps.result.ai.ClassSheetKind
 import com.kgps.result.ai.FieldConfidence
 import com.kgps.result.ai.ScanConstraintSolver
 import com.kgps.result.ai.ScannedStudentRow
+import com.kgps.result.ai.normalizeDetectedSubjectKey
+import com.kgps.result.ai.parseAutoScanJson
 import com.kgps.result.ai.validateScannedStudentRow
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -192,5 +195,98 @@ class BlankSheetAndAiImportFlowTest {
         )
         assertTrue(traitReport.hasHardError)
         assertTrue(traitReport.hardErrors.containsKey("PRES_1"))
+    }
+
+    @Test
+    fun autoScanParserDetectsModeClassTermSubjectAndKindFromImageJson() {
+        assertEquals("BAN", normalizeDetectedSubjectKey("বাংলা", cls = 3))
+        assertEquals("MATH", normalizeDetectedSubjectKey("গণিত", cls = 4))
+        assertEquals("BGW", normalizeDetectedSubjectKey("বাওবি", cls = 5))
+        assertEquals("SCI", normalizeDetectedSubjectKey("প্রাথমিক বিজ্ঞান", cls = 3))
+        assertEquals("SOC", normalizeDetectedSubjectKey("বিজ্ঞান", cls = 2))
+
+        val classSheetJson = """
+            {
+              "scanMode": "CLASS",
+              "sheetKind": "THREE_TERM_MARKS",
+              "cls": 4,
+              "term": 2,
+              "subKey": "গণিত",
+              "rows": [
+                {
+                  "roll": "০১",
+                  "name": "তাসনিম",
+                  "marks": {"T1_CONT": "25", "T1_WR": "60", "T2_CONT": "26", "T2_WR": "62"}
+                }
+              ]
+            }
+        """.trimIndent()
+
+        val classParsed = parseAutoScanJson(
+            raw = classSheetJson,
+            clsHint = null,
+            termHint = null,
+            subKeyHint = null,
+            requestedScope = ClassSheetImportScope.AUTO,
+            sheetKindHint = null
+        )
+        assertTrue(classParsed is AutoScanResult.ClassSheet)
+        val sheet = (classParsed as AutoScanResult.ClassSheet).sheet
+        assertEquals(4, sheet.cls)
+        assertEquals(2, sheet.term)
+        assertEquals("MATH", sheet.subKey)
+        assertEquals(ClassSheetKind.THREE_TERM_MARKS, sheet.sheetKind)
+        assertEquals(1, sheet.rows.size)
+        assertEquals("01", sheet.rows.first().rollText)
+        assertEquals(1, sheet.rows.first().rollText.toIntOrNull())
+
+        val traitsJson = """
+            {
+              "scanMode": "CLASS",
+              "sheetKind": "ATTENDANCE_TRAITS",
+              "cls": 5,
+              "term": 3,
+              "sharedWorkingDays": {"3": "65"},
+              "rows": [
+                {
+                  "roll": "2",
+                  "name": "রাফিদ",
+                  "traits": {"PRES_3": "60", "ACT_3": "ক"}
+                }
+              ]
+            }
+        """.trimIndent()
+        val traitsParsed = parseAutoScanJson(
+            raw = traitsJson,
+            clsHint = null,
+            termHint = null,
+            subKeyHint = null
+        ) as AutoScanResult.ClassSheet
+        assertEquals(ClassSheetKind.ATTENDANCE_TRAITS, traitsParsed.sheet.sheetKind)
+        assertEquals(5, traitsParsed.sheet.cls)
+        assertEquals("65", traitsParsed.sheet.sharedWorkingDaysByTerm[3])
+
+        val singleJson = """
+            {
+              "scanMode": "SINGLE",
+              "term": 2,
+              "student": {"name": "মালিহা", "cls": 3, "roll": 5},
+              "marks": [
+                {"key": "BAN_2_TB", "value": 9.0, "subjectLabel": "বাংলা (পাঠ্যবই)"}
+              ]
+            }
+        """.trimIndent()
+        val singleParsed = parseAutoScanJson(
+            raw = singleJson,
+            clsHint = null,
+            termHint = null,
+            subKeyHint = null
+        )
+        assertTrue(singleParsed is AutoScanResult.SingleStudent)
+        val ms = (singleParsed as AutoScanResult.SingleStudent).marksheet
+        assertEquals(2, ms.term)
+        assertEquals(3, ms.student.cls)
+        assertEquals(5, ms.student.roll)
+        assertEquals("BAN_2_TB", ms.marks.first().key)
     }
 }

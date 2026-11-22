@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
@@ -165,13 +166,13 @@ fun DashboardScreen(
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .padding(horizontal = 12.dp, vertical = 8.dp),
+            .padding(horizontal = 10.dp, vertical = 6.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         LazyColumn(
             modifier = Modifier.widthIn(max = 920.dp).fillMaxSize(),
-            verticalArrangement = Arrangement.spacedBy(10.dp),
-            contentPadding = PaddingValues(bottom = 24.dp)
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+            contentPadding = PaddingValues(bottom = 18.dp)
         ) {
             // 1. Admin Join Requests Banner
             if (isAdmin && pendingRequestCount > 0) {
@@ -186,21 +187,21 @@ fun DashboardScreen(
                             .testTag("dash_pending_approvals_banner")
                     ) {
                         Row(
-                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
                             verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
-                            Icon(Icons.Rounded.HourglassTop, contentDescription = null, tint = AmberNotice, modifier = Modifier.size(20.dp))
+                            Icon(Icons.Rounded.HourglassTop, contentDescription = null, tint = AmberNotice, modifier = Modifier.size(18.dp))
                             Column(Modifier.weight(1f)) {
                                 Text(
                                     "${bn(pendingRequestCount.toString())} জন নতুন শিক্ষক অনুমোদনের অপেক্ষায়",
                                     fontWeight = FontWeight.Bold,
-                                    fontSize = 13.sp,
+                                    fontSize = 12.5.sp,
                                     color = AmberNotice
                                 )
                                 Text(
                                     "অনুমতি নির্ধারণ করে অনুমোদন করতে ট্যাপ করুন",
-                                    fontSize = 11.sp,
+                                    fontSize = 10.5.sp,
                                     color = SlateText
                                 )
                             }
@@ -222,7 +223,7 @@ fun DashboardScreen(
                     modifier = Modifier.fillMaxWidth(),
                     colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
                     border = BorderStroke(1.dp, TealContainer),
-                    shape = RoundedCornerShape(16.dp)
+                    shape = RoundedCornerShape(14.dp)
                 ) {
                     Column(
                         modifier = Modifier
@@ -232,19 +233,19 @@ fun DashboardScreen(
                                     colors = listOf(TealSoft, Color.White)
                                 )
                             )
-                            .padding(14.dp),
-                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                            .padding(11.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
-                            Surface(color = TealContainer, shape = RoundedCornerShape(10.dp)) {
+                            Surface(color = TealContainer, shape = RoundedCornerShape(9.dp)) {
                                 Icon(
                                     Icons.Rounded.School,
                                     contentDescription = "বিদ্যালয়",
                                     tint = TealDark,
-                                    modifier = Modifier.padding(9.dp).size(22.dp)
+                                    modifier = Modifier.padding(7.dp).size(20.dp)
                                 )
                             }
                             Column(Modifier.weight(1f)) {
@@ -358,7 +359,7 @@ fun DashboardScreen(
                     border = BorderStroke(1.dp, SlateOutline),
                     shape = RoundedCornerShape(14.dp)
                 ) {
-                    Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Column(Modifier.padding(11.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             verticalAlignment = Alignment.CenterVertically,
@@ -367,7 +368,7 @@ fun DashboardScreen(
                             Text(
                                 "দ্রুত টুলস, প্রিন্ট ও ব্যাকআপ",
                                 fontWeight = FontWeight.Bold,
-                                fontSize = 14.5.sp,
+                                fontSize = 13.5.sp,
                                 color = SlateText
                             )
                             Surface(
@@ -378,12 +379,12 @@ fun DashboardScreen(
                                 modifier = Modifier.testTag("dash_backup_settings_btn")
                             ) {
                                 Row(
-                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp),
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
                                     verticalAlignment = Alignment.CenterVertically,
                                     horizontalArrangement = Arrangement.spacedBy(4.dp)
                                 ) {
-                                    Icon(Icons.Rounded.Settings, contentDescription = null, tint = SlateMuted, modifier = Modifier.size(14.dp))
-                                    Text("সেটিংস", fontSize = 11.sp, color = SlateText)
+                                    Icon(Icons.Rounded.Settings, contentDescription = null, tint = SlateMuted, modifier = Modifier.size(13.dp))
+                                    Text("সেটিংস", fontSize = 10.5.sp, color = SlateText)
                                 }
                             }
                         }
@@ -391,7 +392,7 @@ fun DashboardScreen(
                         // Row 1: Data Entry & AI Shortcuts
                         Row(
                             modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
                         ) {
                             if (permissions.canManageStudents) {
                                 QuickShortcutTile(
@@ -429,7 +430,7 @@ fun DashboardScreen(
                         // Row 2: PDF, Batch Print & Backup
                         Row(
                             modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
                         ) {
                             if (permissions.canExportPdf) {
                                 QuickShortcutTile(
@@ -465,7 +466,7 @@ fun DashboardScreen(
                         if (permissions.canExportPdf) {
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
                             ) {
                                 QuickShortcutTile(
                                     icon = Icons.Rounded.TableChart,
@@ -491,12 +492,12 @@ fun DashboardScreen(
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Column(
-                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
-                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                        modifier = Modifier.padding(horizontal = 9.dp, vertical = 6.dp),
+                        verticalArrangement = Arrangement.spacedBy(5.dp)
                     ) {
                         Row(
                             modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
-                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            horizontalArrangement = Arrangement.spacedBy(5.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             FilterChip(
@@ -504,7 +505,8 @@ fun DashboardScreen(
                                 onClick = { classFilter = null },
                                 colors = appFilterChipColors(),
                                 border = appFilterChipBorder(classFilter == null),
-                                label = { Text("সব শ্রেণি", fontSize = 11.5.sp) }
+                                modifier = Modifier.height(32.dp),
+                                label = { Text("সব শ্রেণি", fontSize = 11.sp) }
                             )
                             visibleClasses.forEach { c ->
                                 val sel = classFilter == c
@@ -513,18 +515,19 @@ fun DashboardScreen(
                                     onClick = { classFilter = c },
                                     colors = appFilterChipColors(),
                                     border = appFilterChipBorder(sel),
-                                    label = { Text("${classNameBn(c, settings)} শ্রেণি", fontSize = 11.5.sp) }
+                                    modifier = Modifier.height(32.dp),
+                                    label = { Text("${classNameBn(c, settings)} শ্রেণি", fontSize = 11.sp) }
                                 )
                             }
                         }
 
                         Row(
                             modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
-                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            horizontalArrangement = Arrangement.spacedBy(5.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             listOf(
-                                0 to "বার্ষিক (সব)",
+                                0 to "বার্ষিক",
                                 1 to "১ম প্রান্তিক",
                                 2 to "২য় প্রান্তিক",
                                 3 to "৩য় প্রান্তিক"
@@ -535,7 +538,8 @@ fun DashboardScreen(
                                     onClick = { termFilter = t },
                                     colors = appFilterChipColors(),
                                     border = appFilterChipBorder(sel),
-                                    label = { Text(lbl, fontSize = 11.sp) }
+                                    modifier = Modifier.height(32.dp),
+                                    label = { Text(lbl, fontSize = 10.5.sp) }
                                 )
                             }
                         }
@@ -603,25 +607,26 @@ private fun HeroMetricBox(
     Surface(
         color = Color.White,
         border = BorderStroke(1.dp, SlateOutline),
-        shape = RoundedCornerShape(10.dp),
+        shape = RoundedCornerShape(9.dp),
         modifier = modifier
     ) {
         Column(
-            modifier = Modifier.padding(horizontal = 6.dp, vertical = 8.dp),
+            modifier = Modifier.padding(horizontal = 4.dp, vertical = 6.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(2.dp)
+            verticalArrangement = Arrangement.spacedBy(1.dp)
         ) {
             Text(
                 value,
                 fontWeight = FontWeight.Bold,
-                fontSize = 15.sp,
+                fontSize = 14.sp,
                 color = accent,
                 maxLines = 1
             )
             Text(
                 label,
-                fontSize = 10.sp,
+                fontSize = 9.5.sp,
                 color = SlateMuted,
+                textAlign = TextAlign.Center,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
@@ -644,31 +649,30 @@ private fun QuickShortcutTile(
         color = SlateBg,
         border = BorderStroke(1.dp, SlateOutline),
         shape = RoundedCornerShape(10.dp),
-        modifier = modifier.height(66.dp).testTag(testTag)
+        modifier = modifier.heightIn(min = 52.dp).testTag(testTag)
     ) {
         Column(
-            modifier = Modifier.fillMaxSize().padding(horizontal = 8.dp, vertical = 7.dp),
-            verticalArrangement = Arrangement.SpaceBetween,
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 6.dp),
+            verticalArrangement = Arrangement.spacedBy(2.dp),
             horizontalAlignment = Alignment.Start
         ) {
             Row(
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(5.dp)
+                horizontalArrangement = Arrangement.spacedBy(4.dp)
             ) {
-                Icon(icon, contentDescription = null, tint = tint, modifier = Modifier.size(16.dp))
+                Icon(icon, contentDescription = null, tint = tint, modifier = Modifier.size(15.dp))
                 Text(
                     title,
                     fontWeight = FontWeight.SemiBold,
-                    fontSize = 11.5.sp,
+                    fontSize = 11.sp,
                     color = SlateText,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
             }
-            Spacer(Modifier.height(2.dp))
             Text(
                 subtitle,
-                fontSize = 10.sp,
+                fontSize = 9.5.sp,
                 color = SlateMuted,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis

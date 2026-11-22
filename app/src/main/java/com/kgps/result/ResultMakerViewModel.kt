@@ -15,6 +15,7 @@ import com.google.firebase.firestore.FirebaseFirestoreException
 import com.kgps.result.ai.AiChatMessage
 import com.kgps.result.ai.AiModelMode
 import com.kgps.result.ai.AiRepository
+import com.kgps.result.ai.AutoScanResult
 import com.kgps.result.ai.ClassSheetImportScope
 import com.kgps.result.ai.ClassSheetKind
 import com.kgps.result.ai.DirectGeminiAiRepository
@@ -2325,6 +2326,62 @@ class ResultMakerViewModel(
                     it.copy(
                         analyzingImage = false,
                         analysisError = e.message ?: "নম্বরপত্র স্ক্যান করা যায়নি"
+                    )
+                }
+            }
+        }
+    }
+
+    fun analyzeAutoSheet(
+        clsHint: Int?,
+        termHint: Int?,
+        subKeyHint: String?,
+        teacherNote: String,
+        importScope: ClassSheetImportScope = ClassSheetImportScope.AUTO,
+        sheetKindHint: ClassSheetKind? = null
+    ) {
+        val bmp = _aiState.value.selectedImageBitmap ?: return
+        if (_aiState.value.analyzingImage) return
+        val enhance = _aiState.value.documentEnhance
+        val qrMeta = _aiState.value.detectedSheetQr
+
+        _aiState.update {
+            it.copy(
+                analyzingImage = true,
+                analysisError = null,
+                analysisResult = null,
+                classSheetResult = null
+            )
+        }
+        viewModelScope.launch {
+            try {
+                when (
+                    val res = aiRepository.analyzeAutoSheetImage(
+                        bitmap = bmp,
+                        clsHint = clsHint,
+                        termHint = termHint,
+                        subKeyHint = subKeyHint,
+                        teacherNote = teacherNote,
+                        importScope = importScope,
+                        documentEnhance = enhance,
+                        sheetKindHint = sheetKindHint,
+                        qrMeta = qrMeta
+                    )
+                ) {
+                    is AutoScanResult.ClassSheet -> {
+                        _aiState.update { it.copy(analyzingImage = false, classSheetResult = res.sheet, analysisResult = null) }
+                    }
+                    is AutoScanResult.SingleStudent -> {
+                        _aiState.update { it.copy(analyzingImage = false, analysisResult = res.marksheet, classSheetResult = null) }
+                    }
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                _aiState.update {
+                    it.copy(
+                        analyzingImage = false,
+                        analysisError = e.message ?: "ছবি অটো-স্ক্যান করা যায়নি"
                     )
                 }
             }
