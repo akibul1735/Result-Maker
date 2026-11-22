@@ -75,6 +75,7 @@ object Repo {
         o.put("teachers", JSONObject().also { j -> st.teachers.forEach { (k, v) -> j.put(k.toString(), v) } })
         o.put("teacherMobiles", JSONObject().also { j -> st.teacherMobiles.forEach { (k, v) -> j.put(k.toString(), v) } })
         o.put("pdfFont", st.pdfFont)
+        o.put("pdfEnglishFont", st.pdfEnglishFont)
         o.put("dpeLogo", st.dpeLogo)
         o.put("customFields", JSONArray().also { arr ->
             st.customFields.forEach { cf ->
@@ -132,12 +133,17 @@ object Repo {
                 CustomClassDef(id, nameBn, shortBn, tier)
             }.distinctBy { it.id }.sortedBy { it.id }
         } else emptyList()
+        val decodedFonts = decodePdfFontPair(
+            rawPdfFont = o.optString("pdfFont"),
+            explicitEnglishFont = o.optString("pdfEnglishFont").takeIf { it.isNotBlank() }
+        )
         val st = Settings(
             school = o.optString("school"),
             schoolAddress = o.optString("schoolAddress"),
             year = o.optString("year", "২০২৬"),
             teachers = intMap(o.optJSONObject("teachers")), teacherMobiles = intMap(o.optJSONObject("teacherMobiles")),
-            pdfFont = o.optString("pdfFont", "noto_serif").ifBlank { "noto_serif" },
+            pdfFont = decodedFonts.bengaliFontId,
+            pdfEnglishFont = decodedFonts.englishFontId,
             dpeLogo = if (rawLogo == "color") "color" else "simple",
             customFields = customFields,
             customClasses = customClasses
@@ -1259,7 +1265,9 @@ object Repo {
 
     private const val APP_UI_PREFS = "kgps_app_ui_prefs"
     private const val KEY_APP_UI_FONT = "app_ui_font"
+    private const val KEY_APP_UI_ENGLISH_FONT = "app_ui_english_font"
     private const val KEY_PDF_FONT_OVERRIDE = "pdf_font_override"
+    private const val KEY_PDF_ENGLISH_FONT_OVERRIDE = "pdf_english_font_override"
     private const val KEY_SCHOOL_ADDRESS_OVERRIDE = "school_address_override"
 
     fun loadAppFont(ctx: Context): String {
@@ -1267,14 +1275,33 @@ object Repo {
             .getString(KEY_APP_UI_FONT, "system")
             ?.trim()
             .orEmpty()
-        return if (APP_FONT_LIST.any { it.id == saved }) saved else "system"
+        return if (BENGALI_APP_FONT_LIST.any { it.id == saved }) saved else "system"
     }
 
     fun saveAppFont(ctx: Context, fontId: String) {
-        val valid = if (APP_FONT_LIST.any { it.id == fontId }) fontId else "system"
+        val valid = if (BENGALI_APP_FONT_LIST.any { it.id == fontId }) fontId else "system"
         ctx.getSharedPreferences(APP_UI_PREFS, Context.MODE_PRIVATE)
             .edit()
             .putString(KEY_APP_UI_FONT, valid)
+            .apply()
+    }
+
+    fun loadAppEnglishFont(ctx: Context): String {
+        val prefs = ctx.getSharedPreferences(APP_UI_PREFS, Context.MODE_PRIVATE)
+        val explicit = prefs.getString(KEY_APP_UI_ENGLISH_FONT, null)?.trim()
+        if (explicit != null) {
+            return if (ENGLISH_APP_FONT_LIST.any { it.id == explicit }) explicit else "system"
+        }
+        // Migrate legacy single-picker selection if user had picked an English UI font previously
+        val legacy = prefs.getString(KEY_APP_UI_FONT, null)?.trim().orEmpty()
+        return if (legacy != "system" && ENGLISH_APP_FONT_LIST.any { it.id == legacy }) legacy else "system"
+    }
+
+    fun saveAppEnglishFont(ctx: Context, fontId: String) {
+        val valid = if (ENGLISH_APP_FONT_LIST.any { it.id == fontId }) fontId else "system"
+        ctx.getSharedPreferences(APP_UI_PREFS, Context.MODE_PRIVATE)
+            .edit()
+            .putString(KEY_APP_UI_ENGLISH_FONT, valid)
             .apply()
     }
 
@@ -1284,14 +1311,34 @@ object Repo {
             ?.trim()
             ?.takeIf { it.isNotBlank() }
             ?: return null
-        return saved.takeIf { id -> PDF_FONT_LIST.any { it.id == id } }
+        return saved.takeIf { id -> BENGALI_PDF_FONT_LIST.any { it.id == id } }
     }
 
     fun savePdfFontOverride(ctx: Context, fontId: String) {
-        val valid = if (PDF_FONT_LIST.any { it.id == fontId }) fontId else "noto_serif"
+        val valid = if (BENGALI_PDF_FONT_LIST.any { it.id == fontId }) fontId else "noto_serif"
         ctx.getSharedPreferences(APP_UI_PREFS, Context.MODE_PRIVATE)
             .edit()
             .putString(KEY_PDF_FONT_OVERRIDE, valid)
+            .apply()
+    }
+
+    fun loadPdfEnglishFontOverride(ctx: Context): String? {
+        val prefs = ctx.getSharedPreferences(APP_UI_PREFS, Context.MODE_PRIVATE)
+        val explicit = prefs.getString(KEY_PDF_ENGLISH_FONT_OVERRIDE, null)
+            ?.trim()
+            ?.takeIf { it.isNotBlank() }
+        if (explicit != null) {
+            return explicit.takeIf { id -> ENGLISH_PDF_FONT_LIST.any { it.id == id } }
+        }
+        val legacyPdf = prefs.getString(KEY_PDF_FONT_OVERRIDE, null)?.trim().orEmpty()
+        return legacyPdf.takeIf { id -> ENGLISH_PDF_FONT_LIST.any { it.id == id } }
+    }
+
+    fun savePdfEnglishFontOverride(ctx: Context, fontId: String) {
+        val valid = if (ENGLISH_PDF_FONT_LIST.any { it.id == fontId }) fontId else "times_new_roman"
+        ctx.getSharedPreferences(APP_UI_PREFS, Context.MODE_PRIVATE)
+            .edit()
+            .putString(KEY_PDF_ENGLISH_FONT_OVERRIDE, valid)
             .apply()
     }
 

@@ -58,6 +58,7 @@ import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -88,12 +89,14 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.kgps.result.APP_FONT_LIST
+import com.kgps.result.BENGALI_APP_FONT_LIST
+import com.kgps.result.BENGALI_PDF_FONT_LIST
 import com.kgps.result.CsvHeaderStyle
 import com.kgps.result.CustomClassDef
 import com.kgps.result.CustomFieldDef
 import com.kgps.result.DPE_LOGO_LIST
-import com.kgps.result.PDF_FONT_LIST
+import com.kgps.result.ENGLISH_APP_FONT_LIST
+import com.kgps.result.ENGLISH_PDF_FONT_LIST
 import com.kgps.result.PdfGen
 import com.kgps.result.Repo
 import com.kgps.result.Settings
@@ -137,6 +140,9 @@ import com.kgps.result.ui.theme.TealDark
 import com.kgps.result.ui.theme.TealPrimary
 import com.kgps.result.ui.theme.TealSoft
 import com.kgps.result.ui.theme.appComposeFontFamily
+import com.kgps.result.ui.theme.appFilterChipBorder
+import com.kgps.result.ui.theme.appFilterChipColors
+import com.kgps.result.ui.theme.buildMixedScriptAnnotatedString
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -164,7 +170,9 @@ fun SettingsScreen(
     geminiTestStatus: String?,
     geminiTestSuccess: Boolean?,
     appFontId: String = "system",
+    appEnglishFontId: String = "system",
     onSelectAppFont: (String) -> Unit = {},
+    onSelectAppEnglishFont: (String) -> Unit = {},
     onUpdateSettings: (Settings) -> Unit,
     onAddCustomField: (String) -> Boolean,
     onRemoveCustomField: (String) -> Unit,
@@ -385,8 +393,12 @@ fun SettingsScreen(
         }
     }
 
-    val activeAppFontLabel = APP_FONT_LIST.find { it.id == appFontId }?.labelBn?.substringBefore(" (") ?: appFontId
-    val activeFontLabel = PDF_FONT_LIST.find { it.id == s.pdfFont }?.labelBn?.substringBefore(" (") ?: s.pdfFont
+    val activeAppBnFontLabel = BENGALI_APP_FONT_LIST.find { it.id == appFontId }?.labelBn?.substringBefore(" (") ?: appFontId
+    val activeAppEnFontLabel = ENGLISH_APP_FONT_LIST.find { it.id == appEnglishFontId }?.labelBn?.substringBefore(" (") ?: appEnglishFontId
+    val activeAppFontLabel = "বাংলা: $activeAppBnFontLabel · ইংরেজি: $activeAppEnFontLabel"
+    val activePdfBnFontLabel = BENGALI_PDF_FONT_LIST.find { it.id == s.pdfFont }?.labelBn?.substringBefore(" (") ?: s.pdfFont
+    val activePdfEnFontLabel = ENGLISH_PDF_FONT_LIST.find { it.id == s.pdfEnglishFont }?.labelBn?.substringBefore(" (") ?: s.pdfEnglishFont
+    val activeFontLabel = "বাংলা: $activePdfBnFontLabel · ইংরেজি: $activePdfEnFontLabel"
     val activeLogoLabel = DPE_LOGO_LIST.find { it.id == s.dpeLogo }?.labelBn?.substringBefore(" (") ?: s.dpeLogo
 
     Column(
@@ -869,12 +881,16 @@ fun SettingsScreen(
                 }
             }
 
-            // Category 2: Font Management (Two separate parts: App UI Font + Report/PDF Font)
-            SettingsCategoryHeader(title = "ফন্ট ব্যবস্থাপনা (বাংলা ও ইংরেজি — দুটি ভাগ)", icon = Icons.Rounded.FontDownload)
+            // Category 2: Font Management (Separate Bengali & English choices for App UI and Documents)
+            SettingsCategoryHeader(title = "ফন্ট ব্যবস্থাপনা (বাংলা ও ইংরেজি — আলাদা নির্বাচন)", icon = Icons.Rounded.FontDownload)
+
+            var appFontScriptTab by remember { mutableStateOf("bn") }
+            val activeAppBnFamily = remember(appFontId) { appComposeFontFamily(appFontId) }
+            val activeAppEnFamily = remember(appEnglishFontId) { appComposeFontFamily(appEnglishFontId) }
 
             TreeGroupCard(
                 title = "ভাগ ১: অ্যাপসের নিজস্ব ফন্ট",
-                subtitle = "অ্যাপের লেখা ও মেনু · সক্রিয়: $activeAppFontLabel",
+                subtitle = "অ্যাপের লেখা ও মেনু · $activeAppFontLabel",
                 badgeText = "অ্যাপ UI",
                 icon = Icons.Rounded.TextFields,
                 expanded = expandedGroup == "app_font",
@@ -884,12 +900,81 @@ fun SettingsScreen(
                 TreeBranchItem(isLast = true) {
                     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                         Text(
-                            "এই ফন্ট শুধু অ্যাপের ড্যাশবোর্ড, শিক্ষার্থী তালিকা, বাটন ও সকল স্ক্রিনে প্রযোজ্য হবে (প্রত্যেক ব্যবহারকারী নিজের পছন্দমতো সেট করতে পারবেন)।",
+                            "বাংলার জন্য আলাদা বাংলা ফন্ট এবং ইংরেজি/সংখ্যা/কোডের জন্য আলাদা ইংরেজি ফন্ট নির্বাচন করুন — একই স্ক্রিনে উভয় ফন্ট একসাথে প্রযোজ্য হবে।",
                             fontSize = 11.5.sp,
                             color = SlateMuted
                         )
-                        APP_FONT_LIST.forEach { font ->
-                            val selected = appFontId == font.id
+                        Surface(
+                            color = TealSoft,
+                            border = BorderStroke(1.dp, TealPrimary.copy(alpha = 0.25f)),
+                            shape = RoundedCornerShape(10.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Column(
+                                Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+                                verticalArrangement = Arrangement.spacedBy(2.dp)
+                            ) {
+                                Text(
+                                    "লাইভ মিশ্র প্রিভিউ (অ্যাপ UI): বাংলা = $activeAppBnFontLabel · ইংরেজি = $activeAppEnFontLabel",
+                                    fontSize = 10.5.sp,
+                                    color = TealDark,
+                                    fontWeight = FontWeight.Medium
+                                )
+                                Text(
+                                    text = buildMixedScriptAnnotatedString(
+                                        "শ্রেণি: Class 3 · রোল 01 — মিতু (GPA A+ 2026)",
+                                        bnFamily = activeAppBnFamily,
+                                        enFamily = activeAppEnFamily
+                                    ),
+                                    fontSize = 13.sp,
+                                    color = SlateText
+                                )
+                            }
+                        }
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            FilterChip(
+                                selected = appFontScriptTab == "bn",
+                                onClick = { appFontScriptTab = "bn" },
+                                colors = appFilterChipColors(),
+                                border = appFilterChipBorder(appFontScriptTab == "bn"),
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .heightIn(min = 48.dp)
+                                    .testTag("settings_app_font_tab_bn"),
+                                label = {
+                                    Text(
+                                        "বাংলা ফন্ট",
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
+                            )
+                            FilterChip(
+                                selected = appFontScriptTab == "en",
+                                onClick = { appFontScriptTab = "en" },
+                                colors = appFilterChipColors(),
+                                border = appFilterChipBorder(appFontScriptTab == "en"),
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .heightIn(min = 48.dp)
+                                    .testTag("settings_app_font_tab_en"),
+                                label = {
+                                    Text(
+                                        "ইংরেজি ফন্ট",
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
+                            )
+                        }
+
+                        val activeAppList = if (appFontScriptTab == "bn") BENGALI_APP_FONT_LIST else ENGLISH_APP_FONT_LIST
+                        val selectedAppFontForTab = if (appFontScriptTab == "bn") appFontId else appEnglishFontId
+                        activeAppList.forEach { font ->
+                            val selected = selectedAppFontForTab == font.id
                             val sampleFamily = remember(font.id) {
                                 appComposeFontFamily(font.id)
                             }
@@ -898,7 +983,11 @@ fun SettingsScreen(
                                     .fillMaxWidth()
                                     .testTag("settings_app_font_${font.id}")
                                     .clickable {
-                                        onSelectAppFont(font.id)
+                                        if (appFontScriptTab == "bn") {
+                                            onSelectAppFont(font.id)
+                                        } else {
+                                            onSelectAppEnglishFont(font.id)
+                                        }
                                     },
                                 color = if (selected) TealContainer.copy(alpha = 0.65f) else SlateBg,
                                 border = BorderStroke(if (selected) 2.dp else 1.dp, if (selected) TealPrimary else SlateOutline),
@@ -912,15 +1001,19 @@ fun SettingsScreen(
                                     RadioButton(
                                         selected = selected,
                                         onClick = {
-                                            onSelectAppFont(font.id)
+                                            if (appFontScriptTab == "bn") {
+                                                onSelectAppFont(font.id)
+                                            } else {
+                                                onSelectAppEnglishFont(font.id)
+                                            }
                                         }
                                     )
                                     Column(Modifier.weight(1f)) {
                                         Text(font.labelBn, fontWeight = FontWeight.SemiBold, fontSize = 12.5.sp)
                                         Text(font.descriptionBn, fontSize = 11.sp, color = SlateMuted)
                                         Text(
-                                            if (font.id in setOf("roboto", "times_new_roman", "arimo", "plus_jakarta_sans")) {
-                                                "Result Maker Dashboard · Class 1–5 · ABC 2026"
+                                            if (appFontScriptTab == "en") {
+                                                "Result Maker Dashboard · Class 1–5 · Roll 01 (2026)"
                                             } else {
                                                 "ড্যাশবোর্ড, শ্রেণি ও শিক্ষার্থী তালিকা — ২০২৬"
                                             },
@@ -937,9 +1030,17 @@ fun SettingsScreen(
                 }
             }
 
+            var pdfFontScriptTab by remember { mutableStateOf("bn") }
+            val activePdfBnFamily = remember(s.pdfFont) {
+                FontFamily(androidx.compose.ui.text.font.Typeface(PdfGen.resolveTypeface(ctx, s.pdfFont, false)))
+            }
+            val activePdfEnFamily = remember(s.pdfEnglishFont) {
+                FontFamily(androidx.compose.ui.text.font.Typeface(PdfGen.resolveTypeface(ctx, s.pdfEnglishFont, false)))
+            }
+
             TreeGroupCard(
                 title = "ভাগ ২: রিপোর্ট ও অন্যান্য PDF ফন্ট",
-                subtitle = "প্রগতি প্রতিবেদন ও ফাঁকা শিট PDF · সক্রিয়: $activeFontLabel",
+                subtitle = "প্রগতি প্রতিবেদন ও ফাঁকা শিট · $activeFontLabel",
                 badgeText = "PDF ফন্ট",
                 icon = Icons.Rounded.FontDownload,
                 expanded = expandedGroup == "font",
@@ -950,15 +1051,84 @@ fun SettingsScreen(
                     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                         Text(
                             if (isAdmin) {
-                                "এই ফন্ট প্রগতি প্রতিবেদন, ফাঁকা ফর্ম / শিট PDF ও ব্যাচ প্রিন্ট PDF তৈরিতে ব্যবহৃত হবে।"
+                                "একই ডকুমেন্ট বা ফাঁকা শিটে বাংলা অংশ নির্বাচিত বাংলা ফন্টে এবং ইংরেজি অক্ষর/সংখ্যা/রেফারেন্স কোড নির্বাচিত ইংরেজি ফন্টে মুদ্রিত হবে।"
                             } else {
-                                "এই ফন্ট প্রগতি প্রতিবেদন ও ফাঁকা ফর্ম PDF তৈরিতে ব্যবহৃত হবে (শিক্ষক হিসেবেও নিজের ডিভাইসের PDF ফন্ট পরিবর্তন করতে পারবেন)।"
+                                "একই ডকুমেন্ট বা ফাঁকা শিটে বাংলা ও ইংরেজি উভয় ফন্ট একসাথে কাজ করবে (নিজের ডিভাইসের PDF ফন্ট পরিবর্তন করতে পারবেন)।"
                             },
                             fontSize = 11.5.sp,
                             color = SlateMuted
                         )
-                        PDF_FONT_LIST.forEach { font ->
-                            val selected = s.pdfFont == font.id
+                        Surface(
+                            color = TealSoft,
+                            border = BorderStroke(1.dp, TealPrimary.copy(alpha = 0.25f)),
+                            shape = RoundedCornerShape(10.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Column(
+                                Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+                                verticalArrangement = Arrangement.spacedBy(2.dp)
+                            ) {
+                                Text(
+                                    "লাইভ মিশ্র প্রিভিউ (PDF): বাংলা = $activePdfBnFontLabel · ইংরেজি = $activePdfEnFontLabel",
+                                    fontSize = 10.5.sp,
+                                    color = TealDark,
+                                    fontWeight = FontWeight.Medium
+                                )
+                                Text(
+                                    text = buildMixedScriptAnnotatedString(
+                                        "ফাঁকা শিট / Progress Report · Roll 05 · REF:C3-BAN · Grade A+",
+                                        bnFamily = activePdfBnFamily,
+                                        enFamily = activePdfEnFamily
+                                    ),
+                                    fontSize = 13.sp,
+                                    color = SlateText
+                                )
+                            }
+                        }
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            FilterChip(
+                                selected = pdfFontScriptTab == "bn",
+                                onClick = { pdfFontScriptTab = "bn" },
+                                colors = appFilterChipColors(),
+                                border = appFilterChipBorder(pdfFontScriptTab == "bn"),
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .heightIn(min = 48.dp)
+                                    .testTag("settings_pdf_font_tab_bn"),
+                                label = {
+                                    Text(
+                                        "বাংলা ফন্ট (PDF)",
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
+                            )
+                            FilterChip(
+                                selected = pdfFontScriptTab == "en",
+                                onClick = { pdfFontScriptTab = "en" },
+                                colors = appFilterChipColors(),
+                                border = appFilterChipBorder(pdfFontScriptTab == "en"),
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .heightIn(min = 48.dp)
+                                    .testTag("settings_pdf_font_tab_en"),
+                                label = {
+                                    Text(
+                                        "ইংরেজি ফন্ট (PDF)",
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
+                            )
+                        }
+
+                        val activePdfList = if (pdfFontScriptTab == "bn") BENGALI_PDF_FONT_LIST else ENGLISH_PDF_FONT_LIST
+                        val selectedPdfFontForTab = if (pdfFontScriptTab == "bn") s.pdfFont else s.pdfEnglishFont
+                        activePdfList.forEach { font ->
+                            val selected = selectedPdfFontForTab == font.id
                             val sampleFamily = remember(font.id) {
                                 FontFamily(androidx.compose.ui.text.font.Typeface(PdfGen.resolveTypeface(ctx, font.id, false)))
                             }
@@ -967,7 +1137,11 @@ fun SettingsScreen(
                                     .fillMaxWidth()
                                     .testTag("settings_font_${font.id}")
                                     .clickable {
-                                        val next = s.copy(pdfFont = font.id)
+                                        val next = if (pdfFontScriptTab == "bn") {
+                                            s.copy(pdfFont = font.id)
+                                        } else {
+                                            s.copy(pdfEnglishFont = font.id)
+                                        }
                                         s = next
                                         onUpdateSettings(next)
                                     },
@@ -983,7 +1157,11 @@ fun SettingsScreen(
                                     RadioButton(
                                         selected = selected,
                                         onClick = {
-                                            val next = s.copy(pdfFont = font.id)
+                                            val next = if (pdfFontScriptTab == "bn") {
+                                                s.copy(pdfFont = font.id)
+                                            } else {
+                                                s.copy(pdfEnglishFont = font.id)
+                                            }
                                             s = next
                                             onUpdateSettings(next)
                                         }
@@ -992,8 +1170,8 @@ fun SettingsScreen(
                                         Text(font.labelBn, fontWeight = FontWeight.SemiBold, fontSize = 12.5.sp)
                                         Text(font.descriptionBn, fontSize = 11.sp, color = SlateMuted)
                                         Text(
-                                            if (font.id in setOf("times_new_roman", "tinos", "arimo", "merriweather")) {
-                                                "Progress Report Card & Marks Sheet · Class V (2026)"
+                                            if (pdfFontScriptTab == "en") {
+                                                "Progress Report Card & Blank Sheet · Class V (2026)"
                                             } else {
                                                 "শিখন অগ্রগতি প্রতিবেদন ও নম্বরপত্র — ২০২৬"
                                             },

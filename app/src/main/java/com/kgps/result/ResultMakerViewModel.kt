@@ -291,17 +291,27 @@ class ResultMakerViewModel(
         .stateIn(viewModelScope, SharingStarted.Eagerly, emptyMap())
 
     private val _localPdfFontOverride = MutableStateFlow(Repo.loadPdfFontOverride(appContext))
+    private val _localPdfEnglishFontOverride = MutableStateFlow(Repo.loadPdfEnglishFontOverride(appContext))
     private val _localSchoolAddressOverride = MutableStateFlow(Repo.loadSchoolAddressOverride(appContext))
 
     val settings: StateFlow<Settings> = combine(
         activeSchool,
         _localPdfFontOverride,
+        _localPdfEnglishFontOverride,
         _localSchoolAddressOverride
-    ) { school, localFont, localAddress ->
+    ) { school, localFont, localEnFont, localAddress ->
         val base = school?.settings ?: DEFAULT_SETTINGS
-        val effectiveFont = localFont?.takeIf { it.isNotBlank() } ?: base.pdfFont
+        val decodedBase = decodePdfFontPair(base.pdfFont, base.pdfEnglishFont)
+        val effectiveFont = localFont?.takeIf { id -> BENGALI_PDF_FONT_LIST.any { it.id == id } }
+            ?: decodedBase.bengaliFontId
+        val effectiveEnFont = localEnFont?.takeIf { id -> ENGLISH_PDF_FONT_LIST.any { it.id == id } }
+            ?: decodedBase.englishFontId
         val effectiveAddress = localAddress ?: base.schoolAddress
-        val st = base.copy(pdfFont = effectiveFont, schoolAddress = effectiveAddress)
+        val st = base.copy(
+            pdfFont = effectiveFont,
+            pdfEnglishFont = effectiveEnFont,
+            schoolAddress = effectiveAddress
+        )
         SchoolClassRegistry.update(st.customClasses)
         st
     }.stateIn(viewModelScope, SharingStarted.Eagerly, DEFAULT_SETTINGS)
@@ -1275,7 +1285,7 @@ class ResultMakerViewModel(
     }
 
     fun selectPdfFont(fontId: String) {
-        val valid = if (PDF_FONT_LIST.any { it.id == fontId }) fontId else "noto_serif"
+        val valid = if (BENGALI_PDF_FONT_LIST.any { it.id == fontId }) fontId else "noto_serif"
         _localPdfFontOverride.value = valid
         Repo.savePdfFontOverride(appContext, valid)
 
@@ -1295,12 +1305,39 @@ class ResultMakerViewModel(
         }
     }
 
+    fun selectPdfEnglishFont(fontId: String) {
+        val valid = if (ENGLISH_PDF_FONT_LIST.any { it.id == fontId }) fontId else "times_new_roman"
+        _localPdfEnglishFontOverride.value = valid
+        Repo.savePdfEnglishFontOverride(appContext, valid)
+
+        val school = activeSchool.value ?: return
+        if (!school.isAdmin(currentUserId)) return
+
+        val next = school.settings.copy(pdfEnglishFont = valid)
+        viewModelScope.launch {
+            cloudRepo.updateSchoolSettings(school, next).onFailure { e ->
+                val fsEx = generateSequence(e) { it.cause }
+                    .filterIsInstance<com.google.firebase.firestore.FirebaseFirestoreException>()
+                    .firstOrNull()
+                if (fsEx?.code != com.google.firebase.firestore.FirebaseFirestoreException.Code.PERMISSION_DENIED) {
+                    showMessage(friendlyFirestoreErrorMessage(e))
+                }
+            }
+        }
+    }
+
     fun updateSettings(newSettings: Settings) {
         val currentSettings = settings.value
-        val onlyPdfFontChanged = newSettings.pdfFont != currentSettings.pdfFont &&
-            newSettings == currentSettings.copy(pdfFont = newSettings.pdfFont)
-        if (onlyPdfFontChanged) {
-            selectPdfFont(newSettings.pdfFont)
+        val bnChanged = newSettings.pdfFont != currentSettings.pdfFont
+        val enChanged = newSettings.pdfEnglishFont != currentSettings.pdfEnglishFont
+        val onlyFontsChanged = (bnChanged || enChanged) &&
+            newSettings == currentSettings.copy(
+                pdfFont = newSettings.pdfFont,
+                pdfEnglishFont = newSettings.pdfEnglishFont
+            )
+        if (onlyFontsChanged) {
+            if (bnChanged) selectPdfFont(newSettings.pdfFont)
+            if (enChanged) selectPdfEnglishFont(newSettings.pdfEnglishFont)
             return
         }
 
@@ -1309,9 +1346,15 @@ class ResultMakerViewModel(
             showMessage("বিদ্যালয়ের সেটিংস পরিবর্তনের অনুমতি শুধুমাত্র অ্যাডমিনের")
             return
         }
-        if (newSettings.pdfFont != currentSettings.pdfFont) {
-            _localPdfFontOverride.value = newSettings.pdfFont
-            Repo.savePdfFontOverride(appContext, newSettings.pdfFont)
+        if (bnChanged) {
+            val validBn = if (BENGALI_PDF_FONT_LIST.any { it.id == newSettings.pdfFont }) newSettings.pdfFont else "noto_serif"
+            _localPdfFontOverride.value = validBn
+            Repo.savePdfFontOverride(appContext, validBn)
+        }
+        if (enChanged) {
+            val validEn = if (ENGLISH_PDF_FONT_LIST.any { it.id == newSettings.pdfEnglishFont }) newSettings.pdfEnglishFont else "times_new_roman"
+            _localPdfEnglishFontOverride.value = validEn
+            Repo.savePdfEnglishFontOverride(appContext, validEn)
         }
         if (newSettings.schoolAddress != currentSettings.schoolAddress) {
             _localSchoolAddressOverride.value = null

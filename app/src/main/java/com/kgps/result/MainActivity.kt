@@ -145,12 +145,21 @@ class MainActivity : FragmentActivity() {
         setContent {
             val rootContext = LocalContext.current
             var appFontId by remember { mutableStateOf(Repo.loadAppFont(rootContext)) }
-            ResultMakerTheme(appFontId = appFontId) {
+            var appEnglishFontId by remember { mutableStateOf(Repo.loadAppEnglishFont(rootContext)) }
+            ResultMakerTheme(
+                appFontId = appFontId,
+                appEnglishFontId = appEnglishFontId
+            ) {
                 AppRoot(
                     appFontId = appFontId,
+                    appEnglishFontId = appEnglishFontId,
                     onSelectAppFont = { nextFont ->
                         appFontId = nextFont
                         Repo.saveAppFont(rootContext, nextFont)
+                    },
+                    onSelectAppEnglishFont = { nextFont ->
+                        appEnglishFontId = nextFont
+                        Repo.saveAppEnglishFont(rootContext, nextFont)
                     }
                 )
             }
@@ -175,7 +184,9 @@ private val PRIMARY_NAV_ITEMS = listOf(
 @Composable
 private fun AppRoot(
     appFontId: String,
-    onSelectAppFont: (String) -> Unit
+    appEnglishFontId: String,
+    onSelectAppFont: (String) -> Unit,
+    onSelectAppEnglishFont: (String) -> Unit
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -388,7 +399,9 @@ private fun AppRoot(
                             vm = vm,
                             activeSchool = currentActive,
                             appFontId = appFontId,
+                            appEnglishFontId = appEnglishFontId,
                             onSelectAppFont = onSelectAppFont,
+                            onSelectAppEnglishFont = onSelectAppEnglishFont,
                             snackbarHostState = snackbarHostState,
                             onOpenSchoolHub = vm::openSchoolHub,
                             onSignOut = performSignOut
@@ -439,7 +452,9 @@ fun ResultMakerWorkspace(
     vm: ResultMakerViewModel,
     activeSchool: SchoolWorkspace,
     appFontId: String,
+    appEnglishFontId: String,
     onSelectAppFont: (String) -> Unit,
+    onSelectAppEnglishFont: (String) -> Unit,
     snackbarHostState: SnackbarHostState,
     onOpenSchoolHub: () -> Unit,
     onSignOut: () -> Unit
@@ -1021,7 +1036,9 @@ fun ResultMakerWorkspace(
                                     geminiTestStatus = geminiTestStatus,
                                     geminiTestSuccess = geminiTestSuccess,
                                     appFontId = appFontId,
+                                    appEnglishFontId = appEnglishFontId,
                                     onSelectAppFont = onSelectAppFont,
+                                    onSelectAppEnglishFont = onSelectAppEnglishFont,
                                     onUpdateSettings = vm::updateSettings,
                                     onAddCustomField = vm::addCustomField,
                                     onRemoveCustomField = vm::removeCustomField,

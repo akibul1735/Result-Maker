@@ -308,7 +308,7 @@ class SchoolCloudRepository(
                 "year" to settings.year,
                 "teachers" to settings.teachers.mapKeys { it.key.toString() },
                 "teacherMobiles" to settings.teacherMobiles.mapKeys { it.key.toString() },
-                "pdfFont" to settings.pdfFont.ifBlank { "noto_serif" }.take(40),
+                "pdfFont" to com.kgps.result.encodePdfFontPair(settings.pdfFont, settings.pdfEnglishFont).take(40),
                 "dpeLogo" to if (settings.dpeLogo == "color") "color" else "simple",
                 "customFields" to settings.customFields.take(30).map { mapOf("key" to it.key, "label" to it.label) },
                 "customClasses" to settings.customClasses.take(15).map {
@@ -766,8 +766,8 @@ class SchoolCloudRepository(
             val cleanPrevAddress = prev.schoolAddress.trim().take(240)
             val cleanYear = nextSettings.year.trim().ifBlank { "২০২৬" }.take(40)
             val cleanPrevYear = prev.year.trim().ifBlank { "২০২৬" }.take(40)
-            val cleanPdfFont = nextSettings.pdfFont.ifBlank { "noto_serif" }.take(40)
-            val cleanPrevPdfFont = prev.pdfFont.ifBlank { "noto_serif" }.take(40)
+            val cleanPdfFont = com.kgps.result.encodePdfFontPair(nextSettings.pdfFont, nextSettings.pdfEnglishFont).take(40)
+            val cleanPrevPdfFont = com.kgps.result.encodePdfFontPair(prev.pdfFont, prev.pdfEnglishFont).take(40)
             val cleanLogo = if (nextSettings.dpeLogo == "color") "color" else "simple"
             val cleanPrevLogo = if (prev.dpeLogo == "color") "color" else "simple"
 
@@ -1244,13 +1244,15 @@ class SchoolCloudRepository(
         }.distinctBy { it.id }.sortedBy { it.id }
 
         val dpeLogo = if (doc.getString("dpeLogo") == "color") "color" else "simple"
+        val decodedFonts = com.kgps.result.decodePdfFontPair(doc.getString("pdfFont"))
         val settings = Settings(
             school = doc.getString("school").orEmpty(),
             schoolAddress = doc.getString("schoolAddress").orEmpty(),
             year = doc.getString("year") ?: "২০২৬",
             teachers = teachers,
             teacherMobiles = teacherMobiles,
-            pdfFont = doc.getString("pdfFont")?.ifBlank { "noto_serif" } ?: "noto_serif",
+            pdfFont = decodedFonts.bengaliFontId,
+            pdfEnglishFont = decodedFonts.englishFontId,
             dpeLogo = dpeLogo,
             customFields = customFields,
             customClasses = customClasses

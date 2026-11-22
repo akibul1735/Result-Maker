@@ -1,5 +1,8 @@
 package com.kgps.result.ui.theme
 
+import android.content.Context
+import android.graphics.Typeface as AndroidTypeface
+import android.os.Build
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.FilterChipDefaults
@@ -11,13 +14,19 @@ import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.Font
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.kgps.result.R
+import com.kgps.result.splitMixedScriptRuns
 
 val TealPrimary = Color(0xFF0F766E)
 val TealDark = Color(0xFF115E59)
@@ -65,25 +74,78 @@ private val ResultMakerColorScheme = lightColorScheme(
     inversePrimary = TealContainer
 )
 
-fun appComposeFontFamily(fontId: String): FontFamily = when (fontId) {
-    "nikosh" -> FontFamily(Font(R.font.nikosh, FontWeight.Normal))
-    "sutonny_mj" -> FontFamily(Font(R.font.sutonny_mj, FontWeight.Normal))
-    "kalpurush" -> FontFamily(Font(R.font.kalpurush, FontWeight.Normal))
-    "solaiman_lipi" -> FontFamily(Font(R.font.solaiman_lipi, FontWeight.Normal))
-    "noto_serif" -> FontFamily(Font(R.font.noto_serif_bengali, FontWeight.Normal))
-    "tiro_bangla" -> FontFamily(Font(R.font.tiro_bangla, FontWeight.Normal))
-    "noto_sans" -> FontFamily(Font(R.font.noto_sans_bengali, FontWeight.Normal))
-    "hind_siliguri" -> FontFamily(Font(R.font.hind_siliguri, FontWeight.Normal))
-    "anek_bangla" -> FontFamily(Font(R.font.anek_bangla, FontWeight.Normal))
-    "mina" -> FontFamily(Font(R.font.mina, FontWeight.Normal))
-    "baloo_da_2" -> FontFamily(Font(R.font.baloo_da_2, FontWeight.Normal))
-    "roboto" -> FontFamily(Font(R.font.roboto, FontWeight.Normal))
-    "times_new_roman" -> FontFamily(Font(R.font.times_new_roman, FontWeight.Normal))
-    "tinos" -> FontFamily(Font(R.font.tinos, FontWeight.Normal))
-    "arimo" -> FontFamily(Font(R.font.arimo, FontWeight.Normal))
-    "plus_jakarta_sans" -> FontFamily(Font(R.font.plus_jakarta_sans, FontWeight.Normal))
-    "merriweather" -> FontFamily(Font(R.font.merriweather, FontWeight.Normal))
-    else -> FontFamily.Default
+private fun fontResIdFor(fontId: String): Int? = when (fontId) {
+    "nikosh" -> R.font.nikosh
+    "sutonny_mj" -> R.font.sutonny_mj
+    "kalpurush" -> R.font.kalpurush
+    "solaiman_lipi" -> R.font.solaiman_lipi
+    "noto_serif" -> R.font.noto_serif_bengali
+    "tiro_bangla" -> R.font.tiro_bangla
+    "noto_sans" -> R.font.noto_sans_bengali
+    "hind_siliguri" -> R.font.hind_siliguri
+    "anek_bangla" -> R.font.anek_bangla
+    "mina" -> R.font.mina
+    "baloo_da_2" -> R.font.baloo_da_2
+    "roboto" -> R.font.roboto
+    "times_new_roman" -> R.font.times_new_roman
+    "tinos" -> R.font.tinos
+    "arimo" -> R.font.arimo
+    "plus_jakarta_sans" -> R.font.plus_jakarta_sans
+    "merriweather" -> R.font.merriweather
+    else -> null
+}
+
+fun appComposeFontFamily(fontId: String): FontFamily =
+    fontResIdFor(fontId)?.let { FontFamily(Font(it, FontWeight.Normal)) } ?: FontFamily.Default
+
+fun appComposeFontFamily(
+    bnFontId: String,
+    enFontId: String,
+    context: Context?
+): FontFamily {
+    val cleanBn = bnFontId.trim().ifBlank { "system" }
+    val cleanEn = enFontId.trim().ifBlank { "system" }
+    if (cleanBn == "system" && cleanEn == "system") return FontFamily.Default
+
+    if (context != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+        try {
+            val enResId = fontResIdFor(if (cleanEn == "system") "roboto" else cleanEn)
+            val bnResId = fontResIdFor(cleanBn)
+            if (enResId != null) {
+                val enSysFamily = android.graphics.fonts.FontFamily.Builder(
+                    android.graphics.fonts.Font.Builder(context.resources, enResId).build()
+                ).build()
+                val builder = AndroidTypeface.CustomFallbackBuilder(enSysFamily)
+                if (bnResId != null) {
+                    val bnSysFamily = android.graphics.fonts.FontFamily.Builder(
+                        android.graphics.fonts.Font.Builder(context.resources, bnResId).build()
+                    ).build()
+                    builder.addCustomFallback(bnSysFamily)
+                }
+                return FontFamily(androidx.compose.ui.text.font.Typeface(builder.build()))
+            }
+        } catch (_: Exception) {
+            // Fall back below
+        }
+    }
+
+    return when {
+        cleanBn != "system" -> appComposeFontFamily(cleanBn)
+        cleanEn != "system" -> appComposeFontFamily(cleanEn)
+        else -> FontFamily.Default
+    }
+}
+
+fun buildMixedScriptAnnotatedString(
+    text: String,
+    bnFamily: FontFamily,
+    enFamily: FontFamily
+): AnnotatedString = buildAnnotatedString {
+    splitMixedScriptRuns(text).forEach { run ->
+        withStyle(SpanStyle(fontFamily = if (run.isBengali) bnFamily else enFamily)) {
+            append(run.text)
+        }
+    }
 }
 
 private fun buildResultMakerTypography(fontFamily: FontFamily): Typography {
@@ -192,10 +254,12 @@ fun appFilterChipBorder(
 @Composable
 fun ResultMakerTheme(
     appFontId: String = "system",
+    appEnglishFontId: String = "system",
     content: @Composable () -> Unit
 ) {
-    val typography = remember(appFontId) {
-        buildResultMakerTypography(appComposeFontFamily(appFontId))
+    val context = LocalContext.current
+    val typography = remember(appFontId, appEnglishFontId, context) {
+        buildResultMakerTypography(appComposeFontFamily(appFontId, appEnglishFontId, context))
     }
     MaterialTheme(
         colorScheme = ResultMakerColorScheme,

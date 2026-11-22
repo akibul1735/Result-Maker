@@ -96,8 +96,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import com.kgps.result.BENGALI_PDF_FONT_LIST
 import com.kgps.result.DPE_LOGO_LIST
-import com.kgps.result.PDF_FONT_LIST
+import com.kgps.result.ENGLISH_PDF_FONT_LIST
 import com.kgps.result.PdfGen
 import com.kgps.result.ReportSummaryColumn
 import com.kgps.result.Settings
@@ -1365,16 +1366,34 @@ fun ReportStudioScreen(
                                 .padding(bottom = 16.dp),
                             verticalArrangement = Arrangement.spacedBy(10.dp)
                         ) {
-                            Text("অফিসিয়াল ফন্ট (PDF — বাংলা ও ইংরেজি)", fontSize = 12.sp, color = SlateMuted)
+                            Text("বাংলা ফন্ট (PDF ডকুমেন্ট)", fontSize = 12.sp, color = SlateMuted)
                             Row(
                                 horizontalArrangement = Arrangement.spacedBy(6.dp),
                                 modifier = Modifier.horizontalScroll(rememberScrollState())
                             ) {
-                                PDF_FONT_LIST.forEach { font ->
+                                BENGALI_PDF_FONT_LIST.forEach { font ->
                                     val isSel = settings.pdfFont == font.id
                                     FilterChip(
                                         selected = isSel,
                                         onClick = { onUpdateSettings(settings.copy(pdfFont = font.id)) },
+                                        colors = appFilterChipColors(),
+                                        border = appFilterChipBorder(isSel),
+                                        modifier = Modifier.testTag("studio_font_${font.id}"),
+                                        label = { Text(font.labelBn.substringBefore(" (")) }
+                                    )
+                                }
+                            }
+
+                            Text("ইংরেজি ফন্ট (PDF সংখ্যা ও কোড)", fontSize = 12.sp, color = SlateMuted)
+                            Row(
+                                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                modifier = Modifier.horizontalScroll(rememberScrollState())
+                            ) {
+                                ENGLISH_PDF_FONT_LIST.forEach { font ->
+                                    val isSel = settings.pdfEnglishFont == font.id
+                                    FilterChip(
+                                        selected = isSel,
+                                        onClick = { onUpdateSettings(settings.copy(pdfEnglishFont = font.id)) },
                                         colors = appFilterChipColors(),
                                         border = appFilterChipBorder(isSel),
                                         modifier = Modifier.testTag("studio_font_${font.id}"),

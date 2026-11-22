@@ -63,17 +63,21 @@ object BlankSheetPdfGen {
         style = Paint.Style.FILL
     }
 
-    private fun textPaint(
+    private fun dualTextPaint(
         ctx: Context?,
         size: Float,
         bold: Boolean,
-        fontId: String,
+        bnFontId: String,
+        enFontId: String,
         color: Int = 0xFF000000.toInt()
-    ) = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        textSize = size
-        this.color = color
-        typeface = PdfGen.resolveTypeface(ctx, fontId, bold)
-    }
+    ): PdfGen.DualPaint = PdfGen.dualPaint(
+        ctx = ctx,
+        size = size,
+        bold = bold,
+        bnFontId = bnFontId,
+        enFontId = enFontId,
+        textColor = color
+    )
 
     fun renderPageBitmap(
         ctx: Context,
@@ -190,6 +194,7 @@ object BlankSheetPdfGen {
         val marginBottom = 20f
         val contentW = pageW - marginX * 2f
         val fontId = st.pdfFont
+        val enFontId = st.pdfEnglishFont
         val numStyle = page.numeralStyle
 
         // 1. Far-Left Thin Firestore/Cache QR + Centered [DPE Logo + School Title & Subtitle] + Far-Right Compact Offline QR
@@ -255,12 +260,8 @@ object BlankSheetPdfGen {
         val titleMaxW = max(95f, centerAvailW - logoReserve)
 
         val schoolName = st.school.trim().ifBlank { "প্রাথমিক বিদ্যালয়" }
-        val schoolPaint = textPaint(ctx, 13.5f, bold = true, fontId = fontId, color = 0xFF000000.toInt()).apply {
-            textAlign = Paint.Align.CENTER
-        }
-        while (schoolPaint.measureText(schoolName) > titleMaxW && schoolPaint.textSize > 8.5f) {
-            schoolPaint.textSize -= 0.5f
-        }
+        val schoolPaint = dualTextPaint(ctx, 13.5f, bold = true, bnFontId = fontId, enFontId = enFontId, color = 0xFF000000.toInt())
+        PdfGen.shrinkMixedToFit(schoolPaint, schoolName, titleMaxW, step = 0.5f, minSize = 8.5f)
 
         val yearFormatted = BlankSheetCatalog.formatDigits(st.year.ifBlank { "২০২৬" }, numStyle)
         val addressAndYear = buildString {
@@ -272,14 +273,13 @@ object BlankSheetPdfGen {
             append("শিক্ষাবর্ষ: ")
             append(yearFormatted)
         }
-        val subPaint = textPaint(ctx, 8.8f, bold = false, fontId = fontId, color = 0xFF262626.toInt()).apply {
-            textAlign = Paint.Align.CENTER
-        }
-        while (subPaint.measureText(addressAndYear) > titleMaxW && subPaint.textSize > 6.6f) {
-            subPaint.textSize -= 0.3f
-        }
+        val subPaint = dualTextPaint(ctx, 8.8f, bold = false, bnFontId = fontId, enFontId = enFontId, color = 0xFF262626.toInt())
+        PdfGen.shrinkMixedToFit(subPaint, addressAndYear, titleMaxW, step = 0.3f, minSize = 6.6f)
 
-        val textBlockW = max(schoolPaint.measureText(schoolName), subPaint.measureText(addressAndYear))
+        val textBlockW = max(
+            PdfGen.measureMixedText(schoolName, schoolPaint),
+            PdfGen.measureMixedText(addressAndYear, subPaint)
+        )
         val groupW = min(centerAvailW, logoReserve + textBlockW)
         val groupStartX = pageW / 2f - groupW / 2f
         val textCenterX = if (logoBmp != null) {
@@ -296,8 +296,8 @@ object BlankSheetPdfGen {
             pageW / 2f
         }
 
-        c.drawText(schoolName, textCenterX, marginTop + 14.5f, schoolPaint)
-        c.drawText(addressAndYear, textCenterX, marginTop + 27.5f, subPaint)
+        PdfGen.drawMixedText(c, schoolName, textCenterX, marginTop + 14.5f, schoolPaint, Paint.Align.CENTER)
+        PdfGen.drawMixedText(c, addressAndYear, textCenterX, marginTop + 27.5f, subPaint, Paint.Align.CENTER)
 
         // 2. Concise Bengali Class + Subject + Term Title Banner (White + Very Light Gray Shade + Black Border)
         val metaTop = if (hasAnyQr) marginTop + 42f else marginTop + 34f
@@ -324,31 +324,19 @@ object BlankSheetPdfGen {
             append(BlankSheetCatalog.formatInt(page.classTotalPages, numStyle))
         }
 
-        val leftBannerPaint = textPaint(ctx, 9.6f, bold = true, fontId = fontId, color = 0xFF000000.toInt()).apply {
-            textAlign = Paint.Align.LEFT
-        }
-        val centerBannerPaint = textPaint(ctx, 10.2f, bold = true, fontId = fontId, color = 0xFF000000.toInt()).apply {
-            textAlign = Paint.Align.CENTER
-        }
-        val rightBannerPaint = textPaint(ctx, 8.8f, bold = false, fontId = fontId, color = 0xFF1A1A1A.toInt()).apply {
-            textAlign = Paint.Align.RIGHT
-        }
+        val leftBannerPaint = dualTextPaint(ctx, 9.6f, bold = true, bnFontId = fontId, enFontId = enFontId, color = 0xFF000000.toInt())
+        val centerBannerPaint = dualTextPaint(ctx, 10.2f, bold = true, bnFontId = fontId, enFontId = enFontId, color = 0xFF000000.toInt())
+        val rightBannerPaint = dualTextPaint(ctx, 8.8f, bold = false, bnFontId = fontId, enFontId = enFontId, color = 0xFF1A1A1A.toInt())
 
         val maxSideW = contentW * 0.28f
-        while (leftBannerPaint.measureText(classBannerText) > maxSideW && leftBannerPaint.textSize > 7f) {
-            leftBannerPaint.textSize -= 0.3f
-        }
-        while (rightBannerPaint.measureText(rightBannerText) > maxSideW && rightBannerPaint.textSize > 6.5f) {
-            rightBannerPaint.textSize -= 0.3f
-        }
+        PdfGen.shrinkMixedToFit(leftBannerPaint, classBannerText, maxSideW, step = 0.3f, minSize = 7f)
+        PdfGen.shrinkMixedToFit(rightBannerPaint, rightBannerText, maxSideW, step = 0.3f, minSize = 6.5f)
         val maxCenterW = contentW * 0.40f
-        while (centerBannerPaint.measureText(subjectBannerText) > maxCenterW && centerBannerPaint.textSize > 7f) {
-            centerBannerPaint.textSize -= 0.3f
-        }
+        PdfGen.shrinkMixedToFit(centerBannerPaint, subjectBannerText, maxCenterW, step = 0.3f, minSize = 7f)
 
-        c.drawText(classBannerText, marginX + 8f, metaY, leftBannerPaint)
-        c.drawText(subjectBannerText, pageW / 2f, metaY, centerBannerPaint)
-        c.drawText(rightBannerText, marginX + contentW - 8f, metaY, rightBannerPaint)
+        PdfGen.drawMixedText(c, classBannerText, marginX + 8f, metaY, leftBannerPaint, Paint.Align.LEFT)
+        PdfGen.drawMixedText(c, subjectBannerText, pageW / 2f, metaY, centerBannerPaint, Paint.Align.CENTER)
+        PdfGen.drawMixedText(c, rightBannerText, marginX + contentW - 8f, metaY, rightBannerPaint, Paint.Align.RIGHT)
 
         val cols = page.columns.ifEmpty { BlankSheetCatalog.DEFAULT_COLUMNS }
         val hasGroupedHeader = cols.any { !it.groupBn.isNullOrBlank() }
@@ -383,15 +371,11 @@ object BlankSheetPdfGen {
                 "মোট কার্যদিবস —   $termParts"
             }
 
-            val wdPaint = textPaint(ctx, 8.8f, bold = true, fontId = fontId, color = 0xFF000000.toInt()).apply {
-                textAlign = Paint.Align.CENTER
-            }
+            val wdPaint = dualTextPaint(ctx, 8.8f, bold = true, bnFontId = fontId, enFontId = enFontId, color = 0xFF000000.toInt())
             val maxWdTextW = max(40f, contentW - 14f)
-            while (wdPaint.measureText(wdText) > maxWdTextW && wdPaint.textSize > 6.4f) {
-                wdPaint.textSize -= 0.25f
-            }
+            PdfGen.shrinkMixedToFit(wdPaint, wdText, maxWdTextW, step = 0.25f, minSize = 6.4f)
             val wdBaseline = wdTop + (wdH + wdPaint.textSize * 0.72f) / 2f
-            c.drawText(wdText, pageW / 2f, wdBaseline, wdPaint)
+            PdfGen.drawMixedText(c, wdText, pageW / 2f, wdBaseline, wdPaint, Paint.Align.CENTER)
             wdTop + wdH + 5f
         } else {
             metaTop + metaH + 7f
@@ -433,23 +417,22 @@ object BlankSheetPdfGen {
             cellH: Float,
             baseTextSize: Float
         ) {
-            val hp = textPaint(
+            val hp = dualTextPaint(
                 ctx = ctx,
                 size = baseTextSize,
                 bold = true,
-                fontId = fontId,
+                bnFontId = fontId,
+                enFontId = enFontId,
                 color = 0xFF000000.toInt()
-            ).apply {
-                textAlign = Paint.Align.CENTER
-            }
+            )
             val maxLineW = max(6f, cellW - 3.5f)
-            while (lines.maxOf { hp.measureText(it) } > maxLineW && hp.textSize > 4.6f) {
+            while (lines.maxOf { PdfGen.measureMixedText(it, hp) } > maxLineW && hp.textSize > 4.6f) {
                 hp.textSize -= 0.25f
             }
             val lineH = hp.textSize * 1.16f
             var ty = cellY + (cellH - lineH * lines.size) / 2f + hp.textSize * 0.88f
             lines.forEach { line ->
-                c.drawText(line, cellX + cellW / 2f, ty, hp)
+                PdfGen.drawMixedText(c, line, cellX + cellW / 2f, ty, hp, Paint.Align.CENTER)
                 ty += lineH
             }
         }
@@ -568,25 +551,22 @@ object BlankSheetPdfGen {
                 }
                 if (cellValue.isNotBlank()) {
                     val isRoll = col.fillWith == BlankColFill.ROLL
-                    val cp = textPaint(
+                    val cp = dualTextPaint(
                         ctx = ctx,
                         size = baseCellFont,
                         bold = isRoll,
-                        fontId = fontId,
+                        bnFontId = fontId,
+                        enFontId = enFontId,
                         color = 0xFF000000.toInt()
                     )
                     val padX = if (col.align == BlankColAlign.LEFT) 5f else 3f
                     val availW = max(8f, w - padX * 2f)
-                    while (cp.measureText(cellValue) > availW && cp.textSize > 5.2f) {
-                        cp.textSize -= 0.3f
-                    }
+                    PdfGen.shrinkMixedToFit(cp, cellValue, availW, step = 0.3f, minSize = 5.2f)
                     val textBaseline = curY + (rowH + cp.textSize * 0.72f) / 2f
                     if (col.align == BlankColAlign.LEFT) {
-                        cp.textAlign = Paint.Align.LEFT
-                        c.drawText(cellValue, cx + padX, textBaseline, cp)
+                        PdfGen.drawMixedText(c, cellValue, cx + padX, textBaseline, cp, Paint.Align.LEFT)
                     } else {
-                        cp.textAlign = Paint.Align.CENTER
-                        c.drawText(cellValue, cx + w / 2f, textBaseline, cp)
+                        PdfGen.drawMixedText(c, cellValue, cx + w / 2f, textBaseline, cp, Paint.Align.CENTER)
                     }
                 }
                 cx += w
@@ -635,38 +615,28 @@ object BlankSheetPdfGen {
                     bx++
                 }
             }
-            val barLabelPaint = textPaint(ctx, 5.8f, bold = false, fontId = fontId, color = 0xFF1A1A1A.toInt()).apply {
-                textAlign = Paint.Align.CENTER
-            }
-            c.drawText(page.barcodeText, barLeft + barW / 2f, barTop + barH + 6.5f, barLabelPaint)
+            val barLabelPaint = dualTextPaint(ctx, 5.8f, bold = false, bnFontId = fontId, enFontId = enFontId, color = 0xFF1A1A1A.toInt())
+            PdfGen.drawMixedText(c, page.barcodeText, barLeft + barW / 2f, barTop + barH + 6.5f, barLabelPaint, Paint.Align.CENTER)
         }
 
-        val footerLeftPaint = textPaint(ctx, 7.8f, bold = false, fontId = fontId, color = 0xFF262626.toInt()).apply {
-            textAlign = Paint.Align.LEFT
-        }
-        val footerRightPaint = textPaint(ctx, 8.2f, bold = false, fontId = fontId, color = 0xFF000000.toInt()).apply {
-            textAlign = Paint.Align.RIGHT
-        }
+        val footerLeftPaint = dualTextPaint(ctx, 7.8f, bold = false, bnFontId = fontId, enFontId = enFontId, color = 0xFF262626.toInt())
+        val footerRightPaint = dualTextPaint(ctx, 8.2f, bold = false, bnFontId = fontId, enFontId = enFontId, color = 0xFF000000.toInt())
         val refSuffix = if (page.sheetRefCode.isNotBlank()) " · ${page.sheetRefCode}" else ""
         val leftFooter = "মোট: ${BlankSheetCatalog.formatInt(page.totalStudentsInClass, numStyle)} জন · মোট পৃষ্ঠা ${BlankSheetCatalog.formatInt(page.globalPageNumber, numStyle)}/${BlankSheetCatalog.formatInt(page.totalPages, numStyle)}$refSuffix"
         val rightFooter = "তারিখ: ......................   শিক্ষকের স্বাক্ষর: ..........................."
-        c.drawText(leftFooter, marginX, footerY, footerLeftPaint)
-        c.drawText(rightFooter, marginX + contentW, footerY, footerRightPaint)
+        PdfGen.drawMixedText(c, leftFooter, marginX, footerY, footerLeftPaint, Paint.Align.LEFT)
+        PdfGen.drawMixedText(c, rightFooter, marginX + contentW, footerY, footerRightPaint, Paint.Align.RIGHT)
 
         if (BlankSheetCatalog.isThreeTermAttendanceTraitsActive(cols)) {
             val legendText = "গুণাবলি: ক = উত্তম · খ = সন্তোষজনক · গ = উন্নতি প্রয়োজন"
-            val legendPaint = textPaint(ctx, 7.6f, bold = false, fontId = fontId, color = 0xFF333333.toInt()).apply {
-                textAlign = Paint.Align.CENTER
-            }
-            val leftW = footerLeftPaint.measureText(leftFooter)
-            val rightW = footerRightPaint.measureText(rightFooter)
+            val legendPaint = dualTextPaint(ctx, 7.6f, bold = false, bnFontId = fontId, enFontId = enFontId, color = 0xFF333333.toInt())
+            val leftW = PdfGen.measureMixedText(leftFooter, footerLeftPaint)
+            val rightW = PdfGen.measureMixedText(rightFooter, footerRightPaint)
             val freeCenterW = contentW - leftW - rightW - 20f
             if (freeCenterW > 80f) {
-                while (legendPaint.measureText(legendText) > freeCenterW && legendPaint.textSize > 5.8f) {
-                    legendPaint.textSize -= 0.2f
-                }
+                PdfGen.shrinkMixedToFit(legendPaint, legendText, freeCenterW, step = 0.2f, minSize = 5.8f)
                 val centerX = marginX + leftW + 10f + freeCenterW / 2f
-                c.drawText(legendText, centerX, footerY, legendPaint)
+                PdfGen.drawMixedText(c, legendText, centerX, footerY, legendPaint, Paint.Align.CENTER)
             }
         }
     }

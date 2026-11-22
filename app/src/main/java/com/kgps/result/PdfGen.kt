@@ -152,13 +152,84 @@ object PdfGen {
         typeface = resolveTypeface(ctx, fontId, bold)
     }
 
-    private fun wrap(text: String, p: Paint, w: Float): List<String> {
+    internal class DualPaint(
+        val bn: Paint,
+        val en: Paint
+    ) {
+        var textSize: Float
+            get() = bn.textSize
+            set(value) {
+                bn.textSize = value
+                en.textSize = value
+            }
+    }
+
+    internal fun dualPaint(
+        ctx: Context?,
+        size: Float,
+        bold: Boolean = false,
+        bnFontId: String = "noto_serif",
+        enFontId: String = "times_new_roman",
+        textColor: Int = 0xFF0F172A.toInt()
+    ): DualPaint = DualPaint(
+        bn = tp(ctx, size, bold, bnFontId, textColor),
+        en = tp(ctx, size, bold, enFontId, textColor)
+    )
+
+    internal fun measureMixedText(text: String, dp: DualPaint): Float {
+        if (text.isEmpty()) return 0f
+        var width = 0f
+        splitMixedScriptRuns(text).forEach { run ->
+            val p = if (run.isBengali) dp.bn else dp.en
+            width += p.measureText(run.text)
+        }
+        return width
+    }
+
+    internal fun drawMixedText(
+        c: Canvas,
+        text: String,
+        x: Float,
+        y: Float,
+        dp: DualPaint,
+        align: Paint.Align = Paint.Align.LEFT
+    ) {
+        if (text.isEmpty()) return
+        val runs = splitMixedScriptRuns(text)
+        val totalW = if (align == Paint.Align.LEFT) 0f else runs.sumOf {
+            (if (it.isBengali) dp.bn else dp.en).measureText(it.text).toDouble()
+        }.toFloat()
+        var curX = when (align) {
+            Paint.Align.LEFT -> x
+            Paint.Align.CENTER -> x - totalW / 2f
+            Paint.Align.RIGHT -> x - totalW
+        }
+        runs.forEach { run ->
+            val p = if (run.isBengali) dp.bn else dp.en
+            c.drawText(run.text, curX, y, p)
+            curX += p.measureText(run.text)
+        }
+    }
+
+    internal fun shrinkMixedToFit(
+        dp: DualPaint,
+        text: String,
+        maxW: Float,
+        step: Float = 0.3f,
+        minSize: Float = 5f
+    ) {
+        while (measureMixedText(text, dp) > maxW && dp.textSize > minSize) {
+            dp.textSize = max(minSize, dp.textSize - step)
+        }
+    }
+
+    private fun wrapMixed(text: String, dp: DualPaint, w: Float): List<String> {
         val out = mutableListOf<String>()
         text.split("\n").forEach { para ->
             var cur = ""
             para.split(" ").forEach { word ->
                 val t = if (cur.isEmpty()) word else "$cur $word"
-                if (p.measureText(t) <= w || cur.isEmpty()) cur = t else {
+                if (measureMixedText(t, dp) <= w || cur.isEmpty()) cur = t else {
                     out.add(cur)
                     cur = word
                 }
@@ -192,21 +263,21 @@ object PdfGen {
         size: Float = 9f,
         bold: Boolean = false,
         fill: Boolean = false,
-        fontId: String = "noto_serif"
+        fontId: String = "noto_serif",
+        enFontId: String = "times_new_roman"
     ) {
         if (fill) c.drawRect(l, top, l + w, top + h, gray)
         c.drawRect(l, top, l + w, top + h, stroke)
         if (t.isEmpty()) return
-        val p = tp(ctx, size, bold, fontId)
-        p.textAlign = Paint.Align.CENTER
+        val dp = dualPaint(ctx, size, bold, fontId, enFontId)
         val lines = t.split("\n")
-        while (lines.maxOf { p.measureText(it) } > w - 4 && p.textSize > 4.5f) {
-            p.textSize -= 0.4f
+        while (lines.maxOf { measureMixedText(it, dp) } > w - 4 && dp.textSize > 4.5f) {
+            dp.textSize -= 0.4f
         }
-        val lh = p.textSize * 1.24f
-        var y = top + (h - lh * lines.size) / 2 + p.textSize * 0.92f
+        val lh = dp.textSize * 1.24f
+        var y = top + (h - lh * lines.size) / 2 + dp.textSize * 0.92f
         lines.forEach {
-            c.drawText(it, l + w / 2, y, p)
+            drawMixedText(c, it, l + w / 2, y, dp, Paint.Align.CENTER)
             y += lh
         }
     }
@@ -220,26 +291,27 @@ object PdfGen {
         w: Float,
         h: Float,
         size: Float = 7.2f,
-        fontId: String = "noto_serif"
+        fontId: String = "noto_serif",
+        enFontId: String = "times_new_roman"
     ) {
         c.drawRect(l, top, l + w, top + h, stroke)
         if (t.isEmpty()) return
-        val p = tp(ctx, size, false, fontId)
+        val dp = dualPaint(ctx, size, false, fontId, enFontId)
         val availW = w - 6f
         val availH = h - 4f
         fun lineHeightFor(textSize: Float): Float =
             textSize * if (textSize < 6.8f) 1.18f else 1.24f
 
-        var lines = wrap(t, p, availW)
-        while (lines.size * lineHeightFor(p.textSize) > availH && p.textSize > 4.4f) {
-            p.textSize -= 0.25f
-            lines = wrap(t, p, availW)
+        var lines = wrapMixed(t, dp, availW)
+        while (lines.size * lineHeightFor(dp.textSize) > availH && dp.textSize > 4.4f) {
+            dp.textSize -= 0.25f
+            lines = wrapMixed(t, dp, availW)
         }
-        val lh = lineHeightFor(p.textSize)
+        val lh = lineHeightFor(dp.textSize)
         val totalH = lines.size * lh
-        var y = top + max(p.textSize + 1.5f, (h - totalH) / 2f + p.textSize * 0.88f)
+        var y = top + max(dp.textSize + 1.5f, (h - totalH) / 2f + dp.textSize * 0.88f)
         lines.forEach {
-            if (y <= top + h - 1.5f) c.drawText(it, l + 3f, y, p)
+            if (y <= top + h - 1.5f) drawMixedText(c, it, l + 3f, y, dp, Paint.Align.LEFT)
             y += lh
         }
     }
@@ -254,14 +326,12 @@ object PdfGen {
         bold: Boolean = false,
         maxW: Float = 340f,
         fontId: String = "noto_serif",
-        textColor: Int = 0xFF0F172A.toInt()
+        textColor: Int = 0xFF0F172A.toInt(),
+        enFontId: String = "times_new_roman"
     ) {
-        val p = tp(ctx, size, bold, fontId, textColor)
-        p.textAlign = Paint.Align.CENTER
-        while (p.measureText(t) > maxW && p.textSize > 5.5f) {
-            p.textSize -= 0.5f
-        }
-        c.drawText(t, cx, y, p)
+        val dp = dualPaint(ctx, size, bold, fontId, enFontId, textColor)
+        shrinkMixedToFit(dp, t, maxW, step = 0.5f, minSize = 5.5f)
+        drawMixedText(c, t, cx, y, dp, Paint.Align.CENTER)
     }
 
     private fun dottedField(
@@ -273,21 +343,20 @@ object PdfGen {
         y: Float,
         maxX: Float,
         fontSize: Float = 10.5f,
-        fontId: String = "noto_serif"
+        fontId: String = "noto_serif",
+        enFontId: String = "times_new_roman"
     ) {
-        val lp = tp(ctx, fontSize, false, fontId)
-        c.drawText(label, x, y, lp)
-        val lineStart = x + lp.measureText(label) + 5f
+        val lp = dualPaint(ctx, fontSize, false, fontId, enFontId)
+        drawMixedText(c, label, x, y, lp, Paint.Align.LEFT)
+        val lineStart = x + measureMixedText(label, lp) + 5f
         c.drawLine(lineStart, y + 3f, maxX, y + 3f, dottedPaint)
 
         val v = value.trim()
         if (v.isNotEmpty()) {
-            val vp = tp(ctx, fontSize, true, fontId)
+            val vp = dualPaint(ctx, fontSize, true, fontId, enFontId)
             val avail = max(20f, maxX - lineStart - 4f)
-            while (vp.measureText(v) > avail && vp.textSize > 6.5f) {
-                vp.textSize -= 0.4f
-            }
-            c.drawText(v, lineStart + 3f, y - 0.5f, vp)
+            shrinkMixedToFit(vp, v, avail, step = 0.4f, minSize = 6.5f)
+            drawMixedText(c, v, lineStart + 3f, y - 0.5f, vp, Paint.Align.LEFT)
         }
     }
 
@@ -298,7 +367,8 @@ object PdfGen {
         topY: Float,
         targetH: Float,
         logoId: String,
-        fontId: String
+        fontId: String,
+        enFontId: String = "times_new_roman"
     ) {
         val bmp = resolveLogoBitmap(ctx, logoId)
         if (bmp != null && bmp.width > 0 && bmp.height > 0) {
@@ -315,7 +385,7 @@ object PdfGen {
             strokeWidth = 1.6f
         }
         c.drawCircle(cx, cy, r, sealStroke)
-        center(ctx, c, "প্রাথমিক শিক্ষা অধিদপ্তর", cx, cy + r + 12f, 8.5f, true, 160f, fontId)
+        center(ctx, c, "প্রাথমিক শিক্ষা অধিদপ্তর", cx, cy + r + 12f, 8.5f, true, 160f, fontId, enFontId = enFontId)
     }
 
     fun renderCoverBitmap(
@@ -471,6 +541,7 @@ object PdfGen {
         showCoverAddress: Boolean = true
     ) {
         val f = st.pdfFont
+        val fe = st.pdfEnglishFont
         drawPanelFrames(c, showFoldGuide)
 
         // ---- বাম অর্ধেক (x: 18..409): ব্যাক কভার ----
@@ -485,17 +556,17 @@ object PdfGen {
         )
         var x = bx0
         bHd.forEachIndexed { i, h ->
-            cell(ctx, c, h, x, 36f, bCw[i], 30f, 8f, true, true, f)
+            cell(ctx, c, h, x, 36f, bCw[i], 30f, 8f, true, true, f, fe)
             x += bCw[i]
         }
         val tl = listOf("১ম\nপ্রান্তিক", "২য়\nপ্রান্তিক", "৩য়\nপ্রান্তিক")
         for (t in 1..3) {
             val y = 66f + (t - 1) * 66f
             x = bx0
-            cell(ctx, c, tl[t - 1], x, y, bCw[0], 66f, 8f, true, false, f); x += bCw[0]
-            box(ctx, c, s.x["REM_$t"] ?: "", x, y, bCw[1], 66f, 7.5f, f); x += bCw[1]
+            cell(ctx, c, tl[t - 1], x, y, bCw[0], 66f, 8f, true, false, f, fe); x += bCw[0]
+            box(ctx, c, s.x["REM_$t"] ?: "", x, y, bCw[1], 66f, 7.5f, f, fe); x += bCw[1]
             for (i in 2..4) {
-                cell(ctx, c, "", x, y, bCw[i], 66f, 9f, false, false, f)
+                cell(ctx, c, "", x, y, bCw[i], 66f, 9f, false, false, f, fe)
                 x += bCw[i]
             }
         }
@@ -505,7 +576,7 @@ object PdfGen {
         val gx = bx0 + (363f - 296f) / 2f
         x = gx
         listOf("প্রাপ্ত নম্বর", "গ্রেড", "শিখন অর্জন").forEachIndexed { i, h ->
-            cell(ctx, c, h, x, gy, gw[i], 22f, 9f, true, true, f)
+            cell(ctx, c, h, x, gy, gw[i], 22f, 9f, true, true, f, fe)
             x += gw[i]
         }
         val scale = listOf(
@@ -517,13 +588,13 @@ object PdfGen {
         scale.forEachIndexed { r, (a, g, d) ->
             x = gx
             val y = gy + 22f + r * 23f
-            drawCellRow(ctx, c, a, g, d, x, y, gw, f)
+            drawCellRow(ctx, c, a, g, d, x, y, gw, f, fe)
         }
 
         val tn = st.teachers[s.cls] ?: ""
         val tm = st.teacherMobiles[s.cls] ?: ""
-        dottedField(ctx, c, "শ্রেণি শিক্ষকের নাম:", tn, 32f, 438f, 240f, 9.5f, f)
-        dottedField(ctx, c, "মোবাইল নম্বর:", bn(tm), 246f, 438f, 395f, 9.5f, f)
+        dottedField(ctx, c, "শ্রেণি শিক্ষকের নাম:", tn, 32f, 438f, 240f, 9.5f, f, fe)
+        dottedField(ctx, c, "মোবাইল নম্বর:", bn(tm), 246f, 438f, 395f, 9.5f, f, fe)
 
         val backCx = 18f + 391f / 2f
         c.drawLine(48f, 468f, 379f, 468f, stroke)
@@ -534,9 +605,9 @@ object PdfGen {
         val fallbackAddr = listOf(effectiveUpazila, effectiveDistrict).filter { it.isNotBlank() }.joinToString(", ")
         val schoolAddr = st.schoolAddress.ifBlank { fallbackAddr }
 
-        center(ctx, c, schoolName, backCx, 496f, 12.5f, true, 350f, f, 0xFF0F172A.toInt())
+        center(ctx, c, schoolName, backCx, 496f, 12.5f, true, 350f, f, 0xFF0F172A.toInt(), fe)
         if (schoolAddr.isNotBlank()) {
-            center(ctx, c, schoolAddr, backCx, 518f, 10f, false, 350f, f, 0xFF0F172A.toInt())
+            center(ctx, c, schoolAddr, backCx, 518f, 10f, false, 350f, f, 0xFF0F172A.toInt(), fe)
         }
 
         // ---- ডান অর্ধেক (x: 433..824): ফ্রন্ট কভার ----
@@ -557,27 +628,25 @@ object PdfGen {
         }
         c.drawRoundRect(RectF(pillX, pillY, pillX + pillW, pillY + pillH), 22f, 22f, pillOuter)
         c.drawRoundRect(RectF(pillX + 3f, pillY + 3f, pillX + pillW - 3f, pillY + pillH - 3f), 19f, 19f, pillInner)
-        center(ctx, c, "শিখন অগ্রগতি প্রতিবেদন", frontCx, 75f, 20f, true, 290f, f, 0xFF0F172A.toInt())
+        center(ctx, c, "শিখন অগ্রগতি প্রতিবেদন", frontCx, 75f, 20f, true, 290f, f, 0xFF0F172A.toInt(), fe)
 
-        drawDpeLogo(ctx, c, frontCx, 102f, 104f, st.dpeLogo, f)
+        drawDpeLogo(ctx, c, frontCx, 102f, 104f, st.dpeLogo, f, fe)
 
         val schoolTitle = st.school.ifBlank { "বিদ্যালয়ের নাম" }
-        val schoolPaint = tp(ctx, 16.5f, true, f, 0xFF0F172A.toInt()).apply {
-            textAlign = Paint.Align.CENTER
-        }
-        while (schoolPaint.measureText(schoolTitle) > 354f && schoolPaint.textSize > 13.5f) {
+        val schoolPaint = dualPaint(ctx, 16.5f, true, f, fe, 0xFF0F172A.toInt())
+        while (measureMixedText(schoolTitle, schoolPaint) > 354f && schoolPaint.textSize > 13.5f) {
             schoolPaint.textSize -= 0.4f
         }
         val renderedSchoolSize = schoolPaint.textSize
-        val schoolLines = if (schoolPaint.measureText(schoolTitle) > 354f) {
-            wrap(schoolTitle, schoolPaint, 354f).take(2)
+        val schoolLines = if (measureMixedText(schoolTitle, schoolPaint) > 354f) {
+            wrapMixed(schoolTitle, schoolPaint, 354f).take(2)
         } else {
             listOf(schoolTitle)
         }
         var schoolY = 238f
         val schoolLh = renderedSchoolSize * 1.24f
         schoolLines.forEach { line ->
-            c.drawText(line, frontCx, schoolY, schoolPaint)
+            drawMixedText(c, line, frontCx, schoolY, schoolPaint, Paint.Align.CENTER)
             schoolY += schoolLh
         }
         var headerBottomY = (schoolY - schoolLh) + renderedSchoolSize * 0.25f
@@ -585,14 +654,12 @@ object PdfGen {
         val coverAddress = st.schoolAddress.trim()
         if (showCoverAddress && coverAddress.isNotBlank()) {
             val addrSize = (renderedSchoolSize - 2f).coerceAtLeast(10f)
-            val addrPaint = tp(ctx, addrSize, false, f, 0xFF1E293B.toInt()).apply {
-                textAlign = Paint.Align.CENTER
-            }
-            val addrLines = wrap(coverAddress, addrPaint, 348f).take(2)
+            val addrPaint = dualPaint(ctx, addrSize, false, f, fe, 0xFF1E293B.toInt())
+            val addrLines = wrapMixed(coverAddress, addrPaint, 348f).take(2)
             var addrY = headerBottomY + addrSize + 6f
             val addrLh = addrSize * 1.22f
             addrLines.forEach { line ->
-                c.drawText(line, frontCx, addrY, addrPaint)
+                drawMixedText(c, line, frontCx, addrY, addrPaint, Paint.Align.CENTER)
                 addrY += addrLh
             }
             headerBottomY = (addrY - addrLh) + addrSize * 0.25f
@@ -600,25 +667,25 @@ object PdfGen {
 
         val formY0 = max(326f, headerBottomY + 40f)
         val formDy = 33f
-        dottedField(ctx, c, "শিক্ষার্থীর নাম:", s.name, 456f, formY0, 801f, 10.5f, f)
+        dottedField(ctx, c, "শিক্ষার্থীর নাম:", s.name, 456f, formY0, 801f, 10.5f, f, fe)
 
-        dottedField(ctx, c, "শ্রেণি:", classNameBn(s.cls, st), 456f, formY0 + formDy, 574f, 10.5f, f)
-        dottedField(ctx, c, "রোল/আইডি:", bn(s.roll.toString()), 582f, formY0 + formDy, 690f, 10.5f, f)
-        dottedField(ctx, c, "শিক্ষাবর্ষ:", bn(st.year), 698f, formY0 + formDy, 801f, 10.5f, f)
+        dottedField(ctx, c, "শ্রেণি:", classNameBn(s.cls, st), 456f, formY0 + formDy, 574f, 10.5f, f, fe)
+        dottedField(ctx, c, "রোল/আইডি:", bn(s.roll.toString()), 582f, formY0 + formDy, 690f, 10.5f, f, fe)
+        dottedField(ctx, c, "শিক্ষাবর্ষ:", bn(st.year), 698f, formY0 + formDy, 801f, 10.5f, f, fe)
 
         val unionText = s.union.trim()
         if (unionText.isNotBlank()) {
-            dottedField(ctx, c, "গ্রাম:", s.village, 456f, formY0 + formDy * 2, 622f, 10.5f, f)
-            dottedField(ctx, c, "ইউনিয়ন:", unionText, 632f, formY0 + formDy * 2, 801f, 10.5f, f)
+            dottedField(ctx, c, "গ্রাম:", s.village, 456f, formY0 + formDy * 2, 622f, 10.5f, f, fe)
+            dottedField(ctx, c, "ইউনিয়ন:", unionText, 632f, formY0 + formDy * 2, 801f, 10.5f, f, fe)
         } else {
-            dottedField(ctx, c, "গ্রাম:", s.village, 456f, formY0 + formDy * 2, 801f, 10.5f, f)
+            dottedField(ctx, c, "গ্রাম:", s.village, 456f, formY0 + formDy * 2, 801f, 10.5f, f, fe)
         }
 
-        dottedField(ctx, c, "উপজেলা/থানা:", effectiveUpazila, 456f, formY0 + formDy * 3, 636f, 10.5f, f)
-        dottedField(ctx, c, "জেলা:", effectiveDistrict, 646f, formY0 + formDy * 3, 801f, 10.5f, f)
+        dottedField(ctx, c, "উপজেলা/থানা:", effectiveUpazila, 456f, formY0 + formDy * 3, 636f, 10.5f, f, fe)
+        dottedField(ctx, c, "জেলা:", effectiveDistrict, 646f, formY0 + formDy * 3, 801f, 10.5f, f, fe)
 
-        dottedField(ctx, c, "অভিভাবকের নাম:", s.guardian, 456f, formY0 + formDy * 4, 656f, 10.5f, f)
-        dottedField(ctx, c, "মোবাইল:", bn(s.mobile), 664f, formY0 + formDy * 4, 801f, 10.5f, f)
+        dottedField(ctx, c, "অভিভাবকের নাম:", s.guardian, 456f, formY0 + formDy * 4, 656f, 10.5f, f, fe)
+        dottedField(ctx, c, "মোবাইল:", bn(s.mobile), 664f, formY0 + formDy * 4, 801f, 10.5f, f, fe)
     }
 
     private fun drawCellRow(
@@ -630,11 +697,12 @@ object PdfGen {
         x: Float,
         y: Float,
         gw: FloatArray,
-        f: String
+        f: String,
+        fe: String
     ) {
-        cell(ctx, c, a, x, y, gw[0], 23f, 9f, false, false, f)
-        cell(ctx, c, g, x + gw[0], y, gw[1], 23f, 10f, true, false, f)
-        cell(ctx, c, d, x + gw[0] + gw[1], y, gw[2], 23f, 9f, false, false, f)
+        cell(ctx, c, a, x, y, gw[0], 23f, 9f, false, false, f, fe)
+        cell(ctx, c, g, x + gw[0], y, gw[1], 23f, 10f, true, false, f, fe)
+        cell(ctx, c, d, x + gw[0] + gw[1], y, gw[2], 23f, 9f, false, false, f, fe)
     }
 
     // ================= পাতা-২: ভেতরের পাশ (বাম = ১ম+২য় ও গুণাবলি, ডান = ৩য়+চূড়ান্ত ও উপস্থিতি) =================
@@ -650,6 +718,7 @@ object PdfGen {
         summaryColumns: List<ReportSummaryColumn>
     ) {
         val f = st.pdfFont
+        val fe = st.pdfEnglishFont
         drawPanelFrames(c, showFoldGuide)
 
         val subs = s.subs()
@@ -660,10 +729,10 @@ object PdfGen {
         val page2Cx = 18f + 391f / 2f
         val page3Cx = 433f + 391f / 2f
         val page2NameText = "শিক্ষার্থীর নাম: ${s.name}"
-        center(ctx, c, page2NameText, page2Cx, 38f, 8.8f, true, 368f, f, 0xFF334155.toInt())
+        center(ctx, c, page2NameText, page2Cx, 38f, 8.8f, true, 368f, f, 0xFF334155.toInt(), fe)
 
         val page3InfoText = "শ্রেণি: ${classNameBn(s.cls, st)}   ·   রোল/আইডি: ${bn(s.roll.toString())}"
-        center(ctx, c, page3InfoText, page3Cx, 38f, 8.8f, true, 368f, f, 0xFF334155.toInt())
+        center(ctx, c, page3InfoText, page3Cx, 38f, 8.8f, true, 368f, f, 0xFF334155.toInt(), fe)
 
         // ---- বাম ভেতরের অর্ধেক (x: 28..399) ----
         val lx = 28f
@@ -676,21 +745,21 @@ object PdfGen {
         val rh = if (subs.size <= 7) 31f else 27.5f
         val targetBottom = 561f
 
-        cell(ctx, c, "বিষয় (পূর্ণমান)", lx, ty0, sw, hdrH, 8.5f, true, true, f)
-        cell(ctx, c, "১ম প্রান্তিক", lx + sw, ty0, 3 * lcw, hdr1H, 8.5f, true, true, f)
-        cell(ctx, c, "২য় প্রান্তিক", lx + sw + 3 * lcw, ty0, 3 * lcw, hdr1H, 8.5f, true, true, f)
+        cell(ctx, c, "বিষয় (পূর্ণমান)", lx, ty0, sw, hdrH, 8.5f, true, true, f, fe)
+        cell(ctx, c, "১ম প্রান্তিক", lx + sw, ty0, 3 * lcw, hdr1H, 8.5f, true, true, f, fe)
+        cell(ctx, c, "২য় প্রান্তিক", lx + sw + 3 * lcw, ty0, 3 * lcw, hdr1H, 8.5f, true, true, f, fe)
 
         val termSubHdr = listOf("ধারাবাহিক\nনম্বর", "সামষ্টিক\nনম্বর", "মোট\nনম্বর")
         for (t in 0..1) {
             for (i in 0..2) {
-                cell(ctx, c, termSubHdr[i], lx + sw + (t * 3 + i) * lcw, ty0 + hdr1H, lcw, hdr2H, 7f, true, true, f)
+                cell(ctx, c, termSubHdr[i], lx + sw + (t * 3 + i) * lcw, ty0 + hdr1H, lcw, hdr2H, 7f, true, true, f, fe)
             }
         }
 
         val rowsStartY = ty0 + hdrH
         subs.forEachIndexed { i, sub ->
             val ry = rowsStartY + i * rh
-            cell(ctx, c, "${sub.bn} (${bn(sub.max.toString())})", lx, ry, sw, rh, 8f, false, false, f)
+            cell(ctx, c, "${sub.bn} (${bn(sub.max.toString())})", lx, ry, sw, rh, 8f, false, false, f, fe)
             for (t in 1..2) {
                 val has = s.hasSub(sub, t)
                 val b = lx + sw + (t - 1) * 3 * lcw
@@ -698,21 +767,21 @@ object PdfGen {
                 val wrTxt = if (sub.written == 0) "......" else if (has) fmt(s.wr(sub, t)) else ""
                 val totTxt = if (has) fmt(s.total(sub, t)) else ""
 
-                cell(ctx, c, contTxt, b, ry, lcw, rh, 8f, false, false, f)
-                cell(ctx, c, wrTxt, b + lcw, ry, lcw, rh, 8f, false, false, f)
-                cell(ctx, c, totTxt, b + 2 * lcw, ry, lcw, rh, 8.5f, true, false, f)
+                cell(ctx, c, contTxt, b, ry, lcw, rh, 8f, false, false, f, fe)
+                cell(ctx, c, wrTxt, b + lcw, ry, lcw, rh, 8f, false, false, f, fe)
+                cell(ctx, c, totTxt, b + 2 * lcw, ry, lcw, rh, 8.5f, true, false, f, fe)
             }
         }
 
         // বাম মোট সারি
         val ty = rowsStartY + subs.size * rh
         val totalH = 27f
-        cell(ctx, c, "সর্বমোট নম্বর (${bn(totMax.toString())})", lx, ty, sw, totalH, 8f, true, true, f)
+        cell(ctx, c, "সর্বমোট নম্বর (${bn(totMax.toString())})", lx, ty, sw, totalH, 8f, true, true, f, fe)
         for (t in 1..2) {
             val b = lx + sw + (t - 1) * 3 * lcw
             val has = s.hasTerm(t)
             val label = if (t == 1) "১ম প্রান্তিকে মোট" else "২য় প্রান্তিকে মোট"
-            cell(ctx, c, label, b, ty, 2 * lcw, totalH, 7.5f, true, true, f)
+            cell(ctx, c, label, b, ty, 2 * lcw, totalH, 7.5f, true, true, f, fe)
             cell(
                 ctx,
                 c,
@@ -724,7 +793,8 @@ object PdfGen {
                 8.5f,
                 true,
                 true,
-                f
+                f,
+                fe
             )
         }
 
@@ -743,24 +813,24 @@ object PdfGen {
         val qRowH = ((targetBottom - qRowsY) / 3f).coerceAtLeast(42f)
 
         // ১. উপরের নির্দেশনামূলক ছক (আলাদা ছক)
-        cell(ctx, c, "ব্যক্তিগত ও সামাজিক গুণাবলি", lx, by, 177f, qLegendH, 8f, true, true, f)
-        cell(ctx, c, "অবস্থান", lx + 177f, by, 62f, qLegendH, 8f, true, true, f)
+        cell(ctx, c, "ব্যক্তিগত ও সামাজিক গুণাবলি", lx, by, 177f, qLegendH, 8f, true, true, f, fe)
+        cell(ctx, c, "অবস্থান", lx + 177f, by, 62f, qLegendH, 8f, true, true, f, fe)
         val kkgLabels = listOf("উত্তম", "সন্তোষজনক", "উন্নতি প্রয়োজন")
         val kkgCodes = listOf("ক", "খ", "গ")
         val kkgSizes = floatArrayOf(7.5f, 7.0f, 6.8f)
         for (i in 0..2) {
             val cx = lx + 239f + i * qw[2 + i]
-            cell(ctx, c, kkgLabels[i], cx, by, qw[2 + i], qTop1H, kkgSizes[i], true, true, f)
-            cell(ctx, c, kkgCodes[i], cx, by + qTop1H, qw[2 + i], qTop2H, 8f, true, true, f)
+            cell(ctx, c, kkgLabels[i], cx, by, qw[2 + i], qTop1H, kkgSizes[i], true, true, f, fe)
+            cell(ctx, c, kkgCodes[i], cx, by + qTop1H, qw[2 + i], qTop2H, 8f, true, true, f, fe)
         }
 
         // ২. মূল গুণাবলি ছক (মাঝখানে 12pt ফাঁকা জায়গা রেখে)
-        cell(ctx, c, "গুণাবলি", lx, qMainY, qw[0], qMainHdrH, 8.5f, true, true, f)
-        cell(ctx, c, "বর্ণনা", lx + qw[0], qMainY, qw[1], qMainHdrH, 8.5f, true, true, f)
+        cell(ctx, c, "গুণাবলি", lx, qMainY, qw[0], qMainHdrH, 8.5f, true, true, f, fe)
+        cell(ctx, c, "বর্ণনা", lx + qw[0], qMainY, qw[1], qMainHdrH, 8.5f, true, true, f, fe)
         val termShort = listOf("১ম প্রান্তিক", "২য় প্রান্তিক", "৩য় প্রান্তিক")
         for (i in 0..2) {
             val cx = lx + qw[0] + qw[1] + i * qw[2 + i]
-            cell(ctx, c, termShort[i], cx, qMainY, qw[2 + i], qMainHdrH, 7.4f, true, true, f)
+            cell(ctx, c, termShort[i], cx, qMainY, qw[2 + i], qMainHdrH, 7.4f, true, true, f, fe)
         }
 
         val traits = listOf(
@@ -771,10 +841,10 @@ object PdfGen {
         traits.forEachIndexed { r, (lab, k, d) ->
             val yy = qRowsY + r * qRowH
             var cx = lx
-            cell(ctx, c, lab, cx, yy, qw[0], qRowH, 9f, true, false, f); cx += qw[0]
-            box(ctx, c, d, cx, yy, qw[1], qRowH, 9.2f, f); cx += qw[1]
+            cell(ctx, c, lab, cx, yy, qw[0], qRowH, 9f, true, false, f, fe); cx += qw[0]
+            box(ctx, c, d, cx, yy, qw[1], qRowH, 9.2f, f, fe); cx += qw[1]
             for (t in 1..3) {
-                cell(ctx, c, s.x["${k}_$t"] ?: "", cx, yy, qw[1 + t], qRowH, 10.5f, true, false, f)
+                cell(ctx, c, s.x["${k}_$t"] ?: "", cx, yy, qw[1 + t], qRowH, 10.5f, true, false, f, fe)
                 cx += qw[1 + t]
             }
         }
@@ -788,13 +858,13 @@ object PdfGen {
         if (!showClassHighest) {
             val rcw = rW / 6f
 
-            cell(ctx, c, "৩য় প্রান্তিক", rx, ty0, 3 * rcw, hdr1H, 8.5f, true, true, f)
-            cell(ctx, c, "চূড়ান্ত ফলাফল", rx + 3 * rcw, ty0, 3 * rcw, hdr1H, 8.5f, true, true, f)
+            cell(ctx, c, "৩য় প্রান্তিক", rx, ty0, 3 * rcw, hdr1H, 8.5f, true, true, f, fe)
+            cell(ctx, c, "চূড়ান্ত ফলাফল", rx + 3 * rcw, ty0, 3 * rcw, hdr1H, 8.5f, true, true, f, fe)
 
             val finalSubHdr = listOf("প্রান্তিকের\nগড় নম্বর", "বিষয়\nগ্রেড", "সমন্বিত\nগ্রেড")
             for (i in 0..2) {
-                cell(ctx, c, termSubHdr[i], rx + i * rcw, ty0 + hdr1H, rcw, hdr2H, 7f, true, true, f)
-                cell(ctx, c, finalSubHdr[i], rx + (3 + i) * rcw, ty0 + hdr1H, rcw, hdr2H, 7f, true, true, f)
+                cell(ctx, c, termSubHdr[i], rx + i * rcw, ty0 + hdr1H, rcw, hdr2H, 7f, true, true, f, fe)
+                cell(ctx, c, finalSubHdr[i], rx + (3 + i) * rcw, ty0 + hdr1H, rcw, hdr2H, 7f, true, true, f, fe)
             }
 
             subs.forEachIndexed { i, sub ->
@@ -804,13 +874,13 @@ object PdfGen {
                 val wr3 = if (sub.written == 0) "......" else if (has3) fmt(s.wr(sub, 3)) else ""
                 val tot3 = if (has3) fmt(s.total(sub, 3)) else ""
 
-                cell(ctx, c, cont3, rx, ry, rcw, rh, 8f, false, false, f)
-                cell(ctx, c, wr3, rx + rcw, ry, rcw, rh, 8f, false, false, f)
-                cell(ctx, c, tot3, rx + 2 * rcw, ry, rcw, rh, 8.5f, true, false, f)
+                cell(ctx, c, cont3, rx, ry, rcw, rh, 8f, false, false, f, fe)
+                cell(ctx, c, wr3, rx + rcw, ry, rcw, rh, 8f, false, false, f, fe)
+                cell(ctx, c, tot3, rx + 2 * rcw, ry, rcw, rh, 8.5f, true, false, f, fe)
 
                 val a = s.avg(sub)
-                cell(ctx, c, if (anyData) fmt(a) else "", rx + 3 * rcw, ry, rcw, rh, 8.5f, true, false, f)
-                cell(ctx, c, if (anyData) gradeOf(a / sub.max * 100) else "", rx + 4 * rcw, ry, rcw, rh, 9.5f, true, false, f)
+                cell(ctx, c, if (anyData) fmt(a) else "", rx + 3 * rcw, ry, rcw, rh, 8.5f, true, false, f, fe)
+                cell(ctx, c, if (anyData) gradeOf(a / sub.max * 100) else "", rx + 4 * rcw, ry, rcw, rh, 9.5f, true, false, f, fe)
             }
 
             cell(
@@ -824,11 +894,12 @@ object PdfGen {
                 11.5f,
                 true,
                 false,
-                f
+                f,
+                fe
             )
 
             val has3Term = s.hasTerm(3)
-            cell(ctx, c, "৩য় প্রান্তিকে মোট", rx, ty, 2 * rcw, totalH, 7.5f, true, true, f)
+            cell(ctx, c, "৩য় প্রান্তিকে মোট", rx, ty, 2 * rcw, totalH, 7.5f, true, true, f, fe)
             cell(
                 ctx,
                 c,
@@ -840,9 +911,10 @@ object PdfGen {
                 8.5f,
                 true,
                 true,
-                f
+                f,
+                fe
             )
-            cell(ctx, c, "প্রান্তিকের গড় মোট", rx + 3 * rcw, ty, rcw, totalH, 7f, true, true, f)
+            cell(ctx, c, "প্রান্তিকের গড় মোট", rx + 3 * rcw, ty, rcw, totalH, 7f, true, true, f, fe)
             cell(
                 ctx,
                 c,
@@ -854,9 +926,10 @@ object PdfGen {
                 8.5f,
                 true,
                 true,
-                f
+                f,
+                fe
             )
-            cell(ctx, c, "", rx + 5 * rcw, ty, rcw, totalH, 8f, false, true, f)
+            cell(ctx, c, "", rx + 5 * rcw, ty, rcw, totalH, 8f, false, true, f, fe)
         } else {
             // 7 columns: 3 for ৩য় প্রান্তিক (49x3 = 147) + 4 for চূড়ান্ত ফলাফল (54+60+52+58 = 224) = 371
             val rw = floatArrayOf(49f, 49f, 49f, 54f, 60f, 52f, 58f)
@@ -870,11 +943,11 @@ object PdfGen {
             val term3W = rw[0] + rw[1] + rw[2] // 147
             val finalW = rw[3] + rw[4] + rw[5] + rw[6] // 224
 
-            cell(ctx, c, "৩য় প্রান্তিক", rx, ty0, term3W, hdr1H, 8.5f, true, true, f)
-            cell(ctx, c, "চূড়ান্ত ফলাফল", rxCols[3], ty0, finalW, hdr1H, 8.5f, true, true, f)
+            cell(ctx, c, "৩য় প্রান্তিক", rx, ty0, term3W, hdr1H, 8.5f, true, true, f, fe)
+            cell(ctx, c, "চূড়ান্ত ফলাফল", rxCols[3], ty0, finalW, hdr1H, 8.5f, true, true, f, fe)
 
             for (i in 0..2) {
-                cell(ctx, c, termSubHdr[i], rxCols[i], ty0 + hdr1H, rw[i], hdr2H, 6.8f, true, true, f)
+                cell(ctx, c, termSubHdr[i], rxCols[i], ty0 + hdr1H, rw[i], hdr2H, 6.8f, true, true, f, fe)
             }
             val finalSubHdr4 = listOf(
                 "প্রান্তিকের\nগড় নম্বর",
@@ -894,7 +967,8 @@ object PdfGen {
                     if (i == 1) 6.5f else 6.8f,
                     true,
                     true,
-                    f
+                    f,
+                    fe
                 )
             }
 
@@ -909,18 +983,18 @@ object PdfGen {
                 val wr3 = if (sub.written == 0) "......" else if (has3) fmt(s.wr(sub, 3)) else ""
                 val tot3 = if (has3) fmt(s.total(sub, 3)) else ""
 
-                cell(ctx, c, cont3, rxCols[0], ry, rw[0], rh, 7.8f, false, false, f)
-                cell(ctx, c, wr3, rxCols[1], ry, rw[1], rh, 7.8f, false, false, f)
-                cell(ctx, c, tot3, rxCols[2], ry, rw[2], rh, 8.2f, true, false, f)
+                cell(ctx, c, cont3, rxCols[0], ry, rw[0], rh, 7.8f, false, false, f, fe)
+                cell(ctx, c, wr3, rxCols[1], ry, rw[1], rh, 7.8f, false, false, f, fe)
+                cell(ctx, c, tot3, rxCols[2], ry, rw[2], rh, 8.2f, true, false, f, fe)
 
                 val a = s.avg(sub)
                 val classMaxSub = classPeers
                     .filter { peer -> (1..3).any { peer.hasSub(sub, it) } }
                     .maxOfOrNull { peer -> peer.avg(sub) }
 
-                cell(ctx, c, if (anyData) fmt(a) else "", rxCols[3], ry, rw[3], rh, 8.2f, true, false, f)
-                cell(ctx, c, if (classMaxSub != null) fmt(classMaxSub) else "", rxCols[4], ry, rw[4], rh, 8.2f, true, false, f)
-                cell(ctx, c, if (anyData) gradeOf(a / sub.max * 100) else "", rxCols[5], ry, rw[5], rh, 9f, true, false, f)
+                cell(ctx, c, if (anyData) fmt(a) else "", rxCols[3], ry, rw[3], rh, 8.2f, true, false, f, fe)
+                cell(ctx, c, if (classMaxSub != null) fmt(classMaxSub) else "", rxCols[4], ry, rw[4], rh, 8.2f, true, false, f, fe)
+                cell(ctx, c, if (anyData) gradeOf(a / sub.max * 100) else "", rxCols[5], ry, rw[5], rh, 9f, true, false, f, fe)
             }
 
             cell(
@@ -934,11 +1008,12 @@ object PdfGen {
                 11f,
                 true,
                 false,
-                f
+                f,
+                fe
             )
 
             val has3Term = s.hasTerm(3)
-            cell(ctx, c, "৩য় প্রান্তিকে মোট", rxCols[0], ty, rw[0] + rw[1], totalH, 7.2f, true, true, f)
+            cell(ctx, c, "৩য় প্রান্তিকে মোট", rxCols[0], ty, rw[0] + rw[1], totalH, 7.2f, true, true, f, fe)
             cell(
                 ctx,
                 c,
@@ -950,7 +1025,8 @@ object PdfGen {
                 8.2f,
                 true,
                 true,
-                f
+                f,
+                fe
             )
             cell(
                 ctx,
@@ -963,7 +1039,8 @@ object PdfGen {
                 6.8f,
                 true,
                 true,
-                f
+                f,
+                fe
             )
             cell(
                 ctx,
@@ -976,9 +1053,10 @@ object PdfGen {
                 6.6f,
                 true,
                 true,
-                f
+                f,
+                fe
             )
-            cell(ctx, c, "", rxCols[5], ty, rw[5] + rw[6], totalH, 7f, false, true, f)
+            cell(ctx, c, "", rxCols[5], ty, rw[5] + rw[6], totalH, 7f, false, true, f, fe)
         }
 
         // ---- নিচে ডানে: ঐচ্ছিক ফলাফল সারাংশ টেবিল + উপস্থিতি ----
@@ -1051,8 +1129,8 @@ object PdfGen {
                     ReportSummaryColumn.ATTENDANCE_RATE -> attendanceAvgPct?.let { "${fmt(it)}%" } ?: ""
                     ReportSummaryColumn.TOTAL_AVERAGE -> if (anyData) "${fmt(totalAvgObtained)} / ${bn(totMax.toString())}" else ""
                 }
-                cell(ctx, c, hdrLabel, sx, summaryY, colW, sumHdrH, hdrFontSize, true, true, f)
-                cell(ctx, c, valueLabel, sx, summaryY + sumHdrH, colW, sumValH, valFontSize, true, false, f)
+                cell(ctx, c, hdrLabel, sx, summaryY, colW, sumHdrH, hdrFontSize, true, true, f, fe)
+                cell(ctx, c, valueLabel, sx, summaryY + sumHdrH, colW, sumValH, valFontSize, true, false, f, fe)
                 sx += colW
             }
 
@@ -1069,10 +1147,10 @@ object PdfGen {
             attRowH = ((targetBottom - attRowsStartY) / 3f).coerceAtLeast(42f)
         }
 
-        cell(ctx, c, "উপস্থিতি", rx, attStartY, rW, attTopH, if (activeSummaryCols.isNotEmpty()) 9f else 9.5f, true, true, f)
+        cell(ctx, c, "উপস্থিতি", rx, attStartY, rW, attTopH, if (activeSummaryCols.isNotEmpty()) 9f else 9.5f, true, true, f, fe)
         var ax = rx
         listOf("বিবরণ", "১ম প্রান্তিক", "২য় প্রান্তিক", "৩য় প্রান্তিক").forEachIndexed { i, h ->
-            cell(ctx, c, h, ax, attStartY + attTopH, aw[i], attSubH, if (activeSummaryCols.isNotEmpty()) 8f else 8.5f, true, true, f)
+            cell(ctx, c, h, ax, attStartY + attTopH, aw[i], attSubH, if (activeSummaryCols.isNotEmpty()) 8f else 8.5f, true, true, f, fe)
             ax += aw[i]
         }
 
@@ -1080,7 +1158,7 @@ object PdfGen {
         attLabels.forEachIndexed { r, lab ->
             val yy = attRowsStartY + r * attRowH
             ax = rx
-            cell(ctx, c, lab, ax, yy, aw[0], attRowH, 8.5f, true, false, f)
+            cell(ctx, c, lab, ax, yy, aw[0], attRowH, 8.5f, true, false, f, fe)
             ax += aw[0]
             for (t in 1..3) {
                 val d = s.x["DAYS_$t"]?.let { fromBn(it).toDoubleOrNull() }
@@ -1090,7 +1168,7 @@ object PdfGen {
                     1 -> p?.let { fmt(it) } ?: ""
                     else -> if (d != null && p != null && d > 0) "${fmt(p / d * 100)}%" else ""
                 }
-                cell(ctx, c, txt, ax, yy, aw[t], attRowH, 9.2f, r == 2, false, f)
+                cell(ctx, c, txt, ax, yy, aw[t], attRowH, 9.2f, r == 2, false, f, fe)
                 ax += aw[t]
             }
         }

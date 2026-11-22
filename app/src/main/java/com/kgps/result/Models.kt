@@ -47,6 +47,7 @@ data class Settings(
     val teachers: Map<Int, String> = emptyMap(),
     val teacherMobiles: Map<Int, String> = emptyMap(),
     val pdfFont: String = "noto_serif",
+    val pdfEnglishFont: String = "times_new_roman",
     val dpeLogo: String = "simple",
     val customFields: List<CustomFieldDef> = emptyList(),
     val customClasses: List<CustomClassDef> = emptyList()
@@ -61,7 +62,7 @@ val DPE_LOGO_LIST = listOf(
 
 data class PdfFontInfo(val id: String, val labelBn: String, val descriptionBn: String)
 
-val PDF_FONT_LIST = listOf(
+val BENGALI_PDF_FONT_LIST = listOf(
     PdfFontInfo("noto_serif", "নোতো সেরিফ বাংলা (প্রাতিষ্ঠানিক)", "সরকারি নথি ও আনুষ্ঠানিক প্রিন্টের জন্য আদর্শ সেরিফ ফন্ট"),
     PdfFontInfo("nikosh", "নিকষ (Nikosh — সরকারি দাপ্তরিক)", "সরকারি প্রজ্ঞাপন, দাপ্তরিক নথি ও ফর্মের জনপ্রিয় অফিশিয়াল ফন্ট"),
     PdfFontInfo("sutonny_mj", "সুতন্নী এমজে (SutonnyMJ / OMJ)", "ছাপাখানা, অফিস শিট ও ঐতিহ্যবাহী দাপ্তরিক কাগজপত্রের শৈলী"),
@@ -72,21 +73,24 @@ val PDF_FONT_LIST = listOf(
     PdfFontInfo("hind_siliguri", "হিন্দ শিলিগুড়ি (পরিচ্ছন্ন টেবিল)", "নম্বর টেবিল ও সংখ্যার স্পষ্ট পাঠযোগ্যতার জন্য আধুনিক স্যান্স ফন্ট"),
     PdfFontInfo("anek_bangla", "অনেক বাংলা (আধুনিক দাপ্তরিক)", "আধুনিক দাপ্তরিক শিট, নম্বরপত্র ও পরিচ্ছন্ন প্রিন্টের জন্য উপযোগী"),
     PdfFontInfo("mina", "মীনা বাংলা (স্পষ্ট জ্যামিতিক)", "সহজ, স্পষ্ট ও সমানুপাতিক জ্যামিতিক গড়নের অফিশিয়াল বাংলা ফন্ট"),
-    PdfFontInfo("baloo_da_2", "বালু দা ২ (মসৃণ ও প্রাঞ্জল)", "আকর্ষণীয় কভার শিরোনাম ও প্রাঞ্জল পাঠযোগ্যতার জন্য"),
-    PdfFontInfo("times_new_roman", "টাইমস নিউ রোমান (Times New Roman — অফিসিয়াল)", "সরকারি, একাডেমিক ও আন্তর্জাতিক মানের অফিসিয়াল ডকুমেন্ট ফন্ট"),
-    PdfFontInfo("tinos", "টিনোস (Tinos — টাইমস স্টাইল)", "Times New Roman ঘরানার বিকল্প ওপেন-সোর্স অফিসিয়াল ডকুমেন্ট ফন্ট"),
-    PdfFontInfo("arimo", "অ্যারিমো / এরিয়াল স্টাইল (Arimo — অফিসিয়াল স্যান্স)", "Arial ঘরানার পরিচ্ছন্ন দাপ্তরিক ফর্ম, তালিকা ও নম্বরপত্র ফন্ট"),
-    PdfFontInfo("merriweather", "মেরিওয়েদার (Merriweather — ইংরেজি ডকুমেন্ট)", "ইংরেজি রিপোর্ট কার্ড, নম্বরপত্র ও প্রাতিষ্ঠানিক ডকুমেন্টের জন্য ক্লাসিক সেরিফ ফন্ট")
+    PdfFontInfo("baloo_da_2", "বালু দা ২ (মসৃণ ও প্রাঞ্জল)", "আকর্ষণীয় কভার শিরোনাম ও প্রাঞ্জল পাঠযোগ্যতার জন্য")
 )
+
+val ENGLISH_PDF_FONT_LIST = listOf(
+    PdfFontInfo("times_new_roman", "টাইমস নিউ রোমান (Times New Roman)", "সরকারি, একাডেমিক ও আন্তর্জাতিক মানের অফিসিয়াল ডকুমেন্ট ফন্ট"),
+    PdfFontInfo("tinos", "টিনোস (Tinos — টাইমস স্টাইল)", "Times New Roman ঘরানার বিকল্প ওপেন-সোর্স অফিসিয়াল ডকুমেন্ট ফন্ট"),
+    PdfFontInfo("arimo", "অ্যারিমো / এরিয়াল স্টাইল (Arimo)", "Arial ঘরানার পরিচ্ছন্ন দাপ্তরিক ফর্ম, কোড ও নম্বরপত্র ফন্ট"),
+    PdfFontInfo("roboto", "রোবোটো (Roboto — আধুনিক পরিচ্ছন্ন)", "আধুনিক, স্পষ্ট ও সুষম ইংরেজি সংখ্যা ও টেক্সট ফন্ট"),
+    PdfFontInfo("merriweather", "মেরিওয়েদার (Merriweather — সেরিফ)", "ইংরেজি রিপোর্ট কার্ড, নম্বরপত্র ও প্রাতিষ্ঠানিক ডকুমেন্টের ক্লাসিক সেরিফ"),
+    PdfFontInfo("plus_jakarta_sans", "প্লাস জাকার্তা স্যান্স (Plus Jakarta Sans)", "আধুনিক ও মার্জিত জ্যামিতিক ইংরেজি ডকুমেন্ট ফন্ট")
+)
+
+val PDF_FONT_LIST = BENGALI_PDF_FONT_LIST + ENGLISH_PDF_FONT_LIST
 
 val PDF_FONTS = PDF_FONT_LIST.map { it.id to it.labelBn }
 
-val APP_FONT_LIST = listOf(
-    PdfFontInfo("system", "সিস্টেম ডিফল্ট (ডিভাইস ফন্ট)", "অ্যান্ড্রয়েড ডিভাইসের নিজস্ব স্বাভাবিক ফন্ট ব্যবহার করুন"),
-    PdfFontInfo("roboto", "রোবোটো (Roboto — অফিসিয়াল ইংরেজি UI)", "অ্যান্ড্রয়েড ও গুগলের অফিসিয়াল মানসম্মত ইংরেজি ইন্টারফেস ফন্ট"),
-    PdfFontInfo("times_new_roman", "টাইমস নিউ রোমান (Times New Roman — অফিসিয়াল)", "ক্লাসিক অফিসিয়াল সেরিফ শৈলীতে অ্যাপের ইংরেজি লেখা প্রদর্শন"),
-    PdfFontInfo("arimo", "অ্যারিমো / এরিয়াল স্টাইল (Arimo — অফিসিয়াল স্যান্স)", "Arial ঘরানার পরিচ্ছন্ন দাপ্তরিক ইংরেজি UI ও নম্বর এন্ট্রির ফন্ট"),
-    PdfFontInfo("plus_jakarta_sans", "প্লাস জাকার্তা স্যান্স (Plus Jakarta Sans — আধুনিক UI)", "ইংরেজি লেখা, সংখ্যা ও আধুনিক অ্যাপ ইন্টারফেসের জন্য পরিচ্ছন্ন UI ফন্ট"),
+val BENGALI_APP_FONT_LIST = listOf(
+    PdfFontInfo("system", "সিস্টেম ডিফল্ট (ডিভাইস বাংলা ফন্ট)", "অ্যান্ড্রয়েড ডিভাইসের নিজস্ব স্বাভাবিক বাংলা ফন্ট"),
     PdfFontInfo("noto_sans", "নোতো স্যান্স বাংলা (স্ট্যান্ডার্ড)", "অ্যাপের মেনু, তালিকা ও বাটনে পরিচ্ছন্ন ও দ্রুত পাঠযোগ্য ফন্ট"),
     PdfFontInfo("nikosh", "নিকষ (Nikosh — সরকারি দাপ্তরিক)", "সরকারি অফিশিয়াল ফন্টে ড্যাশবোর্ড ও সকল লেখা প্রদর্শন"),
     PdfFontInfo("kalpurush", "কালপুরুষ (Kalpurush)", "চোখের আরামদায়ক ও ক্লাসিক ইউনিকোড বাংলা ইন্টারফেস"),
@@ -99,6 +103,18 @@ val APP_FONT_LIST = listOf(
     PdfFontInfo("noto_serif", "নোতো সেরিফ বাংলা (প্রাতিষ্ঠানিক)", "সারা অ্যাপেই দাপ্তরিক ও বইয়ের মতো সেরিফ আবহ"),
     PdfFontInfo("tiro_bangla", "তিরো বাংলা (ধ্রুপদী বাংলা)", "মার্জিত ধ্রুপদী বাংলা অক্ষরশৈলীতে অ্যাপ প্রদর্শন")
 )
+
+val ENGLISH_APP_FONT_LIST = listOf(
+    PdfFontInfo("system", "সিস্টেম ডিফল্ট (ডিভাইস ইংরেজি ফন্ট)", "অ্যান্ড্রয়েড ডিভাইসের নিজস্ব স্বাভাবিক ইংরেজি ফন্ট"),
+    PdfFontInfo("roboto", "রোবোটো (Roboto — অফিসিয়াল UI)", "অ্যান্ড্রয়েড ও গুগলের অফিসিয়াল মানসম্মত ইংরেজি ইন্টারফেস ফন্ট"),
+    PdfFontInfo("times_new_roman", "টাইমস নিউ রোমান (Times New Roman)", "ক্লাসিক অফিসিয়াল সেরিফ শৈলীতে অ্যাপের ইংরেজি লেখা ও সংখ্যা"),
+    PdfFontInfo("arimo", "অ্যারিমো / এরিয়াল স্টাইল (Arimo)", "Arial ঘরানার পরিচ্ছন্ন দাপ্তরিক ইংরেজি UI ও নম্বর এন্ট্রি"),
+    PdfFontInfo("plus_jakarta_sans", "প্লাস জাকার্তা স্যান্স (Plus Jakarta Sans)", "ইংরেজি লেখা, সংখ্যা ও আধুনিক অ্যাপ ইন্টারফেসের পরিচ্ছন্ন UI ফন্ট"),
+    PdfFontInfo("tinos", "টিনোস (Tinos — টাইমস স্টাইল)", "Times New Roman ঘরানার স্পষ্ট সেরিফ ইংরেজি UI"),
+    PdfFontInfo("merriweather", "মেরিওয়েদার (Merriweather — সেরিফ)", "ক্লাসিক সেরিফ শৈলীতে অ্যাপের ইংরেজি ও সংখ্যা")
+)
+
+val APP_FONT_LIST = BENGALI_APP_FONT_LIST + ENGLISH_APP_FONT_LIST.filter { it.id != "system" }
 
 data class Comp(val key: String, val bn: String, val max: Int)
 data class Sub(val key: String, val bn: String, val max: Int, val comps: List<Comp>, val written: Int)
@@ -399,7 +415,8 @@ val DEFAULT_SETTINGS = Settings(
         4 to "01712345604",
         5 to "01712345605"
     ),
-    pdfFont = "noto_serif"
+    pdfFont = "noto_serif",
+    pdfEnglishFont = "times_new_roman"
 )
 
 val SAMPLE_STUDENTS = listOf(
