@@ -277,13 +277,18 @@ class ResultMakerViewModel(
         .map { it.second }
         .stateIn(viewModelScope, SharingStarted.Eagerly, emptyMap())
 
-    val settings: StateFlow<Settings> = activeSchool
-        .map { school ->
-            val st = school?.settings ?: DEFAULT_SETTINGS
-            SchoolClassRegistry.update(st.customClasses)
-            st
-        }
-        .stateIn(viewModelScope, SharingStarted.Eagerly, DEFAULT_SETTINGS)
+    private val _localPdfFontOverride = MutableStateFlow(Repo.loadPdfFontOverride(appContext))
+
+    val settings: StateFlow<Settings> = combine(
+        activeSchool,
+        _localPdfFontOverride
+    ) { school, localFont ->
+        val base = school?.settings ?: DEFAULT_SETTINGS
+        val effectiveFont = localFont?.takeIf { it.isNotBlank() } ?: base.pdfFont
+        val st = base.copy(pdfFont = effectiveFont)
+        SchoolClassRegistry.update(st.customClasses)
+        st
+    }.stateIn(viewModelScope, SharingStarted.Eagerly, DEFAULT_SETTINGS)
 
     val joinRequests: StateFlow<List<JoinRequestItem>> =
         activeSchool
@@ -1204,11 +1209,44 @@ class ResultMakerViewModel(
         }
     }
 
+    fun selectPdfFont(fontId: String) {
+        val valid = if (PDF_FONT_LIST.any { it.id == fontId }) fontId else "noto_serif"
+        _localPdfFontOverride.value = valid
+        Repo.savePdfFontOverride(appContext, valid)
+
+        val school = activeSchool.value ?: return
+        if (!school.isAdmin(currentUserId)) return
+
+        val next = school.settings.copy(pdfFont = valid)
+        viewModelScope.launch {
+            cloudRepo.updateSchoolSettings(school, next).onFailure { e ->
+                val fsEx = generateSequence(e) { it.cause }
+                    .filterIsInstance<com.google.firebase.firestore.FirebaseFirestoreException>()
+                    .firstOrNull()
+                if (fsEx?.code != com.google.firebase.firestore.FirebaseFirestoreException.Code.PERMISSION_DENIED) {
+                    showMessage(friendlyFirestoreErrorMessage(e))
+                }
+            }
+        }
+    }
+
     fun updateSettings(newSettings: Settings) {
+        val currentSettings = settings.value
+        val onlyPdfFontChanged = newSettings.pdfFont != currentSettings.pdfFont &&
+            newSettings == currentSettings.copy(pdfFont = newSettings.pdfFont)
+        if (onlyPdfFontChanged) {
+            selectPdfFont(newSettings.pdfFont)
+            return
+        }
+
         val school = activeSchool.value ?: return
         if (!school.isAdmin(currentUserId)) {
             showMessage("বিদ্যালয়ের সেটিংস পরিবর্তনের অনুমতি শুধুমাত্র অ্যাডমিনের")
             return
+        }
+        if (newSettings.pdfFont != currentSettings.pdfFont) {
+            _localPdfFontOverride.value = newSettings.pdfFont
+            Repo.savePdfFontOverride(appContext, newSettings.pdfFont)
         }
         viewModelScope.launch {
             cloudRepo.updateSchoolSettings(school, newSettings).onFailure { e ->

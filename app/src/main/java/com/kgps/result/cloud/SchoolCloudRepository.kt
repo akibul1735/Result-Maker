@@ -754,26 +754,44 @@ class SchoolCloudRepository(
         val path = "schools/${school.id}"
         return try {
             requireUserId()
+            val prev = school.settings
             val cleanSchoolName = nextSettings.school.trim().ifBlank { "প্রাথমিক বিদ্যালয়" }.take(160)
+            val cleanPrevSchoolName = prev.school.trim().ifBlank { "প্রাথমিক বিদ্যালয়" }.take(160)
+            val cleanAddress = nextSettings.schoolAddress.trim().take(240)
+            val cleanPrevAddress = prev.schoolAddress.trim().take(240)
+            val cleanYear = nextSettings.year.trim().ifBlank { "২০২৬" }.take(40)
+            val cleanPrevYear = prev.year.trim().ifBlank { "২০২৬" }.take(40)
+            val cleanPdfFont = nextSettings.pdfFont.ifBlank { "noto_serif" }.take(40)
+            val cleanPrevPdfFont = prev.pdfFont.ifBlank { "noto_serif" }.take(40)
+            val cleanLogo = if (nextSettings.dpeLogo == "color") "color" else "simple"
+            val cleanPrevLogo = if (prev.dpeLogo == "color") "color" else "simple"
+
+            val updates = mutableMapOf<String, Any>()
+            if (cleanSchoolName != cleanPrevSchoolName) updates["school"] = cleanSchoolName
+            if (cleanAddress != cleanPrevAddress) updates["schoolAddress"] = cleanAddress
+            if (cleanYear != cleanPrevYear) updates["year"] = cleanYear
+            if (nextSettings.teachers != prev.teachers) {
+                updates["teachers"] = nextSettings.teachers.mapKeys { it.key.toString() }
+            }
+            if (nextSettings.teacherMobiles != prev.teacherMobiles) {
+                updates["teacherMobiles"] = nextSettings.teacherMobiles.mapKeys { it.key.toString() }
+            }
+            if (cleanPdfFont != cleanPrevPdfFont) updates["pdfFont"] = cleanPdfFont
+            if (cleanLogo != cleanPrevLogo) updates["dpeLogo"] = cleanLogo
+            if (nextSettings.customFields != prev.customFields) {
+                updates["customFields"] = nextSettings.customFields.take(30).map { mapOf("key" to it.key, "label" to it.label) }
+            }
+            if (nextSettings.customClasses != prev.customClasses) {
+                updates["customClasses"] = nextSettings.customClasses.take(15).map {
+                    mapOf("id" to it.id, "nameBn" to it.nameBn, "shortBn" to it.shortBn, "syllabusTier" to it.syllabusTier)
+                }
+            }
+            if (updates.isEmpty()) return Result.success(Unit)
+            updates["updatedAt"] = FieldValue.serverTimestamp()
+
             val batch = db.batch()
-            batch.update(
-                db.collection("schools").document(school.id),
-                mapOf(
-                    "school" to cleanSchoolName,
-                    "schoolAddress" to nextSettings.schoolAddress.trim().take(240),
-                    "year" to nextSettings.year.trim().ifBlank { "২০২৬" }.take(40),
-                    "teachers" to nextSettings.teachers.mapKeys { it.key.toString() },
-                    "teacherMobiles" to nextSettings.teacherMobiles.mapKeys { it.key.toString() },
-                    "pdfFont" to nextSettings.pdfFont.ifBlank { "noto_serif" }.take(40),
-                    "dpeLogo" to if (nextSettings.dpeLogo == "color") "color" else "simple",
-                    "customFields" to nextSettings.customFields.take(30).map { mapOf("key" to it.key, "label" to it.label) },
-                    "customClasses" to nextSettings.customClasses.take(15).map {
-                        mapOf("id" to it.id, "nameBn" to it.nameBn, "shortBn" to it.shortBn, "syllabusTier" to it.syllabusTier)
-                    },
-                    "updatedAt" to FieldValue.serverTimestamp()
-                )
-            )
-            if (school.joinCode.isNotBlank() && cleanSchoolName != school.settings.school) {
+            batch.update(db.collection("schools").document(school.id), updates)
+            if (school.joinCode.isNotBlank() && cleanSchoolName != prev.school) {
                 batch.update(
                     db.collection("schoolCodes").document(school.joinCode),
                     mapOf("schoolName" to cleanSchoolName, "updatedAt" to FieldValue.serverTimestamp())

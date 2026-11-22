@@ -770,6 +770,7 @@ object Repo {
 
     private const val APP_UI_PREFS = "kgps_app_ui_prefs"
     private const val KEY_APP_UI_FONT = "app_ui_font"
+    private const val KEY_PDF_FONT_OVERRIDE = "pdf_font_override"
 
     fun loadAppFont(ctx: Context): String {
         val saved = ctx.getSharedPreferences(APP_UI_PREFS, Context.MODE_PRIVATE)
@@ -784,6 +785,23 @@ object Repo {
         ctx.getSharedPreferences(APP_UI_PREFS, Context.MODE_PRIVATE)
             .edit()
             .putString(KEY_APP_UI_FONT, valid)
+            .apply()
+    }
+
+    fun loadPdfFontOverride(ctx: Context): String? {
+        val saved = ctx.getSharedPreferences(APP_UI_PREFS, Context.MODE_PRIVATE)
+            .getString(KEY_PDF_FONT_OVERRIDE, null)
+            ?.trim()
+            ?.takeIf { it.isNotBlank() }
+            ?: return null
+        return saved.takeIf { id -> PDF_FONT_LIST.any { it.id == id } }
+    }
+
+    fun savePdfFontOverride(ctx: Context, fontId: String) {
+        val valid = if (PDF_FONT_LIST.any { it.id == fontId }) fontId else "noto_serif"
+        ctx.getSharedPreferences(APP_UI_PREFS, Context.MODE_PRIVATE)
+            .edit()
+            .putString(KEY_PDF_FONT_OVERRIDE, valid)
             .apply()
     }
 }

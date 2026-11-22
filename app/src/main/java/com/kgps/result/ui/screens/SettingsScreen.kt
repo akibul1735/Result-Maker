@@ -945,7 +945,11 @@ fun SettingsScreen(
                 TreeBranchItem(isLast = true) {
                     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                         Text(
-                            "এই ফন্ট প্রগতি প্রতিবেদন, ফাঁকা ফর্ম / শিট PDF ও ব্যাচ প্রিন্ট PDF তৈরিতে ব্যবহৃত হবে।",
+                            if (isAdmin) {
+                                "এই ফন্ট প্রগতি প্রতিবেদন, ফাঁকা ফর্ম / শিট PDF ও ব্যাচ প্রিন্ট PDF তৈরিতে ব্যবহৃত হবে।"
+                            } else {
+                                "এই ফন্ট প্রগতি প্রতিবেদন ও ফাঁকা ফর্ম PDF তৈরিতে ব্যবহৃত হবে (শিক্ষক হিসেবেও নিজের ডিভাইসের PDF ফন্ট পরিবর্তন করতে পারবেন)।"
+                            },
                             fontSize = 11.5.sp,
                             color = SlateMuted
                         )
@@ -958,7 +962,7 @@ fun SettingsScreen(
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .testTag("settings_font_${font.id}")
-                                    .clickable(enabled = isAdmin) {
+                                    .clickable {
                                         val next = s.copy(pdfFont = font.id)
                                         s = next
                                         onUpdateSettings(next)
@@ -974,7 +978,6 @@ fun SettingsScreen(
                                 ) {
                                     RadioButton(
                                         selected = selected,
-                                        enabled = isAdmin,
                                         onClick = {
                                             val next = s.copy(pdfFont = font.id)
                                             s = next
