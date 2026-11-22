@@ -837,6 +837,8 @@ fun AiAssistantScreen(
                         scanMode = scanMode,
                         selectedImageBitmap = state.selectedImageBitmap,
                         detectedSheetQr = state.detectedSheetQr,
+                        sheetDetectionSource = state.sheetDetectionSource,
+                        resolvingSheetTemplate = state.resolvingSheetTemplate,
                         documentEnhance = state.documentEnhance,
                         preparedStatsLabel = preparedStatsInfo?.first,
                         preparedStatsGood = preparedStatsInfo?.second == true,

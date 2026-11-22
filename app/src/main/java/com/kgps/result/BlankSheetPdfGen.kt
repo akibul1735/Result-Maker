@@ -192,23 +192,13 @@ object BlankSheetPdfGen {
         val fontId = st.pdfFont
         val numStyle = page.numeralStyle
 
-        // 1. Monochrome Black-and-White DPE Logo on top-left + School Title & Subtitle + Top-Right QR Code
-        val logoSize = 27f
-        val logoBmp = PdfGen.resolveLogoBitmap(ctx, "simple")
-        if (logoBmp != null) {
-            c.drawBitmap(
-                logoBmp,
-                null,
-                RectF(marginX, marginTop, marginX + logoSize, marginTop + logoSize),
-                null
-            )
-        }
+        // 1. Far-Left Thin Firestore/Cache QR + Centered [DPE Logo + School Title & Subtitle] + Far-Right Compact Offline QR
+        val leftQrMatrix = if (page.thinQrPayload.isNotBlank()) SheetQrCodec.encodeQrMatrix(page.thinQrPayload) else null
+        val rightQrMatrix = if (page.qrPayload.isNotBlank()) SheetQrCodec.encodeQrMatrix(page.qrPayload) else null
+        val qrBoxSize = 42f
+        val qrTop = marginTop - 3f
 
-        val qrMatrix = if (page.qrPayload.isNotBlank()) SheetQrCodec.encodeQrMatrix(page.qrPayload) else null
-        val qrBoxSize = 40f
-        if (qrMatrix != null) {
-            val qrLeft = marginX + contentW - qrBoxSize
-            val qrTop = marginTop - 3f
+        fun drawQrBox(matrix: com.google.zxing.common.BitMatrix, qrLeft: Float) {
             val qrBox = RectF(qrLeft, qrTop, qrLeft + qrBoxSize, qrTop + qrBoxSize)
             val whitePaint = Paint().apply {
                 color = Color.WHITE
@@ -226,9 +216,9 @@ object BlankSheetPdfGen {
             c.drawRoundRect(qrBox, 2f, 2f, whitePaint)
             c.drawRoundRect(qrBox, 2f, 2f, qrFramePaint)
 
-            val quietPad = 2.6f
-            val matrixW = qrMatrix.width.coerceAtLeast(1)
-            val matrixH = qrMatrix.height.coerceAtLeast(1)
+            val quietPad = 2.8f
+            val matrixW = matrix.width.coerceAtLeast(1)
+            val matrixH = matrix.height.coerceAtLeast(1)
             val drawArea = qrBoxSize - quietPad * 2f
             val modW = drawArea / matrixW.toFloat()
             val modH = drawArea / matrixH.toFloat()
@@ -238,7 +228,7 @@ object BlankSheetPdfGen {
                 val topY = originY + my * modH
                 val bottomY = originY + (my + 1) * modH
                 for (mx in 0 until matrixW) {
-                    if (qrMatrix.get(mx, my)) {
+                    if (matrix.get(mx, my)) {
                         val leftX = originX + mx * modW
                         val rightX = originX + (mx + 1) * modW
                         c.drawRect(leftX, topY, rightX, bottomY, qrModulePaint)
@@ -247,19 +237,30 @@ object BlankSheetPdfGen {
             }
         }
 
-        val leftClearance = if (logoBmp != null) logoSize + 8f else 0f
-        val rightClearance = if (qrMatrix != null) qrBoxSize + 8f else 0f
-        val sideReserve = max(leftClearance, rightClearance)
+        if (leftQrMatrix != null) {
+            drawQrBox(leftQrMatrix, marginX)
+        }
+        if (rightQrMatrix != null) {
+            drawQrBox(rightQrMatrix, marginX + contentW - qrBoxSize)
+        }
+
+        val hasAnyQr = leftQrMatrix != null || rightQrMatrix != null
+        val qrSideClearance = if (hasAnyQr) qrBoxSize + 10f else 0f
+        val centerAvailW = max(130f, contentW - qrSideClearance * 2f)
+
+        val logoSize = 25f
+        val logoGap = 7f
+        val logoBmp = PdfGen.resolveLogoBitmap(ctx, "simple")
+        val logoReserve = if (logoBmp != null) logoSize + logoGap else 0f
+        val titleMaxW = max(95f, centerAvailW - logoReserve)
 
         val schoolName = st.school.trim().ifBlank { "প্রাথমিক বিদ্যালয়" }
         val schoolPaint = textPaint(ctx, 13.5f, bold = true, fontId = fontId, color = 0xFF000000.toInt()).apply {
             textAlign = Paint.Align.CENTER
         }
-        val titleMaxW = max(120f, contentW - sideReserve * 2f)
         while (schoolPaint.measureText(schoolName) > titleMaxW && schoolPaint.textSize > 8.5f) {
             schoolPaint.textSize -= 0.5f
         }
-        c.drawText(schoolName, pageW / 2f, marginTop + 13.5f, schoolPaint)
 
         val yearFormatted = BlankSheetCatalog.formatDigits(st.year.ifBlank { "২০২৬" }, numStyle)
         val addressAndYear = buildString {
@@ -274,13 +275,32 @@ object BlankSheetPdfGen {
         val subPaint = textPaint(ctx, 8.8f, bold = false, fontId = fontId, color = 0xFF262626.toInt()).apply {
             textAlign = Paint.Align.CENTER
         }
-        while (subPaint.measureText(addressAndYear) > titleMaxW && subPaint.textSize > 6.8f) {
+        while (subPaint.measureText(addressAndYear) > titleMaxW && subPaint.textSize > 6.6f) {
             subPaint.textSize -= 0.3f
         }
-        c.drawText(addressAndYear, pageW / 2f, marginTop + 26.5f, subPaint)
+
+        val textBlockW = max(schoolPaint.measureText(schoolName), subPaint.measureText(addressAndYear))
+        val groupW = min(centerAvailW, logoReserve + textBlockW)
+        val groupStartX = pageW / 2f - groupW / 2f
+        val textCenterX = if (logoBmp != null) {
+            val textAreaStart = groupStartX + logoReserve
+            val actualTextW = max(20f, groupW - logoReserve)
+            c.drawBitmap(
+                logoBmp,
+                null,
+                RectF(groupStartX, marginTop + 3f, groupStartX + logoSize, marginTop + 3f + logoSize),
+                null
+            )
+            textAreaStart + actualTextW / 2f
+        } else {
+            pageW / 2f
+        }
+
+        c.drawText(schoolName, textCenterX, marginTop + 14.5f, schoolPaint)
+        c.drawText(addressAndYear, textCenterX, marginTop + 27.5f, subPaint)
 
         // 2. Concise Bengali Class + Subject + Term Title Banner (White + Very Light Gray Shade + Black Border)
-        val metaTop = if (qrMatrix != null) marginTop + 40f else marginTop + 34f
+        val metaTop = if (hasAnyQr) marginTop + 42f else marginTop + 34f
         val metaH = 24f
         val metaRect = RectF(marginX, metaTop, marginX + contentW, metaTop + metaH)
         c.drawRoundRect(metaRect, 3f, 3f, metaFillPaint)
@@ -378,7 +398,8 @@ object BlankSheetPdfGen {
         }
 
         // 3. Table Geometry
-        val footerReservedH = 22f
+        val barcodeMatrix = if (page.barcodeText.isNotBlank()) SheetQrCodec.encodeBarcodeMatrix(page.barcodeText) else null
+        val footerReservedH = if (barcodeMatrix != null) 46f else 22f
         val tableBottomLimit = pageH - marginBottom - footerReservedH
         val hasMaxSubHeader = page.showSubjectMaxInHeader && cols.any { col ->
             BlankSheetCatalog.resolveMaxHint(page.cls, page.subjectKey, col.compKey) != null
@@ -575,8 +596,51 @@ object BlankSheetPdfGen {
 
         c.drawRect(marginX, tableTop, marginX + contentW, curY, headerStrokePaint)
 
-        // 6. Monochrome Footer Line
+        // 6. Optional Code-128 Barcode + Monochrome Footer Line
         val footerY = pageH - marginBottom + 2f
+
+        if (barcodeMatrix != null) {
+            val barH = 16.5f
+            val barW = min(contentW * 0.44f, max(135f, barcodeMatrix.width * 1.05f))
+            val barLeft = pageW / 2f - barW / 2f
+            val barTop = footerY - 31.5f
+            val barQuietX = 6f
+            val barBox = RectF(
+                barLeft - barQuietX,
+                barTop - 2f,
+                barLeft + barW + barQuietX,
+                barTop + barH + 8.5f
+            )
+            val whitePaint = Paint().apply {
+                color = Color.WHITE
+                style = Paint.Style.FILL
+            }
+            val barPaint = Paint().apply {
+                color = Color.BLACK
+                style = Paint.Style.FILL
+            }
+            c.drawRect(barBox, whitePaint)
+            val mw = barcodeMatrix.width.coerceAtLeast(1)
+            val unitW = barW / mw.toFloat()
+            var bx = 0
+            while (bx < mw) {
+                if (barcodeMatrix.get(bx, 0)) {
+                    var runEnd = bx + 1
+                    while (runEnd < mw && barcodeMatrix.get(runEnd, 0)) runEnd++
+                    val rx1 = barLeft + bx * unitW
+                    val rx2 = barLeft + runEnd * unitW
+                    c.drawRect(rx1, barTop, rx2, barTop + barH, barPaint)
+                    bx = runEnd
+                } else {
+                    bx++
+                }
+            }
+            val barLabelPaint = textPaint(ctx, 5.8f, bold = false, fontId = fontId, color = 0xFF1A1A1A.toInt()).apply {
+                textAlign = Paint.Align.CENTER
+            }
+            c.drawText(page.barcodeText, pageW / 2f, barTop + barH + 6.5f, barLabelPaint)
+        }
+
         val footerLeftPaint = textPaint(ctx, 7.8f, bold = false, fontId = fontId, color = 0xFF262626.toInt()).apply {
             textAlign = Paint.Align.LEFT
         }

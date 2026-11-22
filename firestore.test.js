@@ -461,3 +461,79 @@ test("Subject-restricted teacher can update ART 4-components, CONT, and legacy T
   );
 });
 
+test("School members can sync and fetch thin-QR sheetTemplates while outsiders and spoofed writes fail", async () => {
+  const aliceDb = testEnv.authenticatedContext(ALICE_UID).firestore();
+  const bobDb = testEnv.authenticatedContext(BOB_UID).firestore();
+  const eveDb = testEnv.authenticatedContext(EVE_UID).firestore();
+  const unauthDb = testEnv.unauthenticatedContext().firestore();
+
+  await testEnv.withSecurityRulesDisabled(async (ctx) => {
+    const adminDb = ctx.firestore();
+    const school = makeSchoolPayload(ALICE_UID, "TPL100", true);
+    school.memberUids = [ALICE_UID, BOB_UID];
+    school.memberProfiles[BOB_UID] = {
+      uid: BOB_UID,
+      name: "Bob",
+      email: "bob@x.com",
+      role: "TEACHER",
+      allClasses: true,
+      allowedClasses: [1, 2, 3, 4, 5],
+      allSubjects: true,
+      allowedSubjects: ["BAN", "ENG", "MATH", "SOC", "SCI", "BGW", "REL", "PE", "ART"],
+      canViewOtherSubjects: true,
+      canEditAttendance: true,
+      canManageStudents: true,
+      canExportPdf: true,
+    };
+    await adminDb.collection("schools").doc("school_tpl").set(school);
+    await adminDb.collection("schoolCodes").doc("TPL100").set(makeCodePayload("school_tpl", ALICE_UID));
+  });
+
+  const tid = "K9F2X8M1Q4";
+  const tplPayload = (uid) => ({
+    templateId: tid,
+    cls: 3,
+    subjectKey: "BAN",
+    term: 1,
+    sheetKind: "SINGLE_TERM_MARKS",
+    importScope: "BOTH",
+    columnIds: ["ROLL", "NAME", "TB", "ACT", "LANG", "CT", "CONT", "WR", "TOTAL", "CUS:0"],
+    customColumnTitles: ["মৌখিক"],
+    numeralStyle: "BENGALI",
+    showSubjectMaxInHeader: true,
+    workingDaysByTerm: { "1": "62" },
+    pageIndex: 1,
+    totalPages: 2,
+    refCode: "REF:C3-BAN-T1-FULL",
+    createdByUid: uid,
+    updatedByUid: uid,
+    createdAt: pastDate(2000),
+    updatedAt: pastDate(2000),
+  });
+
+  const aliceTplRef = aliceDb.collection("schools").doc("school_tpl").collection("sheetTemplates").doc(tid);
+  const bobTplRef = bobDb.collection("schools").doc("school_tpl").collection("sheetTemplates").doc(tid);
+  const eveTplRef = eveDb.collection("schools").doc("school_tpl").collection("sheetTemplates").doc(tid);
+
+  // Unauthenticated and outsider get/write must fail
+  await assertFails(unauthDb.collection("schools").doc("school_tpl").collection("sheetTemplates").doc(tid).get());
+  await assertFails(eveTplRef.set(tplPayload(EVE_UID)));
+
+  // Spoofed createdByUid or ghost field must fail
+  await assertFails(bobTplRef.set(tplPayload(ALICE_UID)));
+  await assertFails(aliceTplRef.set({ ...tplPayload(ALICE_UID), isAdminOverride: true }));
+
+  // Alice creates valid sheetTemplate; Bob (same school member) can get it by ID
+  await assertSucceeds(aliceTplRef.set(tplPayload(ALICE_UID)));
+  await assertSucceeds(bobTplRef.get());
+
+  // Outsider Eve cannot get it; list query is disallowed even for members
+  await assertFails(eveTplRef.get());
+  await assertFails(aliceDb.collection("schools").doc("school_tpl").collection("sheetTemplates").get());
+
+  // Bob cannot delete Alice's template, but admin Alice can
+  await assertFails(bobTplRef.delete());
+  await assertSucceeds(aliceTplRef.delete());
+});
+
+

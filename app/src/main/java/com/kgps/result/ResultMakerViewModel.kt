@@ -27,6 +27,7 @@ import com.kgps.result.ai.PreparedImageStats
 import com.kgps.result.ai.ScanConstraintSolver
 import com.kgps.result.ai.ScannedStudentRow
 import com.kgps.result.ai.SheetQrScanner
+import com.kgps.result.ai.SheetScanDetection
 import com.kgps.result.ai.VisionImageOptimizer
 import com.kgps.result.ai.validateScannedStudentRow
 import com.kgps.result.backup.AutoBackupManager
@@ -45,6 +46,7 @@ import com.kgps.result.cloud.MemberRole
 import com.kgps.result.cloud.SchoolCloudRepository
 import com.kgps.result.cloud.SchoolCodePreview
 import com.kgps.result.cloud.SchoolWorkspace
+import com.kgps.result.cloud.SheetTemplateCache
 import com.kgps.result.cloud.StudentSyncMeta
 import com.kgps.result.cloud.TeacherPermissions
 import com.kgps.result.cloud.UserCloudProfile
@@ -108,6 +110,8 @@ data class AiAssistantState(
     val preparedImageStats: PreparedImageStats? = null,
     val hasOriginalImageBackup: Boolean = false,
     val detectedSheetQr: BlankSheetQrMeta? = null,
+    val sheetDetectionSource: String? = null,
+    val resolvingSheetTemplate: Boolean = false,
     val analyzingImage: Boolean = false,
     val analysisError: String? = null,
     val analysisResult: ExtractedMarksheet? = null,
@@ -130,6 +134,8 @@ class ResultMakerViewModel(
     private val directAiRepository = DirectGeminiAiRepository(appContext)
     private val aiRepository: AiRepository get() = directAiRepository
     private val sampleAiRepository = PlaceholderAiRepository()
+    private val sheetTemplateCache = SheetTemplateCache(appContext)
+    private val syncedTemplateIdsInSession = mutableSetOf<String>()
     private var originalMarksheetBitmap: Bitmap? = null
 
     val localSeedCount: Int get() = initialLocalSnapshot?.first?.size ?: 0
@@ -861,6 +867,45 @@ class ResultMakerViewModel(
         }
         _editingStudent.value = null
         _currentSection.value = NavSection.BLANK_SHEET
+    }
+
+    fun cacheBlankSheetTemplatesLocally(pages: List<BlankSheetPageSpec>) {
+        if (pages.isEmpty()) return
+        val distinctMetas = pages
+            .map { SheetQrCodec.fromPageConfig(it, it.term) }
+            .distinctBy { it.templateId }
+        if (distinctMetas.isEmpty()) return
+        viewModelScope.launch(Dispatchers.IO) {
+            sheetTemplateCache.putAll(distinctMetas)
+        }
+    }
+
+    fun syncBlankSheetTemplates(pages: List<BlankSheetPageSpec>) {
+        if (pages.isEmpty()) return
+        val distinctMetas = pages
+            .map { SheetQrCodec.fromPageConfig(it, it.term) }
+            .distinctBy { it.templateId }
+        if (distinctMetas.isEmpty()) return
+        val schoolId = activeSchool.value?.id?.trim().orEmpty()
+        viewModelScope.launch(Dispatchers.IO) {
+            sheetTemplateCache.putAll(distinctMetas)
+            if (schoolId.isNotEmpty()) {
+                distinctMetas.forEach { meta ->
+                    val sessionKey = "$schoolId|${meta.templateId}"
+                    val alreadySynced = synchronized(syncedTemplateIdsInSession) {
+                        syncedTemplateIdsInSession.contains(sessionKey)
+                    }
+                    if (!alreadySynced) {
+                        val res = cloudRepo.saveSheetTemplate(schoolId, meta)
+                        if (res.isSuccess) {
+                            synchronized(syncedTemplateIdsInSession) {
+                                syncedTemplateIdsInSession.add(sessionKey)
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
 
     fun selectStudioStudent(studentId: String) {
@@ -2005,26 +2050,22 @@ class ResultMakerViewModel(
             val loaded = withContext(Dispatchers.IO) {
                 val bmp = decodeAndScaleBitmap(uri, 2200) ?: return@withContext null
                 val stats = VisionImageOptimizer.computeStatsOnly(bmp, _aiState.value.documentEnhance)
-                val qrMeta = SheetQrScanner.decodeFromBitmap(bmp)
-                Triple(bmp, stats, qrMeta)
+                val detection = SheetQrScanner.decodeAllFromBitmap(bmp)
+                Triple(bmp, stats, detection)
             }
             if (loaded == null) {
                 showMessage("ছবি পড়া যায়নি")
             } else {
-                val (bmp, stats, qrMeta) = loaded
+                val (bmp, stats, detection) = loaded
                 originalMarksheetBitmap = bmp
-                _aiState.update {
-                    it.copy(
-                        activeTab = 1,
-                        selectedImageBitmap = bmp,
-                        preparedImageStats = stats,
-                        hasOriginalImageBackup = false,
-                        detectedSheetQr = qrMeta,
-                        analysisResult = null,
-                        classSheetResult = null,
-                        analysisError = null
-                    )
-                }
+                applyDetectedSheetState(
+                    targetBmp = bmp,
+                    stats = stats,
+                    detection = detection,
+                    hasOriginalBackup = false,
+                    switchToScannerTab = true,
+                    keepExistingOnMiss = false
+                )
             }
         }
     }
@@ -2048,25 +2089,22 @@ class ResultMakerViewModel(
         val current = _aiState.value.selectedImageBitmap ?: return
         val enhance = _aiState.value.documentEnhance
         viewModelScope.launch {
-            val (rotated, stats, qrMeta) = withContext(Dispatchers.Default) {
+            val (rotated, stats, detection) = withContext(Dispatchers.Default) {
                 val r = VisionImageOptimizer.rotate90Clockwise(current)
                 Triple(
                     r,
                     VisionImageOptimizer.computeStatsOnly(r, enhance),
-                    SheetQrScanner.decodeFromBitmap(r)
+                    SheetQrScanner.decodeAllFromBitmap(r)
                 )
             }
-            _aiState.update {
-                it.copy(
-                    selectedImageBitmap = rotated,
-                    preparedImageStats = stats,
-                    hasOriginalImageBackup = true,
-                    detectedSheetQr = qrMeta ?: it.detectedSheetQr,
-                    analysisResult = null,
-                    classSheetResult = null,
-                    analysisError = null
-                )
-            }
+            applyDetectedSheetState(
+                targetBmp = rotated,
+                stats = stats,
+                detection = detection,
+                hasOriginalBackup = true,
+                switchToScannerTab = false,
+                keepExistingOnMiss = true
+            )
         }
     }
 
@@ -2074,25 +2112,22 @@ class ResultMakerViewModel(
         val current = _aiState.value.selectedImageBitmap ?: return
         val enhance = _aiState.value.documentEnhance
         viewModelScope.launch {
-            val (cropped, stats, qrMeta) = withContext(Dispatchers.Default) {
+            val (cropped, stats, detection) = withContext(Dispatchers.Default) {
                 val c = VisionImageOptimizer.cropNormalized(current, leftFrac, topFrac, rightFrac, bottomFrac)
                 Triple(
                     c,
                     VisionImageOptimizer.computeStatsOnly(c, enhance),
-                    SheetQrScanner.decodeFromBitmap(c)
+                    SheetQrScanner.decodeAllFromBitmap(c)
                 )
             }
-            _aiState.update {
-                it.copy(
-                    selectedImageBitmap = cropped,
-                    preparedImageStats = stats,
-                    hasOriginalImageBackup = true,
-                    detectedSheetQr = qrMeta ?: it.detectedSheetQr,
-                    analysisResult = null,
-                    classSheetResult = null,
-                    analysisError = null
-                )
-            }
+            applyDetectedSheetState(
+                targetBmp = cropped,
+                stats = stats,
+                detection = detection,
+                hasOriginalBackup = true,
+                switchToScannerTab = false,
+                keepExistingOnMiss = true
+            )
         }
     }
 
@@ -2100,20 +2135,17 @@ class ResultMakerViewModel(
         val orig = originalMarksheetBitmap ?: return
         val enhance = _aiState.value.documentEnhance
         viewModelScope.launch {
-            val (stats, qrMeta) = withContext(Dispatchers.Default) {
-                VisionImageOptimizer.computeStatsOnly(orig, enhance) to SheetQrScanner.decodeFromBitmap(orig)
+            val (stats, detection) = withContext(Dispatchers.Default) {
+                VisionImageOptimizer.computeStatsOnly(orig, enhance) to SheetQrScanner.decodeAllFromBitmap(orig)
             }
-            _aiState.update {
-                it.copy(
-                    selectedImageBitmap = orig,
-                    preparedImageStats = stats,
-                    hasOriginalImageBackup = false,
-                    detectedSheetQr = qrMeta,
-                    analysisResult = null,
-                    classSheetResult = null,
-                    analysisError = null
-                )
-            }
+            applyDetectedSheetState(
+                targetBmp = orig,
+                stats = stats,
+                detection = detection,
+                hasOriginalBackup = false,
+                switchToScannerTab = false,
+                keepExistingOnMiss = false
+            )
         }
     }
 
@@ -2125,10 +2157,91 @@ class ResultMakerViewModel(
                 preparedImageStats = null,
                 hasOriginalImageBackup = false,
                 detectedSheetQr = null,
+                sheetDetectionSource = null,
+                resolvingSheetTemplate = false,
                 analysisResult = null,
                 classSheetResult = null,
                 analysisError = null
             )
+        }
+    }
+
+    private suspend fun applyDetectedSheetState(
+        targetBmp: Bitmap,
+        stats: PreparedImageStats,
+        detection: SheetScanDetection,
+        hasOriginalBackup: Boolean,
+        switchToScannerTab: Boolean,
+        keepExistingOnMiss: Boolean
+    ) {
+        val tid = detection.templateId?.trim()?.uppercase()?.takeIf { it.length >= 6 }
+        val cachedMeta = if (tid != null) {
+            withContext(Dispatchers.IO) { sheetTemplateCache.get(tid) }
+        } else null
+
+        val immediateMeta = when {
+            cachedMeta != null -> {
+                val pIdx = detection.offlineQrMeta?.pageIndex ?: cachedMeta.pageIndex
+                val pTot = detection.offlineQrMeta?.totalPages ?: cachedMeta.totalPages
+                cachedMeta.copy(pageIndex = pIdx, totalPages = pTot)
+            }
+            detection.bestLocalMeta != null -> detection.bestLocalMeta
+            keepExistingOnMiss -> _aiState.value.detectedSheetQr
+            else -> null
+        }
+
+        val immediateSource = when {
+            cachedMeta != null -> if (detection.detectedFromBarcode && !detection.detectedFromThinQr && !detection.detectedFromOfflineQr) {
+                "বারকোড + অফলাইন ক্যাশ"
+            } else {
+                "ক্যাশ টেমপ্লেট QR"
+            }
+            detection.bestLocalMeta != null -> detection.sourceLabelBn
+            keepExistingOnMiss && immediateMeta != null -> _aiState.value.sheetDetectionSource
+            else -> null
+        }
+
+        val schoolId = activeSchool.value?.id?.trim().orEmpty()
+        val needsOnlineFetch = tid != null && cachedMeta == null && schoolId.isNotEmpty()
+
+        _aiState.update {
+            it.copy(
+                activeTab = if (switchToScannerTab) 1 else it.activeTab,
+                selectedImageBitmap = targetBmp,
+                preparedImageStats = stats,
+                hasOriginalImageBackup = hasOriginalBackup,
+                detectedSheetQr = immediateMeta,
+                sheetDetectionSource = immediateSource,
+                resolvingSheetTemplate = needsOnlineFetch,
+                analysisResult = null,
+                classSheetResult = null,
+                analysisError = null
+            )
+        }
+
+        if (needsOnlineFetch && tid != null) {
+            viewModelScope.launch {
+                val cloudMeta = withContext(Dispatchers.IO) {
+                    cloudRepo.fetchSheetTemplate(schoolId, tid).getOrNull()?.also { fetched ->
+                        sheetTemplateCache.put(fetched)
+                    }
+                }
+                _aiState.update { cur ->
+                    if (cur.selectedImageBitmap !== targetBmp) {
+                        cur
+                    } else if (cloudMeta != null) {
+                        val pIdx = detection.offlineQrMeta?.pageIndex ?: cloudMeta.pageIndex
+                        val pTot = detection.offlineQrMeta?.totalPages ?: cloudMeta.totalPages
+                        cur.copy(
+                            detectedSheetQr = cloudMeta.copy(pageIndex = pIdx, totalPages = pTot),
+                            sheetDetectionSource = "Firestore ক্লাউড টেমপ্লেট",
+                            resolvingSheetTemplate = false
+                        )
+                    } else {
+                        cur.copy(resolvingSheetTemplate = false)
+                    }
+                }
+            }
         }
     }
 

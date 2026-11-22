@@ -131,6 +131,51 @@
         "createdAt",
         "updatedAt"
       ]
+    },
+    "SheetTemplate": {
+      "title": "SheetTemplate",
+      "description": "Reusable blank sheet structural metadata mapped from thin Firestore QR/barcode template ID",
+      "type": "object",
+      "properties": {
+        "templateId": { "type": "string" },
+        "cls": { "type": "integer" },
+        "subjectKey": { "type": "string" },
+        "term": { "type": "integer" },
+        "sheetKind": { "type": "string", "enum": ["SINGLE_TERM_MARKS", "THREE_TERM_MARKS", "ATTENDANCE_TRAITS"] },
+        "importScope": { "type": "string", "enum": ["AUTO", "BOTH", "CONT_ONLY", "WR_ONLY"] },
+        "columnIds": { "type": "array" },
+        "customColumnTitles": { "type": "array" },
+        "numeralStyle": { "type": "string", "enum": ["BENGALI", "ENGLISH"] },
+        "showSubjectMaxInHeader": { "type": "boolean" },
+        "workingDaysByTerm": { "type": "object" },
+        "pageIndex": { "type": "integer" },
+        "totalPages": { "type": "integer" },
+        "refCode": { "type": "string" },
+        "createdByUid": { "type": "string" },
+        "updatedByUid": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "templateId",
+        "cls",
+        "subjectKey",
+        "term",
+        "sheetKind",
+        "importScope",
+        "columnIds",
+        "customColumnTitles",
+        "numeralStyle",
+        "showSubjectMaxInHeader",
+        "workingDaysByTerm",
+        "pageIndex",
+        "totalPages",
+        "refCode",
+        "createdByUid",
+        "updatedByUid",
+        "createdAt",
+        "updatedAt"
+      ]
     }
   },
   "firestore": {
@@ -153,6 +198,10 @@
     "/schools/{schoolId}/students/{studentId}": {
       "schema": { "$ref": "#/entities/SchoolStudent" },
       "description": "Students, term marks, attendance, traits, and remarks scoped to a school"
+    },
+    "/schools/{schoolId}/sheetTemplates/{templateId}": {
+      "schema": { "$ref": "#/entities/SheetTemplate" },
+      "description": "Smart blank sheet metadata for thin QR and barcode recognition across school devices"
     }
   }
 }

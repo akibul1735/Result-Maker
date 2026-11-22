@@ -27,6 +27,10 @@ service cloud.firestore {
       return code is string && code.size() >= 6 && code.size() <= 12 && code.matches('^[A-Z0-9]+$');
     }
 
+    function isValidTemplateId(id) {
+      return id is string && id.size() >= 6 && id.size() <= 24 && id.matches('^[A-Z0-9]+$');
+    }
+
     function schoolData(schoolId) {
       return get(/databases/$(database)/documents/schools/$(schoolId)).data;
     }
@@ -251,6 +255,29 @@ service cloud.firestore {
              data.updatedAt is timestamp && data.updatedAt <= request.time;
     }
 
+    function isValidSheetTemplate(data) {
+      return isValidTemplateId(data.templateId) &&
+             data.cls is int && data.cls >= 1 && data.cls <= 20 &&
+             data.subjectKey is string && data.subjectKey.size() <= 24 &&
+             data.term is int && data.term >= -1 && data.term <= 3 &&
+             data.sheetKind in ['SINGLE_TERM_MARKS', 'THREE_TERM_MARKS', 'ATTENDANCE_TRAITS'] &&
+             data.importScope in ['AUTO', 'BOTH', 'CONT_ONLY', 'WR_ONLY'] &&
+             data.columnIds is list && data.columnIds.size() >= 1 && data.columnIds.size() <= 30 &&
+             (data.columnIds.size() == 0 || data.columnIds[0] is string) &&
+             data.customColumnTitles is list && data.customColumnTitles.size() <= 15 &&
+             (data.customColumnTitles.size() == 0 || data.customColumnTitles[0] is string) &&
+             data.numeralStyle in ['BENGALI', 'ENGLISH'] &&
+             data.showSubjectMaxInHeader is bool &&
+             data.workingDaysByTerm is map && data.workingDaysByTerm.size() <= 3 &&
+             data.pageIndex is int && data.pageIndex >= 1 && data.pageIndex <= 100 &&
+             data.totalPages is int && data.totalPages >= 1 && data.totalPages <= 100 &&
+             data.refCode is string && data.refCode.size() <= 64 &&
+             data.createdByUid is string && data.createdByUid.size() >= 1 && data.createdByUid.size() <= 128 &&
+             data.updatedByUid is string && data.updatedByUid.size() >= 1 && data.updatedByUid.size() <= 128 &&
+             data.createdAt is timestamp && data.createdAt <= request.time &&
+             data.updatedAt is timestamp && data.updatedAt <= request.time;
+    }
+
     // 4. Users Collection (PII strictly isolated to owner)
     match /users/{userId} {
       allow get, list: if isSignedIn() && request.auth.uid == userId;
@@ -420,6 +447,59 @@ service cloud.firestore {
                          isValidId(studentId) &&
                          isSignedIn() &&
                          canDeleteStudentDoc(schoolData(schoolId), existing());
+      }
+
+      // 9. Smart Blank Sheet Templates Subcollection (Thin QR & Barcode metadata)
+      match /sheetTemplates/{templateId} {
+        allow get: if isValidId(schoolId) &&
+                      isValidTemplateId(templateId) &&
+                      isSchoolMember(schoolId);
+        allow list: if false;
+
+        allow create: if isSignedIn() &&
+                         isValidId(schoolId) &&
+                         isValidTemplateId(templateId) &&
+                         incoming().templateId == templateId &&
+                         incoming().createdByUid == request.auth.uid &&
+                         incoming().updatedByUid == request.auth.uid &&
+                         incoming().keys().hasAll([
+                           'templateId', 'cls', 'subjectKey', 'term', 'sheetKind', 'importScope',
+                           'columnIds', 'customColumnTitles', 'numeralStyle', 'showSubjectMaxInHeader',
+                           'workingDaysByTerm', 'pageIndex', 'totalPages', 'refCode',
+                           'createdByUid', 'updatedByUid', 'createdAt', 'updatedAt'
+                         ]) &&
+                         incoming().keys().hasOnly([
+                           'templateId', 'cls', 'subjectKey', 'term', 'sheetKind', 'importScope',
+                           'columnIds', 'customColumnTitles', 'numeralStyle', 'showSubjectMaxInHeader',
+                           'workingDaysByTerm', 'pageIndex', 'totalPages', 'refCode',
+                           'createdByUid', 'updatedByUid', 'createdAt', 'updatedAt'
+                         ]) &&
+                         isValidSheetTemplate(incoming()) &&
+                         isSchoolMember(schoolId);
+
+        allow update: if isSignedIn() &&
+                         isValidId(schoolId) &&
+                         isValidTemplateId(templateId) &&
+                         isValidSheetTemplate(incoming()) &&
+                         incoming().templateId == existing().templateId &&
+                         incoming().createdByUid == existing().createdByUid &&
+                         incoming().createdAt == existing().createdAt &&
+                         incoming().updatedByUid == request.auth.uid &&
+                         incoming().diff(existing()).affectedKeys().hasOnly([
+                           'cls', 'subjectKey', 'term', 'sheetKind', 'importScope',
+                           'columnIds', 'customColumnTitles', 'numeralStyle', 'showSubjectMaxInHeader',
+                           'workingDaysByTerm', 'pageIndex', 'totalPages', 'refCode',
+                           'updatedByUid', 'updatedAt'
+                         ]) &&
+                         isSchoolMember(schoolId);
+
+        allow delete: if isValidId(schoolId) &&
+                         isValidTemplateId(templateId) &&
+                         isSignedIn() &&
+                         (
+                           isSchoolAdmin(schoolId) ||
+                           (isSchoolMember(schoolId) && existing().createdByUid == request.auth.uid)
+                         );
       }
     }
   }

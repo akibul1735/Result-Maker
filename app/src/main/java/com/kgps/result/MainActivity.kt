@@ -917,6 +917,7 @@ fun ResultMakerWorkspace(
                                                     } else if (pages.isEmpty()) {
                                                         vm.showMessage("PDF তৈরির জন্য কোনো পৃষ্ঠা নেই")
                                                     } else {
+                                                        vm.syncBlankSheetTemplates(pages)
                                                         pendingBlankPdfPages = pages
                                                         pendingBlankPdfOrientation = orientation
                                                         blankPdfLauncher.launch(fileName)
@@ -928,6 +929,7 @@ fun ResultMakerWorkspace(
                                                     } else if (pages.isEmpty()) {
                                                         vm.showMessage("প্রিন্ট করার জন্য কোনো পৃষ্ঠা নেই")
                                                     } else {
+                                                        vm.syncBlankSheetTemplates(pages)
                                                         BlankSheetPdfGen.print(
                                                             ctx = ctx,
                                                             pages = pages,
@@ -937,6 +939,7 @@ fun ResultMakerWorkspace(
                                                         )
                                                     }
                                                 },
+                                                onCacheTemplates = vm::cacheBlankSheetTemplatesLocally,
                                                 onBack = { vm.navigate(NavSection.DASHBOARD) },
                                                 modifier = Modifier.fillMaxSize()
                                             )

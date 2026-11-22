@@ -152,6 +152,7 @@ fun BlankSheetPdfScreen(
     initialClass: Int,
     onExportPdf: (pages: List<BlankSheetPageSpec>, orientation: BlankSheetOrientation, fileName: String) -> Unit,
     onPrint: (pages: List<BlankSheetPageSpec>, orientation: BlankSheetOrientation, jobName: String) -> Unit,
+    onCacheTemplates: (List<BlankSheetPageSpec>) -> Unit = {},
     onBack: (() -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
@@ -208,6 +209,11 @@ fun BlankSheetPdfScreen(
     LaunchedEffect(pages.size) {
         if (previewPageIdx >= pages.size) {
             previewPageIdx = (pages.size - 1).coerceAtLeast(0)
+        }
+    }
+    LaunchedEffect(pages) {
+        if (pages.isNotEmpty()) {
+            onCacheTemplates(pages)
         }
     }
     LaunchedEffect(previewPageIdx, pages.size, config.orientation) {
@@ -842,6 +848,14 @@ fun BlankSheetPdfScreen(
                                             border = appFilterChipBorder(config.includeQrCode),
                                             label = { Text("স্মার্ট QR কোড", fontSize = 10.5.sp) },
                                             modifier = Modifier.testTag("blank_sheet_qr_toggle")
+                                        )
+                                        FilterChip(
+                                            selected = config.includeBarcode,
+                                            onClick = { config = config.copy(includeBarcode = !config.includeBarcode) },
+                                            colors = appFilterChipColors(),
+                                            border = appFilterChipBorder(config.includeBarcode),
+                                            label = { Text("নিচে বারকোড", fontSize = 10.5.sp) },
+                                            modifier = Modifier.testTag("blank_sheet_barcode_toggle")
                                         )
                                         FilterChip(
                                             selected = config.fillRemainingPageRows,

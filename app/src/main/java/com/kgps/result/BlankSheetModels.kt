@@ -405,8 +405,8 @@ object BlankSheetCatalog {
             appendLine("৩) এরপর টেবিলের হেডার হুবহু এই কলামে রাখুন:")
             appendLine(headers.joinToString(","))
             appendLine("৪) সব সংখ্যা ইংরেজি অঙ্কে (0-9) দিন; ফাঁকা ঘর ফাঁকা রাখুন এবং গ্রেড/জিপি/স্বাক্ষর কলাম বাদ দিন।")
-            if (config.includeQrCode) {
-                appendLine("৫) ছবির উপরে ডান কোণায় থাকা QR কোডে কলাম-ক্রম ও ফর্মের মেটাডেটা দেওয়া আছে — প্রয়োজনে সেটিও মিলিয়ে নিন।")
+            if (config.includeQrCode || config.includeBarcode) {
+                appendLine("৫) ছবির উপরে বাম/ডান কোণায় থাকা QR কোড বা নিচের বারকোডে কলাম-ক্রম ও ফর্মের মেটাডেটা দেওয়া আছে — প্রয়োজনে সেটিও মিলিয়ে নিন।")
                 append("৬) কেবল ```csv ... ``` ব্লকের ভেতর আউটপুট দিন, বাড়তি ব্যাখ্যা নয়।")
             } else {
                 append("৫) কেবল ```csv ... ``` ব্লকের ভেতর আউটপুট দিন, বাড়তি ব্যাখ্যা নয়।")
@@ -431,7 +431,8 @@ data class BlankSheetConfig(
     val fillRemainingPageRows: Boolean = false,
     val showSharedWorkingDaysHeader: Boolean = true,
     val workingDaysByTerm: Map<Int, String> = emptyMap(),
-    val includeQrCode: Boolean = true
+    val includeQrCode: Boolean = true,
+    val includeBarcode: Boolean = true
 )
 
 data class BlankSheetRow(
@@ -441,6 +442,7 @@ data class BlankSheetRow(
 
 data class BlankSheetPageSpec(
     val cls: Int,
+    val term: Int = 1,
     val classTitleBn: String,
     val subjectTitleBn: String,
     val termTitleBn: String,
@@ -459,7 +461,10 @@ data class BlankSheetPageSpec(
     val sharedWorkingDaysTerms: List<Int> = emptyList(),
     val workingDaysByTerm: Map<Int, String> = emptyMap(),
     val sheetRefCode: String = "",
-    val qrPayload: String = ""
+    val templateId: String = "",
+    val thinQrPayload: String = "",
+    val qrPayload: String = "",
+    val barcodeText: String = ""
 ) {
     val showSharedWorkingDaysStrip: Boolean
         get() = sharedWorkingDaysTerms.isNotEmpty()
@@ -593,6 +598,7 @@ object BlankSheetPlanner {
             val clsShort = classShortBn(raw.cls, settings)
             val baseSpec = BlankSheetPageSpec(
                 cls = raw.cls,
+                term = config.term,
                 classTitleBn = clsShort,
                 subjectTitleBn = raw.subjectTitleBn,
                 termTitleBn = termTitle,
@@ -617,12 +623,21 @@ object BlankSheetPlanner {
                     columns = safeCols
                 )
             )
-            if (config.includeQrCode) {
-                val meta = SheetQrCodec.fromPageConfig(baseSpec, config.term)
-                baseSpec.copy(qrPayload = SheetQrCodec.encodePayload(meta))
-            } else {
-                baseSpec
-            }
+            val meta = SheetQrCodec.fromPageConfig(baseSpec, config.term)
+            baseSpec.copy(
+                templateId = meta.templateId,
+                thinQrPayload = if (config.includeQrCode) SheetQrCodec.encodeThinTemplateQr(meta.templateId) else "",
+                qrPayload = if (config.includeQrCode) SheetQrCodec.encodePayload(meta) else "",
+                barcodeText = if (config.includeBarcode) {
+                    SheetQrCodec.encodeBarcodeText(
+                        cls = raw.cls,
+                        subjectKey = raw.subjectKey,
+                        term = config.term,
+                        columns = safeCols,
+                        templateId = meta.templateId
+                    )
+                } else ""
+            )
         }
     }
 }

@@ -483,6 +483,8 @@ internal fun ScannerPhotoAndActionCard(
     scanMode: String,
     selectedImageBitmap: Bitmap?,
     detectedSheetQr: BlankSheetQrMeta? = null,
+    sheetDetectionSource: String? = null,
+    resolvingSheetTemplate: Boolean = false,
     documentEnhance: Boolean,
     preparedStatsLabel: String?,
     preparedStatsGood: Boolean,
@@ -668,7 +670,35 @@ internal fun ScannerPhotoAndActionCard(
                         )
                     }
 
+                    if (resolvingSheetTemplate) {
+                        Surface(
+                            color = TealSoft.copy(alpha = 0.7f),
+                            border = BorderStroke(1.dp, TealContainer),
+                            shape = RoundedCornerShape(8.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(7.dp)
+                            ) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(13.dp),
+                                    strokeWidth = 2.dp,
+                                    color = TealPrimary
+                                )
+                                Text(
+                                    text = "Firestore থেকে ফর্মের টেমপ্লেট মিলিয়ে নেওয়া হচ্ছে...",
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.Medium,
+                                    color = TealDark
+                                )
+                            }
+                        }
+                    }
+
                     detectedSheetQr?.let { qrMeta ->
+                        val sourceText = sheetDetectionSource?.takeIf { it.isNotBlank() } ?: "QR/বারকোড"
                         Surface(
                             color = TealSoft,
                             border = BorderStroke(1.dp, TealContainer),
@@ -678,25 +708,39 @@ internal fun ScannerPhotoAndActionCard(
                                 .testTag("ai_qr_detected_badge")
                         ) {
                             Row(
-                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp),
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
                                 verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                horizontalArrangement = Arrangement.spacedBy(7.dp)
                             ) {
                                 Icon(
                                     imageVector = Icons.Rounded.QrCode2,
-                                    contentDescription = "স্মার্ট QR শনাক্ত",
+                                    contentDescription = "স্মার্ট QR ও বারকোড শনাক্ত",
                                     tint = TealPrimary,
-                                    modifier = Modifier.size(16.dp)
+                                    modifier = Modifier.size(18.dp)
                                 )
-                                Text(
-                                    text = "QR শনাক্ত: ${SheetQrCodec.buildSummaryLabelBn(qrMeta)}",
-                                    fontSize = 10.5.sp,
-                                    fontWeight = FontWeight.SemiBold,
-                                    color = TealDark,
-                                    maxLines = 2,
-                                    overflow = TextOverflow.Ellipsis,
-                                    modifier = Modifier.weight(1f)
-                                )
+                                Column(
+                                    modifier = Modifier.weight(1f),
+                                    verticalArrangement = Arrangement.spacedBy(1.dp)
+                                ) {
+                                    Text(
+                                        text = "শনাক্ত ($sourceText): ${SheetQrCodec.buildSummaryLabelBn(qrMeta)}",
+                                        fontSize = 10.5.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = TealDark,
+                                        maxLines = 2,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                    val colsPreview = SheetQrCodec.shortColumnsPreviewBn(qrMeta)
+                                    if (colsPreview.isNotBlank()) {
+                                        Text(
+                                            text = "কলাম: $colsPreview · AI স্ক্যানের জন্য প্রস্তুত",
+                                            fontSize = 9.5.sp,
+                                            color = TealPrimary,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                    }
+                                }
                             }
                         }
                     }

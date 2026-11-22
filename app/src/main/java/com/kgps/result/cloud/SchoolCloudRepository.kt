@@ -9,9 +9,14 @@ import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.FirebaseFirestoreException
 import com.google.firebase.firestore.snapshots
+import com.kgps.result.BlankNumeralStyle
+import com.kgps.result.BlankSheetQrMeta
 import com.kgps.result.CustomFieldDef
 import com.kgps.result.Settings
+import com.kgps.result.SheetQrCodec
 import com.kgps.result.Student
+import com.kgps.result.ai.ClassSheetImportScope
+import com.kgps.result.ai.ClassSheetKind
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.catch
@@ -1304,6 +1309,135 @@ class SchoolCloudRepository(
             updatedAt = doc.getTimestamp("updatedAt", DocumentSnapshot.ServerTimestampBehavior.ESTIMATE)
         )
         return st to meta
+    }
+
+    // ---------- Smart Blank Sheet Templates ----------
+
+    suspend fun saveSheetTemplate(
+        schoolId: String,
+        meta: BlankSheetQrMeta
+    ): Result<String> {
+        val uid = auth.currentUser?.uid
+            ?: return Result.failure(IllegalStateException("টেমপ্লেট সংরক্ষণের আগে Google দিয়ে সাইন-ইন করতে হবে।"))
+        val cleanSchoolId = schoolId.trim()
+        if (cleanSchoolId.isBlank()) {
+            return Result.failure(IllegalArgumentException("School ID পাওয়া যায়নি"))
+        }
+        val templateId = meta.templateId.trim().uppercase().ifBlank {
+            SheetQrCodec.computeTemplateId(meta)
+        }.take(24)
+        val path = "schools/$cleanSchoolId/sheetTemplates/$templateId"
+        return try {
+            val docRef = db.collection("schools").document(cleanSchoolId)
+                .collection("sheetTemplates").document(templateId)
+            val existing = docRef.get().await()
+            if (existing.exists()) {
+                return Result.success(templateId)
+            }
+            val payload = mapOf(
+                "templateId" to templateId,
+                "cls" to meta.cls.coerceIn(1, 20),
+                "subjectKey" to (meta.subjectKey?.trim()?.take(24).orEmpty()),
+                "term" to meta.term.coerceIn(-1, 3),
+                "sheetKind" to meta.sheetKind.name,
+                "importScope" to meta.importScope.name,
+                "columnIds" to meta.columnIds.take(30),
+                "customColumnTitles" to meta.customColumnTitles.map { it.trim().take(40) }.take(15),
+                "numeralStyle" to meta.numeralStyle.name,
+                "showSubjectMaxInHeader" to meta.showSubjectMaxInHeader,
+                "workingDaysByTerm" to meta.workingDaysByTerm.entries.take(3).associate { (k, v) -> k.toString() to v.take(10) },
+                "pageIndex" to meta.pageIndex.coerceIn(1, 100),
+                "totalPages" to meta.totalPages.coerceIn(1, 100),
+                "refCode" to meta.refCode.trim().take(64),
+                "createdByUid" to uid,
+                "updatedByUid" to uid,
+                "createdAt" to FieldValue.serverTimestamp(),
+                "updatedAt" to FieldValue.serverTimestamp()
+            )
+            docRef.set(payload).await()
+            Result.success(templateId)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.WRITE, path)
+            Result.failure(e)
+        }
+    }
+
+    suspend fun fetchSheetTemplate(
+        schoolId: String,
+        templateId: String
+    ): Result<BlankSheetQrMeta?> {
+        val cleanSchoolId = schoolId.trim()
+        val cleanTid = templateId.trim().uppercase()
+        if (cleanSchoolId.isBlank() || cleanTid.isBlank()) return Result.success(null)
+        val path = "schools/$cleanSchoolId/sheetTemplates/$cleanTid"
+        return try {
+            val snap = db.collection("schools").document(cleanSchoolId)
+                .collection("sheetTemplates").document(cleanTid)
+                .get()
+                .await()
+            if (!snap.exists()) {
+                Result.success(null)
+            } else {
+                Result.success(parseSheetTemplateDoc(snap))
+            }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.GET, path)
+            Result.failure(e)
+        }
+    }
+
+    private fun parseSheetTemplateDoc(doc: DocumentSnapshot): BlankSheetQrMeta? {
+        val cls = (doc.get("cls") as? Number)?.toInt()?.takeIf { it in 1..20 } ?: return null
+        val sub = doc.getString("subjectKey")?.trim()?.takeIf { it.isNotEmpty() }
+        val term = ((doc.get("term") as? Number)?.toInt() ?: 1).coerceIn(-1, 3)
+        val kind = runCatching {
+            ClassSheetKind.valueOf(doc.getString("sheetKind").orEmpty())
+        }.getOrDefault(ClassSheetKind.SINGLE_TERM_MARKS)
+        val scope = runCatching {
+            ClassSheetImportScope.valueOf(doc.getString("importScope").orEmpty())
+        }.getOrDefault(ClassSheetImportScope.AUTO)
+        val numStyle = runCatching {
+            BlankNumeralStyle.valueOf(doc.getString("numeralStyle").orEmpty())
+        }.getOrDefault(BlankNumeralStyle.BENGALI)
+
+        val colIds = (doc.get("columnIds") as? List<*>)
+            ?.mapNotNull { it?.toString()?.trim()?.takeIf(String::isNotBlank) }
+            .orEmpty()
+        if (colIds.isEmpty()) return null
+
+        val customTitles = (doc.get("customColumnTitles") as? List<*>)
+            ?.mapNotNull { it?.toString()?.trim() }
+            .orEmpty()
+
+        val wdRaw = doc.get("workingDaysByTerm") as? Map<*, *> ?: emptyMap<Any, Any>()
+        val wdMap = linkedMapOf<Int, String>()
+        wdRaw.forEach { (k, v) ->
+            val t = k?.toString()?.trim()?.toIntOrNull()
+            val d = v?.toString()?.trim()?.filter { it.isDigit() }
+            if (t in 1..3 && !d.isNullOrEmpty()) wdMap[t!!] = d
+        }
+
+        return BlankSheetQrMeta(
+            version = 2,
+            templateId = doc.getString("templateId")?.trim()?.uppercase().orEmpty().ifBlank { doc.id },
+            cls = cls,
+            subjectKey = sub,
+            term = term,
+            sheetKind = kind,
+            importScope = scope,
+            columnIds = colIds,
+            customColumnTitles = customTitles,
+            numeralStyle = numStyle,
+            showSubjectMaxInHeader = doc.getBoolean("showSubjectMaxInHeader") ?: true,
+            workingDaysByTerm = wdMap,
+            pageIndex = ((doc.get("pageIndex") as? Number)?.toInt() ?: 1).coerceAtLeast(1),
+            totalPages = ((doc.get("totalPages") as? Number)?.toInt() ?: 1).coerceAtLeast(1),
+            refCode = doc.getString("refCode").orEmpty()
+        )
     }
 
     private fun unwrapFirestoreException(error: Throwable): FirebaseFirestoreException? =
