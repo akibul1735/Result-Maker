@@ -870,7 +870,7 @@ fun SettingsScreen(
             }
 
             // Category 2: Font Management (Two separate parts: App UI Font + Report/PDF Font)
-            SettingsCategoryHeader(title = "বাংলা ফন্ট ব্যবস্থাপনা (দুটি ভাগ)", icon = Icons.Rounded.FontDownload)
+            SettingsCategoryHeader(title = "ফন্ট ব্যবস্থাপনা (বাংলা ও ইংরেজি — দুটি ভাগ)", icon = Icons.Rounded.FontDownload)
 
             TreeGroupCard(
                 title = "ভাগ ১: অ্যাপসের নিজস্ব ফন্ট",
@@ -919,7 +919,11 @@ fun SettingsScreen(
                                         Text(font.labelBn, fontWeight = FontWeight.SemiBold, fontSize = 12.5.sp)
                                         Text(font.descriptionBn, fontSize = 11.sp, color = SlateMuted)
                                         Text(
-                                            "ড্যাশবোর্ড, শ্রেণি ও শিক্ষার্থী তালিকা — ২০২৬",
+                                            if (font.id in setOf("roboto", "times_new_roman", "arimo", "plus_jakarta_sans")) {
+                                                "Result Maker Dashboard · Class 1–5 · ABC 2026"
+                                            } else {
+                                                "ড্যাশবোর্ড, শ্রেণি ও শিক্ষার্থী তালিকা — ২০২৬"
+                                            },
                                             fontSize = 12.5.sp,
                                             fontFamily = sampleFamily,
                                             color = SlateText,
@@ -988,7 +992,11 @@ fun SettingsScreen(
                                         Text(font.labelBn, fontWeight = FontWeight.SemiBold, fontSize = 12.5.sp)
                                         Text(font.descriptionBn, fontSize = 11.sp, color = SlateMuted)
                                         Text(
-                                            "শিখন অগ্রগতি প্রতিবেদন ও নম্বরপত্র — ২০২৬",
+                                            if (font.id in setOf("times_new_roman", "tinos", "arimo", "merriweather")) {
+                                                "Progress Report Card & Marks Sheet · Class V (2026)"
+                                            } else {
+                                                "শিখন অগ্রগতি প্রতিবেদন ও নম্বরপত্র — ২০২৬"
+                                            },
                                             fontSize = 12.5.sp,
                                             fontFamily = sampleFamily,
                                             color = SlateText,

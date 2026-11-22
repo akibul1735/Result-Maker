@@ -1365,7 +1365,7 @@ fun ReportStudioScreen(
                                 .padding(bottom = 16.dp),
                             verticalArrangement = Arrangement.spacedBy(10.dp)
                         ) {
-                            Text("অফিসিয়াল বাংলা ফন্ট (PDF)", fontSize = 12.sp, color = SlateMuted)
+                            Text("অফিসিয়াল ফন্ট (PDF — বাংলা ও ইংরেজি)", fontSize = 12.sp, color = SlateMuted)
                             Row(
                                 horizontalArrangement = Arrangement.spacedBy(6.dp),
                                 modifier = Modifier.horizontalScroll(rememberScrollState())

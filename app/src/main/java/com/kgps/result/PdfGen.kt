@@ -93,7 +93,7 @@ object PdfGen {
     }
 
     fun resolveTypeface(ctx: Context?, fontId: String, bold: Boolean): Typeface {
-        val isSerif = fontId in setOf("noto_serif", "tiro_bangla", "nikosh", "sutonny_mj", "kalpurush", "solaiman_lipi")
+        val isSerif = fontId in setOf("noto_serif", "tiro_bangla", "nikosh", "sutonny_mj", "kalpurush", "solaiman_lipi", "times_new_roman", "tinos", "merriweather")
         val fallbackBase = when {
             isSerif -> Typeface.SERIF
             fontId == "system" -> Typeface.DEFAULT
@@ -123,6 +123,12 @@ object PdfGen {
                         "anek_bangla" -> R.font.anek_bangla
                         "mina" -> R.font.mina
                         "baloo_da_2" -> R.font.baloo_da_2
+                        "times_new_roman" -> R.font.times_new_roman
+                        "tinos" -> R.font.tinos
+                        "arimo" -> R.font.arimo
+                        "roboto" -> R.font.roboto
+                        "merriweather" -> R.font.merriweather
+                        "plus_jakarta_sans" -> R.font.plus_jakarta_sans
                         else -> R.font.noto_serif_bengali
                     }
                     val loaded = ResourcesCompat.getFont(ctx, resId) ?: fallbackBase

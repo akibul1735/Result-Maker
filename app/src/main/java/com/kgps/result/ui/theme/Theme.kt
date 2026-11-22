@@ -77,6 +77,12 @@ fun appComposeFontFamily(fontId: String): FontFamily = when (fontId) {
     "anek_bangla" -> FontFamily(Font(R.font.anek_bangla, FontWeight.Normal))
     "mina" -> FontFamily(Font(R.font.mina, FontWeight.Normal))
     "baloo_da_2" -> FontFamily(Font(R.font.baloo_da_2, FontWeight.Normal))
+    "roboto" -> FontFamily(Font(R.font.roboto, FontWeight.Normal))
+    "times_new_roman" -> FontFamily(Font(R.font.times_new_roman, FontWeight.Normal))
+    "tinos" -> FontFamily(Font(R.font.tinos, FontWeight.Normal))
+    "arimo" -> FontFamily(Font(R.font.arimo, FontWeight.Normal))
+    "plus_jakarta_sans" -> FontFamily(Font(R.font.plus_jakarta_sans, FontWeight.Normal))
+    "merriweather" -> FontFamily(Font(R.font.merriweather, FontWeight.Normal))
     else -> FontFamily.Default
 }
 
