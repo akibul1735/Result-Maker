@@ -109,6 +109,8 @@ fun CsvStepInputAndMapping(
     onColumnsChange: (List<Repo.CsvColMapping>) -> Unit,
     fallbackCls: Int,
     onFallbackClsChange: (Int) -> Unit,
+    contextTerm: Int? = null,
+    onContextTermChange: (Int?) -> Unit = {},
     contextSubjectKey: String?,
     onContextSubjectKeyChange: (String?) -> Unit,
     sharedWorkingDaysByTerm: Map<Int, String> = emptyMap(),
@@ -318,6 +320,39 @@ fun CsvStepInputAndMapping(
                                     )
                                 },
                                 modifier = Modifier.testTag("csv_fallback_cls_$c")
+                            )
+                        }
+                    }
+
+                    Text("প্রান্তিক (শিরোনামে না থাকলে একক প্রান্তিক কলামের জন্য):", fontSize = 11.5.sp, color = SlateMuted)
+                    FlowRow(
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        val isAutoTerm = contextTerm == null
+                        FilterChip(
+                            selected = isAutoTerm,
+                            onClick = { onContextTermChange(null) },
+                            colors = appFilterChipColors(),
+                            border = appFilterChipBorder(isAutoTerm),
+                            label = { Text("স্বয়ংক্রিয়", fontSize = 11.sp) },
+                            modifier = Modifier.testTag("csv_ctx_term_auto")
+                        )
+                        (1..3).forEach { t ->
+                            val isTermSel = contextTerm == t
+                            FilterChip(
+                                selected = isTermSel,
+                                onClick = { onContextTermChange(t) },
+                                colors = appFilterChipColors(),
+                                border = appFilterChipBorder(isTermSel),
+                                label = {
+                                    Text(
+                                        termNameBn(t),
+                                        fontSize = 11.sp,
+                                        fontWeight = if (isTermSel) FontWeight.Bold else FontWeight.Normal
+                                    )
+                                },
+                                modifier = Modifier.testTag("csv_ctx_term_$t")
                             )
                         }
                     }

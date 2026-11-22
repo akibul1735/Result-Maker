@@ -16,6 +16,7 @@ import com.kgps.result.ai.AiChatMessage
 import com.kgps.result.ai.AiModelMode
 import com.kgps.result.ai.AiRepository
 import com.kgps.result.ai.ClassSheetImportScope
+import com.kgps.result.ai.ClassSheetKind
 import com.kgps.result.ai.DirectGeminiAiRepository
 import com.kgps.result.ai.DiscoveredGeminiModel
 import com.kgps.result.ai.ExtractedClassSheet
@@ -2142,7 +2143,8 @@ class ResultMakerViewModel(
         termHint: Int?,
         subKeyHint: String?,
         teacherNote: String,
-        importScope: ClassSheetImportScope = ClassSheetImportScope.AUTO
+        importScope: ClassSheetImportScope = ClassSheetImportScope.AUTO,
+        sheetKindHint: ClassSheetKind? = null
     ) {
         val bmp = _aiState.value.selectedImageBitmap ?: return
         if (_aiState.value.analyzingImage) return
@@ -2158,7 +2160,7 @@ class ResultMakerViewModel(
         viewModelScope.launch {
             try {
                 val result = aiRepository.analyzeClassSheetImage(
-                    bmp, clsHint, termHint, subKeyHint, teacherNote, importScope, enhance
+                    bmp, clsHint, termHint, subKeyHint, teacherNote, importScope, enhance, sheetKindHint
                 )
                 _aiState.update { it.copy(analyzingImage = false, classSheetResult = result) }
             } catch (e: CancellationException) {
@@ -2178,7 +2180,8 @@ class ResultMakerViewModel(
         clsHint: Int?,
         termHint: Int?,
         subKeyHint: String?,
-        importScope: ClassSheetImportScope = ClassSheetImportScope.AUTO
+        importScope: ClassSheetImportScope = ClassSheetImportScope.AUTO,
+        sheetKindHint: ClassSheetKind? = null
     ) {
         if (_aiState.value.analyzingImage) return
         _aiState.update { it.copy(analyzingImage = true, analysisError = null, analysisResult = null) }
@@ -2186,7 +2189,7 @@ class ResultMakerViewModel(
             try {
                 val bmp = _aiState.value.selectedImageBitmap ?: Bitmap.createBitmap(1, 1, Bitmap.Config.ARGB_8888)
                 val result = sampleAiRepository.analyzeClassSheetImage(
-                    bmp, clsHint, termHint, subKeyHint, "", importScope
+                    bmp, clsHint, termHint, subKeyHint, "", importScope, true, sheetKindHint
                 )
                 _aiState.update { it.copy(analyzingImage = false, classSheetResult = result) }
             } catch (e: CancellationException) {
@@ -2211,7 +2214,9 @@ class ResultMakerViewModel(
                 current.scope
             }
             val nextRows = if (safeCls != current.cls || subKey != current.subKey || nextScope != current.scope) {
-                current.rows.map { r -> ScanConstraintSolver.reconcileInterdependencies(r, safeCls, subKey, nextScope) }
+                current.rows.map { r ->
+                    ScanConstraintSolver.reconcileInterdependencies(r, safeCls, subKey, nextScope, current.sheetKind)
+                }
             } else {
                 current.rows
             }
@@ -2238,9 +2243,39 @@ class ResultMakerViewModel(
                 else -> newScope
             }
             val nextRows = current.rows.map { r ->
-                ScanConstraintSolver.reconcileInterdependencies(r, current.cls, current.subKey, safeScope)
+                ScanConstraintSolver.reconcileInterdependencies(r, current.cls, current.subKey, safeScope, current.sheetKind)
             }
             st.copy(classSheetResult = current.copy(scope = safeScope, rows = nextRows))
+        }
+    }
+
+    fun updateClassSheetKind(newKind: ClassSheetKind) {
+        _aiState.update { st ->
+            val current = st.classSheetResult ?: return@update st
+            if (current.sheetKind == newKind) return@update st
+            val safeScope = if (newKind != ClassSheetKind.SINGLE_TERM_MARKS) ClassSheetImportScope.BOTH else current.scope
+            val nextRows = current.rows.map { r ->
+                ScanConstraintSolver.reconcileInterdependencies(r, current.cls, current.subKey, safeScope, newKind)
+            }
+            st.copy(
+                classSheetResult = current.copy(
+                    sheetKind = newKind,
+                    scope = safeScope,
+                    rows = nextRows
+                )
+            )
+        }
+    }
+
+    fun updateClassSheetSharedWorkingDays(term: Int, rawDays: String) {
+        _aiState.update { st ->
+            val current = st.classSheetResult ?: return@update st
+            val safeTerm = term.coerceIn(1, 3)
+            val cleaned = fromBn(rawDays).filter { it.isDigit() }
+            val nextMap = current.sharedWorkingDaysByTerm.toMutableMap().apply {
+                if (cleaned.isEmpty()) remove(safeTerm) else put(safeTerm, cleaned)
+            }
+            st.copy(classSheetResult = current.copy(sharedWorkingDaysByTerm = nextMap))
         }
     }
 
@@ -2284,6 +2319,8 @@ class ResultMakerViewModel(
                     var nextMarks = r.marksText
                     var nextCont = r.sheetContinuousTotal
                     var nextGrand = r.sheetGrandTotal
+                    var nextRemark = r.remark
+                    var nextTraits = r.traitValues
                     val nextDeduced = r.deducedFields.toMutableMap()
                     val nextResolved = r.resolvedFields.toMutableSet()
 
@@ -2291,36 +2328,63 @@ class ResultMakerViewModel(
                     if (name != null) nextResolved.add("name")
 
                     if (editedKey != null && editedVal != null) {
-                        when (editedKey) {
-                            "CONT" -> nextCont = editedVal.ifBlank { null }
-                            "GRAND" -> nextGrand = editedVal.ifBlank { null }
+                        when {
+                            editedKey == "REMARK" -> {
+                                nextRemark = editedVal
+                                nextResolved.add("remark")
+                            }
+                            editedKey.startsWith("TRAIT:") -> {
+                                val tKey = editedKey.removePrefix("TRAIT:")
+                                nextTraits = r.traitValues.toMutableMap().apply {
+                                    if (editedVal.isEmpty()) remove(tKey) else put(tKey, editedVal)
+                                }
+                                nextResolved.add(tKey)
+                            }
+                            editedKey == "CONT" -> nextCont = editedVal.ifBlank { null }
+                            editedKey == "GRAND" -> nextGrand = editedVal.ifBlank { null }
                             else -> {
                                 nextMarks = r.marksText.toMutableMap().apply {
-                                    put(editedKey, editedVal)
+                                    if (editedVal.isEmpty()) remove(editedKey) else put(editedKey, editedVal)
                                 }
                             }
                         }
-                        // ব্যবহারকারী নিজে এডিট করলে আগের অনুমান মুছে নতুন হিসাব চালু হবে
-                        nextDeduced.remove(editedKey)
-                        nextResolved.add(editedKey)
-                        nextResolved.remove("arithmetic")
+                        if (editedKey != "REMARK" && !editedKey.startsWith("TRAIT:")) {
+                            // ব্যবহারকারী নিজে এডিট করলে আগের অনুমান মুছে নতুন হিসাব চালু হবে
+                            nextDeduced.remove(editedKey)
+                            nextResolved.add(editedKey)
+                            nextResolved.remove("arithmetic")
 
-                        // আগে থেকে স্বয়ংক্রিয় হিসাবকৃত CONT/GRAND থাকলে সেগুলো পুনরায় হিসাবের সুযোগ দিন
-                        if (editedKey != "CONT" && "CONT" in nextDeduced) {
-                            nextCont = null
-                            nextDeduced.remove("CONT")
-                            nextResolved.remove("CONT")
-                        }
-                        if (editedKey != "GRAND" && "GRAND" in nextDeduced) {
-                            nextGrand = null
-                            nextDeduced.remove("GRAND")
-                            nextResolved.remove("GRAND")
-                        }
-                        // যদি user CONT বা GRAND এডিট করেন এবং WR স্বয়ংক্রিয় অনুমান ছিল, তবে পুনরায় অনুমান করুন
-                        if ((editedKey == "CONT" || editedKey == "GRAND") && "WR" in nextDeduced) {
-                            nextMarks = nextMarks.toMutableMap().apply { remove("WR") }
-                            nextDeduced.remove("WR")
-                            nextResolved.remove("WR")
+                            if (current.sheetKind == ClassSheetKind.THREE_TERM_MARKS &&
+                                (editedKey.startsWith("T1_") || editedKey.startsWith("T2_") || editedKey.startsWith("T3_"))
+                            ) {
+                                val termPrefix = editedKey.substringBefore('_')
+                                nextResolved.remove("arithmetic_${termPrefix.lowercase()}")
+                                listOf("${termPrefix}_CONT", "${termPrefix}_WR", "${termPrefix}_TOTAL").forEach { sib ->
+                                    if (sib != editedKey && sib in nextDeduced) {
+                                        nextMarks = nextMarks.toMutableMap().apply { remove(sib) }
+                                        nextDeduced.remove(sib)
+                                        nextResolved.remove(sib)
+                                    }
+                                }
+                            } else {
+                                // আগে থেকে স্বয়ংক্রিয় হিসাবকৃত CONT/GRAND থাকলে সেগুলো পুনরায় হিসাবের সুযোগ দিন
+                                if (editedKey != "CONT" && "CONT" in nextDeduced) {
+                                    nextCont = null
+                                    nextDeduced.remove("CONT")
+                                    nextResolved.remove("CONT")
+                                }
+                                if (editedKey != "GRAND" && "GRAND" in nextDeduced) {
+                                    nextGrand = null
+                                    nextDeduced.remove("GRAND")
+                                    nextResolved.remove("GRAND")
+                                }
+                                // যদি user CONT বা GRAND এডিট করেন এবং WR স্বয়ংক্রিয় অনুমান ছিল, তবে পুনরায় অনুমান করুন
+                                if ((editedKey == "CONT" || editedKey == "GRAND") && "WR" in nextDeduced) {
+                                    nextMarks = nextMarks.toMutableMap().apply { remove("WR") }
+                                    nextDeduced.remove("WR")
+                                    nextResolved.remove("WR")
+                                }
+                            }
                         }
                     }
 
@@ -2337,12 +2401,20 @@ class ResultMakerViewModel(
                         marksText = nextMarks,
                         sheetContinuousTotal = nextCont,
                         sheetGrandTotal = nextGrand,
+                        remark = nextRemark,
+                        traitValues = nextTraits,
                         resolvedFields = nextResolved,
                         deducedFields = nextDeduced,
                         useScannedNameForExisting = nextUseScannedName
                     )
                     if (editedKey != null) {
-                        ScanConstraintSolver.reconcileInterdependencies(updatedRow, current.cls, current.subKey, current.scope)
+                        ScanConstraintSolver.reconcileInterdependencies(
+                            updatedRow,
+                            current.cls,
+                            current.subKey,
+                            current.scope,
+                            current.sheetKind
+                        )
                     } else {
                         updatedRow
                     }
@@ -2375,10 +2447,17 @@ class ResultMakerViewModel(
     fun markAllScannedIssuesVerified() {
         _aiState.update { st ->
             val current = st.classSheetResult ?: return@update st
+            val extraThreeTerm = (1..3).flatMap { t ->
+                listOf("T${t}_CONT", "T${t}_WR", "T${t}_TOTAL", "arithmetic_t$t")
+            }
+            val extraTraits = (1..3).flatMap { t ->
+                listOf("DAYS_$t", "PRES_$t", "ACT_$t", "DISC_$t", "COND_$t", "REM_$t")
+            }
+            val baseVerifyKeys = setOf(
+                "roll", "name", "remark", "TB", "ACT", "LANG", "CT", "WR", "TOTAL", "CONT", "GRAND", "arithmetic"
+            ) + extraThreeTerm + extraTraits
             val nextRows = current.rows.map { r ->
-                val allKeys = r.aiIssues.keys + setOf(
-                    "roll", "name", "TB", "ACT", "LANG", "CT", "WR", "TOTAL", "CONT", "GRAND", "arithmetic"
-                )
+                val allKeys = r.aiIssues.keys + baseVerifyKeys
                 r.copy(resolvedFields = r.resolvedFields + allKeys)
             }
             st.copy(classSheetResult = current.copy(rows = nextRows))
@@ -2403,7 +2482,12 @@ class ResultMakerViewModel(
             showMessage("এই শ্রেণিতে (${classNameBn(cls, settings.value)}) ডেটা সংরক্ষণের অনুমতি আপনার নেই")
             return
         }
-        if (!perm.canEditSubject(subKey)) {
+        if (sheet.sheetKind == ClassSheetKind.ATTENDANCE_TRAITS) {
+            if (!perm.canEditAttendance) {
+                showMessage("উপস্থিতি ও গুণাবলি পরিবর্তনের অনুমতি আপনার নেই")
+                return
+            }
+        } else if (!perm.canEditSubject(subKey)) {
             showMessage("এই বিষয়ে নম্বর পরিবর্তনের অনুমতি আপনার নেই")
             return
         }
@@ -2420,7 +2504,16 @@ class ResultMakerViewModel(
         val hasHardError = selectedRows.any { row ->
             val rInt = fromBn(row.rollText.trim()).toIntOrNull()
             val hasDbName = rInt != null && prevList.any { it.cls == cls && it.roll == rInt && it.name.isNotBlank() }
-            validateScannedStudentRow(row, cls, subKey, duplicates, hasDbName, sheet.scope).hasHardError
+            validateScannedStudentRow(
+                row = row,
+                cls = cls,
+                subKey = subKey,
+                duplicateRolls = duplicates,
+                hasExistingDbName = hasDbName,
+                scope = sheet.scope,
+                sheetKind = sheet.sheetKind,
+                sharedWorkingDaysByTerm = sheet.sharedWorkingDaysByTerm
+            ).hasHardError
         }
         if (hasHardError) {
             showMessage("লাল চিহ্নিত ত্রুটিপূর্ণ ঘরগুলো ঠিক করে আবার সংরক্ষণ করুন")
@@ -2444,60 +2537,156 @@ class ResultMakerViewModel(
             }
             val base = if (pos >= 0) out[pos] else createEmptyStudent(cls, roll)
             val nextM = base.m.toMutableMap()
+            val nextX = base.x.toMutableMap()
             val subDef = subjectsFor(cls, RELIGIONS.first()).find { it.key == subKey }
             val compKeys = subDef?.comps?.map { it.key } ?: emptyList()
             val hasWritten = (subDef?.written ?: 0) > 0
             val isArt = compKeys == listOf("TOTAL") && !hasWritten
-            val hasBreakdown = compKeys.any { !row.marksText[it]?.trim().isNullOrEmpty() }
 
-            if (saveContinuous) {
-                if (isArt) {
-                    val totalRaw = row.marksText["TOTAL"]?.trim().takeIf { !it.isNullOrEmpty() }
-                        ?: row.sheetGrandTotal?.trim().orEmpty()
-                    val fullKey = mk(subKey, term, "TOTAL")
-                    if (totalRaw.isEmpty()) nextM.remove(fullKey)
-                    else fromBn(totalRaw).toDoubleOrNull()?.let { nextM[fullKey] = it }
-                } else if (hasBreakdown) {
-                    nextM.remove(mk(subKey, term, "CONT"))
-                    compKeys.forEach { compKey ->
-                        val raw = row.marksText[compKey]?.trim().orEmpty()
-                        val fullKey = mk(subKey, term, compKey)
-                        if (raw.isEmpty()) {
-                            nextM.remove(fullKey)
-                        } else {
-                            fromBn(raw).toDoubleOrNull()?.let { d -> nextM[fullKey] = d }
+            when (sheet.sheetKind) {
+                ClassSheetKind.ATTENDANCE_TRAITS -> {
+                    (1..3).forEach { t ->
+                        val rowDays = row.traitValues["DAYS_$t"]?.trim().orEmpty().let { fromBn(it).filter { c -> c.isDigit() } }
+                        val rowPres = row.traitValues["PRES_$t"]?.trim().orEmpty().let { fromBn(it).filter { c -> c.isDigit() } }
+                        val rowAct = row.traitValues["ACT_$t"]?.trim().orEmpty().let { ScanConstraintSolver.normalizeTraitCode(it) }
+                        val rowDisc = row.traitValues["DISC_$t"]?.trim().orEmpty().let { ScanConstraintSolver.normalizeTraitCode(it) }
+                        val rowCond = row.traitValues["COND_$t"]?.trim().orEmpty().let { ScanConstraintSolver.normalizeTraitCode(it) }
+                        val rowRem = row.traitValues["REM_$t"]?.trim().orEmpty()
+                        val sharedDays = sheet.sharedWorkingDaysByTerm[t]?.trim().orEmpty().let { fromBn(it).filter { c -> c.isDigit() } }
+
+                        val hasTermActivity = rowDays.isNotEmpty() || rowPres.isNotEmpty() ||
+                            rowAct.isNotEmpty() || rowDisc.isNotEmpty() || rowCond.isNotEmpty() || rowRem.isNotEmpty()
+
+                        if (rowDays.isNotEmpty()) {
+                            nextX["DAYS_$t"] = rowDays
+                        } else if (hasTermActivity && sharedDays.isNotEmpty()) {
+                            nextX["DAYS_$t"] = sharedDays
                         }
+                        if (rowPres.isNotEmpty()) nextX["PRES_$t"] = rowPres
+                        if (rowAct.isNotEmpty()) nextX["ACT_$t"] = rowAct
+                        if (rowDisc.isNotEmpty()) nextX["DISC_$t"] = rowDisc
+                        if (rowCond.isNotEmpty()) nextX["COND_$t"] = rowCond
+                        if (rowRem.isNotEmpty()) nextX["REM_$t"] = rowRem
                     }
-                } else {
-                    // রেজাল্ট কার্ড / শুধু ধারাবাহিক মোট মোড
-                    compKeys.forEach { nextM.remove(mk(subKey, term, it)) }
-                    val rawCont = row.sheetContinuousTotal?.trim().takeIf { !it.isNullOrEmpty() }
-                        ?: if (!hasWritten) row.sheetGrandTotal?.trim().orEmpty() else ""
-                    val contKey = mk(subKey, term, "CONT")
-                    if (rawCont.isEmpty()) {
-                        nextM.remove(contKey)
-                    } else {
-                        fromBn(rawCont).toDoubleOrNull()?.let { d -> nextM[contKey] = d }
+                    if (row.remark.isNotBlank() && row.traitValues["REM_$term"].isNullOrBlank()) {
+                        nextX["REM_$term"] = row.remark.trim()
                     }
                 }
-            }
 
-            if (hasWritten && saveWritten) {
-                val rawWr = row.marksText["WR"]?.trim().orEmpty()
-                val wrKey = mk(subKey, term, "WR")
-                if (rawWr.isEmpty()) {
-                    nextM.remove(wrKey)
-                } else {
-                    fromBn(rawWr).toDoubleOrNull()?.let { d -> nextM[wrKey] = d }
+                ClassSheetKind.THREE_TERM_MARKS -> {
+                    (1..3).forEach { t ->
+                        val rawCont = row.marksText["T${t}_CONT"]?.trim().orEmpty()
+                        val rawWr = row.marksText["T${t}_WR"]?.trim().orEmpty()
+                        val rawTot = row.marksText["T${t}_TOTAL"]?.trim().orEmpty()
+                        if (rawCont.isEmpty() && rawWr.isEmpty() && rawTot.isEmpty()) return@forEach
+
+                        if (isArt) {
+                            fromBn(rawTot).toDoubleOrNull()?.let { d ->
+                                nextM[mk(subKey, t, "TOTAL")] = d
+                            }
+                        } else if (!hasWritten) {
+                            compKeys.forEach { nextM.remove(mk(subKey, t, it)) }
+                            val chosen = rawCont.ifEmpty { rawTot }
+                            fromBn(chosen).toDoubleOrNull()?.let { d ->
+                                nextM[mk(subKey, t, "CONT")] = d
+                                nextM.remove(mk(subKey, t, "TOTAL"))
+                            }
+                        } else if (rawCont.isNotEmpty() || rawWr.isNotEmpty()) {
+                            if (rawCont.isNotEmpty()) {
+                                compKeys.forEach { nextM.remove(mk(subKey, t, it)) }
+                                fromBn(rawCont).toDoubleOrNull()?.let { d -> nextM[mk(subKey, t, "CONT")] = d }
+                            }
+                            if (rawWr.isNotEmpty()) {
+                                fromBn(rawWr).toDoubleOrNull()?.let { d -> nextM[mk(subKey, t, "WR")] = d }
+                            }
+                            nextM.remove(mk(subKey, t, "TOTAL"))
+                        } else if (rawTot.isNotEmpty()) {
+                            compKeys.forEach { nextM.remove(mk(subKey, t, it)) }
+                            nextM.remove(mk(subKey, t, "CONT"))
+                            nextM.remove(mk(subKey, t, "WR"))
+                            fromBn(rawTot).toDoubleOrNull()?.let { d -> nextM[mk(subKey, t, "TOTAL")] = d }
+                        }
+                    }
+                    if (row.remark.isNotBlank() && perm.canEditAttendance) {
+                        nextX["REM_$term"] = row.remark.trim()
+                    }
+                }
+
+                ClassSheetKind.SINGLE_TERM_MARKS -> {
+                    val hasBreakdown = compKeys.any { !row.marksText[it]?.trim().isNullOrEmpty() }
+                    val isGrandTotalOnly = !isArt &&
+                        !hasBreakdown &&
+                        row.sheetContinuousTotal?.trim().isNullOrEmpty() &&
+                        row.marksText["WR"]?.trim().isNullOrEmpty() &&
+                        !row.sheetGrandTotal?.trim().isNullOrEmpty() &&
+                        sheet.scope == ClassSheetImportScope.BOTH
+
+                    if (isGrandTotalOnly) {
+                        compKeys.forEach { nextM.remove(mk(subKey, term, it)) }
+                        nextM.remove(mk(subKey, term, "CONT"))
+                        nextM.remove(mk(subKey, term, "WR"))
+                        fromBn(row.sheetGrandTotal!!.trim()).toDoubleOrNull()?.let { d ->
+                            nextM[mk(subKey, term, "TOTAL")] = d
+                        }
+                    } else {
+                        if (saveContinuous) {
+                            if (isArt) {
+                                val totalRaw = row.marksText["TOTAL"]?.trim().takeIf { !it.isNullOrEmpty() }
+                                    ?: row.sheetGrandTotal?.trim().orEmpty()
+                                val fullKey = mk(subKey, term, "TOTAL")
+                                if (totalRaw.isEmpty()) nextM.remove(fullKey)
+                                else fromBn(totalRaw).toDoubleOrNull()?.let { nextM[fullKey] = it }
+                            } else if (hasBreakdown) {
+                                nextM.remove(mk(subKey, term, "CONT"))
+                                nextM.remove(mk(subKey, term, "TOTAL"))
+                                compKeys.forEach { compKey ->
+                                    val raw = row.marksText[compKey]?.trim().orEmpty()
+                                    val fullKey = mk(subKey, term, compKey)
+                                    if (raw.isEmpty()) {
+                                        nextM.remove(fullKey)
+                                    } else {
+                                        fromBn(raw).toDoubleOrNull()?.let { d -> nextM[fullKey] = d }
+                                    }
+                                }
+                            } else {
+                                // রেজাল্ট কার্ড / শুধু ধারাবাহিক মোট মোড
+                                compKeys.forEach { nextM.remove(mk(subKey, term, it)) }
+                                nextM.remove(mk(subKey, term, "TOTAL"))
+                                val rawCont = row.sheetContinuousTotal?.trim().takeIf { !it.isNullOrEmpty() }
+                                    ?: if (!hasWritten) row.sheetGrandTotal?.trim().orEmpty() else ""
+                                val contKey = mk(subKey, term, "CONT")
+                                if (rawCont.isEmpty()) {
+                                    nextM.remove(contKey)
+                                } else {
+                                    fromBn(rawCont).toDoubleOrNull()?.let { d -> nextM[contKey] = d }
+                                }
+                            }
+                        }
+
+                        if (hasWritten && saveWritten) {
+                            nextM.remove(mk(subKey, term, "TOTAL"))
+                            val rawWr = row.marksText["WR"]?.trim().orEmpty()
+                            val wrKey = mk(subKey, term, "WR")
+                            if (rawWr.isEmpty()) {
+                                nextM.remove(wrKey)
+                            } else {
+                                fromBn(rawWr).toDoubleOrNull()?.let { d -> nextM[wrKey] = d }
+                            }
+                        }
+                    }
+
+                    if (row.remark.isNotBlank() && perm.canEditAttendance) {
+                        nextX["REM_$term"] = row.remark.trim()
+                    }
                 }
             }
 
             val cleanScannedName = row.name.trim()
             val shouldKeepDbName = pos >= 0 && base.name.isNotBlank() && !row.useScannedNameForExisting
             val candidate = if (!shouldKeepDbName && perm.canManageStudents && cleanScannedName.isNotBlank()) {
-                base.copy(name = cleanScannedName, m = nextM)
+                base.copy(name = cleanScannedName, m = nextM, x = nextX)
             } else {
-                base.copy(m = nextM)
+                base.copy(m = nextM, x = nextX)
             }
             val safe = if (school.isAdmin(currentUserId)) {
                 candidate
@@ -2519,7 +2708,7 @@ class ResultMakerViewModel(
         val changedList = out.filter { s -> existingById[s.id] != s }
         if (changedList.isEmpty()) {
             showMessage(
-                if (skippedNoPerm > 0) "নতুন শিক্ষার্থী যোগ করার অনুমতি নেই (শুধু তালিকার শিক্ষার্থীদের নম্বর আপডেট হবে)"
+                if (skippedNoPerm > 0) "নতুন শিক্ষার্থী যোগ করার অনুমতি নেই (শুধু তালিকার শিক্ষার্থীদের তথ্য আপডেট হবে)"
                 else "কোনো পরিবর্তিত ডেটা পাওয়া যায়নি"
             )
             return

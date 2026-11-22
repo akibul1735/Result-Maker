@@ -77,6 +77,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.kgps.result.RELIGIONS
 import com.kgps.result.ai.ClassSheetImportScope
+import com.kgps.result.ai.ClassSheetKind
 import com.kgps.result.bn
 import com.kgps.result.classNameBn
 import com.kgps.result.classShortBn
@@ -104,6 +105,7 @@ internal fun ScannerConfigMenuBar(
     scanMode: String,
     canManageStudents: Boolean,
     importScope: ClassSheetImportScope,
+    sheetKindHint: ClassSheetKind? = null,
     clsHint: Int?,
     termHint: Int?,
     subKeyHint: String?,
@@ -112,6 +114,7 @@ internal fun ScannerConfigMenuBar(
     onChangeScanMode: (String) -> Unit,
     onOpenCsvImport: () -> Unit,
     onChangeScope: (ClassSheetImportScope) -> Unit,
+    onChangeSheetKind: (ClassSheetKind?) -> Unit = {},
     onChangeCls: (Int?) -> Unit,
     onChangeTerm: (Int?) -> Unit,
     onChangeSub: (String?) -> Unit,
@@ -125,8 +128,14 @@ internal fun ScannerConfigMenuBar(
     val subLabel = subKeyHint?.let { k -> subs.find { it.key == k }?.bn ?: k }
     val targetSubtitle = if (scanMode == "class") {
         val cText = clsHint?.let { classShortBn(it) } ?: "অটো"
-        val tText = termHint?.let { bn(it.toString()) } ?: "অটো"
-        if (subLabel != null) "$cText · $tText · $subLabel" else "$cText · $tText · বিষয় অটো"
+        when (sheetKindHint) {
+            ClassSheetKind.ATTENDANCE_TRAITS -> "$cText · উপস্থিতি"
+            ClassSheetKind.THREE_TERM_MARKS -> "$cText · ৩ প্রান্তিক · ${subLabel ?: "বিষয় অটো"}"
+            else -> {
+                val tText = termHint?.let { bn(it.toString()) } ?: "অটো"
+                if (subLabel != null) "$cText · $tText · $subLabel" else "$cText · $tText · বিষয় অটো"
+            }
+        }
     } else {
         if (teacherNote.isNotBlank()) "নির্দেশনা যুক্ত" else "নির্দেশনা (ঐচ্ছিক)"
     }
@@ -280,16 +289,7 @@ internal fun ScannerConfigMenuBar(
 
                                 ScannerConfigMenu.TARGET -> {
                                     if (scanMode == "class") {
-                                        ClassSheetHintSelectors(
-                                            clsHint = clsHint,
-                                            termHint = termHint,
-                                            subKeyHint = subKeyHint,
-                                            permissions = permissions,
-                                            onChangeCls = onChangeCls,
-                                            onChangeTerm = onChangeTerm,
-                                            onChangeSub = onChangeSub
-                                        )
-
+                                        // শীটের ধরন (অটো / ১ প্রান্তিক / ৩ প্রান্তিক / উপস্থিতি)
                                         Surface(
                                             color = SlateSurfaceVariant,
                                             border = BorderStroke(1.dp, SlateOutline),
@@ -303,19 +303,20 @@ internal fun ScannerConfigMenuBar(
                                                 horizontalArrangement = Arrangement.spacedBy(2.dp)
                                             ) {
                                                 listOf(
-                                                    ClassSheetImportScope.AUTO to "স্বয়ংক্রিয়",
-                                                    ClassSheetImportScope.BOTH to "ধারাবাহিক+সামষ্টিক",
-                                                    ClassSheetImportScope.CONT_ONLY to "ধারাবাহিক",
-                                                    ClassSheetImportScope.WR_ONLY to "সামষ্টিক"
-                                                ).forEach { (scopeOpt, label) ->
-                                                    val isSel = importScope == scopeOpt
+                                                    null to "অটো",
+                                                    ClassSheetKind.SINGLE_TERM_MARKS to "১ প্রান্তিক",
+                                                    ClassSheetKind.THREE_TERM_MARKS to "৩ প্রান্তিক",
+                                                    ClassSheetKind.ATTENDANCE_TRAITS to "উপস্থিতি"
+                                                ).forEach { (kindOpt, label) ->
+                                                    val isSel = sheetKindHint == kindOpt
+                                                    val tagKey = kindOpt?.name?.lowercase() ?: "auto"
                                                     Surface(
                                                         color = if (isSel) TealPrimary else Color.Transparent,
                                                         shape = RoundedCornerShape(6.dp),
                                                         modifier = Modifier
-                                                            .weight(if (scopeOpt == ClassSheetImportScope.BOTH) 1.35f else 1f)
-                                                            .clickable { onChangeScope(scopeOpt) }
-                                                            .testTag("scan_scope_${scopeOpt.name.lowercase()}_btn")
+                                                            .weight(1f)
+                                                            .clickable { onChangeSheetKind(kindOpt) }
+                                                            .testTag("scan_kind_${tagKey}_btn")
                                                     ) {
                                                         Text(
                                                             label,
@@ -327,6 +328,62 @@ internal fun ScannerConfigMenuBar(
                                                             overflow = TextOverflow.Ellipsis,
                                                             modifier = Modifier.padding(horizontal = 3.dp, vertical = 6.dp)
                                                         )
+                                                    }
+                                                }
+                                            }
+                                        }
+
+                                        ClassSheetHintSelectors(
+                                            clsHint = clsHint,
+                                            termHint = termHint,
+                                            subKeyHint = subKeyHint,
+                                            permissions = permissions,
+                                            showTerm = sheetKindHint == null || sheetKindHint == ClassSheetKind.SINGLE_TERM_MARKS,
+                                            showSubject = sheetKindHint != ClassSheetKind.ATTENDANCE_TRAITS,
+                                            onChangeCls = onChangeCls,
+                                            onChangeTerm = onChangeTerm,
+                                            onChangeSub = onChangeSub
+                                        )
+
+                                        if (sheetKindHint == null || sheetKindHint == ClassSheetKind.SINGLE_TERM_MARKS) {
+                                            Surface(
+                                                color = SlateSurfaceVariant,
+                                                border = BorderStroke(1.dp, SlateOutline),
+                                                shape = RoundedCornerShape(8.dp),
+                                                modifier = Modifier.fillMaxWidth()
+                                            ) {
+                                                Row(
+                                                    Modifier
+                                                        .fillMaxWidth()
+                                                        .padding(2.dp),
+                                                    horizontalArrangement = Arrangement.spacedBy(2.dp)
+                                                ) {
+                                                    listOf(
+                                                        ClassSheetImportScope.AUTO to "স্বয়ংক্রিয়",
+                                                        ClassSheetImportScope.BOTH to "ধারাবাহিক+সামষ্টিক",
+                                                        ClassSheetImportScope.CONT_ONLY to "ধারাবাহিক",
+                                                        ClassSheetImportScope.WR_ONLY to "সামষ্টিক"
+                                                    ).forEach { (scopeOpt, label) ->
+                                                        val isSel = importScope == scopeOpt
+                                                        Surface(
+                                                            color = if (isSel) TealPrimary else Color.Transparent,
+                                                            shape = RoundedCornerShape(6.dp),
+                                                            modifier = Modifier
+                                                                .weight(if (scopeOpt == ClassSheetImportScope.BOTH) 1.35f else 1f)
+                                                                .clickable { onChangeScope(scopeOpt) }
+                                                                .testTag("scan_scope_${scopeOpt.name.lowercase()}_btn")
+                                                        ) {
+                                                            Text(
+                                                                label,
+                                                                fontSize = 10.sp,
+                                                                fontWeight = if (isSel) FontWeight.Bold else FontWeight.Medium,
+                                                                color = if (isSel) Color.White else SlateText,
+                                                                textAlign = TextAlign.Center,
+                                                                maxLines = 1,
+                                                                overflow = TextOverflow.Ellipsis,
+                                                                modifier = Modifier.padding(horizontal = 3.dp, vertical = 6.dp)
+                                                            )
+                                                        }
                                                     }
                                                 }
                                             }
@@ -677,6 +734,8 @@ internal fun ClassSheetHintSelectors(
     termHint: Int?,
     subKeyHint: String?,
     permissions: TeacherPermissions,
+    showTerm: Boolean = true,
+    showSubject: Boolean = true,
     onChangeCls: (Int?) -> Unit,
     onChangeTerm: (Int?) -> Unit,
     onChangeSub: (String?) -> Unit
@@ -751,7 +810,8 @@ internal fun ClassSheetHintSelectors(
         }
 
         // Term selector
-        Box(Modifier.weight(1f)) {
+        if (showTerm) {
+            Box(Modifier.weight(1f)) {
             OutlinedButton(
                 onClick = { termMenu = true },
                 modifier = Modifier
@@ -804,8 +864,10 @@ internal fun ClassSheetHintSelectors(
                 }
             }
         }
+        }
 
         // Subject selector
+        if (showSubject) {
         Box(Modifier.weight(1.2f)) {
             val activeSubName = subKeyHint?.let { k -> subs.find { it.key == k }?.bn ?: k }
             OutlinedButton(
@@ -859,6 +921,7 @@ internal fun ClassSheetHintSelectors(
                     )
                 }
             }
+        }
         }
     }
 }

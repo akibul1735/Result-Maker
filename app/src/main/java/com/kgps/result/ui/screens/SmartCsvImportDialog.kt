@@ -121,6 +121,7 @@ fun SmartCsvImportDialog(
     }
     val parsedRows = parsedSheet.rows
     var contextSubjectKey by remember { mutableStateOf<String?>(null) }
+    var contextTerm by remember { mutableStateOf<Int?>(null) }
     var sharedWorkingDaysByTerm by remember { mutableStateOf<Map<Int, String>>(emptyMap()) }
     LaunchedEffect(promptConfig.targetCls) {
         if (promptConfig.targetCls > 0 && parsedSheet.detectedCls == null) {
@@ -129,6 +130,9 @@ fun SmartCsvImportDialog(
     }
     LaunchedEffect(parsedSheet, promptConfig.module, promptConfig.selectedSubjectKeys) {
         parsedSheet.detectedCls?.let { fallbackCls = it }
+        if (parsedSheet.detectedTerm != null) {
+            contextTerm = parsedSheet.detectedTerm
+        }
         if (parsedSheet.detectedSubjectKey != null) {
             contextSubjectKey = parsedSheet.detectedSubjectKey
         } else if (promptConfig.module == CsvImportModule.SUBJECT_ALL_TERMS) {
@@ -136,13 +140,13 @@ fun SmartCsvImportDialog(
         }
         sharedWorkingDaysByTerm = parsedSheet.detectedWorkingDaysByTerm
     }
-    var columns by remember(parsedRows, contextSubjectKey, parsedSheet.detectedTerm, settings.customFields) {
+    var columns by remember(parsedRows, contextSubjectKey, contextTerm, parsedSheet.detectedTerm, settings.customFields) {
         mutableStateOf(
             Repo.detectCsvColumns(
                 rows = parsedRows,
                 existingCustomFields = settings.customFields,
                 contextSubjectKey = contextSubjectKey,
-                contextTerm = parsedSheet.detectedTerm
+                contextTerm = parsedSheet.detectedTerm ?: contextTerm
             )
         )
     }
@@ -379,6 +383,8 @@ fun SmartCsvImportDialog(
                             onColumnsChange = { columns = it },
                             fallbackCls = fallbackCls,
                             onFallbackClsChange = { fallbackCls = it },
+                            contextTerm = contextTerm,
+                            onContextTermChange = { contextTerm = it },
                             contextSubjectKey = contextSubjectKey,
                             onContextSubjectKeyChange = { contextSubjectKey = it },
                             sharedWorkingDaysByTerm = sharedWorkingDaysByTerm,

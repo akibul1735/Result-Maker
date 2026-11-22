@@ -300,6 +300,114 @@ object BlankSheetCatalog {
         }
         return out
     }
+    fun buildSheetRefCode(
+        cls: Int,
+        subjectKey: String?,
+        term: Int,
+        columns: List<BlankSheetColumn>
+    ): String {
+        val is3TMarks = isThreeTermMarksActive(columns)
+        val is3TTraits = isThreeTermAttendanceTraitsActive(columns)
+        val hasAtt = columns.any { it.id == "ATT" }
+        val hasMarks = columns.any { it.compKey != null }
+        val subPart = when {
+            is3TTraits && !is3TMarks && !hasMarks -> "ATT"
+            !is3TTraits && hasAtt && !hasMarks -> "ATT"
+            !subjectKey.isNullOrBlank() && subjectKey != ALL_SUBJECTS_KEY -> subjectKey
+            else -> "GEN"
+        }
+        val termPart = when {
+            is3TMarks || is3TTraits -> "3T"
+            term in 1..3 -> "T$term"
+            term == 0 -> "ANN"
+            else -> "TC"
+        }
+        val layoutPart = when {
+            is3TTraits && !is3TMarks -> "TRAITS"
+            is3TMarks -> "3MARKS"
+            hasAtt && !hasMarks -> "ATT"
+            columns.any { it.compKey in setOf("TB", "ACT", "LANG", "CT") } -> "FULL"
+            columns.any { it.compKey in setOf("CONT", "WR") } -> "COMPACT"
+            columns.any { it.compKey == "TOTAL" } -> "TOTAL"
+            else -> "CUSTOM"
+        }
+        return "REF:C$cls-$subPart-$termPart-$layoutPart"
+    }
+
+    fun buildExternalAiCsvPrompt(
+        config: BlankSheetConfig,
+        settings: Settings,
+        allowedClassIds: List<Int>
+    ): String {
+        val cols = config.columns.ifEmpty { DEFAULT_COLUMNS }
+        val is3TMarks = isThreeTermMarksActive(cols)
+        val is3TTraits = isThreeTermAttendanceTraitsActive(cols)
+        val hasMarks = cols.any { it.compKey != null }
+        val hasAttSingle = cols.any { it.id == "ATT" } && !is3TTraits && !hasMarks
+        val clsLabel = config.selectedClass?.let { "${classNameBn(it, settings)} শ্রেণি ($it)" }
+            ?: "ছবির উপরের ব্যানার অনুযায়ী শ্রেণি (${allowedClassIds.joinToString("/")})"
+        val termNum = if (config.term in 1..3) config.term else 1
+        val subName = subjectTitleFor(config.subjectKey, config.customSubjectTitle).ifBlank { "ছবি অনুযায়ী" }
+        val subKeyLabel = config.subjectKey?.takeIf { it != ALL_SUBJECTS_KEY } ?: "AUTO"
+
+        val headers = mutableListOf<String>()
+        if (!is3TMarks) headers.add("শ্রেণি")
+        headers.addAll(listOf("রোল নম্বর", "শিক্ষার্থীর নাম"))
+
+        cols.forEach { col ->
+            when (col.id) {
+                "ROLL", "NAME", "GRADE", "GP", "MERIT", "SIGN" -> {}
+                "TB" -> headers.add("পাঠ্যবই")
+                "ACT" -> headers.add("কাজ")
+                "LANG" -> headers.add("ভাষা")
+                "CT" -> headers.add("অভীক্ষা")
+                "CONT" -> headers.add("ধারাবাহিক")
+                "WR" -> headers.add("লিখিত")
+                "TOTAL" -> headers.add("মোট")
+                "ATT" -> headers.add("${termNameBn(termNum)} - মোট উপস্থিতি")
+                "REMARK" -> headers.add("${termNameBn(termNum)} - শিক্ষকের মন্তব্য")
+                "T1_CONT" -> headers.add("১ম প্রান্তিক - ধারাবাহিক")
+                "T1_WR" -> headers.add("১ম প্রান্তিক - সামষ্টিক")
+                "T1_TOTAL" -> headers.add("১ম প্রান্তিক - মোট")
+                "T2_CONT" -> headers.add("২য় প্রান্তিক - ধারাবাহিক")
+                "T2_WR" -> headers.add("২য় প্রান্তিক - সামষ্টিক")
+                "T2_TOTAL" -> headers.add("২য় প্রান্তিক - মোট")
+                "T3_CONT" -> headers.add("৩য় প্রান্তিক - ধারাবাহিক")
+                "T3_WR" -> headers.add("৩য় প্রান্তিক - সামষ্টিক")
+                "T3_TOTAL" -> headers.add("৩য় প্রান্তিক - মোট")
+                "T1_DAYS" -> headers.add("১ম প্রান্তিক - মোট কার্যদিবস")
+                "T1_PRES" -> headers.add("১ম প্রান্তিক - মোট উপস্থিতি")
+                "T1_ACT" -> headers.add("১ম প্রান্তিক - সহপাঠক্রমিক")
+                "T1_DISC" -> headers.add("১ম প্রান্তিক - শৃঙ্খলাবোধ")
+                "T1_COND" -> headers.add("১ম প্রান্তিক - আচরণ")
+                "T2_DAYS" -> headers.add("২য় প্রান্তিক - মোট কার্যদিবস")
+                "T2_PRES" -> headers.add("২য় প্রান্তিক - মোট উপস্থিতি")
+                "T2_ACT" -> headers.add("২য় প্রান্তিক - সহপাঠক্রমিক")
+                "T2_DISC" -> headers.add("২য় প্রান্তিক - শৃঙ্খলাবোধ")
+                "T2_COND" -> headers.add("২য় প্রান্তিক - আচরণ")
+                "T3_DAYS" -> headers.add("৩য় প্রান্তিক - মোট কার্যদিবস")
+                "T3_PRES" -> headers.add("৩য় প্রান্তিক - মোট উপস্থিতি")
+                "T3_ACT" -> headers.add("৩য় প্রান্তিক - সহপাঠক্রমিক")
+                "T3_DISC" -> headers.add("৩য় প্রান্তিক - শৃঙ্খলাবোধ")
+                "T3_COND" -> headers.add("৩য় প্রান্তিক - আচরণ")
+                else -> if (col.isCustom) headers.add(col.titleBn)
+            }
+        }
+
+        return buildString {
+            appendLine("আমি একটি প্রাথমিক বিদ্যালয়ের পূরণকৃত নম্বর/উপস্থিতি ফর্মের ছবি/PDF দিচ্ছি। ছবির সব সারির তথ্য হুবহু পড়ে কেবল একটি ```csv কোড ব্লকের ভেতরে CSV দিন।")
+            appendLine("তথ্য: শ্রেণি: $clsLabel | বিষয়: $subName ($subKeyLabel) | প্রান্তিক: ${if (is3TMarks || is3TTraits) "৩ প্রান্তিক" else termNameBn(termNum)}")
+            appendLine("নিয়ম:")
+            appendLine("১) প্রথম সারিতে মেটা-তথ্য হিসেবে লিখুন: শ্রেণি: ${config.selectedClass ?: "<ছবি থেকে>"}, বিষয়: $subName, প্রান্তিক: ${if (is3TMarks || is3TTraits) "৩ প্রান্তিক" else termNameBn(termNum)}")
+            if (is3TTraits || hasAttSingle) {
+                appendLine("২) ছবির উপরে 'মোট কার্যদিবস' লেখা থাকলে দ্বিতীয় সারিতে 'মোট কার্যদিবস — ১ম প্রান্তিক: <দিন> দিন ...' লিখুন। গুণাবলির ঘরে কেবল ক, খ বা গ দিন।")
+            }
+            appendLine("৩) এরপর টেবিলের হেডার হুবহু এই কলামে রাখুন:")
+            appendLine(headers.joinToString(","))
+            appendLine("৪) সব সংখ্যা ইংরেজি অঙ্কে (0-9) দিন; ফাঁকা ঘর ফাঁকা রাখুন এবং গ্রেড/জিপি/স্বাক্ষর কলাম বাদ দিন।")
+            append("৫) কেবল ```csv ... ``` ব্লকের ভেতর আউটপুট দিন, বাড়তি ব্যাখ্যা নয়।")
+        }.trim()
+    }
 }
 
 data class BlankSheetConfig(
@@ -343,7 +451,8 @@ data class BlankSheetPageSpec(
     val numeralStyle: BlankNumeralStyle = BlankNumeralStyle.BENGALI,
     val isClassLevelForm: Boolean = false,
     val sharedWorkingDaysTerms: List<Int> = emptyList(),
-    val workingDaysByTerm: Map<Int, String> = emptyMap()
+    val workingDaysByTerm: Map<Int, String> = emptyMap(),
+    val sheetRefCode: String = ""
 ) {
     val showSharedWorkingDaysStrip: Boolean
         get() = sharedWorkingDaysTerms.isNotEmpty()
@@ -493,7 +602,13 @@ object BlankSheetPlanner {
                 numeralStyle = config.numeralStyle,
                 isClassLevelForm = isClassLevelTraitsOnly,
                 sharedWorkingDaysTerms = sharedWorkingDaysTerms,
-                workingDaysByTerm = config.workingDaysByTerm
+                workingDaysByTerm = config.workingDaysByTerm,
+                sheetRefCode = BlankSheetCatalog.buildSheetRefCode(
+                    cls = raw.cls,
+                    subjectKey = raw.subjectKey,
+                    term = config.term,
+                    columns = safeCols
+                )
             )
         }
     }

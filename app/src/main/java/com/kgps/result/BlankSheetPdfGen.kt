@@ -536,7 +536,8 @@ object BlankSheetPdfGen {
         val footerRightPaint = textPaint(ctx, 8.2f, bold = false, fontId = fontId, color = 0xFF000000.toInt()).apply {
             textAlign = Paint.Align.RIGHT
         }
-        val leftFooter = "মোট: ${BlankSheetCatalog.formatInt(page.totalStudentsInClass, numStyle)} জন · মোট পৃষ্ঠা ${BlankSheetCatalog.formatInt(page.globalPageNumber, numStyle)}/${BlankSheetCatalog.formatInt(page.totalPages, numStyle)}"
+        val refSuffix = if (page.sheetRefCode.isNotBlank()) " · ${page.sheetRefCode}" else ""
+        val leftFooter = "মোট: ${BlankSheetCatalog.formatInt(page.totalStudentsInClass, numStyle)} জন · মোট পৃষ্ঠা ${BlankSheetCatalog.formatInt(page.globalPageNumber, numStyle)}/${BlankSheetCatalog.formatInt(page.totalPages, numStyle)}$refSuffix"
         val rightFooter = "তারিখ: ......................   শিক্ষকের স্বাক্ষর: ..........................."
         c.drawText(leftFooter, marginX, footerY, footerLeftPaint)
         c.drawText(rightFooter, marginX + contentW, footerY, footerRightPaint)

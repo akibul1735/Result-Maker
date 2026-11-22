@@ -974,12 +974,16 @@ fun ResultMakerWorkspace(
                                     onRestoreOriginalImage = vm::restoreOriginalMarksheetImage,
                                     onAnalyzeImage = vm::analyzeSelectedMarksheet,
                                     onApplyExtracted = { ext -> vm.applyExtractedMarksheet(ext) },
-                                    onAnalyzeClassSheet = { c, t, s, note, scope ->
-                                        vm.analyzeClassSheet(c, t, s, note, scope)
+                                    onAnalyzeClassSheet = { c, t, s, note, scope, kind ->
+                                        vm.analyzeClassSheet(c, t, s, note, scope, kind)
                                     },
-                                    onLoadSampleClassPreview = vm::loadSampleClassSheetPreview,
+                                    onLoadSampleClassPreview = { c, t, s, scope, kind ->
+                                        vm.loadSampleClassSheetPreview(c, t, s, scope, kind)
+                                    },
                                     onUpdateClassSheetMeta = vm::updateClassSheetMeta,
                                     onUpdateClassSheetScope = vm::updateClassSheetScope,
+                                    onUpdateClassSheetKind = vm::updateClassSheetKind,
+                                    onUpdateClassSheetSharedWorkingDays = vm::updateClassSheetSharedWorkingDays,
                                     onToggleScannedRowSelected = vm::toggleScannedRowSelected,
                                     onSetAllScannedRowsSelected = vm::setAllScannedRowsSelected,
                                     onUpdateScannedRowField = vm::updateScannedRowField,

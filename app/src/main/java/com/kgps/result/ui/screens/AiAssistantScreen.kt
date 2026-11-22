@@ -124,6 +124,7 @@ import com.kgps.result.RELIGIONS
 import com.kgps.result.Student
 import com.kgps.result.ai.AiModelMode
 import com.kgps.result.ai.ClassSheetImportScope
+import com.kgps.result.ai.ClassSheetKind
 import com.kgps.result.ai.DiscoveredGeminiModel
 import com.kgps.result.ai.ExtractedClassSheet
 import com.kgps.result.ai.ExtractedMarksheet
@@ -198,10 +199,12 @@ fun AiAssistantScreen(
     onRestoreOriginalImage: () -> Unit = {},
     onAnalyzeImage: (String) -> Unit,
     onApplyExtracted: (ExtractedMarksheet) -> Unit,
-    onAnalyzeClassSheet: (clsHint: Int?, termHint: Int?, subKeyHint: String?, teacherNote: String, importScope: ClassSheetImportScope) -> Unit,
-    onLoadSampleClassPreview: (clsHint: Int?, termHint: Int?, subKeyHint: String?, importScope: ClassSheetImportScope) -> Unit,
+    onAnalyzeClassSheet: (clsHint: Int?, termHint: Int?, subKeyHint: String?, teacherNote: String, importScope: ClassSheetImportScope, sheetKindHint: ClassSheetKind?) -> Unit,
+    onLoadSampleClassPreview: (clsHint: Int?, termHint: Int?, subKeyHint: String?, importScope: ClassSheetImportScope, sheetKindHint: ClassSheetKind?) -> Unit,
     onUpdateClassSheetMeta: (cls: Int, term: Int, subKey: String) -> Unit,
     onUpdateClassSheetScope: (ClassSheetImportScope) -> Unit = {},
+    onUpdateClassSheetKind: (ClassSheetKind) -> Unit = {},
+    onUpdateClassSheetSharedWorkingDays: (Int, String) -> Unit = { _, _ -> },
     onToggleScannedRowSelected: (rowId: String) -> Unit,
     onSetAllScannedRowsSelected: (Boolean) -> Unit,
     onUpdateScannedRowField: (rowId: String, rollText: String?, name: String?, markEntry: Pair<String, String>?, verifyField: String?) -> Unit,
@@ -222,6 +225,7 @@ fun AiAssistantScreen(
     // Scanner mode & selectors
     var scanMode by remember { mutableStateOf("class") } // "class" | "single"
     var importScope by remember { mutableStateOf(ClassSheetImportScope.AUTO) }
+    var sheetKindHint by remember { mutableStateOf<ClassSheetKind?>(null) } // null = অটো
     var clsHint by remember(selectedClass) { mutableStateOf<Int?>(selectedClass) }
     var termHint by remember { mutableStateOf<Int?>(1) }
     var subKeyHint by remember { mutableStateOf<String?>(null) } // null = ছবির উপর থেকে স্বয়ংক্রিয়
@@ -782,7 +786,7 @@ fun AiAssistantScreen(
                     val triggerScan: () -> Unit = {
                         showOnlyIssues = false
                         if (scanMode == "class") {
-                            onAnalyzeClassSheet(clsHint, termHint, subKeyHint, teacherNote, importScope)
+                            onAnalyzeClassSheet(clsHint, termHint, subKeyHint, teacherNote, importScope, sheetKindHint)
                         } else {
                             onAnalyzeImage(teacherNote)
                         }
@@ -794,6 +798,7 @@ fun AiAssistantScreen(
                         scanMode = scanMode,
                         canManageStudents = permissions.canManageStudents,
                         importScope = importScope,
+                        sheetKindHint = sheetKindHint,
                         clsHint = clsHint,
                         termHint = termHint,
                         subKeyHint = subKeyHint,
@@ -802,6 +807,7 @@ fun AiAssistantScreen(
                         onChangeScanMode = { scanMode = it },
                         onOpenCsvImport = onOpenCsvImport,
                         onChangeScope = { importScope = it },
+                        onChangeSheetKind = { sheetKindHint = it },
                         onChangeCls = { newCls ->
                             clsHint = newCls
                             if (newCls != null && subKeyHint != null) {
@@ -845,7 +851,7 @@ fun AiAssistantScreen(
                         onLoadSample = {
                             activeConfigMenu = null
                             showOnlyIssues = false
-                            onLoadSampleClassPreview(clsHint, termHint, subKeyHint, importScope)
+                            onLoadSampleClassPreview(clsHint, termHint, subKeyHint, importScope, sheetKindHint)
                         }
                     )
 
@@ -876,7 +882,7 @@ fun AiAssistantScreen(
                                         onClick = {
                                             showOnlyIssues = false
                                             if (scanMode == "class") {
-                                                onAnalyzeClassSheet(clsHint, termHint, subKeyHint, teacherNote, importScope)
+                                                onAnalyzeClassSheet(clsHint, termHint, subKeyHint, teacherNote, importScope, sheetKindHint)
                                             } else {
                                                 onAnalyzeImage(teacherNote)
                                             }
@@ -913,6 +919,8 @@ fun AiAssistantScreen(
                             onOpenZoomImage = { zoomDialogOpen = true },
                             onUpdateMeta = onUpdateClassSheetMeta,
                             onUpdateScope = onUpdateClassSheetScope,
+                            onUpdateSheetKind = onUpdateClassSheetKind,
+                            onUpdateSharedWorkingDays = onUpdateClassSheetSharedWorkingDays,
                             onToggleRowSelected = onToggleScannedRowSelected,
                             onSetAllSelected = onSetAllScannedRowsSelected,
                             onUpdateRowField = onUpdateScannedRowField,
@@ -1379,6 +1387,8 @@ private fun ClassSheetPreviewSection(
     onOpenZoomImage: () -> Unit,
     onUpdateMeta: (cls: Int, term: Int, subKey: String) -> Unit,
     onUpdateScope: (ClassSheetImportScope) -> Unit,
+    onUpdateSheetKind: (ClassSheetKind) -> Unit,
+    onUpdateSharedWorkingDays: (Int, String) -> Unit,
     onToggleRowSelected: (rowId: String) -> Unit,
     onSetAllSelected: (Boolean) -> Unit,
     onUpdateRowField: (rowId: String, rollText: String?, name: String?, markEntry: Pair<String, String>?, verifyField: String?) -> Unit,
@@ -1400,13 +1410,31 @@ private fun ClassSheetPreviewSection(
             .keys
     }
 
-    val reportsByRowId = remember(sheet.rows, sheet.cls, sheet.subKey, sheet.scope, rollDuplicates, existingStudents) {
+    val reportsByRowId = remember(
+        sheet.rows,
+        sheet.cls,
+        sheet.subKey,
+        sheet.scope,
+        sheet.sheetKind,
+        sheet.sharedWorkingDaysByTerm,
+        rollDuplicates,
+        existingStudents
+    ) {
         sheet.rows.associate { r ->
             val rInt = fromBn(r.rollText.trim()).toIntOrNull()
             val hasDbName = rInt != null && existingStudents.any {
                 it.cls == sheet.cls && it.roll == rInt && it.name.isNotBlank()
             }
-            r.id to validateScannedStudentRow(r, sheet.cls, sheet.subKey, rollDuplicates, hasDbName, sheet.scope)
+            r.id to validateScannedStudentRow(
+                row = r,
+                cls = sheet.cls,
+                subKey = sheet.subKey,
+                duplicateRolls = rollDuplicates,
+                hasExistingDbName = hasDbName,
+                scope = sheet.scope,
+                sheetKind = sheet.sheetKind,
+                sharedWorkingDaysByTerm = sheet.sharedWorkingDaysByTerm
+            )
         }
     }
 
@@ -1463,6 +1491,46 @@ private fun ClassSheetPreviewSection(
                 }
             }
 
+            // Sheet Format Switcher (১ প্রান্তিক / ৩ প্রান্তিক / উপস্থিতি)
+            Surface(
+                color = SlateSurfaceVariant,
+                border = BorderStroke(1.dp, SlateOutline),
+                shape = RoundedCornerShape(8.dp),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Row(
+                    Modifier.fillMaxWidth().padding(2.dp),
+                    horizontalArrangement = Arrangement.spacedBy(3.dp)
+                ) {
+                    listOf(
+                        ClassSheetKind.SINGLE_TERM_MARKS to "১ প্রান্তিক নম্বর",
+                        ClassSheetKind.THREE_TERM_MARKS to "৩ প্রান্তিক নম্বর",
+                        ClassSheetKind.ATTENDANCE_TRAITS to "উপস্থিতি ও গুণাবলি"
+                    ).forEach { (kindOpt, label) ->
+                        val selectedKind = sheet.sheetKind == kindOpt
+                        Surface(
+                            color = if (selectedKind) TealPrimary else Color.Transparent,
+                            shape = RoundedCornerShape(6.dp),
+                            modifier = Modifier
+                                .weight(1f)
+                                .clickable { onUpdateSheetKind(kindOpt) }
+                                .testTag("preview_kind_${kindOpt.name.lowercase()}_btn")
+                        ) {
+                            Text(
+                                label,
+                                fontSize = 10.sp,
+                                fontWeight = if (selectedKind) FontWeight.Bold else FontWeight.Medium,
+                                color = if (selectedKind) Color.White else SlateText,
+                                textAlign = TextAlign.Center,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.padding(horizontal = 4.dp, vertical = 5.dp)
+                            )
+                        }
+                    }
+                }
+            }
+
             // Target Class / Term / Subject Override Row
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 Box(Modifier.weight(1f)) {
@@ -1500,69 +1568,107 @@ private fun ClassSheetPreviewSection(
                         }
                     }
                 }
-                Box(Modifier.weight(1f)) {
-                    OutlinedButton(
-                        onClick = { termDrop = true },
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(8.dp),
-                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)
-                    ) {
-                        Text(termNameBn(sheet.term), fontSize = 11.5.sp, maxLines = 1, modifier = Modifier.weight(1f))
-                        Icon(Icons.Rounded.ArrowDropDown, contentDescription = null, modifier = Modifier.size(16.dp))
-                    }
-                    DropdownMenu(expanded = termDrop, onDismissRequest = { termDrop = false }) {
-                        (1..3).forEach { t ->
-                            val isTermSel = sheet.term == t
-                            DropdownMenuItem(
-                                modifier = Modifier.background(if (isTermSel) TealContainer else Color.Transparent),
-                                text = {
-                                    Text(
-                                        termNameBn(t),
-                                        fontWeight = if (isTermSel) FontWeight.Bold else FontWeight.Normal,
-                                        color = if (isTermSel) TealDark else SlateText
-                                    )
-                                },
-                                trailingIcon = if (isTermSel) {
-                                    { Icon(Icons.Rounded.Check, contentDescription = null, tint = TealDark, modifier = Modifier.size(16.dp)) }
-                                } else null,
-                                onClick = { onUpdateMeta(sheet.cls, t, sheet.subKey); termDrop = false }
-                            )
+                if (sheet.sheetKind == ClassSheetKind.SINGLE_TERM_MARKS) {
+                    Box(Modifier.weight(1f)) {
+                        OutlinedButton(
+                            onClick = { termDrop = true },
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(8.dp),
+                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)
+                        ) {
+                            Text(termNameBn(sheet.term), fontSize = 11.5.sp, maxLines = 1, modifier = Modifier.weight(1f))
+                            Icon(Icons.Rounded.ArrowDropDown, contentDescription = null, modifier = Modifier.size(16.dp))
+                        }
+                        DropdownMenu(expanded = termDrop, onDismissRequest = { termDrop = false }) {
+                            (1..3).forEach { t ->
+                                val isTermSel = sheet.term == t
+                                DropdownMenuItem(
+                                    modifier = Modifier.background(if (isTermSel) TealContainer else Color.Transparent),
+                                    text = {
+                                        Text(
+                                            termNameBn(t),
+                                            fontWeight = if (isTermSel) FontWeight.Bold else FontWeight.Normal,
+                                            color = if (isTermSel) TealDark else SlateText
+                                        )
+                                    },
+                                    trailingIcon = if (isTermSel) {
+                                        { Icon(Icons.Rounded.Check, contentDescription = null, tint = TealDark, modifier = Modifier.size(16.dp)) }
+                                    } else null,
+                                    onClick = { onUpdateMeta(sheet.cls, t, sheet.subKey); termDrop = false }
+                                )
+                            }
                         }
                     }
                 }
-                Box(Modifier.weight(1.2f)) {
-                    OutlinedButton(
-                        onClick = { subDrop = true },
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(8.dp),
-                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)
-                    ) {
-                        Text(activeSub.bn, fontSize = 11.5.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
-                        Icon(Icons.Rounded.ArrowDropDown, contentDescription = null, modifier = Modifier.size(16.dp))
-                    }
-                    DropdownMenu(expanded = subDrop, onDismissRequest = { subDrop = false }) {
-                        subList.forEach { s ->
-                            val isSubSel = sheet.subKey == s.key
-                            DropdownMenuItem(
-                                modifier = Modifier.background(if (isSubSel) TealContainer else Color.Transparent),
-                                text = {
-                                    Text(
-                                        s.bn,
-                                        fontWeight = if (isSubSel) FontWeight.Bold else FontWeight.Normal,
-                                        color = if (isSubSel) TealDark else SlateText
-                                    )
-                                },
-                                trailingIcon = if (isSubSel) {
-                                    { Icon(Icons.Rounded.Check, contentDescription = null, tint = TealDark, modifier = Modifier.size(16.dp)) }
-                                } else null,
-                                onClick = { onUpdateMeta(sheet.cls, sheet.term, s.key); subDrop = false }
-                            )
+                if (sheet.sheetKind != ClassSheetKind.ATTENDANCE_TRAITS) {
+                    Box(Modifier.weight(1.2f)) {
+                        OutlinedButton(
+                            onClick = { subDrop = true },
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(8.dp),
+                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)
+                        ) {
+                            Text(activeSub.bn, fontSize = 11.5.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+                            Icon(Icons.Rounded.ArrowDropDown, contentDescription = null, modifier = Modifier.size(16.dp))
+                        }
+                        DropdownMenu(expanded = subDrop, onDismissRequest = { subDrop = false }) {
+                            subList.forEach { s ->
+                                val isSubSel = sheet.subKey == s.key
+                                DropdownMenuItem(
+                                    modifier = Modifier.background(if (isSubSel) TealContainer else Color.Transparent),
+                                    text = {
+                                        Text(
+                                            s.bn,
+                                            fontWeight = if (isSubSel) FontWeight.Bold else FontWeight.Normal,
+                                            color = if (isSubSel) TealDark else SlateText
+                                        )
+                                    },
+                                    trailingIcon = if (isSubSel) {
+                                        { Icon(Icons.Rounded.Check, contentDescription = null, tint = TealDark, modifier = Modifier.size(16.dp)) }
+                                    } else null,
+                                    onClick = { onUpdateMeta(sheet.cls, sheet.term, s.key); subDrop = false }
+                                )
+                            }
                         }
                     }
                 }
             }
 
-            if (activeSub.written > 0) {
+            if (sheet.sheetKind == ClassSheetKind.ATTENDANCE_TRAITS) {
+                Surface(
+                    color = SlateSurfaceVariant,
+                    border = BorderStroke(1.dp, SlateOutline),
+                    shape = RoundedCornerShape(8.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(Modifier.padding(8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Text(
+                            "মোট কার্যদিবস (সবার জন্য প্রযোজ্য হলে লিখুন)",
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = TealDark
+                        )
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            (1..3).forEach { t ->
+                                EditableCellField(
+                                    value = sheet.sharedWorkingDaysByTerm[t] ?: "",
+                                    onValueChange = { onUpdateSharedWorkingDays(t, it) },
+                                    label = "${termOrdinalBn(t)} কার্যদিবস",
+                                    confidence = if ((sheet.sharedWorkingDaysByTerm[t] ?: "").isNotBlank()) FieldConfidence.SURE else FieldConfidence.NEUTRAL,
+                                    hardError = null,
+                                    uncertainWarning = null,
+                                    deducedHint = null,
+                                    onVerify = {},
+                                    isNumeric = true,
+                                    modifier = Modifier.weight(1f)
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+
+            if (sheet.sheetKind == ClassSheetKind.SINGLE_TERM_MARKS && activeSub.written > 0) {
                 Surface(
                     color = SlateSurfaceVariant,
                     border = BorderStroke(1.dp, SlateOutline),
@@ -1737,6 +1843,7 @@ private fun ClassSheetPreviewSection(
                         row = row,
                         activeSub = activeSub,
                         scope = sheet.scope,
+                        sheetKind = sheet.sheetKind,
                         report = report,
                         isExistingStudent = matchedExisting != null,
                         existingName = matchedExisting?.name,
@@ -1799,6 +1906,7 @@ private fun ScannedStudentPreviewCard(
     row: ScannedStudentRow,
     activeSub: com.kgps.result.Sub,
     scope: ClassSheetImportScope,
+    sheetKind: ClassSheetKind,
     report: RowValidationReport,
     isExistingStudent: Boolean,
     existingName: String?,
@@ -1939,169 +2047,447 @@ private fun ScannedStudentPreviewCard(
 
             val isArt = activeSub.comps.size == 1 && activeSub.comps.first().key == "TOTAL" && activeSub.written == 0
             val maxCont = activeSub.comps.sumOf { it.max }
-            val showContinuous = scope != ClassSheetImportScope.WR_ONLY
-            val showWritten = activeSub.written > 0 && scope != ClassSheetImportScope.CONT_ONLY
-            val showGrand = scope == ClassSheetImportScope.BOTH
+            var showRemarkField by remember(row.id) { mutableStateOf(false) }
+            val hasRemarkContent = row.remark.isNotBlank() || report.uncertainWarnings["remark"] != null
 
-            var showBreakdownOverride by remember(row.id) { mutableStateOf(false) }
-            val hasBreakdownContent = showContinuous && activeSub.comps.any { c ->
-                !row.marksText[c.key].isNullOrBlank() ||
-                    report.hardErrors[c.key] != null ||
-                    report.uncertainWarnings[c.key] != null
-            }
-            val showBreakdownRow = showContinuous && (!report.isSummaryOnlyMode || hasBreakdownContent || showBreakdownOverride)
-
-            if (isArt) {
-                // শিল্পকলা: TOTAL এবং সর্বমোট এক সারিতে
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    EditableCellField(
-                        value = row.marksText["TOTAL"] ?: "",
-                        onValueChange = { onUpdateMark("TOTAL", it) },
-                        label = "শিল্পকলা (${bn(activeSub.max.toString())})",
-                        confidence = report.fieldConfidences["TOTAL"] ?: FieldConfidence.SURE,
-                        hardError = report.hardErrors["TOTAL"],
-                        uncertainWarning = report.uncertainWarnings["TOTAL"],
-                        deducedHint = row.deducedFields["TOTAL"],
-                        onVerify = { onVerifyField("TOTAL") },
-                        isNumeric = true,
-                        modifier = Modifier.weight(1f)
-                    )
-                    if (showGrand) {
-                        EditableCellField(
-                            value = row.sheetGrandTotal ?: "",
-                            onValueChange = { onUpdateMark("GRAND", it) },
-                            label = "মোট (${bn(activeSub.max.toString())})",
-                            confidence = report.fieldConfidences["GRAND"] ?: FieldConfidence.SURE,
-                            hardError = report.hardErrors["GRAND"],
-                            uncertainWarning = report.uncertainWarnings["GRAND"],
-                            deducedHint = row.deducedFields["GRAND"],
-                            onVerify = { onVerifyField("GRAND") },
-                            isNumeric = true,
-                            modifier = Modifier.weight(1f)
-                        )
+            when (sheetKind) {
+                ClassSheetKind.ATTENDANCE_TRAITS -> {
+                    var showPerRowDaysAndRem by remember(row.id) { mutableStateOf(false) }
+                    val hasExtraTraitData = (1..3).any { t ->
+                        !row.traitValues["DAYS_$t"].isNullOrBlank() ||
+                            !row.traitValues["REM_$t"].isNullOrBlank() ||
+                            report.hardErrors["DAYS_$t"] != null ||
+                            report.uncertainWarnings["DAYS_$t"] != null ||
+                            report.uncertainWarnings["REM_$t"] != null
                     }
-                }
-            } else {
-                if (showBreakdownRow) {
-                    // ১ম সারি: পাঠ্যবই, সক্রিয়তা, ভাষা, ক্লাস টেস্ট (এক সারিতে ৪টি)
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(5.dp)) {
-                        activeSub.comps.forEach { c ->
-                            val shortLabel = when (c.key) {
-                                "TB" -> "পাঠ্যবই"
-                                "ACT" -> "সক্রিয়তা"
-                                "LANG" -> "ভাষা"
-                                "CT" -> "ক্লাস টেস্ট"
-                                else -> "মোট"
+                    (1..3).forEach { t ->
+                        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Row(
+                                Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(5.dp)
+                            ) {
+                                Surface(
+                                    color = TealContainer,
+                                    shape = RoundedCornerShape(6.dp)
+                                ) {
+                                    Text(
+                                        termOrdinalBn(t),
+                                        fontSize = 10.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = TealDark,
+                                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 6.dp)
+                                    )
+                                }
+                                val kPres = "PRES_$t"
+                                val kAct = "ACT_$t"
+                                val kDisc = "DISC_$t"
+                                val kCond = "COND_$t"
+                                EditableCellField(
+                                    value = row.traitValues[kPres] ?: "",
+                                    onValueChange = { onUpdateMark("TRAIT:$kPres", it) },
+                                    label = "উপস্থিত",
+                                    confidence = report.fieldConfidences[kPres] ?: FieldConfidence.NEUTRAL,
+                                    hardError = report.hardErrors[kPres],
+                                    uncertainWarning = report.uncertainWarnings[kPres],
+                                    deducedHint = null,
+                                    onVerify = { onVerifyField(kPres) },
+                                    isNumeric = true,
+                                    modifier = Modifier.weight(1.1f)
+                                )
+                                listOf(
+                                    kAct to "সহপাঠ",
+                                    kDisc to "শৃঙ্খলা",
+                                    kCond to "আচরণ"
+                                ).forEach { (k, lbl) ->
+                                    EditableCellField(
+                                        value = row.traitValues[k] ?: "",
+                                        onValueChange = { onUpdateMark("TRAIT:$k", it) },
+                                        label = lbl,
+                                        confidence = report.fieldConfidences[k] ?: FieldConfidence.NEUTRAL,
+                                        hardError = report.hardErrors[k],
+                                        uncertainWarning = report.uncertainWarnings[k],
+                                        deducedHint = null,
+                                        onVerify = { onVerifyField(k) },
+                                        isNumeric = false,
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                }
                             }
-                            EditableCellField(
-                                value = row.marksText[c.key] ?: "",
-                                onValueChange = { onUpdateMark(c.key, it) },
-                                label = "$shortLabel (${bn(c.max.toString())})",
-                                confidence = report.fieldConfidences[c.key] ?: FieldConfidence.SURE,
-                                hardError = report.hardErrors[c.key],
-                                uncertainWarning = report.uncertainWarnings[c.key],
-                                deducedHint = row.deducedFields[c.key],
-                                onVerify = { onVerifyField(c.key) },
-                                isNumeric = true,
-                                modifier = Modifier.weight(1f)
+                            if (showPerRowDaysAndRem || hasExtraTraitData) {
+                                val kDays = "DAYS_$t"
+                                val kRem = "REM_$t"
+                                if (showPerRowDaysAndRem || !row.traitValues[kDays].isNullOrBlank() || !row.traitValues[kRem].isNullOrBlank() ||
+                                    report.hardErrors[kDays] != null || report.uncertainWarnings[kDays] != null || report.uncertainWarnings[kRem] != null
+                                ) {
+                                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                        EditableCellField(
+                                            value = row.traitValues[kDays] ?: "",
+                                            onValueChange = { onUpdateMark("TRAIT:$kDays", it) },
+                                            label = "${termOrdinalBn(t)} কার্যদিবস",
+                                            confidence = report.fieldConfidences[kDays] ?: FieldConfidence.NEUTRAL,
+                                            hardError = report.hardErrors[kDays],
+                                            uncertainWarning = report.uncertainWarnings[kDays],
+                                            deducedHint = null,
+                                            onVerify = { onVerifyField(kDays) },
+                                            isNumeric = true,
+                                            modifier = Modifier.weight(0.9f)
+                                        )
+                                        EditableCellField(
+                                            value = row.traitValues[kRem] ?: "",
+                                            onValueChange = { onUpdateMark("TRAIT:$kRem", it) },
+                                            label = "${termOrdinalBn(t)} মন্তব্য",
+                                            confidence = report.fieldConfidences[kRem] ?: FieldConfidence.NEUTRAL,
+                                            hardError = report.hardErrors[kRem],
+                                            uncertainWarning = report.uncertainWarnings[kRem],
+                                            deducedHint = null,
+                                            onVerify = { onVerifyField(kRem) },
+                                            isNumeric = false,
+                                            centered = false,
+                                            modifier = Modifier.weight(1.7f)
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    Row(
+                        Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            "গুণাবলি কোড: ক = উত্তম · খ = সন্তোষজনক · গ = উন্নতি প্রয়োজন",
+                            fontSize = 10.sp,
+                            color = SlateMuted,
+                            modifier = Modifier.weight(1f, fill = false)
+                        )
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                if (showPerRowDaysAndRem) "কম দেখুন" else "+ কার্যদিবস",
+                                fontSize = 10.5.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = TealPrimary,
+                                modifier = Modifier.clickable { showPerRowDaysAndRem = !showPerRowDaysAndRem }
+                            )
+                            Text(
+                                if (showRemarkField || hasRemarkContent) "মন্তব্য" else "+ মন্তব্য",
+                                fontSize = 10.5.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = TealPrimary,
+                                modifier = Modifier.clickable { showRemarkField = !showRemarkField }
                             )
                         }
                     }
                 }
 
-                // ২য় সারি: সক্রিয় অংশ অনুযায়ী ধারাবাহিক মোট, সামষ্টিক, মোট
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    if (showContinuous) {
-                        EditableCellField(
-                            value = row.sheetContinuousTotal ?: "",
-                            onValueChange = { onUpdateMark("CONT", it) },
-                            label = "ধারাবাহিক মোট (${bn(maxCont.toString())})",
-                            confidence = report.fieldConfidences["CONT"] ?: FieldConfidence.SURE,
-                            hardError = report.hardErrors["CONT"],
-                            uncertainWarning = report.uncertainWarnings["CONT"],
-                            deducedHint = row.deducedFields["CONT"],
-                            onVerify = { onVerifyField("CONT") },
-                            isNumeric = true,
-                            modifier = Modifier.weight(1f)
-                        )
+                ClassSheetKind.THREE_TERM_MARKS -> {
+                    (1..3).forEach { t ->
+                        val kCont = "T${t}_CONT"
+                        val kWr = "T${t}_WR"
+                        val kTot = "T${t}_TOTAL"
+                        Row(
+                            Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(5.dp)
+                        ) {
+                            Surface(
+                                color = TealContainer,
+                                shape = RoundedCornerShape(6.dp)
+                            ) {
+                                Text(
+                                    termOrdinalBn(t),
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = TealDark,
+                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 6.dp)
+                                )
+                            }
+                            if (!isArt) {
+                                EditableCellField(
+                                    value = row.marksText[kCont] ?: "",
+                                    onValueChange = { onUpdateMark(kCont, it) },
+                                    label = "ধারাবাহিক (${bn(maxCont.toString())})",
+                                    confidence = report.fieldConfidences[kCont] ?: FieldConfidence.NEUTRAL,
+                                    hardError = report.hardErrors[kCont],
+                                    uncertainWarning = report.uncertainWarnings[kCont],
+                                    deducedHint = row.deducedFields[kCont],
+                                    onVerify = { onVerifyField(kCont) },
+                                    isNumeric = true,
+                                    modifier = Modifier.weight(1f)
+                                )
+                                if (activeSub.written > 0) {
+                                    EditableCellField(
+                                        value = row.marksText[kWr] ?: "",
+                                        onValueChange = { onUpdateMark(kWr, it) },
+                                        label = "সামষ্টিক (${bn(activeSub.written.toString())})",
+                                        confidence = report.fieldConfidences[kWr] ?: FieldConfidence.NEUTRAL,
+                                        hardError = report.hardErrors[kWr],
+                                        uncertainWarning = report.uncertainWarnings[kWr],
+                                        deducedHint = row.deducedFields[kWr],
+                                        onVerify = { onVerifyField(kWr) },
+                                        isNumeric = true,
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                }
+                            }
+                            EditableCellField(
+                                value = row.marksText[kTot] ?: "",
+                                onValueChange = { onUpdateMark(kTot, it) },
+                                label = "মোট (${bn(activeSub.max.toString())})",
+                                confidence = report.fieldConfidences[kTot] ?: FieldConfidence.NEUTRAL,
+                                hardError = report.hardErrors[kTot],
+                                uncertainWarning = report.uncertainWarnings[kTot],
+                                deducedHint = row.deducedFields[kTot],
+                                onVerify = { onVerifyField(kTot) },
+                                isNumeric = true,
+                                modifier = Modifier.weight(1f)
+                            )
+                        }
                     }
-                    if (showWritten) {
-                        EditableCellField(
-                            value = row.marksText["WR"] ?: "",
-                            onValueChange = { onUpdateMark("WR", it) },
-                            label = "সামষ্টিক (${bn(activeSub.written.toString())})",
-                            confidence = report.fieldConfidences["WR"] ?: FieldConfidence.SURE,
-                            hardError = report.hardErrors["WR"],
-                            uncertainWarning = report.uncertainWarnings["WR"],
-                            deducedHint = row.deducedFields["WR"],
-                            onVerify = { onVerifyField("WR") },
-                            isNumeric = true,
-                            modifier = Modifier.weight(1f)
+
+                    Row(
+                        Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            "খালি প্রান্তিকগুলোর আগের নম্বর অক্ষত থাকবে",
+                            fontSize = 10.5.sp,
+                            color = TealDark,
+                            modifier = Modifier.weight(1f, fill = false)
                         )
+                        if (!showRemarkField && !hasRemarkContent) {
+                            Text(
+                                "+ মন্তব্য",
+                                fontSize = 10.5.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = TealPrimary,
+                                modifier = Modifier.clickable { showRemarkField = true }
+                            )
+                        }
                     }
-                    if (showGrand) {
-                        EditableCellField(
-                            value = row.sheetGrandTotal ?: "",
-                            onValueChange = { onUpdateMark("GRAND", it) },
-                            label = "মোট (${bn(activeSub.max.toString())})",
-                            confidence = report.fieldConfidences["GRAND"] ?: FieldConfidence.SURE,
-                            hardError = report.hardErrors["GRAND"],
-                            uncertainWarning = report.uncertainWarnings["GRAND"],
-                            deducedHint = row.deducedFields["GRAND"],
-                            onVerify = { onVerifyField("GRAND") },
-                            isNumeric = true,
-                            modifier = Modifier.weight(1f)
+                }
+
+                ClassSheetKind.SINGLE_TERM_MARKS -> {
+                    val showContinuous = scope != ClassSheetImportScope.WR_ONLY
+                    val showWritten = activeSub.written > 0 && scope != ClassSheetImportScope.CONT_ONLY
+                    val showGrand = scope == ClassSheetImportScope.BOTH
+
+                    var showBreakdownOverride by remember(row.id) { mutableStateOf(false) }
+                    var showGrandPartsOverride by remember(row.id) { mutableStateOf(false) }
+                    val hasBreakdownContent = showContinuous && activeSub.comps.any { c ->
+                        !row.marksText[c.key].isNullOrBlank() ||
+                            report.hardErrors[c.key] != null ||
+                            report.uncertainWarnings[c.key] != null
+                    }
+                    val showPartsForGrandTotal = !report.isGrandTotalOnlyMode || showGrandPartsOverride
+                    val showBreakdownRow = showContinuous && showPartsForGrandTotal && (!report.isSummaryOnlyMode || hasBreakdownContent || showBreakdownOverride)
+
+                    if (isArt) {
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            EditableCellField(
+                                value = row.marksText["TOTAL"] ?: "",
+                                onValueChange = { onUpdateMark("TOTAL", it) },
+                                label = "শিল্পকলা (${bn(activeSub.max.toString())})",
+                                confidence = report.fieldConfidences["TOTAL"] ?: FieldConfidence.SURE,
+                                hardError = report.hardErrors["TOTAL"],
+                                uncertainWarning = report.uncertainWarnings["TOTAL"],
+                                deducedHint = row.deducedFields["TOTAL"],
+                                onVerify = { onVerifyField("TOTAL") },
+                                isNumeric = true,
+                                modifier = Modifier.weight(1f)
+                            )
+                            if (showGrand) {
+                                EditableCellField(
+                                    value = row.sheetGrandTotal ?: "",
+                                    onValueChange = { onUpdateMark("GRAND", it) },
+                                    label = "মোট (${bn(activeSub.max.toString())})",
+                                    confidence = report.fieldConfidences["GRAND"] ?: FieldConfidence.SURE,
+                                    hardError = report.hardErrors["GRAND"],
+                                    uncertainWarning = report.uncertainWarnings["GRAND"],
+                                    deducedHint = row.deducedFields["GRAND"],
+                                    onVerify = { onVerifyField("GRAND") },
+                                    isNumeric = true,
+                                    modifier = Modifier.weight(1f)
+                                )
+                            }
+                        }
+                    } else if (report.isGrandTotalOnlyMode && !showGrandPartsOverride) {
+                        // রোল-নাম-মোট (সহজ মোট) মোড: শুধু মোট ঘর দেখান
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            EditableCellField(
+                                value = row.sheetGrandTotal ?: "",
+                                onValueChange = { onUpdateMark("GRAND", it) },
+                                label = "মোট নম্বর (${bn(activeSub.max.toString())})",
+                                confidence = report.fieldConfidences["GRAND"] ?: FieldConfidence.SURE,
+                                hardError = report.hardErrors["GRAND"],
+                                uncertainWarning = report.uncertainWarnings["GRAND"],
+                                deducedHint = row.deducedFields["GRAND"],
+                                onVerify = { onVerifyField("GRAND") },
+                                isNumeric = true,
+                                modifier = Modifier.weight(1f)
+                            )
+                        }
+                    } else {
+                        if (showBreakdownRow) {
+                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+                                activeSub.comps.forEach { c ->
+                                    val shortLabel = when (c.key) {
+                                        "TB" -> "পাঠ্যবই"
+                                        "ACT" -> "সক্রিয়তা"
+                                        "LANG" -> "ভাষা"
+                                        "CT" -> "ক্লাস টেস্ট"
+                                        else -> "মোট"
+                                    }
+                                    EditableCellField(
+                                        value = row.marksText[c.key] ?: "",
+                                        onValueChange = { onUpdateMark(c.key, it) },
+                                        label = "$shortLabel (${bn(c.max.toString())})",
+                                        confidence = report.fieldConfidences[c.key] ?: FieldConfidence.SURE,
+                                        hardError = report.hardErrors[c.key],
+                                        uncertainWarning = report.uncertainWarnings[c.key],
+                                        deducedHint = row.deducedFields[c.key],
+                                        onVerify = { onVerifyField(c.key) },
+                                        isNumeric = true,
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                }
+                            }
+                        }
+
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            if (showContinuous) {
+                                EditableCellField(
+                                    value = row.sheetContinuousTotal ?: "",
+                                    onValueChange = { onUpdateMark("CONT", it) },
+                                    label = "ধারাবাহিক মোট (${bn(maxCont.toString())})",
+                                    confidence = report.fieldConfidences["CONT"] ?: FieldConfidence.SURE,
+                                    hardError = report.hardErrors["CONT"],
+                                    uncertainWarning = report.uncertainWarnings["CONT"],
+                                    deducedHint = row.deducedFields["CONT"],
+                                    onVerify = { onVerifyField("CONT") },
+                                    isNumeric = true,
+                                    modifier = Modifier.weight(1f)
+                                )
+                            }
+                            if (showWritten) {
+                                EditableCellField(
+                                    value = row.marksText["WR"] ?: "",
+                                    onValueChange = { onUpdateMark("WR", it) },
+                                    label = "সামষ্টিক (${bn(activeSub.written.toString())})",
+                                    confidence = report.fieldConfidences["WR"] ?: FieldConfidence.SURE,
+                                    hardError = report.hardErrors["WR"],
+                                    uncertainWarning = report.uncertainWarnings["WR"],
+                                    deducedHint = row.deducedFields["WR"],
+                                    onVerify = { onVerifyField("WR") },
+                                    isNumeric = true,
+                                    modifier = Modifier.weight(1f)
+                                )
+                            }
+                            if (showGrand) {
+                                EditableCellField(
+                                    value = row.sheetGrandTotal ?: "",
+                                    onValueChange = { onUpdateMark("GRAND", it) },
+                                    label = "মোট (${bn(activeSub.max.toString())})",
+                                    confidence = report.fieldConfidences["GRAND"] ?: FieldConfidence.SURE,
+                                    hardError = report.hardErrors["GRAND"],
+                                    uncertainWarning = report.uncertainWarnings["GRAND"],
+                                    deducedHint = row.deducedFields["GRAND"],
+                                    onVerify = { onVerifyField("GRAND") },
+                                    isNumeric = true,
+                                    modifier = Modifier.weight(1f)
+                                )
+                            }
+                        }
+                    }
+
+                    Row(
+                        Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        val contStr = report.calculatedContinuous?.let { bn(fmtEn(it)) } ?: "—"
+                        val grandStr = report.calculatedGrandTotal?.let { bn(fmtEn(it)) } ?: "—"
+                        val wrStr = row.marksText["WR"]?.trim()?.takeIf { it.isNotEmpty() }?.let { bn(it) } ?: "—"
+                        Text(
+                            when {
+                                report.isGrandTotalOnlyMode && !showGrandPartsOverride ->
+                                    "সরাসরি মোট: $grandStr (সহজ মোট শিট)"
+                                scope == ClassSheetImportScope.CONT_ONLY ->
+                                    "শুধু ধারাবাহিক: $contStr (সামষ্টিক অক্ষত)"
+                                scope == ClassSheetImportScope.WR_ONLY ->
+                                    "শুধু সামষ্টিক: $wrStr (ধারাবাহিক অক্ষত)"
+                                else -> buildString {
+                                    if (activeSub.written > 0) append("হিসাব: ধারাবাহিক $contStr · মোট $grandStr")
+                                    else append("হিসাব: মোট $contStr")
+                                }
+                            },
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Medium,
+                            color = if (scope != ClassSheetImportScope.BOTH || report.isSummaryOnlyMode) TealDark else SlateText,
+                            modifier = Modifier.weight(1f, fill = false)
                         )
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            if (!isArt && report.isGrandTotalOnlyMode) {
+                                Text(
+                                    if (showGrandPartsOverride) "সহজ মোট" else "+ অংশ দিন",
+                                    fontSize = 10.5.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = TealPrimary,
+                                    modifier = Modifier.clickable { showGrandPartsOverride = !showGrandPartsOverride }
+                                )
+                            } else if (!isArt && showContinuous && report.isSummaryOnlyMode && !hasBreakdownContent) {
+                                Text(
+                                    if (showBreakdownOverride) "সংক্ষিপ্ত করুন" else "+ ৪ অংশ",
+                                    fontSize = 10.5.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = TealPrimary,
+                                    modifier = Modifier.clickable { showBreakdownOverride = !showBreakdownOverride }
+                                )
+                            }
+                            if (!showRemarkField && !hasRemarkContent) {
+                                Text(
+                                    "+ মন্তব্য",
+                                    fontSize = 10.5.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = TealPrimary,
+                                    modifier = Modifier.clickable { showRemarkField = true }
+                                )
+                            }
+                        }
                     }
                 }
             }
 
-            // Calculated Totals, Optional Breakdown Toggle & Raw Notes Footer
-            Row(
-                Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                val contStr = report.calculatedContinuous?.let { bn(fmtEn(it)) } ?: "—"
-                val grandStr = report.calculatedGrandTotal?.let { bn(fmtEn(it)) } ?: "—"
-                val wrStr = row.marksText["WR"]?.trim()?.takeIf { it.isNotEmpty() }?.let { bn(it) } ?: "—"
-                Text(
-                    when (scope) {
-                        ClassSheetImportScope.CONT_ONLY -> "শুধু ধারাবাহিক: $contStr (সামষ্টিক অক্ষত)"
-                        ClassSheetImportScope.WR_ONLY -> "শুধু সামষ্টিক: $wrStr (ধারাবাহিক অক্ষত)"
-                        else -> buildString {
-                            if (activeSub.written > 0) append("হিসাব: ধারাবাহিক $contStr · মোট $grandStr")
-                            else append("হিসাব: মোট $contStr")
-                        }
-                    },
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.Medium,
-                    color = if (scope != ClassSheetImportScope.BOTH || report.isSummaryOnlyMode) TealDark else SlateText,
-                    modifier = Modifier.weight(1f, fill = false)
+            if (showRemarkField || hasRemarkContent) {
+                EditableCellField(
+                    value = row.remark,
+                    onValueChange = { onUpdateMark("REMARK", it) },
+                    label = "মন্তব্য / টীকা",
+                    confidence = report.fieldConfidences["remark"] ?: FieldConfidence.NEUTRAL,
+                    hardError = report.hardErrors["remark"],
+                    uncertainWarning = report.uncertainWarnings["remark"],
+                    deducedHint = null,
+                    onVerify = { onVerifyField("remark") },
+                    isNumeric = false,
+                    centered = false,
+                    modifier = Modifier.fillMaxWidth()
                 )
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    if (!isArt && showContinuous && report.isSummaryOnlyMode && !hasBreakdownContent) {
-                        Text(
-                            if (showBreakdownOverride) "সংক্ষিপ্ত করুন" else "+ ৪ অংশ",
-                            fontSize = 10.5.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            color = TealPrimary,
-                            modifier = Modifier.clickable { showBreakdownOverride = !showBreakdownOverride }
-                        )
-                    }
-                    if (row.rawNotes.isNotBlank()) {
-                        Text(
-                            row.rawNotes,
-                            fontSize = 10.5.sp,
-                            color = SlateMuted,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                    }
-                }
+            }
+
+            if (row.rawNotes.isNotBlank()) {
+                Text(
+                    row.rawNotes,
+                    fontSize = 10.5.sp,
+                    color = SlateMuted,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis
+                )
             }
 
             report.arithmeticWarning?.let { arithMsg ->

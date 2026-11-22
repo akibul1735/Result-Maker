@@ -672,24 +672,27 @@ object Repo {
         if (n.isBlank()) return false
         return n.contains("ধারাবাহিক") || n.contains("continuous") || Regex("\\b(cont|ca)\\b").containsMatchIn(n) ||
             n.contains("সামষ্টিক") || n.contains("সামস্টিক") || n.contains("লিখিত") || n.contains("summative") || n.contains("written") || Regex("\\b(wr|sa)\\b").containsMatchIn(n) ||
-            n.contains("পাঠ্যপুস্তক") || n.contains("সহায়িকা") || n.contains("textbook") || Regex("\\btb\\b").containsMatchIn(n) ||
-            n.contains("সক্রিয়তা") || n.contains("শ্রেণিকাজ") || n.contains("activity") || Regex("\\bact\\b").containsMatchIn(n) ||
-            n.contains("ভাষাদক্ষতা") || n.contains("বোধগম্যতা") || n.contains("language") || Regex("\\blang\\b").containsMatchIn(n) ||
-            n.contains("ক্লাস টেস্ট") || n.contains("class test") || Regex("\\bct\\b").containsMatchIn(n) ||
+            n.contains("পাঠ্যবই") || n.contains("পাঠ্যপুস্তক") || n.contains("সহায়িকা") || n.contains("textbook") || Regex("\\btb\\b").containsMatchIn(n) ||
+            n == "কাজ" || n.contains("সক্রিয়তা") || n.contains("শ্রেণিকাজ") || n.contains("activity") || Regex("\\bact\\b").containsMatchIn(n) ||
+            n == "ভাষা" || n.contains("ভাষাদক্ষতা") || n.contains("বোধগম্যতা") || n.contains("language") || Regex("\\blang\\b").containsMatchIn(n) ||
+            n.contains("অভীক্ষা") || n.contains("ক্লাস টেস্ট") || n.contains("class test") || Regex("\\bct\\b").containsMatchIn(n) ||
             n == "মোট" || n == "সর্বমোট" || n == "total" || n.contains("মোট নম্বর") ||
             n.contains("কার্যদিবস") || n.contains("উপস্থিতি") || n.contains("মন্তব্য") ||
-            n.contains("শৃঙ্খলা") || n.contains("আচরণ")
+            n.contains("শৃঙ্খলা") || n.contains("আচরণ") ||
+            n == "গ্রেড" || n == "জিপি" || n == "স্বাক্ষর"
     }
 
     private fun isMetadataBannerRow(row: List<String>): Boolean {
         val nonBlank = row.map { it.trim() }.filter { it.isNotBlank() }
         if (nonBlank.isEmpty()) return false
-        val joined = normHeader(fromBn(nonBlank.joinToString(" ")))
+        val joinedRaw = nonBlank.joinToString(" ")
+        val joined = normHeader(fromBn(joinedRaw))
         val hasRollCol = nonBlank.any { normHeader(it) in FIELD_ALIASES["roll"].orEmpty().map(::normHeader) }
         val hasNameCol = nonBlank.any { normHeader(it) in FIELD_ALIASES["name"].orEmpty().map(::normHeader) }
         if (hasRollCol || hasNameCol) return false
         val hasKnownMarkOrTextKey = nonBlank.any { MARK_KEYS.contains(it) || TEXT_KEYS.contains(it) || FRIENDLY_HEADER_REVERSE.containsKey(normHeader(it)) }
         if (hasKnownMarkOrTextKey) return false
+        if (Regex("REF\\s*:\\s*C\\d+", RegexOption.IGNORE_CASE).containsMatchIn(joinedRaw)) return true
         // Top rows like "শ্রেণি: ৩য়, বিষয়: বাংলা" or "মোট কার্যদিবস — ১ম প্রান্তিক: ৬২ দিন" or school name title
         return joined.contains("শ্রেণি") || joined.contains("শ্রেণী") || joined.contains("class") ||
             joined.contains("বিষয়") || joined.contains("বিষয়") || joined.contains("subject") ||
@@ -761,7 +764,21 @@ object Repo {
 
         metaRows.forEach { row ->
             val trimmed = row.map { it.trim() }
-            val rowNorm = normHeader(fromBn(trimmed.joinToString(" ")))
+            val rowJoined = trimmed.joinToString(" ")
+            Regex("REF\\s*:\\s*C(\\d{1,2})-([A-Z]+)-([A-Z0-9]+)", RegexOption.IGNORE_CASE).find(rowJoined)?.let { m ->
+                val refCls = m.groupValues[1].toIntOrNull()?.takeIf { it in 1..20 }
+                val refSub = m.groupValues[2].uppercase().takeIf { it != "ATT" && it != "GEN" }
+                val refTerm = when (m.groupValues[3].uppercase()) {
+                    "T1" -> 1
+                    "T2" -> 2
+                    "T3" -> 3
+                    else -> null
+                }
+                if (clsFound == null && refCls != null) clsFound = refCls
+                if (subFound == null && refSub != null) subFound = refSub
+                if (termFound == null && refTerm != null) termFound = refTerm
+            }
+            val rowNorm = normHeader(fromBn(rowJoined))
             val rowHasWorkingDaysHint = rowNorm.contains("কার্যদিবস") || rowNorm.contains("working day")
             var i = 0
             while (i < trimmed.size) {
@@ -953,13 +970,20 @@ object Repo {
     private fun matchSemanticColumn(
         header: String,
         contextSubjectKey: String?,
-        contextTerm: Int?
+        contextTerm: Int?,
+        sheetLooksLikeTraitsSheet: Boolean = false
     ): Pair<String, String>? {
         val norm = normHeader(fromBn(header))
         if (norm.isBlank()) return null
 
-        // Auto-skip common read-only summary columns when re-importing exported sheets
-        if (norm in setOf("গড় নম্বর", "মোট প্রাপ্ত নম্বর", "শতকরা হার", "অবস্থানগত মান", "মেধাক্রম", "average marks", "total obtained", "percentage", "grade position", "merit rank")) {
+        // Auto-skip common read-only / paper-only columns from exported sheets & Blank Sheets
+        if (norm in setOf(
+                "গড় নম্বর", "মোট প্রাপ্ত নম্বর", "শতকরা হার", "অবস্থানগত মান", "মেধাক্রম",
+                "গ্রেড", "জিপি", "জিপিএ", "স্বাক্ষর", "শিক্ষকের স্বাক্ষর", "অভিভাবকের স্বাক্ষর",
+                "average marks", "total obtained", "percentage", "grade position", "merit rank",
+                "grade", "gp", "gpa", "merit", "sign", "signature"
+            )
+        ) {
             return "skip" to ""
         }
 
@@ -967,12 +991,13 @@ object Repo {
 
         // Attendance / Traits / Comments with optional term
         if (term != null) {
-            val hasSubjectContext = parseSubjectKey(header) != null || contextSubjectKey != null
+            val hasExplicitSubInHeader = parseSubjectKey(header) != null
+            val treatActivityAsTrait = sheetLooksLikeTraitsSheet || (!hasExplicitSubInHeader && contextSubjectKey == null)
             when {
                 norm.contains("কার্যদিবস") || norm.contains("working day") -> return "text" to "DAYS_$term"
                 norm.contains("উপস্থিত") || norm.contains("attendance") || norm.contains("present") -> return "text" to "PRES_$term"
                 norm.contains("সহপাঠক্রমিক") || norm.contains("সহপাঠ্য") || norm.contains("co curricular") ||
-                    (!hasSubjectContext && (norm.contains("সক্রিয়তা") || norm.contains("সক্রিয়তা"))) -> return "text" to "ACT_$term"
+                    (treatActivityAsTrait && (norm.contains("সক্রিয়তা") || norm.contains("সক্রিয়তা"))) -> return "text" to "ACT_$term"
                 norm.contains("শৃঙ্খলা") || norm.contains("discipline") -> return "text" to "DISC_$term"
                 norm.contains("আচরণ") || norm.contains("conduct") -> return "text" to "COND_$term"
                 norm.contains("মন্তব্য") || norm.contains("মতামত") || norm.contains("remark") || norm.contains("comment") -> return "text" to "REM_$term"
@@ -981,10 +1006,10 @@ object Repo {
 
         val subKey = parseSubjectKey(header) ?: contextSubjectKey
         val compKey = when {
-            norm.contains("পাঠ্যপুস্তক") || norm.contains("সহায়িকা") || norm.contains("textbook") || Regex("\\btb\\b").containsMatchIn(norm) -> "TB"
-            norm.contains("শ্রেণিকাজ") || norm.contains("সক্রিয়তা") || norm.contains("activity") || Regex("\\bact\\b").containsMatchIn(norm) -> "ACT"
-            norm.contains("ভাষাদক্ষতা") || norm.contains("বোধগম্যতা") || norm.contains("language") || Regex("\\blang\\b").containsMatchIn(norm) -> "LANG"
-            norm.contains("ক্লাস টেস্ট") || norm.contains("class test") || Regex("\\bct\\b").containsMatchIn(norm) -> "CT"
+            norm.contains("পাঠ্যবই") || norm.contains("পাঠ্যপুস্তক") || norm.contains("সহায়িকা") || norm.contains("textbook") || Regex("\\btb\\b").containsMatchIn(norm) -> "TB"
+            norm == "কাজ" || norm.endsWith(" কাজ") || norm.contains("শ্রেণিকাজ") || norm.contains("সক্রিয়তা") || norm.contains("সক্রিয়তা") || norm.contains("activity") || Regex("\\bact\\b").containsMatchIn(norm) -> "ACT"
+            norm == "ভাষা" || norm.endsWith(" ভাষা") || norm.contains("ভাষাদক্ষতা") || norm.contains("বোধগম্যতা") || norm.contains("language") || Regex("\\blang\\b").containsMatchIn(norm) -> "LANG"
+            norm.contains("অভীক্ষা") || norm.contains("ক্লাস টেস্ট") || norm.contains("class test") || Regex("\\bct\\b").containsMatchIn(norm) -> "CT"
             norm.contains("ধারাবাহিক") || norm.contains("continuous") || Regex("\\b(cont|ca)\\b").containsMatchIn(norm) -> "CONT"
             norm.contains("সামষ্টিক") || norm.contains("সামস্টিক") || norm.contains("লিখিত") || norm.contains("summative") || norm.contains("written") || Regex("\\b(wr|sa)\\b").containsMatchIn(norm) -> "WR"
             norm == "মোট" || norm == "সর্বমোট" || norm == "total" || norm.endsWith(" মোট") || norm.contains("মোট নম্বর") || norm.contains("বিষয় মোট") -> "TOTAL"
@@ -1009,6 +1034,17 @@ object Repo {
         val markSet = MARK_KEYS.toSet()
         val textSet = TEXT_KEYS.toSet()
 
+        val normHeaders = headers.map { normHeader(fromBn(it)) }
+        val hasAnyTraitKw = normHeaders.any {
+            it.contains("উপস্থিত") || it.contains("শৃঙ্খলা") || it.contains("আচরণ") ||
+                it.contains("সহপাঠক্রমিক") || it.contains("কার্যদিবস")
+        }
+        val hasAnyMarkKw = normHeaders.any {
+            it.contains("পাঠ্যবই") || it.contains("পাঠ্যপুস্তক") || it.contains("অভীক্ষা") ||
+                it.contains("লিখিত") || it.contains("সামষ্টিক") || it.contains("ধারাবাহিক")
+        }
+        val sheetLooksLikeTraitsSheet = hasAnyTraitKw && !hasAnyMarkKw
+
         return headers.mapIndexed { colIndex, rawHeader ->
             val header = rawHeader.trim().ifBlank { "কলাম_${colIndex + 1}" }
             val norm = normHeader(header)
@@ -1019,7 +1055,7 @@ object Repo {
             }?.key
             val friendlyMatch = FRIENDLY_HEADER_REVERSE[norm]
             val semanticMatch = if (matchedStd == null && friendlyMatch == null) {
-                matchSemanticColumn(header, contextSubjectKey, contextTerm)
+                matchSemanticColumn(header, contextSubjectKey, contextTerm, sheetLooksLikeTraitsSheet)
             } else null
 
             when {

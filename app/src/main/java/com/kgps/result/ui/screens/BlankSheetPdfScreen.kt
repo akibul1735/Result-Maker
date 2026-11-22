@@ -3,6 +3,7 @@
 package com.kgps.result.ui.screens
 
 import android.graphics.Bitmap
+import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.BorderStroke
@@ -40,6 +41,7 @@ import androidx.compose.material.icons.automirrored.rounded.KeyboardArrowLeft
 import androidx.compose.material.icons.automirrored.rounded.KeyboardArrowRight
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.ArrowDropDown
+import androidx.compose.material.icons.rounded.AutoAwesome
 import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.Download
@@ -85,8 +87,10 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
@@ -155,6 +159,7 @@ fun BlankSheetPdfScreen(
         BackHandler { onBack() }
     }
     val ctx = LocalContext.current
+    val clipboard = LocalClipboardManager.current
     val availableClassIds = remember(settings.customClasses) { activeClassIds(settings) }
     val allowedClasses = remember(permissions, availableClassIds) {
         permissions.effectiveClasses(availableClassIds)
@@ -1516,17 +1521,38 @@ fun BlankSheetPdfScreen(
                 Column(Modifier.weight(1f)) {
                     Text(
                         "${bn(totalStu.toString())} জন · ${bn(pages.size.toString())} পৃষ্ঠা",
-                        fontSize = 12.sp,
+                        fontSize = 11.5.sp,
                         fontWeight = FontWeight.Bold,
                         color = SlateText,
                         maxLines = 1
                     )
                     Text(
                         config.orientation.labelBn,
-                        fontSize = 10.sp,
+                        fontSize = 9.5.sp,
                         color = SlateMuted,
                         maxLines = 1
                     )
+                }
+
+                OutlinedButton(
+                    onClick = {
+                        val promptText = BlankSheetCatalog.buildExternalAiCsvPrompt(config, settings, allowedClasses)
+                        clipboard.setText(AnnotatedString(promptText))
+                        Toast.makeText(
+                            ctx,
+                            "এই ফর্মের AI প্রম্পট কপি হয়েছে — বাইরের AI-তে ছবি/PDF-সহ দিন",
+                            Toast.LENGTH_LONG
+                        ).show()
+                    },
+                    enabled = pages.isNotEmpty(),
+                    shape = RoundedCornerShape(8.dp),
+                    border = BorderStroke(1.dp, TealContainer),
+                    contentPadding = PaddingValues(horizontal = 9.dp, vertical = 10.dp),
+                    modifier = Modifier.heightIn(min = 48.dp).testTag("blank_sheet_copy_ai_prompt_btn")
+                ) {
+                    Icon(Icons.Rounded.AutoAwesome, contentDescription = "AI প্রম্পট কপি", tint = TealPrimary, modifier = Modifier.size(15.dp))
+                    Spacer(Modifier.width(3.dp))
+                    Text("প্রম্পট", fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = TealDark)
                 }
 
                 OutlinedButton(
@@ -1534,24 +1560,24 @@ fun BlankSheetPdfScreen(
                     enabled = pages.isNotEmpty(),
                     shape = RoundedCornerShape(8.dp),
                     border = BorderStroke(1.dp, TealPrimary),
-                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 10.dp),
+                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 10.dp),
                     modifier = Modifier.heightIn(min = 48.dp).testTag("blank_sheet_print_btn")
                 ) {
-                    Icon(Icons.Rounded.Print, contentDescription = null, tint = TealPrimary, modifier = Modifier.size(16.dp))
-                    Spacer(Modifier.width(4.dp))
-                    Text("প্রিন্ট", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = TealPrimary)
+                    Icon(Icons.Rounded.Print, contentDescription = null, tint = TealPrimary, modifier = Modifier.size(15.dp))
+                    Spacer(Modifier.width(3.dp))
+                    Text("প্রিন্ট", fontSize = 11.5.sp, fontWeight = FontWeight.SemiBold, color = TealPrimary)
                 }
 
                 Button(
                     onClick = { onExportPdf(pages, config.orientation, exportFileName) },
                     enabled = pages.isNotEmpty(),
                     shape = RoundedCornerShape(8.dp),
-                    contentPadding = PaddingValues(horizontal = 14.dp, vertical = 10.dp),
+                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 10.dp),
                     modifier = Modifier.heightIn(min = 48.dp).testTag("blank_sheet_export_pdf_btn")
                 ) {
-                    Icon(Icons.Rounded.Download, contentDescription = null, modifier = Modifier.size(16.dp))
+                    Icon(Icons.Rounded.Download, contentDescription = null, modifier = Modifier.size(15.dp))
                     Spacer(Modifier.width(4.dp))
-                    Text("PDF তৈরি করুন", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                    Text("PDF", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
                 }
             }
         }
