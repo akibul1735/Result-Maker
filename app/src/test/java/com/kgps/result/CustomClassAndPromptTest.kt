@@ -169,4 +169,169 @@ class CustomClassAndPromptTest {
         assertEquals("২য় প্রান্তিক", termNameBn(2))
         assertEquals("৩য় প্রান্তিক", termNameBn(3))
     }
+
+    @Test
+    fun smartCsvParsesTopMetadataAndTwoRowGroupedHeadersAcrossAllThreeTerms() {
+        val raw = """
+            শ্রেণি: ৩য়, বিষয়: বাংলা
+            রোল,নাম,১ম প্রান্তিক,,২য় প্রান্তিক,,৩য় প্রান্তিক,
+            ,,ধারাবাহিক,সামস্টিক,ধারাবাহিক,সামষ্টিক,ধারাবাহিক,সামস্টিক
+            ১,আফিয়া তাসনিম,২৫,৬০,২৭,৬৪,২৮,৬৮
+            ২,তানভীর হাসান,22,55,24,-,26,61
+        """.trimIndent()
+
+        val sheet = Repo.parseSmartCsvSheet(raw)
+        assertEquals(3, sheet.detectedCls)
+        assertEquals("BAN", sheet.detectedSubjectKey)
+        assertTrue(sheet.usedTwoRowHeader)
+        assertEquals(1, sheet.skippedMetadataLines)
+        assertEquals(3, sheet.rows.size) // 1 combined header + 2 students
+
+        val cols = Repo.detectCsvColumns(
+            rows = sheet.rows,
+            existingCustomFields = emptyList(),
+            contextSubjectKey = sheet.detectedSubjectKey,
+            contextTerm = sheet.detectedTerm
+        )
+        assertEquals("roll", cols[0].targetKey)
+        assertEquals("name", cols[1].targetKey)
+        assertEquals("BAN_1_CONT", cols[2].targetKey)
+        assertEquals("BAN_1_WR", cols[3].targetKey)
+        assertEquals("BAN_2_CONT", cols[4].targetKey)
+        assertEquals("BAN_2_WR", cols[5].targetKey)
+        assertEquals("BAN_3_CONT", cols[6].targetKey)
+        assertEquals("BAN_3_WR", cols[7].targetKey)
+
+        val report = CsvImportAssistant.validateCsvData(
+            parsedRows = sheet.rows,
+            columns = cols,
+            existingStudents = emptyList(),
+            fallbackCls = sheet.detectedCls ?: 1
+        )
+        assertEquals("Expected zero warnings, got ${report.rows.flatMap { it.messages }}", 0, report.warningCount)
+        assertEquals(0, report.errorCount)
+
+        val summary = Repo.applyMappedCsvImport(
+            rows = sheet.rows,
+            columns = cols,
+            existingStudents = emptyList(),
+            existingSettings = DEFAULT_SETTINGS,
+            defaultCls = sheet.detectedCls ?: 1
+        )
+        assertEquals(2, summary.addedCount)
+        val st1 = summary.students.first { it.roll == 1 && it.cls == 3 }
+        val st2 = summary.students.first { it.roll == 2 && it.cls == 3 }
+        assertEquals(25.0, st1.m["BAN_1_CONT"]!!, 0.001)
+        assertEquals(60.0, st1.m["BAN_1_WR"]!!, 0.001)
+        assertEquals(27.0, st1.m["BAN_2_CONT"]!!, 0.001)
+        assertEquals(64.0, st1.m["BAN_2_WR"]!!, 0.001)
+        assertEquals(28.0, st1.m["BAN_3_CONT"]!!, 0.001)
+        assertEquals(68.0, st1.m["BAN_3_WR"]!!, 0.001)
+        assertFalse("Dash placeholder should not populate BAN_2_WR", st2.m.containsKey("BAN_2_WR"))
+
+        val ban = subjectsFor(3, "ইসলাম").first { it.key == "BAN" }
+        assertEquals(85.0, st1.total(ban, 1), 0.001)
+        assertEquals(91.0, st1.total(ban, 2), 0.001)
+        assertEquals(96.0, st1.total(ban, 3), 0.001)
+    }
+
+    @Test
+    fun smartCsvReconcilesContOverOldGranularComponentsAndSupportsMarkdown() {
+        val existing = listOf(
+            Student(
+                id = "st-4-1",
+                cls = 4,
+                roll = 1,
+                name = "সাদিয়া ইসলাম",
+                m = mapOf(
+                    "MATH_1_TB" to 5.0,
+                    "MATH_1_ACT" to 3.0,
+                    "MATH_1_LANG" to 2.0,
+                    "MATH_1_CT" to 5.0,
+                    "MATH_1_WR" to 40.0
+                )
+            )
+        )
+        val markdown = """
+            ```markdown
+            শ্রেণি,৪র্থ
+            বিষয়,গণিত
+            | রোল | নাম | ১ম প্রান্তিক ধারাবাহিক | ১ম প্রান্তিক সামষ্টিক | ২য় প্রান্তিক ধারাবাহিক | ২য় প্রান্তিক সামষ্টিক |
+            | --- | --- | --- | --- | --- | --- |
+            | ১ | সাদিয়া ইসলাম | 26 | 62 | — | N/A |
+            ```
+        """.trimIndent()
+
+        val sheet = Repo.parseSmartCsvSheet(markdown)
+        assertEquals(4, sheet.detectedCls)
+        assertEquals("MATH", sheet.detectedSubjectKey)
+        assertFalse(sheet.usedTwoRowHeader)
+
+        val cols = Repo.detectCsvColumns(sheet.rows, emptyList(), sheet.detectedSubjectKey, sheet.detectedTerm)
+        val summary = Repo.applyMappedCsvImport(
+            rows = sheet.rows,
+            columns = cols,
+            existingStudents = existing,
+            existingSettings = DEFAULT_SETTINGS,
+            defaultCls = sheet.detectedCls ?: 1
+        )
+        assertEquals(1, summary.updatedCount)
+        val updated = summary.students.first { it.id == "st-4-1" }
+        val math = subjectsFor(4, "ইসলাম").first { it.key == "MATH" }
+        assertEquals(26.0, updated.cont(math, 1), 0.001)
+        assertEquals(62.0, updated.wr(math, 1), 0.001)
+        assertEquals(88.0, updated.total(math, 1), 0.001)
+        assertFalse(updated.m.containsKey("MATH_1_TB"))
+        assertFalse(updated.m.containsKey("MATH_2_CONT"))
+        assertFalse(updated.m.containsKey("MATH_2_WR"))
+    }
+
+    @Test
+    fun prefilledSubjectAllTermsTemplateAndNonWrittenSubjectWorkCleanly() {
+        val roster = listOf(
+            Student(id = "s-2-1", cls = 2, roll = 1, name = "রাফি"),
+            Student(id = "s-2-2", cls = 2, roll = 2, name = "মীম")
+        )
+        val cfg = CsvPromptConfig(
+            module = CsvImportModule.SUBJECT_ALL_TERMS,
+            targetCls = 2,
+            selectedSubjectKeys = setOf("ART"),
+            allTermsSelection = setOf(1, 2, 3),
+            useTwoRowGroupedHeader = true,
+            selectedColumnKeys = defaultSelectedColumnKeys(
+                module = CsvImportModule.SUBJECT_ALL_TERMS,
+                targetCls = 2,
+                targetTerm = 1,
+                selectedSubjects = setOf("ART"),
+                allTermsSelection = setOf(1, 2, 3)
+            )
+        )
+        val template = CsvImportAssistant.buildBlankTemplateCsv(cfg, roster, DEFAULT_SETTINGS, prefillRoster = true)
+        assertTrue(template.contains("শ্রেণি"))
+        assertTrue(template.contains("শিল্পকলা"))
+        assertTrue(template.contains("রাফি"))
+        assertTrue(template.contains("মীম"))
+
+        // Teacher fills in continuous marks and leaves 0 or dash in WR if extra WR column appears
+        val filled = """
+            শ্রেণি,২য়,বিষয়,শিল্পকলা
+            রোল,নাম,১ম প্রান্তিক,,২য় প্রান্তিক,,৩য় প্রান্তিক,
+            ,,ধারাবাহিক,সামষ্টিক,ধারাবাহিক,সামষ্টিক,ধারাবাহিক,সামষ্টিক
+            1,রাফি,45,0,46,-,48,নাই
+            2,মীম,42,,44,,47,
+        """.trimIndent()
+        val sheet = Repo.parseSmartCsvSheet(filled)
+        assertEquals(2, sheet.detectedCls)
+        assertEquals("ART", sheet.detectedSubjectKey)
+        val cols = Repo.detectCsvColumns(sheet.rows, emptyList(), sheet.detectedSubjectKey, sheet.detectedTerm)
+        val report = CsvImportAssistant.validateCsvData(sheet.rows, cols, roster, sheet.detectedCls ?: 2)
+        assertEquals("Expected zero warnings for ART written==0 with 0/dash WR, got ${report.rows.flatMap { it.messages }}", 0, report.warningCount)
+
+        val summary = Repo.applyMappedCsvImport(sheet.rows, cols, roster, DEFAULT_SETTINGS, 2)
+        val rafi = summary.students.first { it.roll == 1 && it.cls == 2 }
+        assertEquals(45.0, rafi.m["ART_1_CONT"]!!, 0.001)
+        assertEquals(46.0, rafi.m["ART_2_CONT"]!!, 0.001)
+        assertEquals(48.0, rafi.m["ART_3_CONT"]!!, 0.001)
+        assertFalse("WR=0 on written==0 subject should not pollute keys", rafi.m.containsKey("ART_1_WR"))
+    }
 }

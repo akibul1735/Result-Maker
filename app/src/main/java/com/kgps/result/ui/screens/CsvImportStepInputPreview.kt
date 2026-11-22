@@ -68,6 +68,7 @@ import com.kgps.result.Settings
 import com.kgps.result.activeSchoolClasses
 import com.kgps.result.bn
 import com.kgps.result.classShortBn
+import com.kgps.result.subjectsFor
 import com.kgps.result.ui.theme.AmberBg
 import com.kgps.result.ui.theme.AmberBorder
 import com.kgps.result.ui.theme.AmberNotice
@@ -97,11 +98,14 @@ enum class CsvPreviewFilter(val id: String, val labelBn: String) {
 fun CsvStepInputAndMapping(
     rawText: String,
     onRawTextChange: (String) -> Unit,
+    parsedSheet: Repo.CsvParsedSheet,
     parsedRows: List<List<String>>,
     columns: List<Repo.CsvColMapping>,
     onColumnsChange: (List<Repo.CsvColMapping>) -> Unit,
     fallbackCls: Int,
     onFallbackClsChange: (Int) -> Unit,
+    contextSubjectKey: String?,
+    onContextSubjectKeyChange: (String?) -> Unit,
     settings: Settings,
     onPickFile: () -> Unit,
     onPasteClipboard: () -> Unit,
@@ -113,6 +117,7 @@ fun CsvStepInputAndMapping(
     val hasCodeFences = remember(rawText) { rawText.contains("```") }
     val newCols = columns.count { it.isNew }
     val matchedCols = columns.size - newCols
+    val clsSubjects = remember(fallbackCls, settings.customClasses) { subjectsFor(fallbackCls.coerceIn(1, 20), "ইসলাম") }
 
     Column(
         modifier = Modifier
@@ -122,7 +127,7 @@ fun CsvStepInputAndMapping(
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         Text(
-            "৩. AI থেকে পাওয়া CSV পেস্ট করুন অথবা ফাইল আপলোড করুন",
+            "৩. AI বা এক্সেল থেকে CSV/টেবিল পেস্ট করুন অথবা ফাইল দিন",
             fontWeight = FontWeight.Bold,
             fontSize = 14.sp,
             color = SlateText
@@ -161,7 +166,7 @@ fun CsvStepInputAndMapping(
         OutlinedTextField(
             value = rawText,
             onValueChange = onRawTextChange,
-            label = { Text("AI আউটপুট (CSV / TSV / ```csv কোড ব্লক) এখানে দিন", fontSize = 11.5.sp) },
+            label = { Text("CSV / Excel Tab / Markdown টেবিল / ```csv কোড ব্লক এখানে দিন", fontSize = 11.5.sp) },
             minLines = if (parsedRows.isEmpty()) 6 else 4,
             maxLines = 8,
             trailingIcon = if (rawText.isNotBlank()) {
@@ -179,15 +184,29 @@ fun CsvStepInputAndMapping(
                 .testTag("csv_raw_input")
         )
 
-        if (hasCodeFences && parsedRows.isNotEmpty()) {
+        val hasSmartDetections = hasCodeFences ||
+            parsedSheet.detectedCls != null ||
+            parsedSheet.detectedSubjectKey != null ||
+            parsedSheet.usedTwoRowHeader
+        if (hasSmartDetections && parsedRows.isNotEmpty()) {
+            val parts = buildList {
+                parsedSheet.detectedCls?.let { add("শ্রেণি: ${classShortBn(it, settings)}") }
+                parsedSheet.detectedSubjectKey?.let { sk ->
+                    val sName = clsSubjects.find { it.key == sk }?.bn?.substringBefore(" (") ?: sk
+                    add("বিষয়: $sName")
+                }
+                if (parsedSheet.usedTwoRowHeader) add("২-সারি প্রান্তিক হেডার")
+                if (hasCodeFences) add("AI কোড ব্লক পরিষ্কার")
+            }
             Surface(
                 color = TealSoft,
                 shape = RoundedCornerShape(8.dp),
                 border = BorderStroke(1.dp, TealContainer)
             ) {
                 Text(
-                    "AI-এর ```csv কোড ব্লক স্বয়ংক্রিয়ভাবে পরিষ্কার করে ডেটা পড়া হয়েছে।",
+                    "✓ স্বয়ংক্রিয় শনাক্ত: ${parts.joinToString(" · ")}",
                     fontSize = 11.5.sp,
+                    fontWeight = FontWeight.SemiBold,
                     color = TealDark,
                     modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
                 )
@@ -212,7 +231,7 @@ fun CsvStepInputAndMapping(
                         color = if (newCols > 0) AmberNotice else TealPrimary
                     )
 
-                    Text("ডিফল্ট শ্রেণি (CSV-তে শ্রেণি কলাম ফাঁকা থাকলে):", fontSize = 11.5.sp, color = SlateMuted)
+                    Text("শ্রেণি (CSV-তে না থাকলে ব্যবহৃত হবে):", fontSize = 11.5.sp, color = SlateMuted)
                     FlowRow(
                         horizontalArrangement = Arrangement.spacedBy(6.dp),
                         verticalArrangement = Arrangement.spacedBy(4.dp)
@@ -233,6 +252,41 @@ fun CsvStepInputAndMapping(
                                     )
                                 },
                                 modifier = Modifier.testTag("csv_fallback_cls_$c")
+                            )
+                        }
+                    }
+
+                    Text("বিষয় (শিরোনামহীন 'ধারাবাহিক/সামষ্টিক' কলামের জন্য):", fontSize = 11.5.sp, color = SlateMuted)
+                    FlowRow(
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        val isNoneSub = contextSubjectKey == null
+                        FilterChip(
+                            selected = isNoneSub,
+                            onClick = { onContextSubjectKeyChange(null) },
+                            colors = appFilterChipColors(),
+                            border = appFilterChipBorder(isNoneSub),
+                            label = {
+                                Text("স্বয়ংক্রিয়", fontSize = 11.sp)
+                            },
+                            modifier = Modifier.testTag("csv_ctx_sub_auto")
+                        )
+                        clsSubjects.forEach { s ->
+                            val isSubSel = contextSubjectKey == s.key
+                            FilterChip(
+                                selected = isSubSel,
+                                onClick = { onContextSubjectKeyChange(s.key) },
+                                colors = appFilterChipColors(),
+                                border = appFilterChipBorder(isSubSel),
+                                label = {
+                                    Text(
+                                        s.bn.substringBefore(" ("),
+                                        fontSize = 11.sp,
+                                        fontWeight = if (isSubSel) FontWeight.Bold else FontWeight.Normal
+                                    )
+                                },
+                                modifier = Modifier.testTag("csv_ctx_sub_${s.key}")
                             )
                         }
                     }
@@ -304,6 +358,8 @@ fun CsvStepInputAndMapping(
                                 CsvColumnMappingCard(
                                     index = idx,
                                     col = col,
+                                    fallbackCls = fallbackCls,
+                                    contextSubjectKey = contextSubjectKey,
                                     settings = settings,
                                     onUpdateCol = { updated ->
                                         onColumnsChange(
@@ -337,6 +393,8 @@ fun CsvStepInputAndMapping(
 private fun CsvColumnMappingCard(
     index: Int,
     col: Repo.CsvColMapping,
+    fallbackCls: Int,
+    contextSubjectKey: String?,
     settings: Settings,
     onUpdateCol: (Repo.CsvColMapping) -> Unit
 ) {
@@ -346,15 +404,26 @@ private fun CsvColumnMappingCard(
         "skip" -> "✕ বাদ দিন"
         "standard" -> Repo.STANDARD_FIELDS.find { it.first == col.targetKey }?.second ?: col.targetKey
         "custom" -> "কাস্টম: ${settings.customFields.find { it.key == col.targetKey }?.label ?: col.targetKey}"
-        "mark" -> "নম্বর কলাম: ${col.targetKey}"
-        "text" -> "উপস্থিতি/মন্তব্য: ${col.targetKey}"
+        "mark" -> Repo.friendlyMarkHeader(col.targetKey, com.kgps.result.CsvHeaderStyle.FRIENDLY_BN)
+        "text" -> Repo.friendlyTextHeader(col.targetKey, com.kgps.result.CsvHeaderStyle.FRIENDLY_BN)
         else -> col.targetKey
+    }
+    val clsSubs = remember(fallbackCls, settings.customClasses) { subjectsFor(fallbackCls.coerceIn(1, 20), "ইসলাম") }
+    val activeSub = contextSubjectKey?.let { key -> clsSubs.find { it.key == key } } ?: clsSubs.first()
+    val quickMarkTargets = remember(activeSub) {
+        buildList {
+            (1..3).forEach { t ->
+                add(com.kgps.result.mk(activeSub.key, t, "CONT"))
+                if (activeSub.written > 0) add(com.kgps.result.mk(activeSub.key, t, "WR"))
+                add(com.kgps.result.mk(activeSub.key, t, "TOTAL"))
+            }
+        }
     }
 
     Card(
         modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(containerColor = if (col.isNew) AmberBg else Color.White),
-        border = BorderStroke(1.dp, if (col.isNew) AmberBorder else SlateOutline),
+        colors = CardDefaults.cardColors(containerColor = if (col.isNew && col.targetType == "create_new") AmberBg else Color.White),
+        border = BorderStroke(1.dp, if (col.isNew && col.targetType == "create_new") AmberBorder else SlateOutline),
         shape = RoundedCornerShape(8.dp)
     ) {
         Column(modifier = Modifier.padding(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -370,10 +439,18 @@ private fun CsvColumnMappingCard(
                     modifier = Modifier.weight(1f)
                 )
                 Text(
-                    if (col.isNew) "নতুন কলাম" else "মিলেছে",
+                    when {
+                        col.targetType == "skip" -> "বাদ"
+                        col.isNew && col.targetType == "create_new" -> "নতুন কলাম"
+                        else -> "মিলেছে"
+                    },
                     fontSize = 10.sp,
                     fontWeight = FontWeight.Bold,
-                    color = if (col.isNew) AmberNotice else EmeraldGrade
+                    color = when {
+                        col.targetType == "skip" -> SlateMuted
+                        col.isNew && col.targetType == "create_new" -> AmberNotice
+                        else -> EmeraldGrade
+                    }
                 )
             }
             if (col.samples.isNotEmpty()) {
@@ -451,6 +528,50 @@ private fun CsvColumnMappingCard(
                             } else null,
                             onClick = {
                                 onUpdateCol(col.copy(targetType = "standard", targetKey = fKey))
+                                dropdownOpen = false
+                            }
+                        )
+                    }
+                    HorizontalDivider()
+                    quickMarkTargets.forEach { mKey ->
+                        val isMarkSel = col.targetType == "mark" && col.targetKey == mKey
+                        DropdownMenuItem(
+                            modifier = Modifier.background(if (isMarkSel) TealContainer else Color.Transparent),
+                            text = {
+                                Text(
+                                    Repo.friendlyMarkHeader(mKey, com.kgps.result.CsvHeaderStyle.FRIENDLY_BN),
+                                    fontSize = 12.sp,
+                                    fontWeight = if (isMarkSel) FontWeight.Bold else FontWeight.Normal,
+                                    color = if (isMarkSel) TealDark else SlateText
+                                )
+                            },
+                            trailingIcon = if (isMarkSel) {
+                                { Icon(Icons.Rounded.Check, contentDescription = null, tint = TealDark, modifier = Modifier.size(16.dp)) }
+                            } else null,
+                            onClick = {
+                                onUpdateCol(col.copy(isNew = false, targetType = "mark", targetKey = mKey))
+                                dropdownOpen = false
+                            }
+                        )
+                    }
+                    HorizontalDivider()
+                    Repo.TEXT_KEYS.forEach { tKey ->
+                        val isTextSel = col.targetType == "text" && col.targetKey == tKey
+                        DropdownMenuItem(
+                            modifier = Modifier.background(if (isTextSel) TealContainer else Color.Transparent),
+                            text = {
+                                Text(
+                                    Repo.friendlyTextHeader(tKey, com.kgps.result.CsvHeaderStyle.FRIENDLY_BN),
+                                    fontSize = 12.sp,
+                                    fontWeight = if (isTextSel) FontWeight.Bold else FontWeight.Normal,
+                                    color = if (isTextSel) TealDark else SlateText
+                                )
+                            },
+                            trailingIcon = if (isTextSel) {
+                                { Icon(Icons.Rounded.Check, contentDescription = null, tint = TealDark, modifier = Modifier.size(16.dp)) }
+                            } else null,
+                            onClick = {
+                                onUpdateCol(col.copy(isNew = false, targetType = "text", targetKey = tKey))
                                 dropdownOpen = false
                             }
                         )

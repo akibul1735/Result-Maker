@@ -267,7 +267,7 @@ object Repo {
         else -> "৩য় প্রান্তিক"
     }
 
-    private fun friendlyMarkHeader(key: String, style: CsvHeaderStyle): String {
+    fun friendlyMarkHeader(key: String, style: CsvHeaderStyle): String {
         if (style == CsvHeaderStyle.SYSTEM_KEYS) return key
         val parts = key.split('_')
         if (parts.size != 3) return key
@@ -289,7 +289,7 @@ object Repo {
         }
     }
 
-    private fun friendlyTextHeader(key: String, style: CsvHeaderStyle): String {
+    fun friendlyTextHeader(key: String, style: CsvHeaderStyle): String {
         if (style == CsvHeaderStyle.SYSTEM_KEYS) return key
         val parts = key.split('_')
         if (parts.size != 2) return key
@@ -467,20 +467,44 @@ object Repo {
 
     fun stripCsvCodeFences(raw: String): String {
         val cleaned = raw.removePrefix("\uFEFF").trim()
-        val fenceRegex = Regex("```(?:csv|tsv|txt|text|excel)?\\s*\\n([\\s\\S]*?)```", RegexOption.IGNORE_CASE)
+        val fenceRegex = Regex("```(?:csv|tsv|txt|text|excel|markdown|md|table)?\\s*\\n([\\s\\S]*?)```", RegexOption.IGNORE_CASE)
         val match = fenceRegex.find(cleaned)
         if (match != null) {
             return match.groupValues[1].trim()
         }
         return cleaned
-            .replace(Regex("^```(?:csv|tsv|txt|text|excel)?\\s*\\n?", RegexOption.IGNORE_CASE), "")
+            .replace(Regex("^```(?:csv|tsv|txt|text|excel|markdown|md|table)?\\s*\\n?", RegexOption.IGNORE_CASE), "")
             .replace(Regex("\\n?```\\s*$"), "")
             .trim()
+    }
+
+    private fun tryParseMarkdownTable(t: String): List<List<String>>? {
+        val lines = t.lines().map { it.trim() }.filter { it.isNotBlank() }
+        if (lines.size < 2) return null
+        val firstPipeIdx = lines.indexOfFirst { it.startsWith("|") && it.endsWith("|") }
+        if (firstPipeIdx < 0) return null
+        val tailLines = lines.drop(firstPipeIdx)
+        val pipeLines = tailLines.count { it.startsWith("|") && it.endsWith("|") }
+        if (pipeLines < 2 || pipeLines < (tailLines.size * 2) / 3) return null
+        val dividerRegex = Regex("^\\|?(?:\\s*:?-{2,}:?\\s*\\|)+\\s*$")
+        val rows = lines
+            .filter { !dividerRegex.matches(it) }
+            .map { line ->
+                if (line.startsWith("|") && line.endsWith("|")) {
+                    line.removePrefix("|").removeSuffix("|").split("|").map { it.trim() }
+                } else {
+                    val splitSep = if (line.contains('\t')) '\t' else if (line.contains(';') && !line.contains(',')) ';' else ','
+                    line.split(splitSep).map { it.trim().trim('"') }
+                }
+            }
+            .filter { r -> r.any { it.isNotBlank() } }
+        return rows.takeIf { it.size >= 2 }
     }
 
     fun parseCsv(t0: String): List<List<String>> {
         val t = stripCsvCodeFences(t0)
         if (t.isBlank()) return emptyList()
+        tryParseMarkdownTable(t)?.let { return it }
         val sep = detectDelimiter(t)
         val rows = mutableListOf<List<String>>()
         var row = mutableListOf<String>()
@@ -500,6 +524,11 @@ object Repo {
         }
         if (sb.isNotEmpty() || row.isNotEmpty()) { row.add(sb.toString()); rows.add(row) }
         return rows.filter { r -> r.any { it.isNotBlank() } }
+    }
+
+    fun isBlankOrDashPlaceholder(raw: String): Boolean {
+        val v = raw.trim().lowercase()
+        return v.isEmpty() || v in setOf("-", "—", "–", "--", "n/a", "na", "nil", "none", "নাই", "নেই", "প্রযোজ্য নয়", "প্রযোজ্য নহে")
     }
 
     fun parseClassNum(raw: String): Int? {
@@ -536,6 +565,27 @@ object Repo {
         val numToken = Regex("\\b([1-9]|1[0-9]|20)\\b").find(s)?.groupValues?.getOrNull(1)?.toIntOrNull()
         if (numToken != null && numToken in 1..20) return numToken
         return null
+    }
+
+    fun parseSubjectKey(raw: String): String? {
+        val s = normHeader(fromBn(raw))
+        if (s.isBlank()) return null
+        return when {
+            s.contains("বাংলাদেশ") || s.contains("বিশ্বপরিচ") || s.contains("বাওবি") ||
+                s.contains("bgw") || s.contains("bgs") || s.contains("bangladesh") || s.contains("global") -> "BGW"
+            s.contains("সামাজিক") || s.contains("সমন্বিত") || s.contains("social") || s == "soc" -> "SOC"
+            s.contains("শিল্পকলা") || s.contains("চারু") || s.contains("কারুকলা") || s == "art" || s.contains("arts") -> "ART"
+            s.contains("শারীরিক") || s.contains("মানসিক স্বাস্থ্য") || s.contains("স্বাস্থ্য শিক্ষা") ||
+                s.contains("physical") || s == "pe" -> "PE"
+            s.contains("ধর্ম") || s.contains("ইসলাম") || s.contains("হিন্দু") || s.contains("বৌদ্ধ") ||
+                s.contains("খ্রীষ্ট") || s.contains("খ্রিষ্ট") || s.contains("religion") || s == "rel" -> "REL"
+            s.contains("বিজ্ঞান") || s.contains("science") || s == "sci" -> "SCI"
+            s.contains("গণিত") || s.contains("গনিত") || s.contains("অঙ্ক") || s.contains("অংক") ||
+                s.contains("math") -> "MATH"
+            s.contains("ইংরেজ") || s.contains("english") || s == "eng" -> "ENG"
+            s.contains("বাংলা") || s.contains("bangla") || s.contains("bengali") || s == "ban" -> "BAN"
+            else -> null
+        }
     }
 
     val STANDARD_FIELDS: List<Pair<String, String>> = listOf(
@@ -585,6 +635,238 @@ object Repo {
         map
     }
 
+    data class CsvParsedSheet(
+        val rows: List<List<String>>,
+        val detectedCls: Int?,
+        val detectedSubjectKey: String?,
+        val detectedTerm: Int?,
+        val usedTwoRowHeader: Boolean,
+        val skippedMetadataLines: Int
+    )
+
+    private fun parseTermFromToken(raw: String): Int? {
+        val s = normHeader(fromBn(raw))
+        if (s.isBlank()) return null
+        return when {
+            s.contains("১ম") || s.contains("প্রথম") || s.contains("1st") ||
+                Regex("\\b(t1|term 1|1)\\b").containsMatchIn(s) && (s.contains("প্রান্তিক") || s.contains("term") || s.contains("t1")) -> 1
+            s.contains("২য়") || s.contains("২য়") || s.contains("দ্বিতীয়") || s.contains("দ্বিতীয়") || s.contains("2nd") ||
+                Regex("\\b(t2|term 2|2)\\b").containsMatchIn(s) && (s.contains("প্রান্তিক") || s.contains("term") || s.contains("t2")) -> 2
+            s.contains("৩য়") || s.contains("৩য়") || s.contains("তৃতীয়") || s.contains("তৃতীয়") || s.contains("3rd") ||
+                Regex("\\b(t3|term 3|3)\\b").containsMatchIn(s) && (s.contains("প্রান্তিক") || s.contains("term") || s.contains("t3")) -> 3
+            s.contains("১ম প্রান্তিক") || s.contains("প্রান্তিক ১") -> 1
+            s.contains("২য় প্রান্তিক") || s.contains("২য় প্রান্তিক") || s.contains("প্রান্তিক ২") -> 2
+            s.contains("৩য় প্রান্তিক") || s.contains("৩য় প্রান্তিক") || s.contains("প্রান্তিক ৩") -> 3
+            else -> null
+        }
+    }
+
+    private fun isSubHeaderKeyword(cell: String): Boolean {
+        val n = normHeader(fromBn(cell))
+        if (n.isBlank()) return false
+        return n.contains("ধারাবাহিক") || n.contains("continuous") || n == "cont" || n == "ca" ||
+            n.contains("সামষ্টিক") || n.contains("সামস্টিক") || n.contains("লিখিত") || n.contains("summative") || n.contains("written") || n == "wr" || n == "sa" ||
+            n.contains("পাঠ্যপুস্তক") || n.contains("সহায়িকা") || n.contains("textbook") || n == "tb" ||
+            n.contains("সক্রিয়তা") || n.contains("শ্রেণিকাজ") || n.contains("activity") || n == "act" ||
+            n.contains("ভাষাদক্ষতা") || n.contains("বোধগম্যতা") || n.contains("language") || n == "lang" ||
+            n.contains("ক্লাস টেস্ট") || n.contains("class test") || n == "ct" ||
+            n == "মোট" || n == "সর্বমোট" || n == "total" || n.contains("মোট নম্বর") ||
+            n.contains("কার্যদিবস") || n.contains("উপস্থিতি") || n.contains("মন্তব্য") ||
+            n.contains("শৃঙ্খলা") || n.contains("আচরণ")
+    }
+
+    private fun isMetadataBannerRow(row: List<String>): Boolean {
+        val nonBlank = row.map { it.trim() }.filter { it.isNotBlank() }
+        if (nonBlank.isEmpty()) return false
+        val joined = normHeader(fromBn(nonBlank.joinToString(" ")))
+        val hasRollCol = nonBlank.any { normHeader(it) in FIELD_ALIASES["roll"].orEmpty().map(::normHeader) }
+        val hasNameCol = nonBlank.any { normHeader(it) in FIELD_ALIASES["name"].orEmpty().map(::normHeader) }
+        if (hasRollCol || hasNameCol) return false
+        val hasKnownMarkOrTextKey = nonBlank.any { MARK_KEYS.contains(it) || TEXT_KEYS.contains(it) || FRIENDLY_HEADER_REVERSE.containsKey(normHeader(it)) }
+        if (hasKnownMarkOrTextKey) return false
+        // Top rows like "শ্রেণি: ৩য়, বিষয়: বাংলা" or "শ্রেণি, ৩য়, বিষয়, বাংলা" or school name title
+        return joined.contains("শ্রেণি") || joined.contains("শ্রেণী") || joined.contains("class") ||
+            joined.contains("বিষয়") || joined.contains("বিষয়") || joined.contains("subject") ||
+            joined.contains("প্রান্তিক") || joined.contains("বিদ্যালয়") || joined.contains("বিদ্যালয়") ||
+            joined.contains("স্কুল") || joined.contains("school") || nonBlank.size <= 2
+    }
+
+    private fun extractMetadataFromTopRows(metaRows: List<List<String>>): Triple<Int?, String?, Int?> {
+        var clsFound: Int? = null
+        var subFound: String? = null
+        var termFound: Int? = null
+
+        fun inspectPair(labelRaw: String, valueRaw: String?) {
+            val lNorm = normHeader(fromBn(labelRaw))
+            val combined = if (valueRaw != null) "$labelRaw $valueRaw" else labelRaw
+            if (lNorm.contains("শ্রেণি") || lNorm.contains("শ্রেণী") || lNorm.contains("class")) {
+                val cand = valueRaw?.takeIf { it.isNotBlank() } ?: labelRaw.substringAfter(":", "").ifBlank { labelRaw }
+                parseClassNum(cand)?.let { if (clsFound == null) clsFound = it }
+            }
+            if (lNorm.contains("বিষয়") || lNorm.contains("বিষয়") || lNorm.contains("subject")) {
+                val cand = valueRaw?.takeIf { it.isNotBlank() } ?: labelRaw.substringAfter(":", "").ifBlank { labelRaw }
+                parseSubjectKey(cand)?.let { if (subFound == null) subFound = it }
+            }
+            if (lNorm.contains("প্রান্তিক") || lNorm.contains("term")) {
+                val cand = valueRaw?.takeIf { it.isNotBlank() } ?: labelRaw.substringAfter(":", "").ifBlank { labelRaw }
+                parseTermFromToken(cand)?.let { if (termFound == null) termFound = it }
+            }
+            // Also check single free-form cell e.g. "৩য় শ্রেণি - বাংলা"
+            if (clsFound == null && (lNorm.contains("শ্রেণি") || lNorm.contains("শ্রেণী") || lNorm.contains("class"))) {
+                parseClassNum(combined)?.let { clsFound = it }
+            }
+            if (subFound == null && !lNorm.contains("শ্রেণি") && !lNorm.contains("শ্রেণী") && !lNorm.contains("প্রান্তিক")) {
+                parseSubjectKey(labelRaw)?.let { subFound = it }
+            }
+        }
+
+        metaRows.forEach { row ->
+            val trimmed = row.map { it.trim() }
+            var i = 0
+            while (i < trimmed.size) {
+                val cell = trimmed[i]
+                if (cell.isBlank()) {
+                    i++; continue
+                }
+                // Check colon or equals key:value in one cell, or key|value in adjacent cells
+                val splitColon = Regex("[:=：]").split(cell, limit = 2)
+                if (splitColon.size == 2 && splitColon[1].isNotBlank()) {
+                    inspectPair(splitColon[0], splitColon[1])
+                } else {
+                    val nextCell = trimmed.getOrNull(i + 1)?.takeIf { it.isNotBlank() }
+                    val cNorm = normHeader(fromBn(cell))
+                    val isKeyLabel = cNorm in setOf("শ্রেণি", "শ্রেণী", "class", "বিষয়", "বিষয়", "subject", "প্রান্তিক", "term")
+                    if (isKeyLabel && nextCell != null) {
+                        inspectPair(cell, nextCell)
+                        i++
+                    } else {
+                        // Could still have multiple key:val chunks separated by | or -
+                        cell.split("|", "•", "·").forEach { chunk ->
+                            val subColon = Regex("[:=：]").split(chunk.trim(), limit = 2)
+                            if (subColon.size == 2) inspectPair(subColon[0], subColon[1])
+                            else inspectPair(chunk.trim(), null)
+                        }
+                    }
+                }
+                i++
+            }
+        }
+        return Triple(clsFound, subFound, termFound)
+    }
+
+    fun parseSmartCsvSheet(rawText: String): CsvParsedSheet {
+        val rawRows = parseCsv(rawText)
+        if (rawRows.isEmpty()) {
+            return CsvParsedSheet(emptyList(), null, null, null, usedTwoRowHeader = false, skippedMetadataLines = 0)
+        }
+
+        // Find the start of table headers within the first few rows
+        val scanLimit = minOf(rawRows.size, 8)
+        var headerIdx = 0
+        while (headerIdx < scanLimit - 1 && isMetadataBannerRow(rawRows[headerIdx])) {
+            val next = rawRows.getOrNull(headerIdx + 1) ?: break
+            val nextJoined = normHeader(fromBn(next.joinToString(" ")))
+            val nextHasHeaderSignal = next.any {
+                val n = normHeader(it)
+                n in FIELD_ALIASES["roll"].orEmpty().map(::normHeader) ||
+                    n in FIELD_ALIASES["name"].orEmpty().map(::normHeader) ||
+                    isSubHeaderKeyword(it) ||
+                    parseTermFromToken(it) != null ||
+                    MARK_KEYS.contains(it.trim()) ||
+                    TEXT_KEYS.contains(it.trim()) ||
+                    FRIENDLY_HEADER_REVERSE.containsKey(n)
+            } || nextJoined.contains("প্রান্তিক")
+            if (isMetadataBannerRow(rawRows[headerIdx]) && nextHasHeaderSignal) {
+                headerIdx++
+            } else if (isMetadataBannerRow(rawRows[headerIdx])) {
+                // Keep scanning only if a later row in scanLimit explicitly has roll or name
+                val laterHasTableHeader = ((headerIdx + 1) until scanLimit).any { idx ->
+                    val r = rawRows[idx]
+                    r.any {
+                        val n = normHeader(it)
+                        n in FIELD_ALIASES["roll"].orEmpty().map(::normHeader) ||
+                            n in FIELD_ALIASES["name"].orEmpty().map(::normHeader)
+                    }
+                }
+                if (laterHasTableHeader) headerIdx++ else break
+            } else {
+                break
+            }
+        }
+
+        val (detectedCls, detectedSubjectKey, detectedTerm) = if (headerIdx > 0) {
+            extractMetadataFromTopRows(rawRows.take(headerIdx))
+        } else {
+            Triple(null, null, null)
+        }
+
+        val hRow = rawRows[headerIdx]
+        val subRow = rawRows.getOrNull(headerIdx + 1)
+        val hasSecondHeaderRow = if (subRow != null && headerIdx + 2 <= rawRows.size) {
+            val subKeywords = subRow.count { isSubHeaderKeyword(it) }
+            val rollColInH = hRow.indexOfFirst { normHeader(it) in FIELD_ALIASES["roll"].orEmpty().map(::normHeader) }
+            val rollCellInSub = if (rollColInH >= 0) subRow.getOrNull(rollColInH)?.trim().orEmpty() else ""
+            val subLooksLikeStudentRow = fromBn(rollCellInSub).toIntOrNull()?.let { it > 0 } == true
+            subKeywords >= 2 && !subLooksLikeStudentRow
+        } else false
+
+        if (!hasSecondHeaderRow) {
+            return CsvParsedSheet(
+                rows = rawRows.drop(headerIdx),
+                detectedCls = detectedCls,
+                detectedSubjectKey = detectedSubjectKey,
+                detectedTerm = detectedTerm,
+                usedTwoRowHeader = false,
+                skippedMetadataLines = headerIdx
+            )
+        }
+
+        val sRow = subRow!!
+        val maxCols = maxOf(hRow.size, sRow.size)
+        val combinedHeaders = MutableList(maxCols) { "" }
+        var carriedParent = ""
+        for (c in 0 until maxCols) {
+            val p = hRow.getOrNull(c)?.trim().orEmpty()
+            val sub = sRow.getOrNull(c)?.trim().orEmpty()
+            val effectiveParent = if (p.isNotBlank()) {
+                val pNorm = normHeader(p)
+                val isIdentityHeader = pNorm in (FIELD_ALIASES["roll"].orEmpty() + FIELD_ALIASES["name"].orEmpty() + FIELD_ALIASES["cls"].orEmpty()).map(::normHeader)
+                carriedParent = if (isIdentityHeader) "" else p
+                p
+            } else if (sub.isNotBlank()) {
+                carriedParent
+            } else {
+                ""
+            }
+
+            combinedHeaders[c] = when {
+                effectiveParent.isNotBlank() && sub.isNotBlank() && normHeader(effectiveParent) != normHeader(sub) -> {
+                    val pNorm = normHeader(effectiveParent)
+                    val sNorm = normHeader(sub)
+                    if (sNorm in (FIELD_ALIASES["roll"].orEmpty() + FIELD_ALIASES["name"].orEmpty() + FIELD_ALIASES["cls"].orEmpty()).map(::normHeader)) {
+                        sub
+                    } else if (pNorm in (FIELD_ALIASES["roll"].orEmpty() + FIELD_ALIASES["name"].orEmpty() + FIELD_ALIASES["cls"].orEmpty()).map(::normHeader)) {
+                        effectiveParent
+                    } else {
+                        "$effectiveParent - $sub"
+                    }
+                }
+                sub.isNotBlank() -> sub
+                else -> effectiveParent
+            }
+        }
+
+        val dataRows = rawRows.drop(headerIdx + 2)
+        return CsvParsedSheet(
+            rows = listOf(combinedHeaders) + dataRows,
+            detectedCls = detectedCls,
+            detectedSubjectKey = detectedSubjectKey,
+            detectedTerm = detectedTerm,
+            usedTwoRowHeader = true,
+            skippedMetadataLines = headerIdx
+        )
+    }
+
     fun makeCustomFieldKey(label: String, existingKeys: Set<String>): String {
         val ascii = label.lowercase().replace(Regex("[^a-z0-9]+"), "_").trim('_')
         val base = if (ascii.isNotBlank()) "cf_$ascii" else "cf_${(label.hashCode().toUInt()).toString(36)}"
@@ -612,7 +894,57 @@ object Repo {
         val createdFields: List<CustomFieldDef>
     )
 
-    fun detectCsvColumns(rows: List<List<String>>, existingCustomFields: List<CustomFieldDef>): List<CsvColMapping> {
+    private fun matchSemanticColumn(
+        header: String,
+        contextSubjectKey: String?,
+        contextTerm: Int?
+    ): Pair<String, String>? {
+        val norm = normHeader(fromBn(header))
+        if (norm.isBlank()) return null
+
+        // Auto-skip common read-only summary columns when re-importing exported sheets
+        if (norm in setOf("গড় নম্বর", "মোট প্রাপ্ত নম্বর", "শতকরা হার", "অবস্থানগত মান", "মেধাক্রম", "average marks", "total obtained", "percentage", "grade position", "merit rank")) {
+            return "skip" to ""
+        }
+
+        val term = parseTermFromToken(header) ?: contextTerm
+
+        // Attendance / Traits / Comments with optional term
+        if (term != null) {
+            when {
+                norm.contains("কার্যদিবস") || norm.contains("working day") -> return "text" to "DAYS_$term"
+                norm.contains("উপস্থিত") || norm.contains("attendance") || norm.contains("present") -> return "text" to "PRES_$term"
+                norm.contains("সহপাঠক্রমিক") || norm.contains("সহপাঠ্য") || norm.contains("co curricular") -> return "text" to "ACT_$term"
+                norm.contains("শৃঙ্খলা") || norm.contains("discipline") -> return "text" to "DISC_$term"
+                norm.contains("আচরণ") || norm.contains("conduct") -> return "text" to "COND_$term"
+                norm.contains("মন্তব্য") || norm.contains("মতামত") || norm.contains("remark") || norm.contains("comment") -> return "text" to "REM_$term"
+            }
+        }
+
+        val subKey = parseSubjectKey(header) ?: contextSubjectKey
+        val compKey = when {
+            norm.contains("পাঠ্যপুস্তক") || norm.contains("সহায়িকা") || norm.contains("textbook") || Regex("\\btb\\b").containsMatchIn(norm) -> "TB"
+            norm.contains("শ্রেণিকাজ") || norm.contains("সক্রিয়তা") || norm.contains("activity") || Regex("\\bact\\b").containsMatchIn(norm) -> "ACT"
+            norm.contains("ভাষাদক্ষতা") || norm.contains("বোধগম্যতা") || norm.contains("language") || Regex("\\blang\\b").containsMatchIn(norm) -> "LANG"
+            norm.contains("ক্লাস টেস্ট") || norm.contains("class test") || Regex("\\bct\\b").containsMatchIn(norm) -> "CT"
+            norm.contains("ধারাবাহিক") || norm.contains("continuous") || Regex("\\b(cont|ca)\\b").containsMatchIn(norm) -> "CONT"
+            norm.contains("সামষ্টিক") || norm.contains("সামস্টিক") || norm.contains("লিখিত") || norm.contains("summative") || norm.contains("written") || Regex("\\b(wr|sa)\\b").containsMatchIn(norm) -> "WR"
+            norm == "মোট" || norm == "সর্বমোট" || norm == "total" || norm.endsWith(" মোট") || norm.contains("মোট নম্বর") || norm.contains("বিষয় মোট") -> "TOTAL"
+            else -> null
+        }
+
+        if (subKey != null && term != null && term in 1..3 && compKey != null) {
+            return "mark" to mk(subKey, term, compKey)
+        }
+        return null
+    }
+
+    fun detectCsvColumns(
+        rows: List<List<String>>,
+        existingCustomFields: List<CustomFieldDef>,
+        contextSubjectKey: String? = null,
+        contextTerm: Int? = null
+    ): List<CsvColMapping> {
         if (rows.isEmpty()) return emptyList()
         val headers = rows[0]
         val dataRows = rows.drop(1)
@@ -628,6 +960,9 @@ object Repo {
                 aliases.any { normHeader(it) == norm }
             }?.key
             val friendlyMatch = FRIENDLY_HEADER_REVERSE[norm]
+            val semanticMatch = if (matchedStd == null && friendlyMatch == null) {
+                matchSemanticColumn(header, contextSubjectKey, contextTerm)
+            } else null
 
             when {
                 matchedStd != null -> {
@@ -641,6 +976,10 @@ object Repo {
                 }
                 friendlyMatch != null -> {
                     val (tType, tKey) = friendlyMatch
+                    CsvColMapping(colIndex, header, samples, isNew = false, targetType = tType, targetKey = tKey, newLabel = header)
+                }
+                semanticMatch != null -> {
+                    val (tType, tKey) = semanticMatch
                     CsvColMapping(colIndex, header, samples, isNew = false, targetType = tType, targetKey = tKey, newLabel = header)
                 }
                 else -> {
@@ -695,7 +1034,7 @@ object Repo {
             var clsVal: Int? = null
             var rollVal: Int? = null
             val stdMap = mutableMapOf<String, String>()
-            val m = mutableMapOf<String, Double>()
+            val importedMarks = mutableMapOf<String, Double>()
             val x = mutableMapOf<String, String>()
 
             for (col in resolvedCols) {
@@ -711,7 +1050,9 @@ object Repo {
                             stdMap[col.targetKey] = if (prev != null && prev != raw) "$prev, $raw" else raw
                         }
                     }
-                    "mark" -> fromBn(raw).toDoubleOrNull()?.let { m[col.targetKey] = it }
+                    "mark" -> if (!isBlankOrDashPlaceholder(raw)) {
+                        fromBn(raw).toDoubleOrNull()?.let { importedMarks[col.targetKey] = it }
+                    }
                     "text", "custom" -> {
                         val prev = x[col.targetKey]
                         x[col.targetKey] = if (prev != null && prev != raw) "$prev, $raw" else raw
@@ -730,6 +1071,43 @@ object Repo {
 
             val pos = out.indexOfFirst { it.cls == cls && it.roll == roll }
             val base = if (pos >= 0) out[pos] else Student(UUID.randomUUID().toString(), cls, roll, "")
+            val clsSubs = subjectsFor(cls, stdMap["religion"]?.ifBlank { base.religion } ?: base.religion)
+
+            // Reconcile CONT vs granular components (TB/ACT/LANG/CT) & ignore WR on written==0 subjects
+            val mergedMarks = base.m.toMutableMap()
+            val cleanedImported = importedMarks.filter { (key, num) ->
+                val parts = key.split("_")
+                if (parts.size == 3 && parts[2] == "WR") {
+                    val sub = clsSubs.find { it.key == parts[0] }
+                    sub == null || sub.written > 0 || num > 0.0
+                } else true
+            }
+            cleanedImported.keys.forEach { key ->
+                val parts = key.split("_")
+                if (parts.size == 3) {
+                    val subKey = parts[0]
+                    val term = parts[1].toIntOrNull()
+                    val compKey = parts[2]
+                    if (term != null) {
+                        when (compKey) {
+                            "CONT" -> listOf("TB", "ACT", "LANG", "CT", "TOTAL").forEach { mergedMarks.remove(mk(subKey, term, it)) }
+                            "TB", "ACT", "LANG", "CT" -> {
+                                mergedMarks.remove(mk(subKey, term, "CONT"))
+                                mergedMarks.remove(mk(subKey, term, "TOTAL"))
+                            }
+                            "TOTAL" -> {
+                                val hasGranularOrContInSameRow = listOf("TB", "ACT", "LANG", "CT", "CONT", "WR")
+                                    .any { cleanedImported.containsKey(mk(subKey, term, it)) }
+                                if (!hasGranularOrContInSameRow) {
+                                    listOf("TB", "ACT", "LANG", "CT", "CONT", "WR").forEach { mergedMarks.remove(mk(subKey, term, it)) }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            mergedMarks.putAll(cleanedImported)
+
             val upd = base.copy(
                 name = stdMap["name"]?.ifBlank { base.name } ?: base.name,
                 guardian = stdMap["guardian"]?.ifBlank { base.guardian } ?: base.guardian,
@@ -740,7 +1118,7 @@ object Repo {
                 district = (stdMap["district"]?.ifBlank { base.district } ?: base.district).ifBlank { DEFAULT_DISTRICT },
                 mobile = stdMap["mobile"]?.ifBlank { base.mobile } ?: base.mobile,
                 religion = stdMap["religion"]?.ifBlank { base.religion } ?: base.religion,
-                m = base.m + m,
+                m = mergedMarks,
                 x = base.x + x
             )
             if (pos >= 0) {
@@ -761,10 +1139,10 @@ object Repo {
 
     /** একই শ্রেণি+রোল থাকলে হালনাগাদ, না থাকলে নতুন শিক্ষার্থী যোগ */
     fun importCsv(txt: String, existing: List<Student>): List<Student> {
-        val rows = parseCsv(txt)
-        if (rows.size < 2) return existing
-        val cols = detectCsvColumns(rows, emptyList())
-        return applyMappedCsvImport(rows, cols, existing, DEFAULT_SETTINGS, 1).students
+        val sheet = parseSmartCsvSheet(txt)
+        if (sheet.rows.size < 2) return existing
+        val cols = detectCsvColumns(sheet.rows, emptyList(), sheet.detectedSubjectKey, sheet.detectedTerm)
+        return applyMappedCsvImport(sheet.rows, cols, existing, DEFAULT_SETTINGS, sheet.detectedCls ?: 1).students
     }
 
     private const val APP_UI_PREFS = "kgps_app_ui_prefs"

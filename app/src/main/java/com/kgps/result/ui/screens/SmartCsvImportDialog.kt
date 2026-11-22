@@ -115,11 +115,34 @@ fun SmartCsvImportDialog(
 
     var rawText by remember(initialText) { mutableStateOf(initialText) }
     var fallbackCls by remember(defaultCls) { mutableStateOf(defaultCls.coerceIn(1, 20)) }
-    val parsedRows = remember(rawText) {
-        if (rawText.isBlank()) emptyList() else Repo.parseCsv(rawText)
+    val parsedSheet = remember(rawText) {
+        if (rawText.isBlank()) Repo.CsvParsedSheet(emptyList(), null, null, null, false, 0)
+        else Repo.parseSmartCsvSheet(rawText)
     }
-    var columns by remember(parsedRows, settings.customFields) {
-        mutableStateOf(Repo.detectCsvColumns(parsedRows, settings.customFields))
+    val parsedRows = parsedSheet.rows
+    var contextSubjectKey by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(promptConfig.targetCls) {
+        if (promptConfig.targetCls > 0 && parsedSheet.detectedCls == null) {
+            fallbackCls = promptConfig.targetCls
+        }
+    }
+    LaunchedEffect(parsedSheet, promptConfig.module, promptConfig.selectedSubjectKeys) {
+        parsedSheet.detectedCls?.let { fallbackCls = it }
+        if (parsedSheet.detectedSubjectKey != null) {
+            contextSubjectKey = parsedSheet.detectedSubjectKey
+        } else if (promptConfig.module == CsvImportModule.SUBJECT_ALL_TERMS) {
+            contextSubjectKey = CsvImportAssistant.resolveSubjectForAllTerms(promptConfig).key
+        }
+    }
+    var columns by remember(parsedRows, contextSubjectKey, parsedSheet.detectedTerm, settings.customFields) {
+        mutableStateOf(
+            Repo.detectCsvColumns(
+                rows = parsedRows,
+                existingCustomFields = settings.customFields,
+                contextSubjectKey = contextSubjectKey,
+                contextTerm = parsedSheet.detectedTerm
+            )
+        )
     }
 
     val validationReport = remember(parsedRows, columns, students, fallbackCls) {
@@ -148,7 +171,7 @@ fun SmartCsvImportDialog(
                     ?.use { it.readText() }
                     ?: ""
                 rawText = loaded
-                if (Repo.parseCsv(loaded).size >= 2) {
+                if (Repo.parseSmartCsvSheet(loaded).rows.size >= 2) {
                     currentStep = CsvWizardStep.PREVIEW
                 } else {
                     Toast.makeText(ctx, "ফাইল লোড হয়েছে", Toast.LENGTH_SHORT).show()
@@ -296,6 +319,7 @@ fun SmartCsvImportDialog(
 
                         CsvWizardStep.PROMPT -> CsvStepPrompt(
                             config = promptConfig,
+                            students = students,
                             settings = settings,
                             promptCopiedRecently = promptCopiedRecently,
                             onCopyPrompt = { txt ->
@@ -307,17 +331,28 @@ fun SmartCsvImportDialog(
                                 clipboard.setText(AnnotatedString(hdr))
                                 Toast.makeText(ctx, "শুধু হেডার লাইন কপি হয়েছে", Toast.LENGTH_SHORT).show()
                             },
+                            onCopyRosterTemplate = { csvTxt, isRoster ->
+                                clipboard.setText(AnnotatedString(csvTxt))
+                                Toast.makeText(
+                                    ctx,
+                                    if (isRoster) "রোল-নামসহ শিট কপি হয়েছে" else "ফাঁকা টেমপ্লেট কপি হয়েছে",
+                                    Toast.LENGTH_SHORT
+                                ).show()
+                            },
                             onGoToStep3 = { currentStep = CsvWizardStep.INPUT }
                         )
 
                         CsvWizardStep.INPUT -> CsvStepInputAndMapping(
                             rawText = rawText,
                             onRawTextChange = { rawText = it },
+                            parsedSheet = parsedSheet,
                             parsedRows = parsedRows,
                             columns = columns,
                             onColumnsChange = { columns = it },
                             fallbackCls = fallbackCls,
                             onFallbackClsChange = { fallbackCls = it },
+                            contextSubjectKey = contextSubjectKey,
+                            onContextSubjectKeyChange = { contextSubjectKey = it },
                             settings = settings,
                             onPickFile = { filePicker.launch(arrayOf("*/*")) },
                             onPasteClipboard = {
