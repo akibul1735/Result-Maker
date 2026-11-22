@@ -115,22 +115,36 @@ object TeacherRemarkEngine {
             else -> ResultBand.NEEDS_SUPPORT
         }
 
+        fun subjectPriorityRank(key: String): Int = when (key) {
+            "BAN", "ENG", "MATH" -> 0
+            "PE", "ART" -> 2
+            else -> 1
+        }
+
         val coreSubPcts = subPcts.filter { (sub, _) -> sub.key !in setOf("PE", "ART") }
             .ifEmpty { subPcts }
 
         val strongSubjects = coreSubPcts
             .filter { (_, pct) -> pct >= 75.0 }
-            .sortedByDescending { it.second }
+            .sortedWith(
+                compareBy<Pair<Sub, Double>> { subjectPriorityRank(it.first.key) }
+                    .thenByDescending { it.second }
+            )
             .take(2)
             .map { shortSubName(it.first) }
 
         val weakSubjects = coreSubPcts
             .filter { (_, pct) -> pct < 55.0 }
-            .sortedBy { it.second }
+            .sortedWith(
+                compareBy<Pair<Sub, Double>> { subjectPriorityRank(it.first.key) }
+                    .thenBy { it.second }
+            )
             .take(2)
             .map { shortSubName(it.first) }
             .ifEmpty {
-                val lowest = coreSubPcts.minByOrNull { it.second }
+                val lowest = coreSubPcts.minWithOrNull(
+                    compareBy<Pair<Sub, Double>> { it.second }.thenBy { subjectPriorityRank(it.first.key) }
+                )
                 if (lowest != null && overallPct != null && lowest.second < overallPct - 10.0 && lowest.second < 72.0) {
                     listOf(shortSubName(lowest.first))
                 } else emptyList()

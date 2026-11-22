@@ -114,6 +114,7 @@ import com.kgps.result.fmt
 import com.kgps.result.fmtEn
 import com.kgps.result.fromBn
 import com.kgps.result.gradeOf
+import com.kgps.result.hasSub
 import com.kgps.result.mk
 import com.kgps.result.subjectsFor
 import com.kgps.result.subs
@@ -327,16 +328,16 @@ fun BulkSheetScreen(
                     "REL" -> "ধর্ম"
                     else -> sub.bn
                 }
-                val isArt = sub.key == "ART"
+                val hasWritten = sub.written > 0
                 SheetColDef(
                     key = "all_${sub.key}",
                     label = shortName,
-                    subLabel = "${if (isArt) "মোট" else "সামষ্টিক"} (${fmtSheetDigits((if (sub.written > 0) sub.written else sub.max).toString())})",
-                    max = if (sub.written > 0) sub.written else sub.max,
+                    subLabel = "${if (hasWritten) "সামষ্টিক" else "ধারাবাহিক"} (${fmtSheetDigits((if (hasWritten) sub.written else sub.max).toString())})",
+                    max = if (hasWritten) sub.written else sub.max,
                     width = 86.dp,
                     isMark = true,
                     markSubKey = sub.key,
-                    markCompKey = if (isArt) "TOTAL" else if (sub.written > 0) "WR" else "TB"
+                    markCompKey = if (hasWritten) "WR" else "CONT"
                 )
             }
             "attendance" -> listOf(
@@ -413,6 +414,14 @@ fun BulkSheetScreen(
                     val d = fromBn(trimmed).toDoubleOrNull()
                     if (d != null && d in 0.0..col.max.toDouble()) {
                         nextM[mk(col.markSubKey, term, col.markCompKey)] = d
+                        if (col.markCompKey == "CONT") {
+                            listOf("TB", "ACT", "LANG", "CT", "TOTAL").forEach { comp ->
+                                nextM.remove(mk(col.markSubKey, term, comp))
+                            }
+                        } else if (col.markCompKey in listOf("TB", "ACT", "LANG", "CT")) {
+                            nextM.remove(mk(col.markSubKey, term, "CONT"))
+                            nextM.remove(mk(col.markSubKey, term, "TOTAL"))
+                        }
                         updatedCells++
                     }
                 } else if (col.xKey != null) {
@@ -1779,7 +1788,15 @@ fun BulkSheetScreen(
                                             val initialVal = remember(s.id, s.m, s.x, s.guardian, s.mobile, s.village, s.union, s.upazila, s.district, s.religion, col.key, term, useBnDigits) {
                                                 when {
                                                     col.isMark && col.markSubKey != null && col.markCompKey != null -> {
-                                                        s.m[mk(col.markSubKey, term, col.markCompKey)]?.let { fmtSheetNum(it) } ?: ""
+                                                        val explicit = s.m[mk(col.markSubKey, term, col.markCompKey)]
+                                                        if (explicit != null) {
+                                                            fmtSheetNum(explicit)
+                                                        } else if (col.markCompKey == "CONT") {
+                                                            val subDef = allSubsForClass.find { it.key == col.markSubKey }
+                                                            if (subDef != null && s.hasSub(subDef, term)) fmtSheetNum(s.cont(subDef, term)) else ""
+                                                        } else {
+                                                            ""
+                                                        }
                                                     }
                                                     col.xKey != null -> {
                                                         val rawX = s.x[col.xKey].orEmpty()
@@ -1816,14 +1833,35 @@ fun BulkSheetScreen(
                                                 val clean = fromBn(text.trim())
                                                 if (col.isMark && col.markSubKey != null && col.markCompKey != null) {
                                                     val k = mk(col.markSubKey, term, col.markCompKey)
+                                                    val subDef = allSubsForClass.find { it.key == col.markSubKey }
                                                     if (clean.isEmpty()) {
                                                         if (s.m.containsKey(k)) {
                                                             onPatchStudentField(s.id, "m.$k", null)
                                                         }
+                                                        if (col.markCompKey == "CONT") {
+                                                            listOf("TB", "ACT", "LANG", "CT", "TOTAL").forEach { comp ->
+                                                                val ck = mk(col.markSubKey, term, comp)
+                                                                if (s.m.containsKey(ck)) onPatchStudentField(s.id, "m.$ck", null)
+                                                            }
+                                                        }
                                                     } else {
                                                         clean.toDoubleOrNull()?.let { d ->
-                                                            if (d in 0.0..col.max.toDouble() && s.m[k] != d) {
-                                                                onPatchStudentField(s.id, "m.$k", d)
+                                                            if (d in 0.0..col.max.toDouble()) {
+                                                                val currentShown = s.m[k] ?: if (col.markCompKey == "CONT" && subDef != null && s.hasSub(subDef, term)) s.cont(subDef, term) else null
+                                                                if (currentShown != d) {
+                                                                    onPatchStudentField(s.id, "m.$k", d)
+                                                                    if (col.markCompKey == "CONT") {
+                                                                        listOf("TB", "ACT", "LANG", "CT", "TOTAL").forEach { comp ->
+                                                                            val ck = mk(col.markSubKey, term, comp)
+                                                                            if (s.m.containsKey(ck)) onPatchStudentField(s.id, "m.$ck", null)
+                                                                        }
+                                                                    } else if (col.markCompKey in listOf("TB", "ACT", "LANG", "CT")) {
+                                                                        val contK = mk(col.markSubKey, term, "CONT")
+                                                                        if (s.m.containsKey(contK)) onPatchStudentField(s.id, "m.$contK", null)
+                                                                        val totK = mk(col.markSubKey, term, "TOTAL")
+                                                                        if (s.m.containsKey(totK)) onPatchStudentField(s.id, "m.$totK", null)
+                                                                    }
+                                                                }
                                                             }
                                                         }
                                                     }

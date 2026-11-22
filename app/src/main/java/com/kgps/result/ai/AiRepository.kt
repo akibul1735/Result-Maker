@@ -978,7 +978,8 @@ class DirectGeminiAiRepository(
         val prompt = """
             বাংলাদেশ প্রাথমিক নম্বরপত্র OCR। শুধু JSON দিন।
             নোট: ${cleanNote.ifBlank { "নেই" }}
-            বিষয়: BAN, ENG, MATH, SOC(১-২), SCI(৩-৫), BGW, REL, PE, ART। অংশ: TB, ACT, LANG, CT, WR, TOTAL। কী: "<SUB>_<TERM>_<COMP>"।
+            বিষয়: BAN, ENG, MATH, SOC(১-২), SCI(৩-৫), BGW, REL, ART, PE। অংশ: TB, ACT, LANG, CT, WR, CONT, TOTAL। কী: "<SUB>_<TERM>_<COMP>"।
+            নম্বর নিয়ম: ১ম-২য় শ্রেণিতে SOC, REL, ART, PE এবং ৩য়-৫ম শ্রেণিতে ART, PE বিষয়ে সামষ্টিক (WR) নেই (শুধু ধারাবাহিক ৫০)।
             অস্পষ্ট থাকলে uncertainNotes-এ বাংলায় লিখুন।
             {"summary":"","term":1,"student":{"name":"","cls":3,"roll":1,"guardian":"","religion":"ইসলাম"},"marks":[{"key":"MATH_1_TB","value":9.0,"subjectLabel":"গণিত (পাঠ্যবই)"}],"attendanceAndTraits":{"days":"","present":"","act":"","disc":"","cond":"","remark":""},"uncertainNotes":[]}
         """.trimIndent()

@@ -400,3 +400,64 @@ test("Admin can configure custom classes and teachers with custom class permissi
   );
 });
 
+test("Subject-restricted teacher can update ART 4-components, CONT, and legacy TOTAL only for allowed subject", async () => {
+  const aliceDb = testEnv.authenticatedContext(ALICE_UID).firestore();
+  const bobDb = testEnv.authenticatedContext(BOB_UID).firestore();
+
+  await testEnv.withSecurityRulesDisabled(async (ctx) => {
+    const adminDb = ctx.firestore();
+    const school = makeSchoolPayload(ALICE_UID, "ART202", true);
+    school.memberUids = [ALICE_UID, BOB_UID];
+    school.memberProfiles[BOB_UID] = {
+      uid: BOB_UID,
+      name: "Bob",
+      email: "bob@x.com",
+      role: "TEACHER",
+      allClasses: false,
+      allowedClasses: [2],
+      allSubjects: false,
+      allowedSubjects: ["ART", "PE"],
+      canViewOtherSubjects: false,
+      canEditAttendance: false,
+      canManageStudents: false,
+      canExportPdf: false,
+    };
+    await adminDb.collection("schools").doc("school_art").set(school);
+    await adminDb.collection("schoolCodes").doc("ART202").set(makeCodePayload("school_art", ALICE_UID));
+  });
+
+  const c2Ref = aliceDb.collection("schools").doc("school_art").collection("students").doc("st_c2");
+  await assertSucceeds(c2Ref.set(makeStudentPayload(ALICE_UID, 1, "মিমি", 2)));
+
+  const bobC2 = bobDb.collection("schools").doc("school_art").collection("students").doc("st_c2");
+  await assertSucceeds(
+    bobC2.update({
+      "m.ART_1_TB": 18,
+      "m.ART_1_ACT": 4,
+      "m.ART_1_LANG": 4,
+      "m.ART_1_CT": 18,
+      "m.PE_1_CONT": 46,
+      updatedByUid: BOB_UID,
+      updatedByName: "Bob",
+      updatedAt: pastDate(200),
+    })
+  );
+  await assertSucceeds(
+    bobC2.update({
+      "m.ART_2_CONT": 45,
+      "m.ART_3_TOTAL": 44,
+      updatedByUid: BOB_UID,
+      updatedByName: "Bob",
+      updatedAt: pastDate(150),
+    })
+  );
+  await assertFails(
+    bobC2.update({
+      "m.BAN_1_CONT": 40,
+      updatedByUid: BOB_UID,
+      updatedByName: "Bob",
+      updatedAt: pastDate(100),
+    })
+  );
+});
+

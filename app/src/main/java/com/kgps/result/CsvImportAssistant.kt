@@ -188,21 +188,19 @@ object CsvImportAssistant {
                     )
                 )
             }
-            if (s.key != "ART") {
-                val contMax = s.comps.sumOf { it.max }
-                if (contMax > 0) {
-                    val contSample = ((contMax * 8) / 10).coerceAtLeast(1).toString()
-                    out.add(
-                        CsvColumnOption(
-                            key = mk(s.key, term, "CONT"),
-                            labelBn = "$subShort · মোট ধারাবাহিক (সর্বোচ্চ ${bn(contMax.toString())})",
-                            group = "নম্বর ($subShort)",
-                            required = false,
-                            sampleEn = contSample,
-                            ruleHint = "0 থেকে $contMax"
-                        )
+            val contMax = s.comps.sumOf { it.max }
+            if (contMax > 0) {
+                val contSample = ((contMax * 8) / 10).coerceAtLeast(1).toString()
+                out.add(
+                    CsvColumnOption(
+                        key = mk(s.key, term, "CONT"),
+                        labelBn = "$subShort · মোট ধারাবাহিক (সর্বোচ্চ ${bn(contMax.toString())})",
+                        group = "নম্বর ($subShort)",
+                        required = false,
+                        sampleEn = contSample,
+                        ruleHint = "0 থেকে $contMax"
                     )
-                }
+                )
             }
             if (s.written > 0) {
                 val sample = ((s.written * 8) / 10).coerceAtLeast(1).toString()
@@ -217,19 +215,17 @@ object CsvImportAssistant {
                     )
                 )
             }
-            if (s.key != "ART") {
-                val totalSample = ((s.max * 8) / 10).coerceAtLeast(1).toString()
-                out.add(
-                    CsvColumnOption(
-                        key = mk(s.key, term, "TOTAL"),
-                        labelBn = "$subShort · মোট (সর্বোচ্চ ${bn(s.max.toString())})",
-                        group = "নম্বর ($subShort)",
-                        required = false,
-                        sampleEn = totalSample,
-                        ruleHint = "0 থেকে ${s.max}"
-                    )
+            val totalSample = ((s.max * 8) / 10).coerceAtLeast(1).toString()
+            out.add(
+                CsvColumnOption(
+                    key = mk(s.key, term, "TOTAL"),
+                    labelBn = "$subShort · মোট (সর্বোচ্চ ${bn(s.max.toString())})",
+                    group = "নম্বর ($subShort)",
+                    required = false,
+                    sampleEn = totalSample,
+                    ruleHint = "0 থেকে ${s.max}"
                 )
-            }
+            )
         }
         return out
     }
@@ -350,13 +346,13 @@ object CsvImportAssistant {
                         s.comps.forEach { c ->
                             if (mk(s.key, config.targetTerm, c.key) in selectedKeys) add("${c.key}≤${c.max}")
                         }
-                        if (s.key != "ART" && mk(s.key, config.targetTerm, "CONT") in selectedKeys) {
+                        if (mk(s.key, config.targetTerm, "CONT") in selectedKeys) {
                             add("CONT≤${s.comps.sumOf { it.max }}")
                         }
                         if (s.written > 0 && mk(s.key, config.targetTerm, "WR") in selectedKeys) {
                             add("WR≤${s.written}")
                         }
-                        if (s.key != "ART" && mk(s.key, config.targetTerm, "TOTAL") in selectedKeys) {
+                        if (mk(s.key, config.targetTerm, "TOTAL") in selectedKeys) {
                             add("TOTAL≤${s.max}")
                         }
                     }.joinToString(",")

@@ -210,17 +210,24 @@ fun subjectsFor(cls: Int, religion: String): List<Sub> {
     fun full(k: String, n: String) =
         if (low) Sub(k, n, 100, comps(20, 20), 50) else Sub(k, n, 100, comps(10, 10), 70)
     fun half(k: String, n: String) = Sub(k, n, 50, comps(20, 20), 0)
-    val art = Sub("ART", "শিল্পকলা", 50,
-        listOf(Comp("TOTAL", "মোট নম্বর (চারু ও কারুকলা, সংগীত, নৃত্য, নাট্যকলা)", 50)), 0)
     val rel = "ধর্মশিক্ষা ($religion)"
     return if (low) listOf(
-        full("BAN", "বাংলা"), full("ENG", "ইংরেজি"), full("MATH", "গণিত"),
-        half("SOC", "সামাজিক বিজ্ঞান ও বিজ্ঞান (সমন্বিত)"), half("REL", rel),
-        half("PE", "শারীরিক ও মানসিক স্বাস্থ্য শিক্ষা"), art
+        full("BAN", "বাংলা"),
+        full("ENG", "ইংরেজি"),
+        full("MATH", "গণিত"),
+        half("SOC", "সামাজিক বিজ্ঞান ও বিজ্ঞান (সমন্বিত)"),
+        half("REL", rel),
+        half("ART", "শিল্পকলা"),
+        half("PE", "শারীরিক ও মানসিক স্বাস্থ্য শিক্ষা")
     ) else listOf(
-        full("BAN", "বাংলা"), full("ENG", "ইংরেজি"), full("MATH", "গণিত"),
-        full("SCI", "বিজ্ঞান"), full("BGW", "বাংলাদেশ ও বিশ্বপরিচয়"), full("REL", rel),
-        half("PE", "শারীরিক ও মানসিক স্বাস্থ্য শিক্ষা"), art
+        full("BAN", "বাংলা"),
+        full("ENG", "ইংরেজি"),
+        full("MATH", "গণিত"),
+        full("BGW", "বাংলাদেশ ও বিশ্বপরিচয়"),
+        full("SCI", "বিজ্ঞান"),
+        full("REL", rel),
+        half("ART", "শিল্পকলা"),
+        half("PE", "শারীরিক ও মানসিক স্বাস্থ্য শিক্ষা")
     )
 }
 
@@ -251,12 +258,13 @@ fun Student.cont(s: Sub, t: Int): Double {
     return if (hasBreakdown) {
         s.comps.sumOf { m[mk(s.key, t, it.key)] ?: 0.0 }
     } else {
-        m[mk(s.key, t, "CONT")] ?: 0.0
+        m[mk(s.key, t, "CONT")]
+            ?: (if (s.key == "ART" || s.written == 0) m[mk(s.key, t, "TOTAL")] else null)
+            ?: 0.0
     }
 }
 fun Student.wr(s: Sub, t: Int) = if (s.written > 0) (m[mk(s.key, t, "WR")] ?: 0.0) else 0.0
 fun Student.total(s: Sub, t: Int): Double {
-    if (s.key == "ART") return cont(s, t)
     val hasParts = s.comps.any { m.containsKey(mk(s.key, t, it.key)) } ||
         m.containsKey(mk(s.key, t, "CONT")) ||
         (s.written > 0 && m.containsKey(mk(s.key, t, "WR")))
@@ -406,21 +414,21 @@ val SAMPLE_STUDENTS = listOf(
             "SOC_1_TB" to 18.0, "SOC_1_ACT" to 4.0, "SOC_1_LANG" to 5.0, "SOC_1_CT" to 17.0,
             "REL_1_TB" to 19.0, "REL_1_ACT" to 5.0, "REL_1_LANG" to 4.0, "REL_1_CT" to 18.0,
             "PE_1_TB" to 18.0, "PE_1_ACT" to 5.0, "PE_1_LANG" to 4.0, "PE_1_CT" to 18.0,
-            "ART_1_TOTAL" to 45.0,
+            "ART_1_TB" to 18.0, "ART_1_ACT" to 5.0, "ART_1_LANG" to 4.0, "ART_1_CT" to 18.0,
             "BAN_2_TB" to 19.0, "BAN_2_ACT" to 5.0, "BAN_2_LANG" to 5.0, "BAN_2_CT" to 18.0, "BAN_2_WR" to 45.0,
             "ENG_2_TB" to 18.0, "ENG_2_ACT" to 4.0, "ENG_2_LANG" to 5.0, "ENG_2_CT" to 17.0, "ENG_2_WR" to 43.0,
             "MATH_2_TB" to 19.0, "MATH_2_ACT" to 5.0, "MATH_2_LANG" to 5.0, "MATH_2_CT" to 19.0, "MATH_2_WR" to 47.0,
             "SOC_2_TB" to 18.0, "SOC_2_ACT" to 5.0, "SOC_2_LANG" to 4.0, "SOC_2_CT" to 18.0,
             "REL_2_TB" to 19.0, "REL_2_ACT" to 5.0, "REL_2_LANG" to 5.0, "REL_2_CT" to 19.0,
             "PE_2_TB" to 19.0, "PE_2_ACT" to 5.0, "PE_2_LANG" to 5.0, "PE_2_CT" to 18.0,
-            "ART_2_TOTAL" to 47.0,
+            "ART_2_TB" to 19.0, "ART_2_ACT" to 5.0, "ART_2_LANG" to 5.0, "ART_2_CT" to 18.0,
             "BAN_3_TB" to 19.0, "BAN_3_ACT" to 5.0, "BAN_3_LANG" to 5.0, "BAN_3_CT" to 19.0, "BAN_3_WR" to 46.0,
             "ENG_3_TB" to 18.0, "ENG_3_ACT" to 5.0, "ENG_3_LANG" to 5.0, "ENG_3_CT" to 18.0, "ENG_3_WR" to 44.0,
             "MATH_3_TB" to 20.0, "MATH_3_ACT" to 5.0, "MATH_3_LANG" to 5.0, "MATH_3_CT" to 19.0, "MATH_3_WR" to 48.0,
             "SOC_3_TB" to 19.0, "SOC_3_ACT" to 5.0, "SOC_3_LANG" to 5.0, "SOC_3_CT" to 18.0,
             "REL_3_TB" to 19.0, "REL_3_ACT" to 5.0, "REL_3_LANG" to 5.0, "REL_3_CT" to 19.0,
             "PE_3_TB" to 19.0, "PE_3_ACT" to 5.0, "PE_3_LANG" to 5.0, "PE_3_CT" to 19.0,
-            "ART_3_TOTAL" to 48.0
+            "ART_3_TB" to 19.0, "ART_3_ACT" to 5.0, "ART_3_LANG" to 5.0, "ART_3_CT" to 19.0
         ),
         x = mapOf(
             "DAYS_1" to "62", "PRES_1" to "59", "ACT_1" to "ক", "DISC_1" to "ক", "COND_1" to "ক",
@@ -451,7 +459,7 @@ val SAMPLE_STUDENTS = listOf(
             "BGW_1_TB" to 9.0, "BGW_1_ACT" to 4.0, "BGW_1_LANG" to 4.0, "BGW_1_CT" to 8.0, "BGW_1_WR" to 57.0,
             "REL_1_TB" to 9.0, "REL_1_ACT" to 5.0, "REL_1_LANG" to 5.0, "REL_1_CT" to 9.0, "REL_1_WR" to 62.0,
             "PE_1_TB" to 18.0, "PE_1_ACT" to 5.0, "PE_1_LANG" to 4.0, "PE_1_CT" to 17.0,
-            "ART_1_TOTAL" to 44.0,
+            "ART_1_TB" to 18.0, "ART_1_ACT" to 5.0, "ART_1_LANG" to 4.0, "ART_1_CT" to 17.0,
             "BAN_2_TB" to 9.0, "BAN_2_ACT" to 5.0, "BAN_2_LANG" to 5.0, "BAN_2_CT" to 9.0, "BAN_2_WR" to 62.0,
             "ENG_2_TB" to 9.0, "ENG_2_ACT" to 5.0, "ENG_2_LANG" to 4.0, "ENG_2_CT" to 9.0, "ENG_2_WR" to 59.0,
             "MATH_2_TB" to 10.0, "MATH_2_ACT" to 5.0, "MATH_2_LANG" to 5.0, "MATH_2_CT" to 10.0, "MATH_2_WR" to 65.0,
@@ -459,7 +467,7 @@ val SAMPLE_STUDENTS = listOf(
             "BGW_2_TB" to 9.0, "BGW_2_ACT" to 5.0, "BGW_2_LANG" to 4.0, "BGW_2_CT" to 9.0, "BGW_2_WR" to 60.0,
             "REL_2_TB" to 10.0, "REL_2_ACT" to 5.0, "REL_2_LANG" to 5.0, "REL_2_CT" to 9.0, "REL_2_WR" to 64.0,
             "PE_2_TB" to 19.0, "PE_2_ACT" to 5.0, "PE_2_LANG" to 5.0, "PE_2_CT" to 18.0,
-            "ART_2_TOTAL" to 46.0,
+            "ART_2_TB" to 18.0, "ART_2_ACT" to 5.0, "ART_2_LANG" to 5.0, "ART_2_CT" to 18.0,
             "BAN_3_TB" to 10.0, "BAN_3_ACT" to 5.0, "BAN_3_LANG" to 5.0, "BAN_3_CT" to 9.0, "BAN_3_WR" to 63.0,
             "ENG_3_TB" to 9.0, "ENG_3_ACT" to 5.0, "ENG_3_LANG" to 5.0, "ENG_3_CT" to 9.0, "ENG_3_WR" to 61.0,
             "MATH_3_TB" to 10.0, "MATH_3_ACT" to 5.0, "MATH_3_LANG" to 5.0, "MATH_3_CT" to 10.0, "MATH_3_WR" to 67.0,
@@ -467,7 +475,7 @@ val SAMPLE_STUDENTS = listOf(
             "BGW_3_TB" to 9.0, "BGW_3_ACT" to 5.0, "BGW_3_LANG" to 5.0, "BGW_3_CT" to 9.0, "BGW_3_WR" to 62.0,
             "REL_3_TB" to 10.0, "REL_3_ACT" to 5.0, "REL_3_LANG" to 5.0, "REL_3_CT" to 10.0, "REL_3_WR" to 65.0,
             "PE_3_TB" to 19.0, "PE_3_ACT" to 5.0, "PE_3_LANG" to 5.0, "PE_3_CT" to 19.0,
-            "ART_3_TOTAL" to 47.0
+            "ART_3_TB" to 19.0, "ART_3_ACT" to 5.0, "ART_3_LANG" to 5.0, "ART_3_CT" to 18.0
         ),
         x = mapOf(
             "DAYS_1" to "62", "PRES_1" to "58", "ACT_1" to "ক", "DISC_1" to "ক", "COND_1" to "ক",
@@ -498,7 +506,7 @@ val SAMPLE_STUDENTS = listOf(
             "BGW_1_TB" to 8.0, "BGW_1_ACT" to 4.0, "BGW_1_LANG" to 4.0, "BGW_1_CT" to 7.0, "BGW_1_WR" to 49.0,
             "REL_1_TB" to 9.0, "REL_1_ACT" to 5.0, "REL_1_LANG" to 4.0, "REL_1_CT" to 8.0, "REL_1_WR" to 56.0,
             "PE_1_TB" to 17.0, "PE_1_ACT" to 4.0, "PE_1_LANG" to 4.0, "PE_1_CT" to 16.0,
-            "ART_1_TOTAL" to 41.0,
+            "ART_1_TB" to 16.0, "ART_1_ACT" to 5.0, "ART_1_LANG" to 4.0, "ART_1_CT" to 16.0,
             "BAN_2_TB" to 9.0, "BAN_2_ACT" to 4.0, "BAN_2_LANG" to 4.0, "BAN_2_CT" to 8.0, "BAN_2_WR" to 55.0,
             "ENG_2_TB" to 8.0, "ENG_2_ACT" to 4.0, "ENG_2_LANG" to 4.0, "ENG_2_CT" to 8.0, "ENG_2_WR" to 50.0,
             "MATH_2_TB" to 9.0, "MATH_2_ACT" to 5.0, "MATH_2_LANG" to 4.0, "MATH_2_CT" to 9.0, "MATH_2_WR" to 56.0,
@@ -506,7 +514,7 @@ val SAMPLE_STUDENTS = listOf(
             "BGW_2_TB" to 8.0, "BGW_2_ACT" to 4.0, "BGW_2_LANG" to 4.0, "BGW_2_CT" to 8.0, "BGW_2_WR" to 52.0,
             "REL_2_TB" to 9.0, "REL_2_ACT" to 5.0, "REL_2_LANG" to 4.0, "REL_2_CT" to 9.0, "REL_2_WR" to 58.0,
             "PE_2_TB" to 18.0, "PE_2_ACT" to 4.0, "PE_2_LANG" to 4.0, "PE_2_CT" to 17.0,
-            "ART_2_TOTAL" to 43.0
+            "ART_2_TB" to 17.0, "ART_2_ACT" to 5.0, "ART_2_LANG" to 4.0, "ART_2_CT" to 17.0
         ),
         x = mapOf(
             "DAYS_1" to "62", "PRES_1" to "54", "ACT_1" to "খ", "DISC_1" to "ক", "COND_1" to "ক",

@@ -71,11 +71,15 @@ service cloud.firestore {
 
     function subjectMarkKeys(sub) {
       return sub == 'ART'
-        ? ['ART_1_TOTAL', 'ART_2_TOTAL', 'ART_3_TOTAL']
+        ? [
+            'ART_1_TB', 'ART_1_ACT', 'ART_1_LANG', 'ART_1_CT', 'ART_1_CONT', 'ART_1_TOTAL',
+            'ART_2_TB', 'ART_2_ACT', 'ART_2_LANG', 'ART_2_CT', 'ART_2_CONT', 'ART_2_TOTAL',
+            'ART_3_TB', 'ART_3_ACT', 'ART_3_LANG', 'ART_3_CT', 'ART_3_CONT', 'ART_3_TOTAL'
+          ]
         : [
-            sub + '_1_TB', sub + '_1_ACT', sub + '_1_LANG', sub + '_1_CT', sub + '_1_WR',
-            sub + '_2_TB', sub + '_2_ACT', sub + '_2_LANG', sub + '_2_CT', sub + '_2_WR',
-            sub + '_3_TB', sub + '_3_ACT', sub + '_3_LANG', sub + '_3_CT', sub + '_3_WR'
+            sub + '_1_TB', sub + '_1_ACT', sub + '_1_LANG', sub + '_1_CT', sub + '_1_CONT', sub + '_1_WR',
+            sub + '_2_TB', sub + '_2_ACT', sub + '_2_LANG', sub + '_2_CT', sub + '_2_CONT', sub + '_2_WR',
+            sub + '_3_TB', sub + '_3_ACT', sub + '_3_LANG', sub + '_3_CT', sub + '_3_CONT', sub + '_3_WR'
           ];
     }
 

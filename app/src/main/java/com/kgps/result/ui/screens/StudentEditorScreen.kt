@@ -578,6 +578,7 @@ fun StudentEditorScreen(
                                                         }
                                                         Box(Modifier.weight(1f)) {
                                                             val ck = mk(sub.key, t, "CONT")
+                                                            val tk = mk(sub.key, t, "TOTAL")
                                                             MarkField(
                                                                 label = shortLabel,
                                                                 max = c.max.toDouble(),
@@ -585,7 +586,7 @@ fun StudentEditorScreen(
                                                                 k = k,
                                                                 enabled = canEditSub
                                                             ) { v ->
-                                                                s = s.copy(m = if (v == null) s.m - k else (s.m - ck) + (k to v))
+                                                                s = s.copy(m = if (v == null) s.m - k else (s.m - ck - tk) + (k to v))
                                                             }
                                                         }
                                                     }
@@ -593,17 +594,23 @@ fun StudentEditorScreen(
                                                 }
                                             }
                                             val ck = mk(sub.key, t, "CONT")
+                                            val tk = mk(sub.key, t, "TOTAL")
                                             val hasBreakdown = sub.comps.any { s.m.containsKey(mk(sub.key, t, it.key)) }
-                                            if (!hasBreakdown && s.m.containsKey(ck) && sub.key != "ART") {
+                                            val legacyKey = when {
+                                                s.m.containsKey(ck) -> ck
+                                                sub.written == 0 && s.m.containsKey(tk) -> tk
+                                                else -> null
+                                            }
+                                            if (!hasBreakdown && legacyKey != null) {
                                                 val contMax = sub.comps.sumOf { it.max }
                                                 MarkField(
                                                     label = "ধারাবাহিক মোট (সরাসরি · সর্বোচ্চ ${bn(contMax.toString())})",
                                                     max = contMax.toDouble(),
-                                                    value = s.m[ck],
-                                                    k = ck,
+                                                    value = s.m[legacyKey],
+                                                    k = legacyKey,
                                                     enabled = canEditSub
                                                 ) { v ->
-                                                    s = s.copy(m = if (v == null) s.m - ck else s.m + (ck to v))
+                                                    s = s.copy(m = if (v == null) s.m - legacyKey else s.m + (legacyKey to v))
                                                 }
                                             }
                                             if (sub.written > 0) {

@@ -670,7 +670,7 @@ object PdfGen {
             for (t in 1..2) {
                 val has = s.hasSub(sub, t)
                 val b = lx + sw + (t - 1) * 3 * lcw
-                val contTxt = if (sub.key == "ART") "......" else if (has) fmt(s.cont(sub, t)) else ""
+                val contTxt = if (has) fmt(s.cont(sub, t)) else ""
                 val wrTxt = if (sub.written == 0) "......" else if (has) fmt(s.wr(sub, t)) else ""
                 val totTxt = if (has) fmt(s.total(sub, t)) else ""
 
@@ -776,7 +776,7 @@ object PdfGen {
             subs.forEachIndexed { i, sub ->
                 val ry = rowsStartY + i * rh
                 val has3 = s.hasSub(sub, 3)
-                val cont3 = if (sub.key == "ART") "......" else if (has3) fmt(s.cont(sub, 3)) else ""
+                val cont3 = if (has3) fmt(s.cont(sub, 3)) else ""
                 val wr3 = if (sub.written == 0) "......" else if (has3) fmt(s.wr(sub, 3)) else ""
                 val tot3 = if (has3) fmt(s.total(sub, 3)) else ""
 
@@ -881,7 +881,7 @@ object PdfGen {
             subs.forEachIndexed { i, sub ->
                 val ry = rowsStartY + i * rh
                 val has3 = s.hasSub(sub, 3)
-                val cont3 = if (sub.key == "ART") "......" else if (has3) fmt(s.cont(sub, 3)) else ""
+                val cont3 = if (has3) fmt(s.cont(sub, 3)) else ""
                 val wr3 = if (sub.written == 0) "......" else if (has3) fmt(s.wr(sub, 3)) else ""
                 val tot3 = if (has3) fmt(s.total(sub, 3)) else ""
 

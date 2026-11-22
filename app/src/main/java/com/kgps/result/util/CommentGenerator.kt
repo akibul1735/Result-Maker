@@ -94,6 +94,16 @@ object CommentGenerator {
 
     private val WHITESPACE_REGEX = Regex("\\s+")
 
+    // Core primary subjects (বাংলা, ইংরেজি, গণিত) always receive highest pedagogical priority
+    private val CORE_PRIMARY_KEYS = setOf("BAN", "ENG", "MATH")
+    private val NON_SUMMATIVE_CO_KEYS = setOf("PE", "ART")
+
+    private fun subjectPriorityRank(key: String): Int = when (key) {
+        in CORE_PRIMARY_KEYS -> 0
+        in NON_SUMMATIVE_CO_KEYS -> 2
+        else -> 1
+    }
+
     // Gender-neutrality guard words (never emitted by generator)
     private val FORBIDDEN_GENDERED_WORDS = listOf("সে ", "তার ", "ছেলে", "মেয়ে", "ছাত্র ", "ছাত্রী ")
 
@@ -147,28 +157,30 @@ object CommentGenerator {
         val subjectEvals = enteredSubs.map { sub ->
             val obtained = student.total(sub, safeTerm)
             val pct = if (sub.max > 0) (obtained / sub.max) * 100.0 else 0.0
-            val isArt = sub.key == "ART"
 
             fun compPct(compKey: String, maxVal: Int): Double? {
-                if (isArt || maxVal <= 0) return null
+                if (maxVal <= 0) return null
                 val raw = student.m[mk(sub.key, safeTerm, compKey)] ?: return null
                 return (raw / maxVal) * 100.0
             }
 
             val contMax = sub.comps.sumOf { it.max }
-            val hasCont = !isArt && (sub.comps.any { student.m.containsKey(mk(sub.key, safeTerm, it.key)) } ||
-                student.m.containsKey(mk(sub.key, safeTerm, "CONT")))
+            val hasBreakdown = sub.comps.any { student.m.containsKey(mk(sub.key, safeTerm, it.key)) }
+            val hasCont = hasBreakdown ||
+                student.m.containsKey(mk(sub.key, safeTerm, "CONT")) ||
+                (sub.written == 0 && student.m.containsKey(mk(sub.key, safeTerm, "TOTAL")))
             val contPct = if (hasCont && contMax > 0) {
-                val contVal = sub.comps.fold(0.0) { acc, c ->
-                    acc + (student.m[mk(sub.key, safeTerm, c.key)] ?: 0.0)
-                }.let { sum ->
-                    if (sub.comps.any { student.m.containsKey(mk(sub.key, safeTerm, it.key)) }) sum
-                    else student.m[mk(sub.key, safeTerm, "CONT")] ?: 0.0
+                val contVal = if (hasBreakdown) {
+                    sub.comps.sumOf { c -> student.m[mk(sub.key, safeTerm, c.key)] ?: 0.0 }
+                } else {
+                    student.m[mk(sub.key, safeTerm, "CONT")]
+                        ?: (if (sub.written == 0) student.m[mk(sub.key, safeTerm, "TOTAL")] else null)
+                        ?: 0.0
                 }
                 (contVal / contMax) * 100.0
             } else null
 
-            val wrPct = if (!isArt && sub.written > 0 && student.m.containsKey(mk(sub.key, safeTerm, "WR"))) {
+            val wrPct = if (sub.written > 0 && student.m.containsKey(mk(sub.key, safeTerm, "WR"))) {
                 ((student.m[mk(sub.key, safeTerm, "WR")] ?: 0.0) / sub.written) * 100.0
             } else null
 
@@ -216,23 +228,23 @@ object CommentGenerator {
 
         val gradeBand = averagePercent?.let(::gradeBandOf)
 
-        // Prioritize core academic subjects before PE/ART when picking representative highlights
+        // Prioritize primary core subjects (বাংলা, ইংরেজি, গণিত) -> other academic -> PE/ART
         val rankedForStrong = subjectEvals
             .filter { it.percent >= 80.0 }
             .sortedWith(
-                compareBy<SubjectEval> { it.sub.key in setOf("PE", "ART") }
+                compareBy<SubjectEval> { subjectPriorityRank(it.sub.key) }
                     .thenByDescending { it.percent }
             )
         val rankedForWeak = subjectEvals
             .filter { it.percent < 50.0 }
             .sortedWith(
-                compareBy<SubjectEval> { it.sub.key in setOf("PE", "ART") }
+                compareBy<SubjectEval> { subjectPriorityRank(it.sub.key) }
                     .thenBy { it.percent }
             )
         val borderlineSubjects = subjectEvals
             .filter { it.percent >= 50.0 && it.percent < 65.0 }
             .sortedWith(
-                compareBy<SubjectEval> { it.sub.key in setOf("PE", "ART") }
+                compareBy<SubjectEval> { subjectPriorityRank(it.sub.key) }
                     .thenBy { it.percent }
             )
 
@@ -405,8 +417,12 @@ object CommentGenerator {
                 )
                 slots += SentenceSlot("weak", txt, Int.MAX_VALUE)
             }
-            a.borderlineSubjects.isNotEmpty() && a.gradeBand == CommentGradeBand.SONTOSHJONOK -> {
-                val bName = nameFn(a.borderlineSubjects.first())
+            a.borderlineSubjects.isNotEmpty() &&
+                (a.gradeBand == CommentGradeBand.SONTOSHJONOK ||
+                    (a.gradeBand == CommentGradeBand.UTTOM && a.borderlineSubjects.any { it.sub.key in CORE_PRIMARY_KEYS && it.percent < 60.0 })) -> {
+                val targetBorder = a.borderlineSubjects.firstOrNull { it.sub.key in CORE_PRIMARY_KEYS && it.percent < 60.0 }
+                    ?: a.borderlineSubjects.first()
+                val bName = nameFn(targetBorder)
                 slots += SentenceSlot("borderline", "$bName বিষয়ে আরও চর্চা প্রয়োজন।", 5)
             }
         }
@@ -488,6 +504,8 @@ object CommentGenerator {
         val significantImprovement = (a.termDelta ?: 0.0) >= 5.0
         val significantDecline = (a.termDelta ?: 0.0) <= -5.0
 
+        val weakCoreKeys = a.weakSubjects.filter { it.sub.key in CORE_PRIMARY_KEYS }.map { it.sub.key }.toSet()
+
         // (5) Guidance (always last, short, never drop)
         val guidanceSentence = when {
             (a.attendancePercent ?: 100.0) < 75.0 && a.weakSubjects.isNotEmpty() -> pickVariant(
@@ -500,6 +518,12 @@ object CommentGenerator {
                 seed, 13, listOf(
                     "নিয়মিত বিদ্যালয়ে উপস্থিত থাকতে হবে।",
                     "শ্রেণিতে নিয়মিত উপস্থিত থাকা জরুরি।"
+                )
+            )
+            a.gradeBand == CommentGradeBand.SOHAYOTA_PROYOJON && weakCoreKeys.isNotEmpty() -> pickVariant(
+                seed, 14, listOf(
+                    "বাংলা, ইংরেজি ও গণিতে নিবিড় তদারকি কাম্য।",
+                    "মৌলিক পাঠ-গণিতে অভিভাবকের সহযোগিতা কাম্য।"
                 )
             )
             a.gradeBand == CommentGradeBand.SOHAYOTA_PROYOJON -> pickVariant(
@@ -518,6 +542,24 @@ object CommentGenerator {
                 seed, 16, listOf(
                     "মনোযোগ বাড়িয়ে চর্চা জোরদার করতে হবে।",
                     "পূর্বের মান ফেরাতে নিয়মিত চর্চা দরকার।"
+                )
+            )
+            weakCoreKeys.contains("MATH") && (weakCoreKeys.contains("BAN") || weakCoreKeys.contains("ENG")) -> pickVariant(
+                seed, 17, listOf(
+                    "পঠন-লিখন ও মৌলিক হিসাব প্রতিদিন অনুশীলন করতে হবে।",
+                    "বাংলা-ইংরেজি পঠন ও গণিত চর্চা বাড়াতে হবে।"
+                )
+            )
+            weakCoreKeys.contains("MATH") -> pickVariant(
+                seed, 17, listOf(
+                    "গণিতের মৌলিক হিসাব প্রতিদিন অনুশীলন করতে হবে।",
+                    "মৌলিক অঙ্ক ও নামতা চর্চা আরও বাড়াতে হবে।"
+                )
+            )
+            weakCoreKeys.isNotEmpty() -> pickVariant(
+                seed, 17, listOf(
+                    "পঠন, বানান ও লেখার চর্চা প্রতিদিন করতে হবে।",
+                    "মৌলিক পঠন ও লেখার অনুশীলন বাড়াতে হবে।"
                 )
             )
             a.weakSubjects.isNotEmpty() -> pickVariant(
@@ -685,9 +727,16 @@ object CommentGenerator {
         // ------------------------------------------------------------------
         // 2. GRANULAR SUBJECT-BY-SUBJECT & COMPONENT ANALYSIS (বিষয় খুঁটিনাটি)
         // ------------------------------------------------------------------
-        a.subjectEvals.forEach { se ->
+        val orderedSubs = a.subjectEvals.sortedWith(
+            compareBy<SubjectEval> { subjectPriorityRank(it.sub.key) }
+                .thenByDescending { it.percent < 50.0 }
+                .thenByDescending { it.percent }
+        )
+
+        orderedSubs.forEach { se ->
             val name = se.shortName
             val pRound = se.percent.roundToInt()
+            val coreBoost = if (se.sub.key in CORE_PRIMARY_KEYS) 4 else 0
             // Subject-specific pedagogical detail lines
             when {
                 se.percent >= 85.0 -> {
@@ -697,7 +746,7 @@ object CommentGenerator {
                         "$detail। সার্বিকভাবে পাঠ্যবিষয়ে আগ্রহ ও পরিশ্রম প্রশংসনীয়; এই দক্ষতা ধরে রাখতে হবে।",
                         CommentCategory.SUBJECT_ANALYSIS,
                         "$name (${bn(pRound.toString())}%)",
-                        if (se == a.topSubject) 91 else 84
+                        (if (se == a.topSubject) 91 else 84) + coreBoost
                     )
                 }
                 se.percent in 60.0..79.9 -> {
@@ -707,7 +756,17 @@ object CommentGenerator {
                         "$name বিষয়ে অর্জন ভালো (${bn(pRound.toString())}%); $growthHint আরও চর্চা করলে অতি উত্তম মান অর্জন সম্ভব।",
                         CommentCategory.SUBJECT_ANALYSIS,
                         "$name বিশ্লেষণ",
-                        80
+                        80 + coreBoost
+                    )
+                }
+                se.percent < 40.0 -> {
+                    val weakAction = subjectActionPhrase(se)
+                    addOpt(
+                        "gen_sub_pass_risk_${se.sub.key}",
+                        "$name বিষয়ে পাশ মান (৪০%) অর্জনে $weakAction নিবিড় অনুশীলন ও নিয়মিত তদারকি একান্ত জরুরি।",
+                        CommentCategory.SUBJECT_ANALYSIS,
+                        "$name পাশ মান সতর্কতা",
+                        92 + coreBoost
                     )
                 }
                 se.percent < 50.0 -> {
@@ -717,7 +776,7 @@ object CommentGenerator {
                         "$name বিষয়ে ফলাফল দুর্বল। $weakAction ও প্রতিদিন নিয়মিত অনুশীলন করা অত্যন্ত জরুরি।",
                         CommentCategory.SUBJECT_ANALYSIS,
                         "$name উন্নতি দরকার",
-                        92
+                        90 + coreBoost
                     )
                 }
                 se.percent in 50.0..59.9 -> {
@@ -727,7 +786,7 @@ object CommentGenerator {
                         "$name বিষয়ে মোটামুটি মান অর্জিত হয়েছে। $nudge বাড়ালে ফলাফল দ্রুত উত্তম পর্যায়ে পৌঁছাবে।",
                         CommentCategory.SUBJECT_ANALYSIS,
                         "$name তাগিদ",
-                        85
+                        84 + coreBoost
                     )
                 }
             }
@@ -840,16 +899,48 @@ object CommentGenerator {
             }
         }
 
+        // Core primary trio diagnostics (বাংলা, ইংরেজি ও গণিত)
+        val coreEvals = a.subjectEvals.filter { it.sub.key in CORE_PRIMARY_KEYS }
+        val nonCoreEvals = a.subjectEvals.filter { it.sub.key !in CORE_PRIMARY_KEYS }
+        if (coreEvals.isNotEmpty()) {
+            val strongCore = coreEvals.filter { it.percent >= 80.0 }.map { it.shortName }
+            val lagCore = coreEvals.filter { it.percent < 60.0 }.sortedBy { it.percent }.map { it.shortName }
+            when {
+                coreEvals.size >= 2 && strongCore.size == coreEvals.size -> addOpt(
+                    "gen_core3_all_strong",
+                    "বাংলা, ইংরেজি ও গণিত—প্রাথমিকের মূল বিষয়গুলোতে দৃঢ় ভিত্তি তৈরি হয়েছে। পঠন, লিখন ও হিসাব দক্ষতা অত্যন্ত প্রশংসনীয়।",
+                    CommentCategory.SUBJECT_ANALYSIS, "মূল ৩ বিষয় (শক্তিশালী)", 94
+                )
+                strongCore.isNotEmpty() && lagCore.isNotEmpty() -> addOpt(
+                    "gen_core3_mixed",
+                    "${joinNames(strongCore)}-এ ভালো দক্ষতা থাকলেও ${joinNames(lagCore)} বিষয়ে পঠন-লিখন ও মৌলিক চর্চা জোরদার করা জরুরি।",
+                    CommentCategory.SUBJECT_ANALYSIS, "মূল বিষয় সমন্বয়", 93
+                )
+                lagCore.isNotEmpty() -> addOpt(
+                    "gen_core3_needs_focus",
+                    "মূল বিষয় ${joinNames(lagCore)}-এ ভিত্তি মজবুত করতে প্রতিদিন বাংলা-ইংরেজি পাঠ ও মৌলিক গণিত অনুশীলন করা আবশ্যক।",
+                    CommentCategory.SUBJECT_ANALYSIS, "মূল বিষয়ে গুরুত্ব", 93
+                )
+            }
+            if (nonCoreEvals.isNotEmpty() && coreEvals.map { it.percent }.average() + 10.0 <= nonCoreEvals.map { it.percent }.average()) {
+                addOpt(
+                    "gen_core_vs_noncore",
+                    "সহপাঠ ও অন্যান্য বিষয়ে ভালো করলেও বাংলা, ইংরেজি ও গণিতের মৌলিক দক্ষতা বাড়াতে প্রতিদিন বাড়তি সময় দেওয়া জরুরি।",
+                    CommentCategory.SUBJECT_ANALYSIS, "মূল বনাম অন্যান্য বিষয়", 91
+                )
+            }
+        }
+
         // Paired core-skills observations (always useful alternatives)
         addOpt(
             "gen_sub_ban_eng_math_combo",
             when (a.gradeBand) {
-                CommentGradeBand.OTI_UTTOM -> "মৌলিক পঠন, লিখন ও গাণিতিক যুক্তিতে দৃঢ় ভিত্তি তৈরি হয়েছে। সৃজনশীল অনুশীলনে আরও উৎকর্ষ সাধন করবে।"
-                CommentGradeBand.UTTOM -> "পঠন ও হিসাবের ভিত্তি ভালো। শুদ্ধ বানান ও দ্রুত লেখার চর্চা বাড়ালে শীর্ষ মান অর্জন করবে।"
-                CommentGradeBand.SONTOSHJONOK -> "পঠনদক্ষতা ও মৌলিক হিসাব অনুশীলনে প্রতিদিন সময় দেওয়া দরকার। সহজ ধাপে চর্চা করলে দ্রুত উন্নতি করবে।"
-                else -> "বর্ণ-শব্দ চেনা, শুদ্ধ পঠন ও প্রাথমিক গণনায় নিবিড় সহায়তা প্রয়োজন। অভিভাবক ও শিক্ষকের যৌথ তদারকি কাম্য।"
+                CommentGradeBand.OTI_UTTOM -> "বাংলা, ইংরেজি ও গণিতে মৌলিক পঠন, লিখন ও যুক্তিতে দৃঢ় ভিত্তি তৈরি হয়েছে। সৃজনশীল চর্চায় আরও এগিয়ে যাবে।"
+                CommentGradeBand.UTTOM -> "বাংলা, ইংরেজি ও গণিতের ভিত্তি ভালো। শুদ্ধ বানান, রিডিং ও দ্রুত হিসাবের চর্চা বাড়ালে শীর্ষ মান অর্জন করবে।"
+                CommentGradeBand.SONTOSHJONOK -> "বাংলা, ইংরেজি পঠনদক্ষতা ও গণিতের মৌলিক হিসাব অনুশীলনে প্রতিদিন সময় দেওয়া দরকার। সহজ ধাপে চর্চায় দ্রুত উন্নতি করবে।"
+                else -> "বাংলা বর্ণ-বানান, সহজ ইংরেজি ও প্রাথমিক গণনায় নিবিড় সহায়তা প্রয়োজন। অভিভাবক ও শিক্ষকের যৌথ তদারকি কাম্য।"
             },
-            CommentCategory.SUBJECT_ANALYSIS, "মৌলিক দক্ষতা বিশ্লেষণ", 83
+            CommentCategory.SUBJECT_ANALYSIS, "বাংলা-ইংরেজি-গণিত ভিত্তি", 88
         )
 
         // ------------------------------------------------------------------
@@ -907,6 +998,9 @@ object CommentGenerator {
                 }
                 att >= 75.0 -> {
                     addOpt("gen_att_mod_1", "উপস্থিতি মোটামুটি ভালো ($attBn%), তবে ${bn(absent.toString())} দিন অনুপস্থিত ছিল। শতভাগ উপস্থিত থাকলে আরও ভালো করবে।", CommentCategory.ATTENDANCE, "উপস্থিতি উন্নতি", 88)
+                    if (att < 85.0) {
+                        addOpt("gen_att_below_85", "উপস্থিতি $attBn%; পরবর্তী শ্রেণিতে উত্তীর্ণের ন্যূনতম ৮৫% মানদণ্ড পূরণে বিদ্যালয়ে নিয়মিত উপস্থিত থাকা জরুরি।", CommentCategory.ATTENDANCE, "৮৫% উপস্থিতি শর্ত", 89)
+                    }
                     addOpt("gen_att_mod_2", "মাঝে মাঝে অনুপস্থিতির কারণে পাঠের ধারাবাহিকতা ব্যাহত হয়েছে। প্রতি কার্যদিবসে বিদ্যালয়ে আসা জরুরি।", CommentCategory.ATTENDANCE, "নিয়মিত থাকার পরামর্শ", 84)
                 }
                 else -> {

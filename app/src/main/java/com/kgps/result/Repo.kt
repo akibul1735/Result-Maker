@@ -57,8 +57,7 @@ object Repo {
         }
         return subs.flatMap { s ->
             val comps = when {
-                s == "ART" -> listOf("TOTAL")
-                s == "SOC" || s == "PE" -> listOf("TB", "ACT", "LANG", "CT", "CONT", "TOTAL")
+                s == "SOC" || s == "PE" || s == "ART" -> listOf("TB", "ACT", "LANG", "CT", "CONT", "TOTAL")
                 s == "REL" && low -> listOf("TB", "ACT", "LANG", "CT", "CONT", "TOTAL")
                 else -> listOf("TB", "ACT", "LANG", "CT", "WR", "CONT", "TOTAL")
             }
