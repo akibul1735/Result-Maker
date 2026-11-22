@@ -1,0 +1,63 @@
+{
+  "project_info": {
+    "project_number": "935330107573",
+    "project_id": "result-maker-kgps",
+    "storage_bucket": "result-maker-kgps.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:935330107573:android:90f8edc0512f2434576efc",
+        "android_client_info": {
+          "package_name": "com.kgps.result"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "935330107573-04p64gjhull2r1hr4l6opo95a85j4rum.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.kgps.result",
+            "certificate_hash": "240f32c1ed3eebcd68da237ab11341dead781a45"
+          }
+        },
+        {
+          "client_id": "935330107573-bvdpuc0l8j4qi2j39eitmobc98sbvg1e.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.kgps.result",
+            "certificate_hash": "e359bcb0fb5ea7c63af80ba53e1c8c53ed6ddc6d"
+          }
+        },
+        {
+          "client_id": "935330107573-u5btkl5pbncsd7pbvv9s1b932g96rmfm.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.kgps.result",
+            "certificate_hash": "8313116bf34d0cca448f1a51ef63798d4e0bdaca"
+          }
+        },
+        {
+          "client_id": "935330107573-5k094qpd08s4nguoi5h927euvq31pcuq.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAbMTI4JGFLsxIcPR5BbhzLchE7z2wHQdk"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "935330107573-5k094qpd08s4nguoi5h927euvq31pcuq.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
