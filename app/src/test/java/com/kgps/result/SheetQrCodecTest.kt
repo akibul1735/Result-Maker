@@ -7,6 +7,7 @@ import com.google.zxing.RGBLuminanceSource
 import com.google.zxing.common.HybridBinarizer
 import com.google.zxing.oned.Code128Reader
 import com.google.zxing.qrcode.QRCodeReader
+import com.kgps.result.ai.BarcodeLuminanceDecoder
 import com.kgps.result.ai.ClassSheetImportScope
 import com.kgps.result.ai.ClassSheetKind
 import org.junit.Assert.assertEquals
@@ -264,6 +265,68 @@ class SheetQrCodecTest {
         assertEquals("BAN", decoded.subjectKey)
         assertEquals(ClassSheetKind.THREE_TERM_MARKS, decoded.sheetKind)
         assertEquals(cols.map { it.id }, decoded.columnIds)
+    }
+
+    @Test
+    fun barcodeLuminanceDecoderRecoversShadowedLowContrastBlurAndZeroQuietZone() {
+        val barcodeText = "C3-BAN-T1-FULL-ABCDEF1234"
+        val matrix = SheetQrCodec.encodeBarcodeMatrix(barcodeText)
+        assertNotNull(matrix)
+        val mw = matrix!!.width
+
+        // 1) Zero quiet zone + uneven camera shadow gradient + washed-out contrast
+        val scaleX = 2
+        val w1 = mw * scaleX
+        val h1 = 44
+        val lowContrastGradLuma = ByteArray(w1 * h1)
+        for (y in 0 until h1) {
+            for (x in 0 until w1) {
+                val mx = x / scaleX
+                val isBar = matrix.get(mx, 0)
+                // Left side dark shadow (black=35, white=95), right side bright washed-out (black=155, white=220)
+                val t = x.toFloat() / (w1 - 1).coerceAtLeast(1)
+                val blackLevel = 35f + 120f * t
+                val whiteLevel = 95f + 125f * t
+                val noise = if (((x * 7 + y * 13) % 5) == 0) 4 else -3
+                val lum = ((if (isBar) blackLevel else whiteLevel) + noise).toInt().coerceIn(0, 255)
+                lowContrastGradLuma[y * w1 + x] = lum.toByte()
+            }
+        }
+        val decodedShadowed = BarcodeLuminanceDecoder.decodeCode128(w1, h1, lowContrastGradLuma, addQuietZone = true)
+        assertEquals(barcodeText, decodedShadowed)
+
+        // 2) Blurry + anti-aliased narrow barcode simulating old-PDF fractional camera scaling (~1.85 px/module)
+        val fractionalScale = 1.85f
+        val quietPx = 6
+        val w2 = (mw * fractionalScale).toInt() + quietPx * 2
+        val h2 = 36
+        val softLuma = ByteArray(w2 * h2) { 0xE6.toByte() }
+        fun sampleAt(mxf: Float): Float {
+            val idx = kotlin.math.floor(mxf.toDouble()).toInt()
+            return if (idx in 0 until mw && matrix.get(idx, 0)) 45f else 225f
+        }
+        for (x in 0 until w2) {
+            val sx = (x - quietPx) / fractionalScale
+            val c0 = sampleAt(sx)
+            val cLeft = sampleAt(sx - 0.42f)
+            val cRight = sampleAt(sx + 0.42f)
+            val blurred = ((cLeft * 0.20f + c0 * 0.60f + cRight * 0.20f)).toInt().coerceIn(0, 255)
+            for (y in 4 until (h2 - 4)) {
+                softLuma[y * w2 + x] = blurred.toByte()
+            }
+        }
+        val decodedSoft = BarcodeLuminanceDecoder.decodeCode128(w2, h2, softLuma, addQuietZone = true)
+        assertEquals(barcodeText, decodedSoft)
+    }
+
+    @Test
+    fun barcodeRegexSupportsExtendedSubjectKeys() {
+        val ch = SheetQrCodec.decodeChannel("C5-SOC_1-T2-COMPACT-ABCDEF1234")
+        assertEquals("ABCDEF1234", ch.templateId)
+        assertNotNull(ch.meta)
+        assertEquals(5, ch.meta!!.cls)
+        assertEquals("SOC_1", ch.meta.subjectKey)
+        assertEquals(2, ch.meta.term)
     }
 
     private fun decodeQrMatrixWithZxing(matrix: com.google.zxing.common.BitMatrix): String {

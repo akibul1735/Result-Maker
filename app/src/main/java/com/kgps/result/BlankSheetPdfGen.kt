@@ -383,7 +383,7 @@ object BlankSheetPdfGen {
 
         // 3. Table Geometry
         val barcodeMatrix = if (page.barcodeText.isNotBlank()) SheetQrCodec.encodeBarcodeMatrix(page.barcodeText) else null
-        val footerReservedH = if (barcodeMatrix != null) 48f else 22f
+        val footerReservedH = if (barcodeMatrix != null) 56f else 22f
         val tableBottomLimit = pageH - marginBottom - footerReservedH
         val hasMaxSubHeader = page.showSubjectMaxInHeader && cols.any { col ->
             BlankSheetCatalog.resolveMaxHint(page.cls, page.subjectKey, col.compKey) != null
@@ -580,16 +580,17 @@ object BlankSheetPdfGen {
         val footerY = pageH - marginBottom + 2f
 
         if (barcodeMatrix != null) {
-            val barH = 16f
-            val barW = min(contentW * 0.40f, max(132f, barcodeMatrix.width * 1.02f))
-            val barLeft = marginX + 4f
-            val barTop = footerY - 34f
-            val barQuietX = 4f
+            val barH = 22f
+            val barQuietX = 12f
+            val maxAvailBarW = max(120f, contentW - barQuietX * 2f)
+            val barW = min(maxAvailBarW, max(196f, barcodeMatrix.width * 1.45f))
+            val barLeft = marginX + barQuietX
+            val barTop = footerY - 43f
             val barBox = RectF(
                 barLeft - barQuietX,
-                barTop - 2f,
+                barTop - 4f,
                 barLeft + barW + barQuietX,
-                barTop + barH + 8.5f
+                barTop + barH + 10.5f
             )
             val whitePaint = Paint().apply {
                 color = Color.WHITE
@@ -598,6 +599,7 @@ object BlankSheetPdfGen {
             val barPaint = Paint().apply {
                 color = Color.BLACK
                 style = Paint.Style.FILL
+                isAntiAlias = false
             }
             c.drawRect(barBox, whitePaint)
             val mw = barcodeMatrix.width.coerceAtLeast(1)
@@ -615,8 +617,8 @@ object BlankSheetPdfGen {
                     bx++
                 }
             }
-            val barLabelPaint = dualTextPaint(ctx, 5.8f, bold = false, bnFontId = fontId, enFontId = enFontId, color = 0xFF1A1A1A.toInt())
-            PdfGen.drawMixedText(c, page.barcodeText, barLeft + barW / 2f, barTop + barH + 6.5f, barLabelPaint, Paint.Align.CENTER)
+            val barLabelPaint = dualTextPaint(ctx, 6.2f, bold = false, bnFontId = fontId, enFontId = enFontId, color = 0xFF1A1A1A.toInt())
+            PdfGen.drawMixedText(c, page.barcodeText, barLeft + barW / 2f, barTop + barH + 8.5f, barLabelPaint, Paint.Align.CENTER)
         }
 
         val footerLeftPaint = dualTextPaint(ctx, 7.8f, bold = false, bnFontId = fontId, enFontId = enFontId, color = 0xFF262626.toInt())

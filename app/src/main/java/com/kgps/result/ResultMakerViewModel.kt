@@ -2095,7 +2095,7 @@ class ResultMakerViewModel(
     fun loadMarksheetImage(uri: Uri) {
         viewModelScope.launch {
             val loaded = withContext(Dispatchers.IO) {
-                val bmp = decodeAndScaleBitmap(uri, 2200) ?: return@withContext null
+                val bmp = decodeAndScaleBitmap(uri, 2800) ?: return@withContext null
                 val stats = VisionImageOptimizer.computeStatsOnly(bmp, _aiState.value.documentEnhance)
                 val detection = SheetQrScanner.decodeAllFromBitmap(bmp)
                 Triple(bmp, stats, detection)

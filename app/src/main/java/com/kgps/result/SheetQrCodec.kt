@@ -43,11 +43,11 @@ object SheetQrCodec {
     private val customIdPrefixRegex = Regex("^CUS:(\\d+)$")
     private val thinQrRegex = Regex("^KT1:([A-Z0-9]{6,24})$", RegexOption.IGNORE_CASE)
     private val barcodeRegex = Regex(
-        "^(?:REF\\s*:\\s*)?C(\\d{1,2})-([A-Z]+)-([A-Z0-9]+)(?:-([A-Z0-9]+))?(?:-([A-Z0-9]{6,24}))?$",
+        "^(?:REF\\s*:\\s*)?C(\\d{1,2})-([A-Z0-9_]+)-([A-Z0-9]+)(?:-([A-Z0-9]+))?(?:-([A-Z0-9]{6,24}))?$",
         RegexOption.IGNORE_CASE
     )
     private val refInlineRegex = Regex(
-        "REF\\s*:\\s*C(\\d{1,2})-([A-Z]+)-([A-Z0-9]+)(?:-([A-Z0-9]+))?",
+        "REF\\s*:\\s*C(\\d{1,2})-([A-Z0-9_]+)-([A-Z0-9]+)(?:-([A-Z0-9]+))?",
         RegexOption.IGNORE_CASE
     )
 
