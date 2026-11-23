@@ -151,7 +151,7 @@ object BlankSheetCatalog {
         )
 
     val DEFAULT_COLUMNS: List<BlankSheetColumn> =
-        BlankSheetPreset.COMPACT_MARKS.columnIds.mapNotNull { id -> ALL_COLUMNS.find { it.id == id } }
+        BlankSheetPreset.THREE_TERM_MARKS.columnIds.mapNotNull { id -> ALL_COLUMNS.find { it.id == id } }
 
     val SUBJECT_OPTIONS: List<BlankSubjectOption> = listOf(
         BlankSubjectOption(ALL_SUBJECTS_KEY, "সব বিষয় (একসাথে সব)"),
@@ -456,7 +456,7 @@ data class BlankSheetConfig(
     val columns: List<BlankSheetColumn> = BlankSheetCatalog.DEFAULT_COLUMNS,
     val rowsPerPage: Int = 20,
     val orientation: BlankSheetOrientation = BlankSheetOrientation.PORTRAIT,
-    val numeralStyle: BlankNumeralStyle = BlankNumeralStyle.BENGALI,
+    val numeralStyle: BlankNumeralStyle = BlankNumeralStyle.ENGLISH,
     val autoFillRollAndName: Boolean = true,
     val showSubjectMaxInHeader: Boolean = true,
     val extraBlankRowsPerClass: Int = 0,
@@ -489,7 +489,7 @@ data class BlankSheetPageSpec(
     val columns: List<BlankSheetColumn>,
     val showSubjectMaxInHeader: Boolean,
     val subjectKey: String?,
-    val numeralStyle: BlankNumeralStyle = BlankNumeralStyle.BENGALI,
+    val numeralStyle: BlankNumeralStyle = BlankNumeralStyle.ENGLISH,
     val isClassLevelForm: Boolean = false,
     val sharedWorkingDaysTerms: List<Int> = emptyList(),
     val workingDaysByTerm: Map<Int, String> = emptyMap(),

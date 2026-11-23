@@ -30,6 +30,7 @@ class BlankSheetPlannerTest {
             selectedClass = 3,
             subjectKey = "SCI",
             term = 2,
+            columns = BlankSheetCatalog.presetColumns(BlankSheetPreset.COMPACT_MARKS),
             rowsPerPage = 10,
             numeralStyle = BlankNumeralStyle.BENGALI,
             autoFillRollAndName = true
@@ -126,6 +127,7 @@ class BlankSheetPlannerTest {
             customSubjectTitle = "হাতের লেখা",
             term = -1,
             customTermTitle = "মাসিক পরীক্ষা",
+            columns = BlankSheetCatalog.presetColumns(BlankSheetPreset.COMPACT_MARKS),
             rowsPerPage = 10,
             autoFillRollAndName = false,
             fillRemainingPageRows = true
@@ -153,5 +155,27 @@ class BlankSheetPlannerTest {
         assertEquals(50, BlankSheetCatalog.resolveMaxHint(1, "BAN", "CONT"))
         assertEquals(30, BlankSheetCatalog.resolveMaxHint(3, "SCI", "CONT"))
         assertEquals(100, BlankSheetCatalog.resolveMaxHint(3, "SCI", "TOTAL"))
+    }
+
+    @Test
+    fun defaultSettingsUsePortraitEnglishNumeralsAndThreeTermTemplateFirst() {
+        val defaultCfg = BlankSheetConfig()
+        assertEquals(BlankSheetOrientation.PORTRAIT, defaultCfg.orientation)
+        assertEquals(BlankNumeralStyle.ENGLISH, defaultCfg.numeralStyle)
+        assertEquals(BlankSheetPreset.THREE_TERM_MARKS, BlankSheetPreset.entries.first())
+        assertEquals(
+            BlankSheetCatalog.presetColumns(BlankSheetPreset.THREE_TERM_MARKS).map { it.id },
+            defaultCfg.columns.map { it.id }
+        )
+
+        val pages = BlankSheetPlanner.buildPages(
+            students = listOf(Student(id = "s1", cls = 3, roll = 1, name = "রাফি")),
+            settings = Settings(),
+            config = defaultCfg.copy(selectedClass = 3),
+            allowedClassIds = listOf(3)
+        )
+        assertEquals(1, pages.size)
+        assertEquals("01", pages.first().rows.first().rollText)
+        assertEquals("৩ প্রান্তিক", pages.first().termTitleBn)
     }
 }

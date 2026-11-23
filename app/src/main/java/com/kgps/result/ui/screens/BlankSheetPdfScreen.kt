@@ -175,7 +175,8 @@ fun BlankSheetPdfScreen(
                 term = 1,
                 columns = BlankSheetCatalog.DEFAULT_COLUMNS,
                 rowsPerPage = 20,
-                orientation = BlankSheetOrientation.PORTRAIT
+                orientation = BlankSheetOrientation.PORTRAIT,
+                numeralStyle = BlankNumeralStyle.ENGLISH
             )
         )
     }
@@ -927,7 +928,7 @@ fun BlankSheetPdfScreen(
                                 Surface(
                                     onClick = {
                                         val cols = BlankSheetCatalog.presetColumns(preset)
-                                        val suggestedOri = if (cols.size >= 8) BlankSheetOrientation.LANDSCAPE else BlankSheetOrientation.PORTRAIT
+                                        val suggestedOri = if (cols.size >= 9) BlankSheetOrientation.LANDSCAPE else BlankSheetOrientation.PORTRAIT
                                         config = config.copy(columns = cols, orientation = suggestedOri)
                                         focusedColId = null
                                         previewPageIdx = 0
