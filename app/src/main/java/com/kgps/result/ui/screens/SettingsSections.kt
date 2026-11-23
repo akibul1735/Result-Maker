@@ -1192,7 +1192,7 @@ internal fun SettingsCsvJsonContent(
                             .weight(1f)
                             .testTag("settings_pick_csv_btn"),
                         shape = RoundedCornerShape(8.dp)
-                    ) { Text("CSV ফাইল খুলুন", fontSize = 12.sp) }
+                    ) { Text("CSV / Excel খুলুন", fontSize = 12.sp) }
                 }
             }
             Row(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.fillMaxWidth()) {

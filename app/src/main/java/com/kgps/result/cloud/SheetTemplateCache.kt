@@ -24,6 +24,10 @@ class SheetTemplateCache(context: Context) {
         return map[cleanId]
     }
 
+    fun getAll(): List<BlankSheetQrMeta> = synchronized(lock) {
+        readAllLocked().values.toList()
+    }
+
     fun put(meta: BlankSheetQrMeta) {
         val tid = meta.templateId.trim().uppercase().ifBlank {
             SheetQrCodec.computeTemplateId(meta)
@@ -81,11 +85,28 @@ class SheetTemplateCache(context: Context) {
         prefs.edit().putString(KEY_TEMPLATES_JSON, root.toString()).apply()
     }
 
-    private fun serializeMeta(meta: BlankSheetQrMeta): JSONObject = JSONObject().apply {
-        put("templateId", meta.templateId)
-        put("cls", meta.cls)
+    private fun serializeMeta(meta: BlankSheetQrMeta): JSONObject =
+        SheetTemplateJson.serialize(meta)
+
+    private fun parseMeta(tid: String, obj: JSONObject): BlankSheetQrMeta? =
+        SheetTemplateJson.parse(tid, obj)
+
+    companion object {
+        private const val PREFS_NAME = "blank_sheet_template_cache_v1"
+        private const val KEY_TEMPLATES_JSON = "templates_map"
+        private const val MAX_TEMPLATES = 250
+    }
+}
+
+object SheetTemplateJson {
+    fun serialize(meta: BlankSheetQrMeta): JSONObject = JSONObject().apply {
+        val tid = meta.templateId.trim().uppercase().ifBlank {
+            SheetQrCodec.computeTemplateId(meta)
+        }
+        put("templateId", tid)
+        put("cls", meta.cls.coerceIn(1, 20))
         put("subjectKey", meta.subjectKey.orEmpty())
-        put("term", meta.term)
+        put("term", meta.term.coerceIn(-1, 3))
         put("sheetKind", meta.sheetKind.name)
         put("importScope", meta.importScope.name)
         put("columnIds", JSONArray(meta.columnIds))
@@ -95,12 +116,14 @@ class SheetTemplateCache(context: Context) {
         put("workingDaysByTerm", JSONObject().apply {
             meta.workingDaysByTerm.forEach { (k, v) -> put(k.toString(), v) }
         })
-        put("pageIndex", meta.pageIndex)
-        put("totalPages", meta.totalPages)
+        put("pageIndex", meta.pageIndex.coerceAtLeast(1))
+        put("totalPages", meta.totalPages.coerceAtLeast(1))
         put("refCode", meta.refCode)
     }
 
-    private fun parseMeta(tid: String, obj: JSONObject): BlankSheetQrMeta? {
+    fun parse(fallbackTid: String, obj: JSONObject): BlankSheetQrMeta? {
+        val tid = obj.optString("templateId", fallbackTid).trim().uppercase()
+        if (tid.isBlank()) return null
         val cls = obj.optInt("cls", -1).takeIf { it in 1..20 } ?: return null
         val sub = obj.optString("subjectKey", "").trim().takeIf { it.isNotEmpty() }
         val term = obj.optInt("term", 1).coerceIn(-1, 3)
@@ -135,7 +158,7 @@ class SheetTemplateCache(context: Context) {
 
         return BlankSheetQrMeta(
             version = 2,
-            templateId = tid.uppercase(),
+            templateId = tid,
             cls = cls,
             subjectKey = sub,
             term = term,
@@ -150,11 +173,5 @@ class SheetTemplateCache(context: Context) {
             totalPages = obj.optInt("totalPages", 1).coerceAtLeast(1),
             refCode = obj.optString("refCode", "")
         )
-    }
-
-    companion object {
-        private const val PREFS_NAME = "blank_sheet_template_cache_v1"
-        private const val KEY_TEMPLATES_JSON = "templates_map"
-        private const val MAX_TEMPLATES = 250
     }
 }

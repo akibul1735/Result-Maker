@@ -109,31 +109,35 @@ object GoogleDriveBackupClient {
                 setRequestProperty("Content-Type", "multipart/related; boundary=$boundary")
             }
 
-            conn.outputStream.use { out ->
-                val writer = OutputStreamWriter(out, Charsets.UTF_8)
-                writer.write("--$boundary\r\n")
-                writer.write("Content-Type: application/json; charset=UTF-8\r\n\r\n")
-                writer.write(metadata.toString())
-                writer.write("\r\n--$boundary\r\n")
-                writer.write("Content-Type: application/json; charset=UTF-8\r\n\r\n")
-                writer.write(jsonContent)
-                writer.write("\r\n--$boundary--\r\n")
-                writer.flush()
-            }
+            try {
+                conn.outputStream.use { out ->
+                    val writer = OutputStreamWriter(out, Charsets.UTF_8)
+                    writer.write("--$boundary\r\n")
+                    writer.write("Content-Type: application/json; charset=UTF-8\r\n\r\n")
+                    writer.write(metadata.toString())
+                    writer.write("\r\n--$boundary\r\n")
+                    writer.write("Content-Type: application/json; charset=UTF-8\r\n\r\n")
+                    writer.write(jsonContent)
+                    writer.write("\r\n--$boundary--\r\n")
+                    writer.flush()
+                }
 
-            val code = conn.responseCode
-            val body = readResponseBody(conn, code in 200..299)
-            if (code !in 200..299) {
-                throw IllegalStateException(formatDriveHttpError(code, body))
-            }
+                val code = conn.responseCode
+                val body = readResponseBody(conn, code in 200..299)
+                if (code !in 200..299) {
+                    throw IllegalStateException(formatDriveHttpError(code, body))
+                }
 
-            val obj = JSONObject(body)
-            DriveBackupFile(
-                id = obj.optString("id"),
-                name = obj.optString("name", fileName),
-                modifiedTime = obj.optString("modifiedTime"),
-                sizeBytes = obj.optString("size", jsonContent.toByteArray(Charsets.UTF_8).size.toString()).toLongOrNull() ?: 0L
-            )
+                val obj = JSONObject(body)
+                DriveBackupFile(
+                    id = obj.optString("id"),
+                    name = obj.optString("name", fileName),
+                    modifiedTime = obj.optString("modifiedTime"),
+                    sizeBytes = obj.optString("size", jsonContent.toByteArray(Charsets.UTF_8).size.toString()).toLongOrNull() ?: 0L
+                )
+            } finally {
+                conn.disconnect()
+            }
         }
     }
 
@@ -151,21 +155,25 @@ object GoogleDriveBackupClient {
                 readTimeout = 20_000
                 setRequestProperty("Authorization", "Bearer $accessToken")
             }
-            val code = conn.responseCode
-            val body = readResponseBody(conn, code in 200..299)
-            if (code !in 200..299) {
-                throw IllegalStateException(formatDriveHttpError(code, body))
-            }
+            try {
+                val code = conn.responseCode
+                val body = readResponseBody(conn, code in 200..299)
+                if (code !in 200..299) {
+                    throw IllegalStateException(formatDriveHttpError(code, body))
+                }
 
-            val arr = JSONObject(body).optJSONArray("files") ?: JSONArray()
-            (0 until arr.length()).mapNotNull { i ->
-                val obj = arr.optJSONObject(i) ?: return@mapNotNull null
-                DriveBackupFile(
-                    id = obj.optString("id"),
-                    name = obj.optString("name"),
-                    modifiedTime = obj.optString("modifiedTime"),
-                    sizeBytes = obj.optString("size", "0").toLongOrNull() ?: 0L
-                )
+                val arr = JSONObject(body).optJSONArray("files") ?: JSONArray()
+                (0 until arr.length()).mapNotNull { i ->
+                    val obj = arr.optJSONObject(i) ?: return@mapNotNull null
+                    DriveBackupFile(
+                        id = obj.optString("id"),
+                        name = obj.optString("name"),
+                        modifiedTime = obj.optString("modifiedTime"),
+                        sizeBytes = obj.optString("size", "0").toLongOrNull() ?: 0L
+                    )
+                }
+            } finally {
+                conn.disconnect()
             }
         }
     }
@@ -179,12 +187,16 @@ object GoogleDriveBackupClient {
                 readTimeout = 30_000
                 setRequestProperty("Authorization", "Bearer $accessToken")
             }
-            val code = conn.responseCode
-            val body = readResponseBody(conn, code in 200..299)
-            if (code !in 200..299) {
-                throw IllegalStateException(formatDriveHttpError(code, body))
+            try {
+                val code = conn.responseCode
+                val body = readResponseBody(conn, code in 200..299)
+                if (code !in 200..299) {
+                    throw IllegalStateException(formatDriveHttpError(code, body))
+                }
+                body
+            } finally {
+                conn.disconnect()
             }
-            body
         }
     }
 
@@ -203,14 +215,18 @@ object GoogleDriveBackupClient {
             setRequestProperty("Authorization", "Bearer $accessToken")
             setRequestProperty("Content-Type", "application/json; charset=UTF-8")
         }
-        conn.outputStream.use { it.write(payload.toString().toByteArray(Charsets.UTF_8)) }
+        return try {
+            conn.outputStream.use { it.write(payload.toString().toByteArray(Charsets.UTF_8)) }
 
-        val code = conn.responseCode
-        val body = readResponseBody(conn, code in 200..299)
-        if (code !in 200..299) {
-            throw IllegalStateException(formatDriveHttpError(code, body))
+            val code = conn.responseCode
+            val body = readResponseBody(conn, code in 200..299)
+            if (code !in 200..299) {
+                throw IllegalStateException(formatDriveHttpError(code, body))
+            }
+            JSONObject(body).getString("id")
+        } finally {
+            conn.disconnect()
         }
-        return JSONObject(body).getString("id")
     }
 
     private fun findFolderId(accessToken: String): String? {
@@ -223,13 +239,17 @@ object GoogleDriveBackupClient {
             readTimeout = 20_000
             setRequestProperty("Authorization", "Bearer $accessToken")
         }
-        val code = conn.responseCode
-        val body = readResponseBody(conn, code in 200..299)
-        if (code !in 200..299) {
-            throw IllegalStateException(formatDriveHttpError(code, body))
+        return try {
+            val code = conn.responseCode
+            val body = readResponseBody(conn, code in 200..299)
+            if (code !in 200..299) {
+                throw IllegalStateException(formatDriveHttpError(code, body))
+            }
+            val arr = JSONObject(body).optJSONArray("files") ?: return null
+            arr.optJSONObject(0)?.optString("id")?.takeIf { it.isNotBlank() }
+        } finally {
+            conn.disconnect()
         }
-        val arr = JSONObject(body).optJSONArray("files") ?: return null
-        return arr.optJSONObject(0)?.optString("id")?.takeIf { it.isNotBlank() }
     }
 
     private fun findFileInFolder(accessToken: String, folderId: String, fileName: String): String? {
@@ -242,13 +262,17 @@ object GoogleDriveBackupClient {
             readTimeout = 20_000
             setRequestProperty("Authorization", "Bearer $accessToken")
         }
-        val code = conn.responseCode
-        val body = readResponseBody(conn, code in 200..299)
-        if (code !in 200..299) {
-            throw IllegalStateException(formatDriveHttpError(code, body))
+        return try {
+            val code = conn.responseCode
+            val body = readResponseBody(conn, code in 200..299)
+            if (code !in 200..299) {
+                throw IllegalStateException(formatDriveHttpError(code, body))
+            }
+            val arr = JSONObject(body).optJSONArray("files") ?: return null
+            arr.optJSONObject(0)?.optString("id")?.takeIf { it.isNotBlank() }
+        } finally {
+            conn.disconnect()
         }
-        val arr = JSONObject(body).optJSONArray("files") ?: return null
-        return arr.optJSONObject(0)?.optString("id")?.takeIf { it.isNotBlank() }
     }
 
     private fun readResponseBody(conn: HttpURLConnection, ok: Boolean): String {

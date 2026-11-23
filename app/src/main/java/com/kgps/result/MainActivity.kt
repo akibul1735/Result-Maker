@@ -311,7 +311,7 @@ private fun AppRoot(
         val driveConsentLauncher = rememberLauncherForActivityResult(
             ActivityResultContracts.StartIntentSenderForResult()
         ) { result ->
-            vm.handleDriveConsentIntentResult(result.data)
+            vm.handleDriveConsentIntentResult(result.resultCode, result.data)
         }
         LaunchedEffect(pendingDriveConsent) {
             val sender = pendingDriveConsent ?: return@LaunchedEffect
@@ -1046,6 +1046,7 @@ fun ResultMakerWorkspace(
                                     onRemoveCustomClass = vm::removeCustomClass,
                                     onOpenCsvImport = { txt -> vm.openCsvImport(txt) },
                                     onRestoreBackupJson = vm::restoreBackupJson,
+                                    onBuildBackupJson = vm::buildFullBackupJson,
                                     onExportAllPdf = {
                                         val allowedCls = permissions.effectiveClasses().toSet()
                                         requestPdfWithOption(

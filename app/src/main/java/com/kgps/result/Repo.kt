@@ -40,6 +40,20 @@ enum class CsvHeaderStyle(
     }
 }
 
+data class ReportBackupPrefs(
+    val includeClassHighest: Boolean = false,
+    val includeSummaryTable: Boolean = false,
+    val summaryTableColumns: List<ReportSummaryColumn> = ReportSummaryColumn.DEFAULT_SELECTED,
+    val showCoverAddress: Boolean = true
+)
+
+data class BackupBundle(
+    val students: List<Student>,
+    val settings: Settings,
+    val reportPrefs: ReportBackupPrefs? = null,
+    val sheetTemplates: List<BlankSheetQrMeta> = emptyList()
+)
+
 object Repo {
     private val BASE = listOf("cls", "roll", "name", "guardian", "village", "union", "upazila", "district", "mobile", "religion")
     val MARK_KEYS: List<String> = listOf("BAN", "ENG", "MATH", "SOC", "SCI", "BGW", "REL", "PE", "ART").flatMap { s ->
@@ -66,9 +80,14 @@ object Repo {
     }
 
     // ---------- JSON (ব্যাকআপ/রিস্টোর) ----------
-    fun toJson(list: List<Student>, st: Settings): String {
+    fun toJson(
+        list: List<Student>,
+        st: Settings,
+        reportPrefs: ReportBackupPrefs? = null,
+        sheetTemplates: List<BlankSheetQrMeta> = emptyList()
+    ): String {
         val o = JSONObject()
-        o.put("version", 1)
+        o.put("version", 2)
         o.put("school", st.school)
         o.put("schoolAddress", st.schoolAddress)
         o.put("year", st.year)
@@ -92,14 +111,29 @@ object Repo {
                 })
             }
         })
+        if (reportPrefs != null) {
+            o.put("reportPrefs", JSONObject().apply {
+                put("includeClassHighest", reportPrefs.includeClassHighest)
+                put("includeSummaryTable", reportPrefs.includeSummaryTable)
+                put("summaryTableColumns", ReportSummaryColumn.serializeList(reportPrefs.summaryTableColumns))
+                put("showCoverAddress", reportPrefs.showCoverAddress)
+            })
+        }
+        if (sheetTemplates.isNotEmpty()) {
+            o.put("sheetTemplates", JSONArray().also { arr ->
+                sheetTemplates.distinctBy { it.templateId.trim().uppercase() }.forEach { tmpl ->
+                    arr.put(com.kgps.result.cloud.SheetTemplateJson.serialize(tmpl))
+                }
+            })
+        }
         val a = JSONArray()
         list.forEach { s ->
             a.put(JSONObject().apply {
                 put("id", s.id); put("cls", s.cls); put("roll", s.roll); put("name", s.name)
-                put("guardian", s.guardian); put("village", s.village); put("union", s.union)
+                put("guardian", s.guardian); put("village", s.village); put("union", s.union); put("post", s.post)
                 put("upazila", s.upazila.ifBlank { DEFAULT_UPAZILA })
                 put("district", s.district.ifBlank { DEFAULT_DISTRICT }); put("mobile", s.mobile); put("religion", s.religion)
-                put("m", JSONObject().also { j -> s.m.forEach { (k, v) -> j.put(k, v) } })
+                put("m", JSONObject().also { j -> s.m.forEach { (k, v) -> if (v.isFinite()) j.put(k, v) } })
                 put("x", JSONObject().also { j -> s.x.forEach { (k, v) -> j.put(k, v) } })
             })
         }
@@ -108,9 +142,9 @@ object Repo {
     }
 
     private fun intMap(j: JSONObject?): Map<Int, String> =
-        j?.keys()?.asSequence()?.mapNotNull { k -> k.toIntOrNull()?.let { it to j.getString(k) } }?.toMap() ?: emptyMap()
+        j?.keys()?.asSequence()?.mapNotNull { k -> k.toIntOrNull()?.let { it to j.optString(k) } }?.toMap() ?: emptyMap()
 
-    fun fromJson(txt: String): Pair<List<Student>, Settings> {
+    fun fromBackupJson(txt: String): BackupBundle {
         val o = JSONObject(txt)
         val rawLogo = o.optString("dpeLogo", "simple")
         val cfArr = o.optJSONArray("customFields")
@@ -140,41 +174,112 @@ object Repo {
         val st = Settings(
             school = o.optString("school"),
             schoolAddress = o.optString("schoolAddress"),
-            year = o.optString("year", "২০২৬"),
-            teachers = intMap(o.optJSONObject("teachers")), teacherMobiles = intMap(o.optJSONObject("teacherMobiles")),
+            year = o.optString("year", "২০২৬").ifBlank { "২০২৬" },
+            teachers = intMap(o.optJSONObject("teachers")),
+            teacherMobiles = intMap(o.optJSONObject("teacherMobiles")),
             pdfFont = decodedFonts.bengaliFontId,
             pdfEnglishFont = decodedFonts.englishFontId,
             dpeLogo = if (rawLogo == "color") "color" else "simple",
             customFields = customFields,
             customClasses = customClasses
         )
+        val rpObj = o.optJSONObject("reportPrefs")
+        val reportPrefs = if (rpObj != null) {
+            ReportBackupPrefs(
+                includeClassHighest = rpObj.optBoolean("includeClassHighest", false),
+                includeSummaryTable = rpObj.optBoolean("includeSummaryTable", false),
+                summaryTableColumns = ReportSummaryColumn.deserializeList(rpObj.optString("summaryTableColumns", "")),
+                showCoverAddress = rpObj.optBoolean("showCoverAddress", true)
+            )
+        } else null
+        val tmplArr = o.optJSONArray("sheetTemplates")
+        val sheetTemplates = if (tmplArr != null) {
+            (0 until tmplArr.length()).mapNotNull { idx ->
+                val obj = tmplArr.optJSONObject(idx) ?: return@mapNotNull null
+                com.kgps.result.cloud.SheetTemplateJson.parse("", obj)
+            }.distinctBy { it.templateId }
+        } else emptyList()
+
         val a = o.optJSONArray("students") ?: JSONArray()
-        val list = (0 until a.length()).map { i ->
-            val j = a.getJSONObject(i)
-            val mj = j.optJSONObject("m"); val xj = j.optJSONObject("x")
-            val xMap = xj?.keys()?.asSequence()?.associateWith { xj.getString(it) } ?: emptyMap()
+        val usedIds = mutableSetOf<String>()
+        val list = (0 until a.length()).mapNotNull { i ->
+            val j = a.optJSONObject(i) ?: return@mapNotNull null
+            val mj = j.optJSONObject("m")
+            val xj = j.optJSONObject("x")
+            val xMap = xj?.keys()?.asSequence()?.associateWith { xj.optString(it) } ?: emptyMap()
             val unionVal = j.optString("union").ifBlank { xMap["UNION"].orEmpty() }
+            var idVal = j.optString("id").trim().ifBlank { UUID.randomUUID().toString() }
+            if (!usedIds.add(idVal)) {
+                idVal = UUID.randomUUID().toString()
+                usedIds.add(idVal)
+            }
+            val marks = mj?.keys()?.asSequence()?.mapNotNull { k ->
+                val d = mj.optDouble(k, Double.NaN)
+                if (d.isFinite()) k to d else null
+            }?.toMap() ?: emptyMap()
             Student(
-                id = j.optString("id", UUID.randomUUID().toString()), cls = j.optInt("cls", 1), roll = j.optInt("roll"),
-                name = j.optString("name"), guardian = j.optString("guardian"), village = j.optString("village"),
+                id = idVal,
+                cls = j.optInt("cls", 1).coerceIn(1, 20),
+                roll = j.optInt("roll", i + 1).coerceIn(1, 9999),
+                name = j.optString("name"),
+                guardian = j.optString("guardian"),
+                village = j.optString("village"),
                 union = unionVal,
-                post = "",
+                post = j.optString("post"),
                 upazila = j.optString("upazila").ifBlank { DEFAULT_UPAZILA },
                 district = j.optString("district").ifBlank { DEFAULT_DISTRICT },
                 mobile = j.optString("mobile"),
-                religion = j.optString("religion", "ইসলাম"),
-                m = mj?.keys()?.asSequence()?.associateWith { mj.getDouble(it) } ?: emptyMap(),
+                religion = j.optString("religion", "ইসলাম").ifBlank { "ইসলাম" },
+                m = marks,
                 x = xMap - "UNION"
             )
         }
-        return list to st
+        return BackupBundle(
+            students = list,
+            settings = st,
+            reportPrefs = reportPrefs,
+            sheetTemplates = sheetTemplates
+        )
     }
+
+    fun fromJson(txt: String): Pair<List<Student>, Settings> =
+        fromBackupJson(txt).let { it.students to it.settings }
 
     private fun file(ctx: Context) = File(ctx.filesDir, "data.json")
     fun load(ctx: Context): Pair<List<Student>, Settings> =
         try { if (file(ctx).exists()) fromJson(file(ctx).readText()) else SAMPLE_STUDENTS to DEFAULT_SETTINGS }
         catch (e: Exception) { SAMPLE_STUDENTS to DEFAULT_SETTINGS }
-    fun save(ctx: Context, list: List<Student>, st: Settings) { file(ctx).writeText(toJson(list, st)) }
+
+    fun save(ctx: Context, list: List<Student>, st: Settings) {
+        val target = file(ctx)
+        val tmp = File(ctx.filesDir, "data.json.tmp")
+        tmp.writeText(toJson(list, st), Charsets.UTF_8)
+        if (!tmp.renameTo(target)) {
+            tmp.copyTo(target, overwrite = true)
+            tmp.delete()
+        }
+    }
+
+    fun loadReportBackupPrefs(ctx: Context): ReportBackupPrefs {
+        val rp = ctx.applicationContext.getSharedPreferences("kgps_report_prefs", Context.MODE_PRIVATE)
+        return ReportBackupPrefs(
+            includeClassHighest = rp.getBoolean("include_class_highest", false),
+            includeSummaryTable = rp.getBoolean("include_summary_table", false),
+            summaryTableColumns = ReportSummaryColumn.deserializeList(rp.getString("summary_table_columns", null)),
+            showCoverAddress = rp.getBoolean("show_cover_address", true)
+        )
+    }
+
+    fun saveReportBackupPrefs(ctx: Context, prefs: ReportBackupPrefs) {
+        val cleanedCols = prefs.summaryTableColumns.distinct().ifEmpty { ReportSummaryColumn.DEFAULT_SELECTED }
+        ctx.applicationContext.getSharedPreferences("kgps_report_prefs", Context.MODE_PRIVATE)
+            .edit()
+            .putBoolean("include_class_highest", prefs.includeClassHighest)
+            .putBoolean("include_summary_table", prefs.includeSummaryTable)
+            .putString("summary_table_columns", ReportSummaryColumn.serializeList(cleanedCols))
+            .putBoolean("show_cover_address", prefs.showCoverAddress)
+            .apply()
+    }
 
     // ---------- CSV ----------
     private fun q(s: String) = if (s.any { it == ',' || it == '"' || it == '\n' || it == '\r' }) "\"" + s.replace("\"", "\"\"") + "\"" else s
@@ -406,9 +511,11 @@ object Repo {
                         val comp = parts.getOrNull(2)
                         val subObj = if (subKey != null) subs.firstOrNull { it.key == subKey } else null
                         if (subObj != null && term != null && s.hasSub(subObj, term)) {
-                            when (comp) {
-                                "CONT" -> fmtEn(s.cont(subObj, term))
-                                "TOTAL" -> fmtEn(s.total(subObj, term))
+                            val hasGranularOrCont = subObj.comps.any { s.m.containsKey(mk(subObj.key, term, it.key)) } ||
+                                s.m.containsKey(mk(subObj.key, term, "CONT"))
+                            when {
+                                comp == "CONT" && hasGranularOrCont -> fmtEn(s.cont(subObj, term))
+                                comp == "TOTAL" -> fmtEn(s.total(subObj, term))
                                 else -> ""
                             }
                         } else ""
@@ -1216,47 +1323,95 @@ object Repo {
             val base = if (pos >= 0) out[pos] else Student(UUID.randomUUID().toString(), cls, roll, "")
             val clsSubs = subjectsFor(cls, stdMap["religion"]?.ifBlank { base.religion } ?: base.religion)
 
-            // Reconcile CONT vs granular components (TB/ACT/LANG/CT) & ignore WR on written==0 subjects
+            // Reconcile CONT vs granular components (TB/ACT/LANG/CT) & avoid storing redundant CONT/TOTAL on round-trip
             val mergedMarks = base.m.toMutableMap()
             val cleanedImported = importedMarks.filter { (key, num) ->
+                if (!num.isFinite()) return@filter false
                 val parts = key.split("_")
                 if (parts.size == 3 && parts[2] == "WR") {
                     val sub = clsSubs.find { it.key == parts[0] }
                     sub == null || sub.written > 0 || num > 0.0
                 } else true
             }
-            cleanedImported.keys.forEach { key ->
+            val finalImported = mutableMapOf<String, Double>()
+            val groupedBySubTerm = linkedMapOf<Pair<String, Int>, MutableMap<String, Double>>()
+            cleanedImported.forEach { (key, num) ->
                 val parts = key.split("_")
-                if (parts.size == 3) {
-                    val subKey = parts[0]
-                    val term = parts[1].toIntOrNull()
-                    val compKey = parts[2]
-                    if (term != null) {
-                        when (compKey) {
-                            "CONT" -> listOf("TB", "ACT", "LANG", "CT", "TOTAL").forEach { mergedMarks.remove(mk(subKey, term, it)) }
-                            "TB", "ACT", "LANG", "CT" -> {
-                                mergedMarks.remove(mk(subKey, term, "CONT"))
-                                mergedMarks.remove(mk(subKey, term, "TOTAL"))
+                val term = parts.getOrNull(1)?.toIntOrNull()
+                if (parts.size == 3 && term != null) {
+                    groupedBySubTerm.getOrPut(parts[0] to term) { linkedMapOf() }[parts[2]] = num
+                } else {
+                    finalImported[key] = num
+                }
+            }
+            groupedBySubTerm.forEach { (subTerm, compsMap) ->
+                val (subKey, term) = subTerm
+                val hasGranular = compsMap.keys.any { it == "TB" || it == "ACT" || it == "LANG" || it == "CT" }
+                val hasCont = compsMap.containsKey("CONT")
+                val hasWr = compsMap.containsKey("WR")
+                val subObj = clsSubs.find { it.key == subKey }
+                val isWrittenSub = subObj == null || subObj.written > 0
+                val isArtTotalPreferred = subKey == "ART" && !hasGranular && compsMap.containsKey("TOTAL") && (
+                    !hasCont || compsMap["CONT"] == compsMap["TOTAL"] || compsMap["CONT"] == 0.0
+                )
+                val skipZeroCalculatedCont = hasCont &&
+                    compsMap["CONT"] == 0.0 &&
+                    ((isWrittenSub && hasWr) || compsMap.containsKey("TOTAL"))
+
+                when {
+                    hasGranular -> {
+                        mergedMarks.remove(mk(subKey, term, "CONT"))
+                        mergedMarks.remove(mk(subKey, term, "TOTAL"))
+                        compsMap.forEach { (compKey, num) ->
+                            if (compKey != "CONT" && compKey != "TOTAL") {
+                                finalImported[mk(subKey, term, compKey)] = num
                             }
-                            "TOTAL" -> {
-                                val hasGranularOrContInSameRow = listOf("TB", "ACT", "LANG", "CT", "CONT", "WR")
-                                    .any { cleanedImported.containsKey(mk(subKey, term, it)) }
-                                if (!hasGranularOrContInSameRow) {
-                                    listOf("TB", "ACT", "LANG", "CT", "CONT", "WR").forEach { mergedMarks.remove(mk(subKey, term, it)) }
-                                }
-                            }
+                        }
+                    }
+                    isArtTotalPreferred -> {
+                        listOf("TB", "ACT", "LANG", "CT", "CONT", "WR").forEach {
+                            mergedMarks.remove(mk(subKey, term, it))
+                        }
+                        finalImported[mk(subKey, term, "TOTAL")] = compsMap.getValue("TOTAL")
+                    }
+                    (hasCont && !skipZeroCalculatedCont) || (isWrittenSub && hasWr) -> {
+                        if (hasCont && !skipZeroCalculatedCont) {
+                            listOf("TB", "ACT", "LANG", "CT").forEach { mergedMarks.remove(mk(subKey, term, it)) }
+                        }
+                        mergedMarks.remove(mk(subKey, term, "TOTAL"))
+                        compsMap.forEach { (compKey, num) ->
+                            if (compKey == "TOTAL") return@forEach
+                            if (compKey == "CONT" && skipZeroCalculatedCont) return@forEach
+                            finalImported[mk(subKey, term, compKey)] = num
+                        }
+                    }
+                    compsMap.containsKey("TOTAL") -> {
+                        listOf("TB", "ACT", "LANG", "CT", "CONT", "WR", "TOTAL").forEach {
+                            mergedMarks.remove(mk(subKey, term, it))
+                        }
+                        val totalVal = compsMap.getValue("TOTAL")
+                        val targetComp = if (subObj != null && subObj.written == 0 && subObj.key != "ART") {
+                            "CONT"
+                        } else {
+                            "TOTAL"
+                        }
+                        finalImported[mk(subKey, term, targetComp)] = totalVal
+                    }
+                    else -> {
+                        compsMap.forEach { (compKey, num) ->
+                            finalImported[mk(subKey, term, compKey)] = num
                         }
                     }
                 }
             }
-            mergedMarks.putAll(cleanedImported)
+            mergedMarks.putAll(finalImported)
 
             val upd = base.copy(
                 name = stdMap["name"]?.ifBlank { base.name } ?: base.name,
                 guardian = stdMap["guardian"]?.ifBlank { base.guardian } ?: base.guardian,
                 village = stdMap["village"]?.ifBlank { base.village } ?: base.village,
                 union = stdMap["union"]?.ifBlank { base.union } ?: base.union,
-                post = "",
+                post = base.post,
                 upazila = (stdMap["upazila"]?.ifBlank { base.upazila } ?: base.upazila).ifBlank { DEFAULT_UPAZILA },
                 district = (stdMap["district"]?.ifBlank { base.district } ?: base.district).ifBlank { DEFAULT_DISTRICT },
                 mobile = stdMap["mobile"]?.ifBlank { base.mobile } ?: base.mobile,

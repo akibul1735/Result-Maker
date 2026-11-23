@@ -8,16 +8,22 @@ import android.os.Build
 import android.os.Environment
 import android.provider.MediaStore
 import androidx.documentfile.provider.DocumentFile
+import com.kgps.result.BlankSheetQrMeta
 import com.kgps.result.CsvHeaderStyle
 import com.kgps.result.Repo
+import com.kgps.result.ReportBackupPrefs
 import com.kgps.result.Settings
 import com.kgps.result.Student
 import com.kgps.result.bn
+import com.kgps.result.cloud.SheetTemplateCache
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.security.MessageDigest
@@ -283,6 +289,9 @@ class AutoBackupManager(
 ) {
     private val appContext = context.applicationContext
     private val prefs = appContext.getSharedPreferences("rm_auto_backup_$userId", Context.MODE_PRIVATE)
+    private val localMutex = Mutex()
+    private val csvMutex = Mutex()
+    private val driveMutex = Mutex()
 
     private val _status = MutableStateFlow(loadInitialStatus())
     val status: StateFlow<AutoBackupStatus> = _status.asStateFlow()
@@ -473,80 +482,91 @@ class AutoBackupManager(
         schoolCode: String,
         students: List<Student>,
         settings: Settings,
-        force: Boolean = false
+        force: Boolean = false,
+        reportPrefs: ReportBackupPrefs? = Repo.loadReportBackupPrefs(appContext),
+        sheetTemplates: List<BlankSheetQrMeta> = SheetTemplateCache(appContext).getAll()
     ): Result<String> = withContext(Dispatchers.IO) {
-        val st = _status.value
-        if (!force && !st.localEnabled) {
-            return@withContext Result.success("skipped")
-        }
-        val json = Repo.toJson(students, settings)
-        val hash = sha256(json)
-        val nowMs = System.currentTimeMillis()
-        if (!force) {
-            if (st.localSchedule.mode == BackupScheduleMode.ON_CHANGE) {
-                val prevHash = prefs.getString(KEY_LAST_LOCAL_HASH, "")
-                if (hash == prevHash) {
-                    refreshLocalSnapshots(schoolId)
-                    return@withContext Result.success("unchanged")
+        localMutex.withLock {
+            val st = _status.value
+            if (!force && !st.localEnabled) {
+                return@withLock Result.success("skipped")
+            }
+            val json = Repo.toJson(
+                list = students,
+                st = settings,
+                reportPrefs = reportPrefs,
+                sheetTemplates = sheetTemplates
+            )
+            val hash = sha256(json)
+            val nowMs = System.currentTimeMillis()
+            if (!force) {
+                if (st.localSchedule.mode == BackupScheduleMode.ON_CHANGE) {
+                    val prevHash = prefs.getString(KEY_LAST_LOCAL_HASH, "")
+                    if (hash == prevHash) {
+                        refreshLocalSnapshots(schoolId)
+                        return@withLock Result.success("unchanged")
+                    }
+                } else {
+                    val lastSlotMs = prefs.getLong(KEY_LAST_LOCAL_SLOT_MS, 0L)
+                    if (!BackupScheduleCalculator.isScheduledDue(st.localSchedule, lastSlotMs, nowMs)) {
+                        refreshLocalSnapshots(schoolId)
+                        return@withLock Result.success("not_due")
+                    }
                 }
-            } else {
-                val lastSlotMs = prefs.getLong(KEY_LAST_LOCAL_SLOT_MS, 0L)
-                if (!BackupScheduleCalculator.isScheduledDue(st.localSchedule, lastSlotMs, nowMs)) {
-                    refreshLocalSnapshots(schoolId)
-                    return@withContext Result.success("not_due")
+            }
+
+            runCatching {
+                val bytes = json.toByteArray(Charsets.UTF_8)
+                val dateTag = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date(nowMs))
+                val safeCode = schoolCode.replace(Regex("[^A-Za-z0-9]"), "").ifBlank { "SCHOOL" }
+                val dailyName = "ResultMaker_${safeCode}_$dateTag.json"
+
+                // 1. App-private rolling backup folder (atomic temp write)
+                val dir = schoolBackupDir(schoolId)
+                writeBytesAtomically(dir, "latest_backup.json", bytes)
+                writeBytesAtomically(dir, dailyName, bytes)
+                pruneOldSnapshots(dir, prefix = "ResultMaker_", ext = ".json", keepDailyCount = 14)
+
+                // Also keep standard local Repo snapshot synchronized
+                Repo.save(appContext, students, settings)
+
+                // 2. Android 10+ Downloads/ResultMaker folder (user-accessible without permissions)
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    writeToMediaStoreDownloads(
+                        fileName = "ResultMaker_${safeCode}_latest.json",
+                        mimeType = "application/json",
+                        bytes = bytes
+                    )
                 }
-            }
-        }
 
-        runCatching {
-            val bytes = json.toByteArray(Charsets.UTF_8)
-            val dateTag = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date(nowMs))
-            val safeCode = schoolCode.replace(Regex("[^A-Za-z0-9]"), "").ifBlank { "SCHOOL" }
-            val dailyName = "ResultMaker_${safeCode}_$dateTag.json"
+                // 3. Optional user-picked SAF folder
+                val folderUriStr = _status.value.localFolderUri
+                if (!folderUriStr.isNullOrBlank()) {
+                    writeToSafFolder(Uri.parse(folderUriStr), dailyName, "application/json", bytes)
+                }
 
-            // 1. App-private rolling backup folder (always reliable, zero permissions)
-            val dir = schoolBackupDir(schoolId)
-            File(dir, "latest_backup.json").writeBytes(bytes)
-            File(dir, dailyName).writeBytes(bytes)
-            pruneOldSnapshots(dir, prefix = "ResultMaker_", ext = ".json", keepDailyCount = 14)
+                withContext(NonCancellable) {
+                    prefs.edit()
+                        .putString(KEY_LAST_LOCAL_HASH, hash)
+                        .putLong(KEY_LAST_LOCAL_MS, nowMs)
+                        .putLong(KEY_LAST_LOCAL_SLOT_MS, nowMs)
+                        .putString(KEY_LAST_LOCAL_NAME, dailyName)
+                        .apply()
 
-            // Also keep standard local Repo snapshot synchronized
-            Repo.save(appContext, students, settings)
-
-            // 2. Android 10+ Downloads/ResultMaker folder (user-accessible without permissions)
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                writeToMediaStoreDownloads(
-                    fileName = "ResultMaker_${safeCode}_latest.json",
-                    mimeType = "application/json",
-                    bytes = bytes
-                )
-            }
-
-            // 3. Optional user-picked SAF folder
-            val folderUriStr = _status.value.localFolderUri
-            if (!folderUriStr.isNullOrBlank()) {
-                writeToSafFolder(Uri.parse(folderUriStr), dailyName, "application/json", bytes)
-            }
-
-            prefs.edit()
-                .putString(KEY_LAST_LOCAL_HASH, hash)
-                .putLong(KEY_LAST_LOCAL_MS, nowMs)
-                .putLong(KEY_LAST_LOCAL_SLOT_MS, nowMs)
-                .putString(KEY_LAST_LOCAL_NAME, dailyName)
-                .apply()
-
-            refreshLocalSnapshots(schoolId)
-            _status.update {
-                it.copy(
-                    lastLocalBackupMs = nowMs,
-                    lastLocalFileName = dailyName,
-                    lastLocalError = null
-                )
-            }
-            dailyName
-        }.onFailure { err ->
-            _status.update {
-                it.copy(lastLocalError = err.localizedMessage ?: "লোকাল ব্যাকআপ ত্রুটি")
+                    refreshLocalSnapshots(schoolId)
+                    _status.update {
+                        it.copy(
+                            lastLocalBackupMs = nowMs,
+                            lastLocalFileName = dailyName,
+                            lastLocalError = null
+                        )
+                    }
+                }
+                dailyName
+            }.onFailure { err ->
+                _status.update {
+                    it.copy(lastLocalError = err.localizedMessage ?: "লোকাল ব্যাকআপ ত্রুটি")
+                }
             }
         }
     }
@@ -559,113 +579,119 @@ class AutoBackupManager(
         force: Boolean = false,
         formatOverride: CsvBackupFormat? = null
     ): Result<String> = withContext(Dispatchers.IO) {
-        val st = _status.value
-        if (!force && !st.csvEnabled) {
-            return@withContext Result.success("skipped")
-        }
-        val activeFormat = formatOverride ?: st.csvBackupFormat
-        val combinedCsv = Repo.toCsv(
-            list = students,
-            customFields = settings.customFields,
-            style = st.csvHeaderStyle,
-            targetCls = null
-        )
-        val hash = sha256("${activeFormat.id}:${st.csvHeaderStyle.id}:$combinedCsv")
-        val nowMs = System.currentTimeMillis()
-        if (!force) {
-            if (st.csvSchedule.mode == BackupScheduleMode.ON_CHANGE) {
-                val prevHash = prefs.getString(KEY_LAST_CSV_HASH, "")
-                if (hash == prevHash) {
-                    refreshCsvSnapshots(schoolId)
-                    return@withContext Result.success("unchanged")
-                }
-            } else {
-                val lastSlotMs = prefs.getLong(KEY_LAST_CSV_SLOT_MS, 0L)
-                if (!BackupScheduleCalculator.isScheduledDue(st.csvSchedule, lastSlotMs, nowMs)) {
-                    refreshCsvSnapshots(schoolId)
-                    return@withContext Result.success("not_due")
+        csvMutex.withLock {
+            val st = _status.value
+            if (!force && !st.csvEnabled) {
+                return@withLock Result.success("skipped")
+            }
+            val activeFormat = formatOverride ?: st.csvBackupFormat
+            val combinedCsv = Repo.toCsv(
+                list = students,
+                customFields = settings.customFields,
+                style = st.csvHeaderStyle,
+                targetCls = null
+            )
+            val hash = sha256("${activeFormat.id}:${st.csvHeaderStyle.id}:$combinedCsv")
+            val nowMs = System.currentTimeMillis()
+            if (!force) {
+                if (st.csvSchedule.mode == BackupScheduleMode.ON_CHANGE) {
+                    val prevHash = prefs.getString(KEY_LAST_CSV_HASH, "")
+                    if (hash == prevHash) {
+                        refreshCsvSnapshots(schoolId)
+                        return@withLock Result.success("unchanged")
+                    }
+                } else {
+                    val lastSlotMs = prefs.getLong(KEY_LAST_CSV_SLOT_MS, 0L)
+                    if (!BackupScheduleCalculator.isScheduledDue(st.csvSchedule, lastSlotMs, nowMs)) {
+                        refreshCsvSnapshots(schoolId)
+                        return@withLock Result.success("not_due")
+                    }
                 }
             }
-        }
 
-        runCatching {
-            val dateTag = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date(nowMs))
-            val safeCode = schoolCode.replace(Regex("[^A-Za-z0-9]"), "").ifBlank { "SCHOOL" }
-            val dir = schoolCsvBackupDir(schoolId)
-            val folderUriStr = _status.value.csvFolderUri
+            runCatching {
+                val dateTag = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date(nowMs))
+                val safeCode = schoolCode.replace(Regex("[^A-Za-z0-9]"), "").ifBlank { "SCHOOL" }
+                val dir = schoolCsvBackupDir(schoolId)
+                val folderUriStr = _status.value.csvFolderUri
 
-            // Remove any legacy per-class split files from earlier versions so only single clean files remain
-            dir.listFiles { f ->
-                f.isFile && (f.name.startsWith("latest_class_") || f.name.contains("_Class"))
-            }?.forEach { runCatching { it.delete() } }
+                // Remove any legacy per-class split files from earlier versions so only single clean files remain
+                dir.listFiles { f ->
+                    f.isFile && (f.name.startsWith("latest_class_") || f.name.contains("_Class"))
+                }?.forEach { runCatching { it.delete() } }
 
-            val outputName: String
-            when (activeFormat) {
-                CsvBackupFormat.CSV -> {
-                    val csvBytes = combinedCsv.toByteArray(Charsets.UTF_8)
-                    val dailyName = "ResultMaker_${safeCode}_$dateTag.csv"
-                    File(dir, "latest_backup.csv").writeBytes(csvBytes)
-                    File(dir, dailyName).writeBytes(csvBytes)
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                        writeToMediaStoreDownloads(
-                            fileName = "ResultMaker_${safeCode}_latest.csv",
-                            mimeType = "text/csv",
-                            bytes = csvBytes
+                val outputName: String
+                when (activeFormat) {
+                    CsvBackupFormat.CSV -> {
+                        val csvBytes = combinedCsv.toByteArray(Charsets.UTF_8)
+                        val dailyName = "ResultMaker_${safeCode}_$dateTag.csv"
+                        writeBytesAtomically(dir, "latest_backup.csv", csvBytes)
+                        writeBytesAtomically(dir, dailyName, csvBytes)
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                            writeToMediaStoreDownloads(
+                                fileName = "ResultMaker_${safeCode}_latest.csv",
+                                mimeType = "text/csv",
+                                bytes = csvBytes
+                            )
+                        }
+                        if (!folderUriStr.isNullOrBlank()) {
+                            writeToSafFolder(Uri.parse(folderUriStr), dailyName, "text/csv", csvBytes)
+                        }
+                        pruneOldSnapshots(dir, prefix = "ResultMaker_", ext = ".csv", keepDailyCount = 14)
+                        outputName = dailyName
+                    }
+                    CsvBackupFormat.EXCEL -> {
+                        val knownIds = (com.kgps.result.activeClassIds(settings) + students.map { it.cls }.filter { it in 1..20 })
+                            .distinct()
+                            .sorted()
+                        val activeClasses = knownIds.filter { c -> students.any { it.cls == c } }.ifEmpty { knownIds }
+                        val xlsxBytes = XlsxExporter.exportAllClassesWorkbook(
+                            students = students,
+                            customFields = settings.customFields,
+                            style = st.csvHeaderStyle,
+                            classes = activeClasses
+                        )
+                        val dailyName = "ResultMaker_${safeCode}_$dateTag.xlsx"
+                        val xlsxMime = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                        writeBytesAtomically(dir, "latest_all_classes.xlsx", xlsxBytes)
+                        writeBytesAtomically(dir, dailyName, xlsxBytes)
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                            writeToMediaStoreDownloads(
+                                fileName = "ResultMaker_${safeCode}_latest.xlsx",
+                                mimeType = xlsxMime,
+                                bytes = xlsxBytes
+                            )
+                        }
+                        if (!folderUriStr.isNullOrBlank()) {
+                            writeToSafFolder(Uri.parse(folderUriStr), dailyName, xlsxMime, xlsxBytes)
+                        }
+                        pruneOldSnapshots(dir, prefix = "ResultMaker_", ext = ".xlsx", keepDailyCount = 14)
+                        outputName = dailyName
+                    }
+                }
+
+                withContext(NonCancellable) {
+                    prefs.edit()
+                        .putString(KEY_LAST_CSV_HASH, hash)
+                        .putLong(KEY_LAST_CSV_MS, nowMs)
+                        .putLong(KEY_LAST_CSV_SLOT_MS, nowMs)
+                        .putString(KEY_LAST_CSV_NAME, outputName)
+                        .apply()
+
+                    refreshCsvSnapshots(schoolId)
+                    _status.update {
+                        it.copy(
+                            lastCsvBackupMs = nowMs,
+                            lastCsvFileName = outputName,
+                            lastCsvError = null
                         )
                     }
-                    if (!folderUriStr.isNullOrBlank()) {
-                        writeToSafFolder(Uri.parse(folderUriStr), dailyName, "text/csv", csvBytes)
-                    }
-                    pruneOldSnapshots(dir, prefix = "ResultMaker_", ext = ".csv", keepDailyCount = 14)
-                    outputName = dailyName
                 }
-                CsvBackupFormat.EXCEL -> {
-                    val knownIds = com.kgps.result.activeClassIds(settings)
-                    val activeClasses = knownIds.filter { c -> students.any { it.cls == c } }.ifEmpty { knownIds }
-                    val xlsxBytes = XlsxExporter.exportAllClassesWorkbook(
-                        students = students,
-                        customFields = settings.customFields,
-                        style = st.csvHeaderStyle,
-                        classes = activeClasses
-                    )
-                    val dailyName = "ResultMaker_${safeCode}_$dateTag.xlsx"
-                    val xlsxMime = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-                    File(dir, "latest_all_classes.xlsx").writeBytes(xlsxBytes)
-                    File(dir, dailyName).writeBytes(xlsxBytes)
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                        writeToMediaStoreDownloads(
-                            fileName = "ResultMaker_${safeCode}_latest.xlsx",
-                            mimeType = xlsxMime,
-                            bytes = xlsxBytes
-                        )
-                    }
-                    if (!folderUriStr.isNullOrBlank()) {
-                        writeToSafFolder(Uri.parse(folderUriStr), dailyName, xlsxMime, xlsxBytes)
-                    }
-                    pruneOldSnapshots(dir, prefix = "ResultMaker_", ext = ".xlsx", keepDailyCount = 14)
-                    outputName = dailyName
+                outputName
+            }.onFailure { err ->
+                _status.update {
+                    it.copy(lastCsvError = err.localizedMessage ?: "ব্যাকআপ ত্রুটি")
                 }
-            }
-
-            prefs.edit()
-                .putString(KEY_LAST_CSV_HASH, hash)
-                .putLong(KEY_LAST_CSV_MS, nowMs)
-                .putLong(KEY_LAST_CSV_SLOT_MS, nowMs)
-                .putString(KEY_LAST_CSV_NAME, outputName)
-                .apply()
-
-            refreshCsvSnapshots(schoolId)
-            _status.update {
-                it.copy(
-                    lastCsvBackupMs = nowMs,
-                    lastCsvFileName = outputName,
-                    lastCsvError = null
-                )
-            }
-            outputName
-        }.onFailure { err ->
-            _status.update {
-                it.copy(lastCsvError = err.localizedMessage ?: "ব্যাকআপ ত্রুটি")
             }
         }
     }
@@ -678,13 +704,21 @@ class AutoBackupManager(
         schoolCode: String,
         students: List<Student>,
         settings: Settings,
-        force: Boolean = false
-    ): DriveAuthOutcome {
+        force: Boolean = false,
+        enableAutoOnSuccess: Boolean = false,
+        reportPrefs: ReportBackupPrefs? = Repo.loadReportBackupPrefs(appContext),
+        sheetTemplates: List<BlankSheetQrMeta> = SheetTemplateCache(appContext).getAll()
+    ): DriveAuthOutcome = driveMutex.withLock {
         val st = _status.value
         if (!force && !st.driveEnabled) {
-            return DriveAuthOutcome.Failed("disabled")
+            return@withLock DriveAuthOutcome.Failed("disabled")
         }
-        val json = Repo.toJson(students, settings)
+        val json = Repo.toJson(
+            list = students,
+            st = settings,
+            reportPrefs = reportPrefs,
+            sheetTemplates = sheetTemplates
+        )
         val hash = sha256(json)
         val prevHash = prefs.getString(KEY_LAST_DRIVE_HASH, "")
         val lastMs = prefs.getLong(KEY_LAST_DRIVE_MS, 0L)
@@ -694,36 +728,54 @@ class AutoBackupManager(
         if (!force) {
             if (st.driveSchedule.mode == BackupScheduleMode.ON_CHANGE) {
                 if (hash == prevHash) {
-                    return DriveAuthOutcome.Authorized("unchanged")
+                    return@withLock DriveAuthOutcome.Authorized("unchanged")
                 }
                 if (elapsedMs < MIN_AUTO_DRIVE_INTERVAL_MS) {
-                    return DriveAuthOutcome.Authorized("throttled")
+                    return@withLock DriveAuthOutcome.Authorized("throttled")
                 }
             } else {
                 val lastSlotMs = prefs.getLong(KEY_LAST_DRIVE_SLOT_MS, 0L)
                 if (!BackupScheduleCalculator.isScheduledDue(st.driveSchedule, lastSlotMs, nowMs)) {
-                    return DriveAuthOutcome.Authorized("not_due")
+                    return@withLock DriveAuthOutcome.Authorized("not_due")
                 }
                 if (hash == prevHash && lastMs > 0L) {
                     prefs.edit().putLong(KEY_LAST_DRIVE_SLOT_MS, nowMs).apply()
-                    return DriveAuthOutcome.Authorized("unchanged")
+                    return@withLock DriveAuthOutcome.Authorized("unchanged")
                 }
             }
         }
 
         _status.update { it.copy(driveBusy = true, lastDriveError = null) }
-        return when (val auth = GoogleDriveBackupClient.authorizeDrive(appContext)) {
-            is DriveAuthOutcome.NeedsConsent -> {
-                _status.update { it.copy(driveBusy = false, driveNeedsConsent = true) }
-                auth
+        try {
+            when (val auth = GoogleDriveBackupClient.authorizeDrive(appContext)) {
+                is DriveAuthOutcome.NeedsConsent -> {
+                    _status.update { it.copy(driveNeedsConsent = true) }
+                    auth
+                }
+                is DriveAuthOutcome.Failed -> {
+                    _status.update { it.copy(lastDriveError = auth.message) }
+                    auth
+                }
+                is DriveAuthOutcome.Authorized -> {
+                    val uploadRes = uploadWithTokenLocked(
+                        accessToken = auth.accessToken,
+                        schoolCode = schoolCode,
+                        jsonContent = json,
+                        hash = hash,
+                        enableAutoOnSuccess = enableAutoOnSuccess
+                    )
+                    if (uploadRes.isSuccess) {
+                        auth
+                    } else {
+                        DriveAuthOutcome.Failed(
+                            uploadRes.exceptionOrNull()?.localizedMessage ?: "Google Drive ব্যাকআপ ব্যর্থ হয়েছে"
+                        )
+                    }
+                }
             }
-            is DriveAuthOutcome.Failed -> {
-                _status.update { it.copy(driveBusy = false, lastDriveError = auth.message) }
-                auth
-            }
-            is DriveAuthOutcome.Authorized -> {
-                uploadWithToken(auth.accessToken, schoolCode, json, hash)
-                auth
+        } finally {
+            withContext(NonCancellable) {
+                _status.update { it.copy(driveBusy = false) }
             }
         }
     }
@@ -732,9 +784,32 @@ class AutoBackupManager(
         accessToken: String,
         schoolCode: String,
         jsonContent: String,
-        hash: String = sha256(jsonContent)
-    ): Result<DriveBackupFile> {
+        hash: String = sha256(jsonContent),
+        enableAutoOnSuccess: Boolean = false
+    ): Result<DriveBackupFile> = driveMutex.withLock {
         _status.update { it.copy(driveBusy = true, driveNeedsConsent = false, lastDriveError = null) }
+        return@withLock try {
+            uploadWithTokenLocked(
+                accessToken = accessToken,
+                schoolCode = schoolCode,
+                jsonContent = jsonContent,
+                hash = hash,
+                enableAutoOnSuccess = enableAutoOnSuccess
+            )
+        } finally {
+            withContext(NonCancellable) {
+                _status.update { it.copy(driveBusy = false) }
+            }
+        }
+    }
+
+    private suspend fun uploadWithTokenLocked(
+        accessToken: String,
+        schoolCode: String,
+        jsonContent: String,
+        hash: String,
+        enableAutoOnSuccess: Boolean
+    ): Result<DriveBackupFile> {
         val dateTag = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date())
         val safeCode = schoolCode.replace(Regex("[^A-Za-z0-9]"), "").ifBlank { "SCHOOL" }
         val fileName = "ResultMaker_${safeCode}_$dateTag.json"
@@ -742,29 +817,35 @@ class AutoBackupManager(
         val result = GoogleDriveBackupClient.uploadBackupJson(accessToken, fileName, jsonContent)
         result.onSuccess { uploaded ->
             val nowMs = System.currentTimeMillis()
-            prefs.edit()
-                .putString(KEY_LAST_DRIVE_HASH, hash)
-                .putLong(KEY_LAST_DRIVE_MS, nowMs)
-                .putLong(KEY_LAST_DRIVE_SLOT_MS, nowMs)
-                .putString(KEY_LAST_DRIVE_NAME, uploaded.name)
-                .putBoolean(KEY_DRIVE_ENABLED, true)
-                .apply()
-            _status.update {
-                it.copy(
-                    driveEnabled = true,
-                    driveBusy = false,
-                    driveNeedsConsent = false,
-                    lastDriveBackupMs = nowMs,
-                    lastDriveFileName = uploaded.name,
-                    lastDriveError = null
-                )
+            withContext(NonCancellable) {
+                prefs.edit().apply {
+                    putString(KEY_LAST_DRIVE_HASH, hash)
+                    putLong(KEY_LAST_DRIVE_MS, nowMs)
+                    putLong(KEY_LAST_DRIVE_SLOT_MS, nowMs)
+                    putString(KEY_LAST_DRIVE_NAME, uploaded.name)
+                    if (enableAutoOnSuccess) {
+                        putBoolean(KEY_DRIVE_ENABLED, true)
+                    }
+                }.apply()
+                _status.update { cur ->
+                    cur.copy(
+                        driveEnabled = if (enableAutoOnSuccess) true else cur.driveEnabled,
+                        driveBusy = false,
+                        driveNeedsConsent = false,
+                        lastDriveBackupMs = nowMs,
+                        lastDriveFileName = uploaded.name,
+                        lastDriveError = null
+                    )
+                }
             }
         }.onFailure { err ->
-            _status.update {
-                it.copy(
-                    driveBusy = false,
-                    lastDriveError = err.localizedMessage ?: "Google Drive ব্যাকআপ ব্যর্থ হয়েছে"
-                )
+            withContext(NonCancellable) {
+                _status.update {
+                    it.copy(
+                        driveBusy = false,
+                        lastDriveError = err.localizedMessage ?: "Google Drive ব্যাকআপ ব্যর্থ হয়েছে"
+                    )
+                }
             }
         }
         return result
@@ -819,12 +900,36 @@ class AutoBackupManager(
         }
     }
 
+    private fun writeBytesAtomically(dir: File, targetName: String, bytes: ByteArray) {
+        if (!dir.exists()) dir.mkdirs()
+        val target = File(dir, targetName)
+        val tmp = File(dir, "$targetName.tmp")
+        tmp.writeBytes(bytes)
+        if (!tmp.renameTo(target)) {
+            tmp.copyTo(target, overwrite = true)
+            tmp.delete()
+        }
+    }
+
     private fun writeToSafFolder(treeUri: Uri, fileName: String, mimeType: String, bytes: ByteArray) {
-        val dirDoc = DocumentFile.fromTreeUri(appContext, treeUri) ?: return
+        val dirDoc = DocumentFile.fromTreeUri(appContext, treeUri)
+        if (dirDoc == null || !dirDoc.exists() || !dirDoc.canWrite()) {
+            throw IllegalStateException("নির্বাচিত ব্যাকআপ ফোল্ডারে লেখার অনুমতি নেই")
+        }
         val existing = dirDoc.findFile(fileName)
-        val target = existing ?: dirDoc.createFile(mimeType, fileName) ?: return
-        appContext.contentResolver.openOutputStream(target.uri, "wt")?.use { out ->
+        val target = existing ?: dirDoc.createFile(mimeType, fileName)
+            ?: throw IllegalStateException("নির্বাচিত ফোল্ডারে $fileName তৈরি করা যায়নি")
+        val stream = try {
+            appContext.contentResolver.openOutputStream(target.uri, "wt")
+        } catch (_: IllegalArgumentException) {
+            appContext.contentResolver.openOutputStream(target.uri, "w")
+        } catch (_: UnsupportedOperationException) {
+            appContext.contentResolver.openOutputStream(target.uri, "w")
+        } ?: appContext.contentResolver.openOutputStream(target.uri)
+            ?: throw IllegalStateException("নির্বাচিত ফোল্ডারে ফাইল স্ট্রিম খোলা যায়নি")
+        stream.use { out ->
             out.write(bytes)
+            out.flush()
         }
     }
 

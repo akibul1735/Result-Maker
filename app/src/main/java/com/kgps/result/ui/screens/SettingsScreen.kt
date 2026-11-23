@@ -111,6 +111,7 @@ import com.kgps.result.backup.CsvBackupFormat
 import com.kgps.result.backup.DriveBackupFile
 import com.kgps.result.backup.LocalBackupEntry
 import com.kgps.result.backup.XlsxExporter
+import com.kgps.result.backup.XlsxImporter
 import com.kgps.result.bn
 import com.kgps.result.classNameBn
 import com.kgps.result.DataResetCategory
@@ -119,6 +120,7 @@ import com.kgps.result.cloud.JoinRequestItem
 import com.kgps.result.cloud.MemberRole
 import com.kgps.result.cloud.SchoolMemberProfile
 import com.kgps.result.cloud.SchoolWorkspace
+import com.kgps.result.cloud.SheetTemplateCache
 import com.kgps.result.cloud.TeacherPermissions
 import com.kgps.result.ui.components.AddCustomClassDialog
 import com.kgps.result.ui.components.DataResetDialog
@@ -180,6 +182,7 @@ fun SettingsScreen(
     onRemoveCustomClass: (Int) -> Unit = {},
     onOpenCsvImport: (String) -> Unit,
     onRestoreBackupJson: (String) -> Unit,
+    onBuildBackupJson: (() -> String)? = null,
     onExportAllPdf: () -> Unit,
     onResetSampleData: () -> Unit,
     onClearAllStudents: () -> Unit,
@@ -311,7 +314,7 @@ fun SettingsScreen(
     ) { uri ->
         if (uri != null) {
             try {
-                val availableIds = activeClassIds(settings)
+                val availableIds = (activeClassIds(settings) + students.map { it.cls }.filter { it in 1..20 }).distinct().sorted()
                 val allowed = permissions.effectiveClasses(availableIds).ifEmpty { availableIds }
                 val bytes = XlsxExporter.exportAllClassesWorkbook(
                     students = students.filter { it.cls in allowed },
@@ -330,7 +333,7 @@ fun SettingsScreen(
     val csvZipExportLauncher = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/zip")) { uri ->
         if (uri != null) {
             try {
-                val availableIds = activeClassIds(settings)
+                val availableIds = (activeClassIds(settings) + students.map { it.cls }.filter { it in 1..20 }).distinct().sorted()
                 val allowed = permissions.effectiveClasses(availableIds).ifEmpty { availableIds }
                 val bytes = Repo.toPerClassCsvZip(
                     list = students.filter { it.cls in allowed },
@@ -348,20 +351,23 @@ fun SettingsScreen(
 
     val csvFilePickLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) {
-            try {
-                val txt = ctx.contentResolver.openInputStream(uri)?.bufferedReader(Charsets.UTF_8)?.use { it.readText() } ?: ""
-                onOpenCsvImport(txt)
-            } catch (e: Exception) {
-                onShowMessage("CSV পড়া যায়নি: ${e.message ?: "ত্রুটি"}")
-            }
+            XlsxImporter.readSpreadsheetAsText(ctx.contentResolver, uri)
+                .onSuccess { txt -> onOpenCsvImport(txt) }
+                .onFailure { e -> onShowMessage("ফাইল পড়া যায়নি: ${e.message ?: "ত্রুটি"}") }
         }
     }
 
     val jsonExportLauncher = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri ->
         if (uri != null) {
             try {
+                val fullJson = onBuildBackupJson?.invoke() ?: Repo.toJson(
+                    list = students,
+                    st = settings,
+                    reportPrefs = Repo.loadReportBackupPrefs(ctx),
+                    sheetTemplates = SheetTemplateCache(ctx).getAll()
+                )
                 ctx.contentResolver.openOutputStream(uri)?.use {
-                    it.write(Repo.toJson(students, settings).toByteArray(Charsets.UTF_8))
+                    it.write(fullJson.toByteArray(Charsets.UTF_8))
                 }
                 onShowMessage("JSON ব্যাকআপ সংরক্ষিত হয়েছে")
             } catch (e: Exception) {
@@ -373,7 +379,8 @@ fun SettingsScreen(
     val jsonRestoreLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) {
             try {
-                val txt = ctx.contentResolver.openInputStream(uri)?.bufferedReader(Charsets.UTF_8)?.use { it.readText() } ?: ""
+                val txt = ctx.contentResolver.openInputStream(uri)?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }
+                    ?.removePrefix("\uFEFF") ?: ""
                 if (txt.isNotBlank()) pendingManualJsonRestore = txt
             } catch (e: Exception) {
                 onShowMessage("ফাইল পড়া যায়নি: ${e.message ?: "ত্রুটি"}")

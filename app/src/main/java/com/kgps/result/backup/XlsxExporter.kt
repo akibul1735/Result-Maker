@@ -96,7 +96,7 @@ object XlsxExporter {
     }
 
     private fun isPlainNumber(value: String): Boolean {
-        if (value.isEmpty()) return false
+        if (value.isEmpty() || value.length > 12) return false
         if (value.length > 1 && value.startsWith("0") && !value.startsWith("0.")) return false
         return value.toDoubleOrNull()?.isFinite() == true
     }

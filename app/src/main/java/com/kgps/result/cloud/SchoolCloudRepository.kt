@@ -306,13 +306,18 @@ class SchoolCloudRepository(
                 "school" to settings.school,
                 "schoolAddress" to settings.schoolAddress,
                 "year" to settings.year,
-                "teachers" to settings.teachers.mapKeys { it.key.toString() },
-                "teacherMobiles" to settings.teacherMobiles.mapKeys { it.key.toString() },
+                "teachers" to settings.teachers.entries.take(25).associate { it.key.toString() to it.value.trim().take(120) },
+                "teacherMobiles" to settings.teacherMobiles.entries.take(25).associate { it.key.toString() to it.value.trim().take(30) },
                 "pdfFont" to com.kgps.result.encodePdfFontPair(settings.pdfFont, settings.pdfEnglishFont).take(40),
                 "dpeLogo" to if (settings.dpeLogo == "color") "color" else "simple",
-                "customFields" to settings.customFields.take(30).map { mapOf("key" to it.key, "label" to it.label) },
+                "customFields" to settings.customFields.take(30).map { mapOf("key" to it.key.take(60), "label" to it.label.take(120)) },
                 "customClasses" to settings.customClasses.take(15).map {
-                    mapOf("id" to it.id, "nameBn" to it.nameBn, "shortBn" to it.shortBn, "syllabusTier" to it.syllabusTier)
+                    mapOf(
+                        "id" to it.id.coerceIn(6, 20),
+                        "nameBn" to it.nameBn.trim().take(40),
+                        "shortBn" to it.shortBn.trim().take(12),
+                        "syllabusTier" to if (it.syllabusTier <= 2) 1 else 3
+                    )
                 },
                 "createdAt" to FieldValue.serverTimestamp(),
                 "updatedAt" to FieldValue.serverTimestamp()
@@ -771,32 +776,45 @@ class SchoolCloudRepository(
             val cleanLogo = if (nextSettings.dpeLogo == "color") "color" else "simple"
             val cleanPrevLogo = if (prev.dpeLogo == "color") "color" else "simple"
 
+            val nextTeachers = nextSettings.teachers.entries.take(25).associate { it.key.toString() to it.value.trim().take(120) }
+            val prevTeachers = prev.teachers.entries.take(25).associate { it.key.toString() to it.value.trim().take(120) }
+            val nextMobiles = nextSettings.teacherMobiles.entries.take(25).associate { it.key.toString() to it.value.trim().take(30) }
+            val prevMobiles = prev.teacherMobiles.entries.take(25).associate { it.key.toString() to it.value.trim().take(30) }
+            val nextFields = nextSettings.customFields.take(30).map { mapOf("key" to it.key.take(60), "label" to it.label.take(120)) }
+            val prevFields = prev.customFields.take(30).map { mapOf("key" to it.key.take(60), "label" to it.label.take(120)) }
+            val nextClasses = nextSettings.customClasses.take(15).map {
+                mapOf(
+                    "id" to it.id.coerceIn(6, 20),
+                    "nameBn" to it.nameBn.trim().take(40),
+                    "shortBn" to it.shortBn.trim().take(12),
+                    "syllabusTier" to if (it.syllabusTier <= 2) 1 else 3
+                )
+            }
+            val prevClasses = prev.customClasses.take(15).map {
+                mapOf(
+                    "id" to it.id.coerceIn(6, 20),
+                    "nameBn" to it.nameBn.trim().take(40),
+                    "shortBn" to it.shortBn.trim().take(12),
+                    "syllabusTier" to if (it.syllabusTier <= 2) 1 else 3
+                )
+            }
+
             val updates = mutableMapOf<String, Any>()
             if (cleanSchoolName != cleanPrevSchoolName) updates["school"] = cleanSchoolName
             if (cleanAddress != cleanPrevAddress) updates["schoolAddress"] = cleanAddress
             if (cleanYear != cleanPrevYear) updates["year"] = cleanYear
-            if (nextSettings.teachers != prev.teachers) {
-                updates["teachers"] = nextSettings.teachers.mapKeys { it.key.toString() }
-            }
-            if (nextSettings.teacherMobiles != prev.teacherMobiles) {
-                updates["teacherMobiles"] = nextSettings.teacherMobiles.mapKeys { it.key.toString() }
-            }
+            if (nextTeachers != prevTeachers) updates["teachers"] = nextTeachers
+            if (nextMobiles != prevMobiles) updates["teacherMobiles"] = nextMobiles
             if (cleanPdfFont != cleanPrevPdfFont) updates["pdfFont"] = cleanPdfFont
             if (cleanLogo != cleanPrevLogo) updates["dpeLogo"] = cleanLogo
-            if (nextSettings.customFields != prev.customFields) {
-                updates["customFields"] = nextSettings.customFields.take(30).map { mapOf("key" to it.key, "label" to it.label) }
-            }
-            if (nextSettings.customClasses != prev.customClasses) {
-                updates["customClasses"] = nextSettings.customClasses.take(15).map {
-                    mapOf("id" to it.id, "nameBn" to it.nameBn, "shortBn" to it.shortBn, "syllabusTier" to it.syllabusTier)
-                }
-            }
+            if (nextFields != prevFields) updates["customFields"] = nextFields
+            if (nextClasses != prevClasses) updates["customClasses"] = nextClasses
             if (updates.isEmpty()) return Result.success(Unit)
             updates["updatedAt"] = FieldValue.serverTimestamp()
 
             val batch = db.batch()
             batch.update(db.collection("schools").document(school.id), updates)
-            if (school.joinCode.isNotBlank() && cleanSchoolName != prev.school) {
+            if (school.joinCode.isNotBlank() && cleanSchoolName != cleanPrevSchoolName) {
                 batch.update(
                     db.collection("schoolCodes").document(school.joinCode),
                     mapOf("schoolName" to cleanSchoolName, "updatedAt" to FieldValue.serverTimestamp())
@@ -857,50 +875,15 @@ class SchoolCloudRepository(
             if (existing == null) {
                 docRef.set(buildStudentCreatePayload(student, uid, name)).await()
             } else {
-                val updates = mutableMapOf<String, Any>(
-                    "updatedByUid" to uid,
-                    "updatedByName" to name,
-                    "updatedAt" to FieldValue.serverTimestamp()
+                val updates = StudentSyncDiffHelper.buildUpdateDiff(
+                    prev = existing,
+                    next = student,
+                    uid = uid,
+                    userName = name,
+                    deleteSentinel = FieldValue.delete(),
+                    updatedAtValue = FieldValue.serverTimestamp()
                 )
-                if (existing.cls != student.cls) updates["cls"] = student.cls.coerceIn(1, 20)
-                if (existing.roll != student.roll) updates["roll"] = student.roll.coerceIn(1, 9999)
-                if (existing.name != student.name) updates["name"] = student.name.take(120)
-                if (existing.guardian != student.guardian) updates["guardian"] = student.guardian.take(120)
-                if (existing.village != student.village) updates["village"] = student.village.take(120)
-                if (existing.post != student.post) updates["post"] = student.post.take(120)
-                val nextUpazila = student.upazila.ifBlank { com.kgps.result.DEFAULT_UPAZILA }
-                val nextDistrict = student.district.ifBlank { com.kgps.result.DEFAULT_DISTRICT }
-                if (existing.upazila != nextUpazila) updates["upazila"] = nextUpazila.take(120)
-                if (existing.district != nextDistrict) updates["district"] = nextDistrict.take(120)
-                if (existing.mobile != student.mobile) updates["mobile"] = student.mobile.take(30)
-                if (existing.religion != student.religion) updates["religion"] = student.religion.ifBlank { "ইসলাম" }.take(40)
-
-                // Field-level diff on marks `m` so concurrent edits by other teachers on other subjects stay intact
-                for ((k, v) in student.m) {
-                    if (existing.m[k] != v) updates["m.$k"] = v
-                }
-                for (k in existing.m.keys) {
-                    if (!student.m.containsKey(k)) updates["m.$k"] = FieldValue.delete()
-                }
-                // Field-level diff on attributes/remarks `x`
-                val nextX = if (student.union.isNotBlank()) {
-                    student.x + ("UNION" to student.union.trim().take(120))
-                } else {
-                    student.x - "UNION"
-                }
-                val prevX = if (existing.union.isNotBlank()) {
-                    existing.x + ("UNION" to existing.union.trim().take(120))
-                } else {
-                    existing.x - "UNION"
-                }
-                for ((k, v) in nextX) {
-                    if (prevX[k] != v) updates["x.$k"] = v
-                }
-                for (k in prevX.keys) {
-                    if (!nextX.containsKey(k)) updates["x.$k"] = FieldValue.delete()
-                }
-
-                if (updates.size > 3) {
+                if (updates != null) {
                     docRef.update(updates).await()
                 }
             }
@@ -1092,26 +1075,18 @@ class SchoolCloudRepository(
                 val prev = prevMap[docId]
                 if (prev == null) {
                     ops.add(docId to buildStudentCreatePayload(st, uid, name))
-                } else if (prev != st) {
-                    ops.add(
-                        docId to mapOf(
-                            "cls" to st.cls.coerceIn(1, 20),
-                            "roll" to st.roll.coerceIn(1, 9999),
-                            "name" to st.name.take(120),
-                            "guardian" to st.guardian.take(120),
-                            "village" to st.village.take(120),
-                            "post" to st.post.take(120),
-                            "upazila" to st.upazila.ifBlank { com.kgps.result.DEFAULT_UPAZILA }.take(120),
-                            "district" to st.district.ifBlank { com.kgps.result.DEFAULT_DISTRICT }.take(120),
-                            "mobile" to st.mobile.take(30),
-                            "religion" to st.religion.ifBlank { "ইসলাম" }.take(40),
-                            "m" to st.m,
-                            "x" to (if (st.union.isNotBlank()) st.x + ("UNION" to st.union.trim().take(120)) else st.x - "UNION"),
-                            "updatedByUid" to uid,
-                            "updatedByName" to name,
-                            "updatedAt" to FieldValue.serverTimestamp()
-                        )
+                } else {
+                    val diff = StudentSyncDiffHelper.buildUpdateDiff(
+                        prev = prev,
+                        next = st,
+                        uid = uid,
+                        userName = name,
+                        deleteSentinel = FieldValue.delete(),
+                        updatedAtValue = FieldValue.serverTimestamp()
                     )
+                    if (diff != null) {
+                        ops.add(docId to diff)
+                    }
                 }
             }
             if (deleteRemoved) {
@@ -1166,23 +1141,12 @@ class SchoolCloudRepository(
     }
 
     private fun buildStudentCreatePayload(s: Student, uid: String, userName: String): Map<String, Any> =
-        mapOf(
-            "cls" to s.cls.coerceIn(1, 20),
-            "roll" to s.roll.coerceIn(1, 9999),
-            "name" to s.name.take(120),
-            "guardian" to s.guardian.take(120),
-            "village" to s.village.take(120),
-            "post" to s.post.take(120),
-            "upazila" to s.upazila.ifBlank { com.kgps.result.DEFAULT_UPAZILA }.take(120),
-            "district" to s.district.ifBlank { com.kgps.result.DEFAULT_DISTRICT }.take(120),
-            "mobile" to s.mobile.take(30),
-            "religion" to s.religion.ifBlank { "ইসলাম" }.take(40),
-            "m" to s.m,
-            "x" to (if (s.union.isNotBlank()) s.x + ("UNION" to s.union.trim().take(120)) else s.x - "UNION"),
-            "updatedByUid" to uid,
-            "updatedByName" to userName.take(100),
-            "createdAt" to FieldValue.serverTimestamp(),
-            "updatedAt" to FieldValue.serverTimestamp()
+        StudentSyncDiffHelper.buildCreatePayload(
+            s = s,
+            uid = uid,
+            userName = userName,
+            createdAtValue = FieldValue.serverTimestamp(),
+            updatedAtValue = FieldValue.serverTimestamp()
         )
 
     private fun parseSchoolDoc(doc: DocumentSnapshot): SchoolWorkspace? {
@@ -1296,7 +1260,7 @@ class SchoolCloudRepository(
             guardian = doc.getString("guardian").orEmpty(),
             village = doc.getString("village").orEmpty(),
             union = unionVal,
-            post = "",
+            post = doc.getString("post").orEmpty(),
             upazila = doc.getString("upazila").orEmpty().ifBlank { com.kgps.result.DEFAULT_UPAZILA },
             district = doc.getString("district").orEmpty().ifBlank { com.kgps.result.DEFAULT_DISTRICT },
             mobile = doc.getString("mobile").orEmpty(),
@@ -1469,4 +1433,119 @@ class SchoolCloudRepository(
         generateSequence(error) { it.cause }
             .filterIsInstance<FirebaseFirestoreException>()
             .firstOrNull()
+}
+
+object StudentSyncDiffHelper {
+    private const val MAX_MARKS_ENTRIES = 200
+    private const val MAX_X_ENTRIES = 120
+
+    fun normalizeMarksForCloud(marks: Map<String, Double>): Map<String, Double> =
+        marks.entries
+            .asSequence()
+            .filter { (k, v) -> k.isNotBlank() && !k.contains('.') && v.isFinite() }
+            .take(MAX_MARKS_ENTRIES)
+            .associate { it.key to it.value }
+
+    fun normalizeXForCloud(x: Map<String, String>, union: String): Map<String, String> {
+        val cleanUnion = union.trim().take(120)
+        val nonUnionLimit = if (cleanUnion.isNotEmpty()) MAX_X_ENTRIES - 1 else MAX_X_ENTRIES
+        val out = LinkedHashMap<String, String>()
+        x.entries
+            .asSequence()
+            .filter { (k, _) -> k.isNotBlank() && !k.contains('.') && k != "UNION" }
+            .take(nonUnionLimit)
+            .forEach { (k, v) -> out[k] = v.take(240) }
+        if (cleanUnion.isNotEmpty()) {
+            out["UNION"] = cleanUnion
+        }
+        return out
+    }
+
+    fun buildCreatePayload(
+        s: Student,
+        uid: String,
+        userName: String,
+        createdAtValue: Any,
+        updatedAtValue: Any
+    ): Map<String, Any> = mapOf(
+        "cls" to s.cls.coerceIn(1, 20),
+        "roll" to s.roll.coerceIn(1, 9999),
+        "name" to s.name.take(120),
+        "guardian" to s.guardian.take(120),
+        "village" to s.village.take(120),
+        "post" to s.post.take(120),
+        "upazila" to s.upazila.ifBlank { com.kgps.result.DEFAULT_UPAZILA }.take(120),
+        "district" to s.district.ifBlank { com.kgps.result.DEFAULT_DISTRICT }.take(120),
+        "mobile" to s.mobile.take(30),
+        "religion" to s.religion.ifBlank { "ইসলাম" }.take(40),
+        "m" to normalizeMarksForCloud(s.m),
+        "x" to normalizeXForCloud(s.x, s.union),
+        "updatedByUid" to uid,
+        "updatedByName" to userName.take(100),
+        "createdAt" to createdAtValue,
+        "updatedAt" to updatedAtValue
+    )
+
+    fun buildUpdateDiff(
+        prev: Student,
+        next: Student,
+        uid: String,
+        userName: String,
+        deleteSentinel: Any,
+        updatedAtValue: Any
+    ): Map<String, Any>? {
+        val updates = LinkedHashMap<String, Any>()
+
+        val prevCls = prev.cls.coerceIn(1, 20)
+        val nextCls = next.cls.coerceIn(1, 20)
+        if (prevCls != nextCls) updates["cls"] = nextCls
+
+        val prevRoll = prev.roll.coerceIn(1, 9999)
+        val nextRoll = next.roll.coerceIn(1, 9999)
+        if (prevRoll != nextRoll) updates["roll"] = nextRoll
+
+        if (prev.name.take(120) != next.name.take(120)) updates["name"] = next.name.take(120)
+        if (prev.guardian.take(120) != next.guardian.take(120)) updates["guardian"] = next.guardian.take(120)
+        if (prev.village.take(120) != next.village.take(120)) updates["village"] = next.village.take(120)
+        if (prev.post.take(120) != next.post.take(120)) updates["post"] = next.post.take(120)
+
+        val prevUpazila = prev.upazila.ifBlank { com.kgps.result.DEFAULT_UPAZILA }.take(120)
+        val nextUpazila = next.upazila.ifBlank { com.kgps.result.DEFAULT_UPAZILA }.take(120)
+        if (prevUpazila != nextUpazila) updates["upazila"] = nextUpazila
+
+        val prevDistrict = prev.district.ifBlank { com.kgps.result.DEFAULT_DISTRICT }.take(120)
+        val nextDistrict = next.district.ifBlank { com.kgps.result.DEFAULT_DISTRICT }.take(120)
+        if (prevDistrict != nextDistrict) updates["district"] = nextDistrict
+
+        if (prev.mobile.take(30) != next.mobile.take(30)) updates["mobile"] = next.mobile.take(30)
+
+        val prevReligion = prev.religion.ifBlank { "ইসলাম" }.take(40)
+        val nextReligion = next.religion.ifBlank { "ইসলাম" }.take(40)
+        if (prevReligion != nextReligion) updates["religion"] = nextReligion
+
+        val prevM = normalizeMarksForCloud(prev.m)
+        val nextM = normalizeMarksForCloud(next.m)
+        for ((k, v) in nextM) {
+            if (prevM[k] != v) updates["m.$k"] = v
+        }
+        for (k in prevM.keys) {
+            if (!nextM.containsKey(k)) updates["m.$k"] = deleteSentinel
+        }
+
+        val prevX = normalizeXForCloud(prev.x, prev.union)
+        val nextX = normalizeXForCloud(next.x, next.union)
+        for ((k, v) in nextX) {
+            if (prevX[k] != v) updates["x.$k"] = v
+        }
+        for (k in prevX.keys) {
+            if (!nextX.containsKey(k)) updates["x.$k"] = deleteSentinel
+        }
+
+        if (updates.isEmpty()) return null
+
+        updates["updatedByUid"] = uid
+        updates["updatedByName"] = userName.take(100)
+        updates["updatedAt"] = updatedAtValue
+        return updates
+    }
 }

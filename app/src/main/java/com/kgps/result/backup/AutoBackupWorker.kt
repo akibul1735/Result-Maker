@@ -9,8 +9,10 @@ import androidx.work.NetworkType
 import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
+import com.kgps.result.BackupBundle
 import com.kgps.result.DEFAULT_SETTINGS
 import com.kgps.result.Repo
+import com.kgps.result.cloud.SheetTemplateCache
 import java.io.File
 import java.util.concurrent.TimeUnit
 
@@ -34,8 +36,14 @@ class AutoBackupWorker(
             ?: metaPrefs.getString(KEY_META_SCHOOL_CODE, "")?.takeIf { it.isNotBlank() }
             ?: "SCHOOL"
 
-        val (students, settings) = loadBestCachedData(schoolId) ?: return Result.success()
+        val bundle = loadBestCachedData(schoolId) ?: return Result.success()
+        val students = bundle.students
+        val settings = bundle.settings
         if (students.isEmpty() && settings == DEFAULT_SETTINGS) return Result.success()
+
+        val effectiveReportPrefs = bundle.reportPrefs ?: Repo.loadReportBackupPrefs(applicationContext)
+        val effectiveTemplates = (bundle.sheetTemplates + SheetTemplateCache(applicationContext).getAll())
+            .distinctBy { it.templateId.trim().uppercase() }
 
         val manager = AutoBackupManager(applicationContext, userId)
         val st = manager.status.value
@@ -48,7 +56,9 @@ class AutoBackupWorker(
                         schoolCode = schoolCode,
                         students = students,
                         settings = settings,
-                        force = false
+                        force = false,
+                        reportPrefs = effectiveReportPrefs,
+                        sheetTemplates = effectiveTemplates
                     )
                     BackupWorkScheduler.scheduleKind(
                         context = applicationContext,
@@ -67,7 +77,10 @@ class AutoBackupWorker(
                         schoolCode = schoolCode,
                         students = students,
                         settings = settings,
-                        force = false
+                        force = false,
+                        enableAutoOnSuccess = false,
+                        reportPrefs = effectiveReportPrefs,
+                        sheetTemplates = effectiveTemplates
                     )
                     BackupWorkScheduler.scheduleKind(
                         context = applicationContext,
@@ -104,14 +117,14 @@ class AutoBackupWorker(
         return Result.success()
     }
 
-    private fun loadBestCachedData(schoolId: String) = runCatching {
+    private fun loadBestCachedData(schoolId: String): BackupBundle? = runCatching {
         val safeId = schoolId.replace(Regex("[^a-zA-Z0-9_\\-]"), "_").ifBlank { "default" }
         val schoolLatest = File(applicationContext.filesDir, "auto_backups/$safeId/latest_backup.json")
         if (schoolLatest.exists()) {
-            Repo.fromJson(schoolLatest.readText(Charsets.UTF_8))
+            Repo.fromBackupJson(schoolLatest.readText(Charsets.UTF_8))
         } else {
             val dataFile = File(applicationContext.filesDir, "data.json")
-            if (dataFile.exists()) Repo.fromJson(dataFile.readText(Charsets.UTF_8)) else null
+            if (dataFile.exists()) Repo.fromBackupJson(dataFile.readText(Charsets.UTF_8)) else null
         }
     }.getOrNull()
 

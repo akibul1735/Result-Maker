@@ -63,6 +63,7 @@ import com.kgps.result.BlankSheetQrMeta
 import com.kgps.result.CsvImportAssistant
 import com.kgps.result.CsvImportModule
 import com.kgps.result.CsvPromptConfig
+import com.kgps.result.backup.XlsxImporter
 import com.kgps.result.CsvRowStatus
 import com.kgps.result.Repo
 import com.kgps.result.Settings
@@ -358,20 +359,18 @@ fun SmartCsvImportDialog(
 
     val filePicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) {
-            try {
-                val loaded = ctx.contentResolver.openInputStream(uri)
-                    ?.bufferedReader(Charsets.UTF_8)
-                    ?.use { it.readText() }
-                    ?: ""
-                rawText = loaded
-                if (Repo.parseSmartCsvSheet(loaded).rows.size >= 2) {
-                    currentStep = CsvWizardStep.PREVIEW
-                } else {
-                    Toast.makeText(ctx, "ফাইল লোড হয়েছে", Toast.LENGTH_SHORT).show()
+            XlsxImporter.readSpreadsheetAsText(ctx.contentResolver, uri)
+                .onSuccess { loaded ->
+                    rawText = loaded
+                    if (Repo.parseSmartCsvSheet(loaded).rows.size >= 2) {
+                        currentStep = CsvWizardStep.PREVIEW
+                    } else {
+                        Toast.makeText(ctx, "ফাইল লোড হয়েছে", Toast.LENGTH_SHORT).show()
+                    }
                 }
-            } catch (e: Exception) {
-                onError("ফাইল পড়া যায়নি: ${e.message ?: "ত্রুটি"}")
-            }
+                .onFailure { e ->
+                    onError("ফাইল পড়া যায়নি: ${e.message ?: "ত্রুটি"}")
+                }
         }
     }
 

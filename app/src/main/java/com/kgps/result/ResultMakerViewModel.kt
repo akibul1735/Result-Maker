@@ -56,6 +56,7 @@ import com.kgps.result.ui.screens.BatchStudentUpdatePatch
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -173,8 +174,24 @@ class ResultMakerViewModel(
 
     val backupStatus: StateFlow<AutoBackupStatus> = autoBackupManager.status
 
+    private data class StudentsStreamState(
+        val loadedSchoolId: String? = null,
+        val hadError: Boolean = false,
+        val students: List<Student> = emptyList(),
+        val meta: Map<String, StudentSyncMeta> = emptyMap()
+    )
+
+    private sealed interface PendingDriveAction {
+        data object UploadOnly : PendingDriveAction
+        data object EnableAutoAndUpload : PendingDriveAction
+        data object ListFiles : PendingDriveAction
+        data class RestoreFile(val fileId: String) : PendingDriveAction
+    }
+
     private val _pendingDriveConsent = MutableStateFlow<IntentSender?>(null)
     val pendingDriveConsent: StateFlow<IntentSender?> = _pendingDriveConsent.asStateFlow()
+    private val _pendingDriveAction = MutableStateFlow<PendingDriveAction?>(null)
+    private var driveAutoBackupJob: Job? = null
 
     private val _driveFiles = MutableStateFlow<List<DriveBackupFile>>(emptyList())
     val driveFiles: StateFlow<List<DriveBackupFile>> = _driveFiles.asStateFlow()
@@ -261,34 +278,42 @@ class ResultMakerViewModel(
         }
     }.stateIn(viewModelScope, SharingStarted.Eagerly, CloudSessionState.Loading)
 
-    private val studentsAndMetaFlow: StateFlow<Pair<List<Student>, Map<String, StudentSyncMeta>>> =
+    private val studentsAndMetaFlow: StateFlow<StudentsStreamState> =
         combine(
             activeSchool.map { it?.id }.distinctUntilChanged(),
             _cloudRetryTrigger
         ) { schoolId, _ -> schoolId }
             .flatMapLatest { schoolId ->
                 if (schoolId.isNullOrBlank()) {
-                    flowOf(emptyList<Student>() to emptyMap())
+                    flowOf(StudentsStreamState(loadedSchoolId = null, hadError = false))
                 } else {
                     cloudRepo.observeSchoolStudents(schoolId)
+                        .map { (list, meta) ->
+                            StudentsStreamState(
+                                loadedSchoolId = schoolId,
+                                hadError = false,
+                                students = list,
+                                meta = meta
+                            )
+                        }
                         .catch { e ->
                             val fsErr = unwrapFirestoreError(e)
                             if (fsErr == null && e is CancellationException) throw e
                             if (!_isSigningOut.value && _suppressedSchoolId.value != schoolId) {
                                 _snackbarMessage.value = friendlyFirestoreErrorMessage(fsErr ?: e)
                             }
-                            emit(emptyList<Student>() to emptyMap())
+                            emit(StudentsStreamState(loadedSchoolId = null, hadError = true))
                         }
                 }
             }
-            .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList<Student>() to emptyMap())
+            .stateIn(viewModelScope, SharingStarted.Eagerly, StudentsStreamState())
 
     val students: StateFlow<List<Student>> = studentsAndMetaFlow
-        .map { it.first }
+        .map { it.students }
         .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
     val studentSyncMeta: StateFlow<Map<String, StudentSyncMeta>> = studentsAndMetaFlow
-        .map { it.second }
+        .map { it.meta }
         .stateIn(viewModelScope, SharingStarted.Eagerly, emptyMap())
 
     private val _localPdfFontOverride = MutableStateFlow(Repo.loadPdfFontOverride(appContext))
@@ -512,23 +537,30 @@ class ResultMakerViewModel(
 
         // Three-way Auto Backup (Local JSON, Google Drive, CSV) when Firestore data updates
         viewModelScope.launch {
-            combine(activeSchool, students, settings) { school, studentList, st ->
-                Triple(school, studentList, st)
+            combine(activeSchool, studentsAndMetaFlow, settings) { school, streamState, st ->
+                Triple(school, streamState, st)
             }
                 .debounce(3_500L)
-                .collectLatest { (school, studentList, st) ->
+                .collectLatest { (school, streamState, st) ->
                     if (school == null) return@collectLatest
+                    if (streamState.hadError || streamState.loadedSchoolId != school.id) return@collectLatest
+                    val studentList = streamState.students
                     if (studentList.isEmpty() && st == DEFAULT_SETTINGS) return@collectLatest
 
                     Repo.save(appContext, studentList, st)
                     BackupWorkScheduler.saveActiveMeta(appContext, currentUserId, school.id, school.joinCode)
+
+                    val reportBackupPrefs = Repo.loadReportBackupPrefs(appContext)
+                    val cachedTemplates = sheetTemplateCache.getAll()
 
                     autoBackupManager.runLocalBackupIfNeeded(
                         schoolId = school.id,
                         schoolCode = school.joinCode,
                         students = studentList,
                         settings = st,
-                        force = false
+                        force = false,
+                        reportPrefs = reportBackupPrefs,
+                        sheetTemplates = cachedTemplates
                     )
 
                     autoBackupManager.runCsvBackupIfNeeded(
@@ -539,14 +571,23 @@ class ResultMakerViewModel(
                         force = false
                     )
 
-                    if (autoBackupManager.status.value.driveEnabled) {
-                        delay(4_000L)
-                        autoBackupManager.runDriveBackupIfNeeded(
-                            schoolCode = school.joinCode,
-                            students = studentList,
-                            settings = st,
-                            force = false
-                        )
+                    if (autoBackupManager.status.value.driveEnabled && driveAutoBackupJob?.isActive != true) {
+                        val targetSchoolCode = school.joinCode
+                        driveAutoBackupJob = viewModelScope.launch {
+                            delay(4_000L)
+                            val latestSchool = activeSchool.value ?: return@launch
+                            val latestStream = studentsAndMetaFlow.value
+                            if (latestStream.hadError || latestStream.loadedSchoolId != latestSchool.id) return@launch
+                            autoBackupManager.runDriveBackupIfNeeded(
+                                schoolCode = latestSchool.joinCode.ifBlank { targetSchoolCode },
+                                students = latestStream.students,
+                                settings = settings.value,
+                                force = false,
+                                enableAutoOnSuccess = false,
+                                reportPrefs = Repo.loadReportBackupPrefs(appContext),
+                                sheetTemplates = sheetTemplateCache.getAll()
+                            )
+                        }
                     }
                 }
         }
@@ -556,16 +597,23 @@ class ResultMakerViewModel(
             while (isActive) {
                 delay(60_000L)
                 val school = activeSchool.value ?: continue
-                val studentList = students.value
+                val streamState = studentsAndMetaFlow.value
+                if (streamState.hadError || streamState.loadedSchoolId != school.id) continue
+                val studentList = streamState.students
                 val st = settings.value
                 if (studentList.isEmpty() && st == DEFAULT_SETTINGS) continue
+
+                val reportBackupPrefs = Repo.loadReportBackupPrefs(appContext)
+                val cachedTemplates = sheetTemplateCache.getAll()
 
                 autoBackupManager.runLocalBackupIfNeeded(
                     schoolId = school.id,
                     schoolCode = school.joinCode,
                     students = studentList,
                     settings = st,
-                    force = false
+                    force = false,
+                    reportPrefs = reportBackupPrefs,
+                    sheetTemplates = cachedTemplates
                 )
                 autoBackupManager.runCsvBackupIfNeeded(
                     schoolId = school.id,
@@ -579,7 +627,10 @@ class ResultMakerViewModel(
                         schoolCode = school.joinCode,
                         students = studentList,
                         settings = st,
-                        force = false
+                        force = false,
+                        enableAutoOnSuccess = false,
+                        reportPrefs = reportBackupPrefs,
+                        sheetTemplates = cachedTemplates
                     )
                 }
             }
@@ -1076,7 +1127,12 @@ class ResultMakerViewModel(
                 val sub = k.substringBefore('_')
                 perm.canEditSubject(sub)
             }
-            val filteredX = if (perm.canEditAttendance) student.x else emptyMap()
+            val attendancePrefixes = listOf("DAYS_", "PRES_", "ACT_", "DISC_", "COND_", "REM_")
+            val filteredX = if (perm.canEditAttendance) {
+                student.x
+            } else {
+                student.x.filterKeys { k -> attendancePrefixes.none { p -> k.startsWith(p) } }
+            }
             return student.copy(m = filteredM, x = filteredX)
         }
 
@@ -1563,6 +1619,13 @@ class ResultMakerViewModel(
         }
     }
 
+    fun buildFullBackupJson(): String = Repo.toJson(
+        list = students.value,
+        st = settings.value,
+        reportPrefs = Repo.loadReportBackupPrefs(appContext),
+        sheetTemplates = sheetTemplateCache.getAll()
+    )
+
     fun restoreBackupJson(rawText: String) {
         val school = activeSchool.value ?: return
         if (!school.isAdmin(currentUserId)) {
@@ -1570,13 +1633,46 @@ class ResultMakerViewModel(
             return
         }
         try {
-            val (restoredStudents, restoredSettings) = Repo.fromJson(rawText)
+            val bundle = Repo.fromBackupJson(rawText)
             val prevList = students.value
             viewModelScope.launch {
-                cloudRepo.updateSchoolSettings(school, restoredSettings)
-                cloudRepo.syncBatchStudents(school.id, prevList, restoredStudents, deleteRemoved = true)
+                val settingsRes = cloudRepo.updateSchoolSettings(school, bundle.settings)
+                if (settingsRes.isFailure) {
+                    showMessage(friendlyFirestoreErrorMessage(settingsRes.exceptionOrNull()!!))
+                    return@launch
+                }
+
+                // Keep device font & cover address overrides aligned with the restored school backup
+                Repo.saveSchoolAddressOverride(appContext, null)
+                _localSchoolAddressOverride.value = null
+                val decodedFonts = decodePdfFontPair(bundle.settings.pdfFont, bundle.settings.pdfEnglishFont)
+                Repo.savePdfFontOverride(appContext, decodedFonts.bengaliFontId)
+                _localPdfFontOverride.value = decodedFonts.bengaliFontId
+                Repo.savePdfEnglishFontOverride(appContext, decodedFonts.englishFontId)
+                _localPdfEnglishFontOverride.value = decodedFonts.englishFontId
+
+                bundle.reportPrefs?.let { rp ->
+                    setIncludeClassHighestInReport(rp.includeClassHighest)
+                    setIncludeSummaryTableInReport(rp.includeSummaryTable)
+                    setSummaryTableColumns(rp.summaryTableColumns)
+                    setShowCoverAddressInReport(rp.showCoverAddress)
+                }
+
+                cloudRepo.syncBatchStudents(school.id, prevList, bundle.students, deleteRemoved = true)
                     .onSuccess {
-                        showMessage("ব্যাকআপ রিস্টোর হয়েছে (${bn(restoredStudents.size.toString())} জন শিক্ষার্থী)")
+                        val restoredTemplates = bundle.sheetTemplates
+                        if (restoredTemplates.isNotEmpty()) {
+                            sheetTemplateCache.putAll(restoredTemplates)
+                            withContext(Dispatchers.IO) {
+                                restoredTemplates.forEach { meta ->
+                                    cloudRepo.saveSheetTemplate(school.id, meta)
+                                }
+                            }
+                        }
+                        val templateNote = if (restoredTemplates.isNotEmpty()) {
+                            " ও ${bn(restoredTemplates.size.toString())}টি টেমপ্লেট"
+                        } else ""
+                        showMessage("ব্যাকআপ রিস্টোর হয়েছে (${bn(bundle.students.size.toString())} জন শিক্ষার্থী$templateNote)")
                     }
                     .onFailure { e ->
                         showMessage(friendlyFirestoreErrorMessage(e))
@@ -1740,13 +1836,17 @@ class ResultMakerViewModel(
                 schoolCode = school.joinCode,
                 students = students.value,
                 settings = settings.value,
-                force = true
+                force = true,
+                enableAutoOnSuccess = true,
+                reportPrefs = Repo.loadReportBackupPrefs(appContext),
+                sheetTemplates = sheetTemplateCache.getAll()
             )) {
                 is DriveAuthOutcome.Authorized -> {
                     autoBackupManager.setDriveAutoBackupEnabled(true)
                     showMessage("Google Drive অটো ব্যাকআপ চালু ও সম্পন্ন হয়েছে")
                 }
                 is DriveAuthOutcome.NeedsConsent -> {
+                    _pendingDriveAction.value = PendingDriveAction.EnableAutoAndUpload
                     _pendingDriveConsent.value = outcome.intentSender
                 }
                 is DriveAuthOutcome.Failed -> {
@@ -1868,10 +1968,16 @@ class ResultMakerViewModel(
                 schoolCode = school.joinCode,
                 students = students.value,
                 settings = settings.value,
-                force = true
+                force = true,
+                enableAutoOnSuccess = false,
+                reportPrefs = Repo.loadReportBackupPrefs(appContext),
+                sheetTemplates = sheetTemplateCache.getAll()
             )) {
                 is DriveAuthOutcome.Authorized -> showMessage("Google Drive ব্যাকআপ সম্পন্ন হয়েছে")
-                is DriveAuthOutcome.NeedsConsent -> _pendingDriveConsent.value = driveRes.intentSender
+                is DriveAuthOutcome.NeedsConsent -> {
+                    _pendingDriveAction.value = PendingDriveAction.UploadOnly
+                    _pendingDriveConsent.value = driveRes.intentSender
+                }
                 is DriveAuthOutcome.Failed -> showMessage(driveRes.message)
             }
         }
@@ -1903,12 +2009,16 @@ class ResultMakerViewModel(
     fun backupNowAll() {
         val school = activeSchool.value ?: return
         viewModelScope.launch {
+            val reportBackupPrefs = Repo.loadReportBackupPrefs(appContext)
+            val cachedTemplates = sheetTemplateCache.getAll()
             val localRes = autoBackupManager.runLocalBackupIfNeeded(
                 schoolId = school.id,
                 schoolCode = school.joinCode,
                 students = students.value,
                 settings = settings.value,
-                force = true
+                force = true,
+                reportPrefs = reportBackupPrefs,
+                sheetTemplates = cachedTemplates
             )
             val csvRes = autoBackupManager.runCsvBackupIfNeeded(
                 schoolId = school.id,
@@ -1921,7 +2031,10 @@ class ResultMakerViewModel(
                 schoolCode = school.joinCode,
                 students = students.value,
                 settings = settings.value,
-                force = true
+                force = true,
+                enableAutoOnSuccess = false,
+                reportPrefs = reportBackupPrefs,
+                sheetTemplates = cachedTemplates
             )) {
                 is DriveAuthOutcome.Authorized -> {
                     val localOk = localRes.isSuccess
@@ -1933,6 +2046,7 @@ class ResultMakerViewModel(
                     showMessage(msg)
                 }
                 is DriveAuthOutcome.NeedsConsent -> {
+                    _pendingDriveAction.value = PendingDriveAction.UploadOnly
                     _pendingDriveConsent.value = driveRes.intentSender
                 }
                 is DriveAuthOutcome.Failed -> {
@@ -1952,25 +2066,69 @@ class ResultMakerViewModel(
 
     fun clearPendingDriveConsent() {
         _pendingDriveConsent.value = null
+        _pendingDriveAction.value = null
+        _driveFilesLoading.value = false
     }
 
-    fun handleDriveConsentIntentResult(data: Intent?) {
+    fun handleDriveConsentIntentResult(resultCode: Int, data: Intent?) {
         _pendingDriveConsent.value = null
-        val school = activeSchool.value ?: return
+        val pendingAction = _pendingDriveAction.value ?: PendingDriveAction.UploadOnly
+        _pendingDriveAction.value = null
+
+        if (resultCode != android.app.Activity.RESULT_OK) {
+            _driveFilesLoading.value = false
+            showMessage("Google Drive অনুমতি বাতিল করা হয়েছে")
+            return
+        }
+
         viewModelScope.launch {
-            when (val outcome = GoogleDriveBackupClient.handleConsentResult(appContext, data)) {
-                is DriveAuthOutcome.Authorized -> {
-                    val json = Repo.toJson(students.value, settings.value)
-                    autoBackupManager.uploadWithToken(outcome.accessToken, school.joinCode, json)
-                        .onSuccess { uploaded ->
-                            showMessage("Google Drive-এ ব্যাকআপ হয়েছে: ${uploaded.name}")
+            if (pendingAction is PendingDriveAction.ListFiles || pendingAction is PendingDriveAction.RestoreFile) {
+                _driveFilesLoading.value = true
+            }
+            try {
+                when (val outcome = GoogleDriveBackupClient.handleConsentResult(appContext, data)) {
+                    is DriveAuthOutcome.Authorized -> {
+                        when (pendingAction) {
+                            is PendingDriveAction.ListFiles -> {
+                                GoogleDriveBackupClient.listBackupFiles(outcome.accessToken)
+                                    .onSuccess { files -> _driveFiles.value = files }
+                                    .onFailure { err -> showMessage(err.localizedMessage ?: "Drive তালিকা লোড হয়নি") }
+                            }
+                            is PendingDriveAction.RestoreFile -> {
+                                GoogleDriveBackupClient.downloadBackupJson(outcome.accessToken, pendingAction.fileId)
+                                    .onSuccess { json -> restoreBackupJson(json) }
+                                    .onFailure { err -> showMessage(err.localizedMessage ?: "Drive ফাইল ডাউনলোড হয়নি") }
+                            }
+                            is PendingDriveAction.EnableAutoAndUpload,
+                            is PendingDriveAction.UploadOnly -> {
+                                val school = activeSchool.value ?: return@launch
+                                val enableAuto = pendingAction is PendingDriveAction.EnableAutoAndUpload
+                                val json = buildFullBackupJson()
+                                autoBackupManager.uploadWithToken(
+                                    accessToken = outcome.accessToken,
+                                    schoolCode = school.joinCode,
+                                    jsonContent = json,
+                                    enableAutoOnSuccess = enableAuto
+                                )
+                                    .onSuccess { uploaded ->
+                                        val msg = if (enableAuto) {
+                                            "Google Drive অটো ব্যাকআপ চালু ও সম্পন্ন হয়েছে: ${uploaded.name}"
+                                        } else {
+                                            "Google Drive-এ ব্যাকআপ হয়েছে: ${uploaded.name}"
+                                        }
+                                        showMessage(msg)
+                                    }
+                                    .onFailure { err ->
+                                        showMessage(err.localizedMessage ?: "Google Drive আপলোড ব্যর্থ")
+                                    }
+                            }
                         }
-                        .onFailure { err ->
-                            showMessage(err.localizedMessage ?: "Google Drive আপলোড ব্যর্থ")
-                        }
+                    }
+                    is DriveAuthOutcome.Failed -> showMessage(outcome.message)
+                    is DriveAuthOutcome.NeedsConsent -> showMessage("Google Drive অনুমতি সম্পন্ন হয়নি")
                 }
-                is DriveAuthOutcome.Failed -> showMessage(outcome.message)
-                is DriveAuthOutcome.NeedsConsent -> showMessage("Google Drive অনুমতি সম্পন্ন হয়নি")
+            } finally {
+                _driveFilesLoading.value = false
             }
         }
     }
@@ -1986,38 +2144,46 @@ class ResultMakerViewModel(
     fun loadDriveBackupList() {
         viewModelScope.launch {
             _driveFilesLoading.value = true
-            when (val auth = GoogleDriveBackupClient.authorizeDrive(appContext)) {
-                is DriveAuthOutcome.Authorized -> {
-                    GoogleDriveBackupClient.listBackupFiles(auth.accessToken)
-                        .onSuccess { files -> _driveFiles.value = files }
-                        .onFailure { err -> showMessage(err.localizedMessage ?: "Drive তালিকা লোড হয়নি") }
+            try {
+                when (val auth = GoogleDriveBackupClient.authorizeDrive(appContext)) {
+                    is DriveAuthOutcome.Authorized -> {
+                        GoogleDriveBackupClient.listBackupFiles(auth.accessToken)
+                            .onSuccess { files -> _driveFiles.value = files }
+                            .onFailure { err -> showMessage(err.localizedMessage ?: "Drive তালিকা লোড হয়নি") }
+                    }
+                    is DriveAuthOutcome.NeedsConsent -> {
+                        _pendingDriveAction.value = PendingDriveAction.ListFiles
+                        _pendingDriveConsent.value = auth.intentSender
+                    }
+                    is DriveAuthOutcome.Failed -> {
+                        showMessage(auth.message)
+                    }
                 }
-                is DriveAuthOutcome.NeedsConsent -> {
-                    _pendingDriveConsent.value = auth.intentSender
-                }
-                is DriveAuthOutcome.Failed -> {
-                    showMessage(auth.message)
-                }
+            } finally {
+                _driveFilesLoading.value = false
             }
-            _driveFilesLoading.value = false
         }
     }
 
     fun restoreFromDriveFile(fileId: String) {
         viewModelScope.launch {
             _driveFilesLoading.value = true
-            when (val auth = GoogleDriveBackupClient.authorizeDrive(appContext)) {
-                is DriveAuthOutcome.Authorized -> {
-                    GoogleDriveBackupClient.downloadBackupJson(auth.accessToken, fileId)
-                        .onSuccess { json -> restoreBackupJson(json) }
-                        .onFailure { err -> showMessage(err.localizedMessage ?: "Drive ফাইল ডাউনলোড হয়নি") }
+            try {
+                when (val auth = GoogleDriveBackupClient.authorizeDrive(appContext)) {
+                    is DriveAuthOutcome.Authorized -> {
+                        GoogleDriveBackupClient.downloadBackupJson(auth.accessToken, fileId)
+                            .onSuccess { json -> restoreBackupJson(json) }
+                            .onFailure { err -> showMessage(err.localizedMessage ?: "Drive ফাইল ডাউনলোড হয়নি") }
+                    }
+                    is DriveAuthOutcome.NeedsConsent -> {
+                        _pendingDriveAction.value = PendingDriveAction.RestoreFile(fileId)
+                        _pendingDriveConsent.value = auth.intentSender
+                    }
+                    is DriveAuthOutcome.Failed -> showMessage(auth.message)
                 }
-                is DriveAuthOutcome.NeedsConsent -> {
-                    _pendingDriveConsent.value = auth.intentSender
-                }
-                is DriveAuthOutcome.Failed -> showMessage(auth.message)
+            } finally {
+                _driveFilesLoading.value = false
             }
-            _driveFilesLoading.value = false
         }
     }
 
