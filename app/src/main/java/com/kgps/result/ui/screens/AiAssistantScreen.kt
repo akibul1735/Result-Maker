@@ -1923,6 +1923,15 @@ private fun ClassSheetPreviewSection(
                     modifier = Modifier.padding(8.dp)
                 )
             } else {
+                val hasOtherTermTraitData = remember(sheet.rows, sheet.sharedWorkingDaysByTerm, sheet.term) {
+                    sheet.term !in 1..3 ||
+                        sheet.sharedWorkingDaysByTerm.any { (t, v) -> t != sheet.term && v.isNotBlank() } ||
+                        sheet.rows.any { r ->
+                            r.traitValues.any { (k, v) ->
+                                v.isNotBlank() && (k.substringAfterLast('_', "").toIntOrNull() ?: sheet.term) != sheet.term
+                            }
+                        }
+                }
                 visibleRows.forEach { row ->
                     val report = reportsByRowId[row.id] ?: RowValidationReport(emptyMap(), emptyMap())
                     val rollInt = fromBn(row.rollText.trim()).toIntOrNull()
@@ -1932,6 +1941,8 @@ private fun ClassSheetPreviewSection(
                     ScannedStudentPreviewCard(
                         row = row,
                         activeSub = activeSub,
+                        activeTerm = sheet.term,
+                        hasOtherTermTraitData = hasOtherTermTraitData,
                         scope = sheet.scope,
                         sheetKind = sheet.sheetKind,
                         report = report,
@@ -1995,6 +2006,8 @@ private fun ClassSheetPreviewSection(
 private fun ScannedStudentPreviewCard(
     row: ScannedStudentRow,
     activeSub: com.kgps.result.Sub,
+    activeTerm: Int,
+    hasOtherTermTraitData: Boolean,
     scope: ClassSheetImportScope,
     sheetKind: ClassSheetKind,
     report: RowValidationReport,
@@ -2143,14 +2156,18 @@ private fun ScannedStudentPreviewCard(
             when (sheetKind) {
                 ClassSheetKind.ATTENDANCE_TRAITS -> {
                     var showPerRowDaysAndRem by remember(row.id) { mutableStateOf(false) }
-                    val hasExtraTraitData = (1..3).any { t ->
+                    var showAllThreeTerms by remember(row.id, hasOtherTermTraitData, activeTerm) {
+                        mutableStateOf(hasOtherTermTraitData || activeTerm !in 1..3)
+                    }
+                    val visibleTraitTerms = if (showAllThreeTerms) listOf(1, 2, 3) else listOf(activeTerm.coerceIn(1, 3))
+                    val hasExtraTraitData = visibleTraitTerms.any { t ->
                         !row.traitValues["DAYS_$t"].isNullOrBlank() ||
                             !row.traitValues["REM_$t"].isNullOrBlank() ||
                             report.hardErrors["DAYS_$t"] != null ||
                             report.uncertainWarnings["DAYS_$t"] != null ||
                             report.uncertainWarnings["REM_$t"] != null
                     }
-                    (1..3).forEach { t ->
+                    visibleTraitTerms.forEach { t ->
                         Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                             Row(
                                 Modifier.fillMaxWidth(),
@@ -2254,6 +2271,15 @@ private fun ScannedStudentPreviewCard(
                             modifier = Modifier.weight(1f, fill = false)
                         )
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                            if (activeTerm in 1..3) {
+                                Text(
+                                    if (showAllThreeTerms) termNameBn(activeTerm) else "সব ৩ প্রান্তিক",
+                                    fontSize = 10.5.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = TealPrimary,
+                                    modifier = Modifier.clickable { showAllThreeTerms = !showAllThreeTerms }
+                                )
+                            }
                             Text(
                                 if (showPerRowDaysAndRem) "কম দেখুন" else "+ কার্যদিবস",
                                 fontSize = 10.5.sp,

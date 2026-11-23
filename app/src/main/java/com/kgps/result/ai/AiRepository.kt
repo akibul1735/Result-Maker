@@ -8,6 +8,7 @@ import android.util.Base64
 import com.kgps.result.BlankSheetCatalog
 import com.kgps.result.BlankSheetQrMeta
 import com.kgps.result.RELIGIONS
+import com.kgps.result.Repo
 import com.kgps.result.SheetQrCodec
 import com.kgps.result.bn
 import com.kgps.result.classNameBn
@@ -715,6 +716,56 @@ internal fun parseExtractedClassSheetJson(
     }
 
     val rawSheetKind = json.optString("sheetKind", "").trim().uppercase()
+    val looksLikeTraitsSheet =
+        sheetKindHint == ClassSheetKind.ATTENDANCE_TRAITS ||
+            qrMeta?.sheetKind == ClassSheetKind.ATTENDANCE_TRAITS ||
+            rawSheetKind == "ATTENDANCE_TRAITS" ||
+            refLayout == "TRAITS" ||
+            refLayout == "ATT"
+
+    fun normalizeTraitJsonKey(rawKey: String): String? {
+        val trimmed = rawKey.trim()
+        if (trimmed.isEmpty()) return null
+        val up = trimmed.uppercase()
+        val low = trimmed.lowercase()
+        val tPrefixMatch = Regex("^T([1-3])_(.+)$").find(up)
+        val bareOrSuffix = tPrefixMatch?.groupValues?.getOrNull(2) ?: up
+        val tPrefixNum = tPrefixMatch?.groupValues?.getOrNull(1)?.toIntOrNull()
+
+        val numberedMatch = Regex("^(DAYS|PRES|ATT|PRESENT|ACT|TRAIT_ACT|DISC|TRAIT_DISC|COND|TRAIT_COND|REM|REMARK)_([1-3])$").find(up)
+        if (numberedMatch != null) {
+            val baseRaw = numberedMatch.groupValues[1]
+            val tNum = numberedMatch.groupValues[2]
+            val base = when (baseRaw) {
+                "ATT", "PRESENT" -> "PRES"
+                "TRAIT_ACT" -> "ACT"
+                "TRAIT_DISC" -> "DISC"
+                "TRAIT_COND" -> "COND"
+                "REMARK" -> "REM"
+                else -> baseRaw
+            }
+            return "${base}_$tNum"
+        }
+
+        val mappedBase = when {
+            bareOrSuffix in setOf("DAYS", "WORKING_DAYS", "WORK_DAYS") ||
+                low.contains("কার্যদিবস") -> "DAYS"
+            bareOrSuffix in setOf("PRES", "ATT", "ATTENDANCE", "PRESENT") ||
+                low.contains("উপস্থিত") || low.contains("হাজিরা") -> "PRES"
+            bareOrSuffix in setOf("ACT", "TRAIT_ACT", "CO_CURRICULAR", "ACTIVITIES") ||
+                low.contains("সক্রিয়") || low.contains("সক্রিয়") || low.contains("সহপাঠ") -> "ACT"
+            bareOrSuffix in setOf("DISC", "TRAIT_DISC", "DISCIPLINE") ||
+                low.contains("শৃঙ্খলা") || low.contains("শৃংখলা") -> "DISC"
+            bareOrSuffix in setOf("COND", "TRAIT_COND", "CONDUCT", "BEHAVIOR", "BEHAVIOUR") ||
+                low.contains("আচরণ") || low.contains("আচরন") -> "COND"
+            bareOrSuffix in setOf("REM", "REMARK", "COMMENT") ||
+                low.contains("মন্তব্য") -> "REM"
+            else -> null
+        } ?: return null
+
+        val termNum = tPrefixNum ?: detectedTerm
+        return "${mappedBase}_$termNum"
+    }
 
     val rowsArr = json.optJSONArray("rows") ?: JSONArray()
     val rawParsed = (0 until rowsArr.length()).mapNotNull { idx ->
@@ -723,26 +774,36 @@ internal fun parseExtractedClassSheetJson(
         val nameStr = obj.optString("name", "").trim()
         val marksObj = obj.optJSONObject("marks") ?: JSONObject()
         val marksMap = mutableMapOf<String, String>()
+        val traitsMap = mutableMapOf<String, String>()
+
+        fun putTraitValue(normKey: String, rawVal: String) {
+            val cleanVal = when {
+                normKey.startsWith("DAYS_") || normKey.startsWith("PRES_") ->
+                    fromBn(rawVal).filter { it.isDigit() }
+                normKey.startsWith("ACT_") || normKey.startsWith("DISC_") || normKey.startsWith("COND_") ->
+                    Repo.normalizeTraitCode(rawVal)
+                else -> rawVal.trim()
+            }
+            if (cleanVal.isNotEmpty()) traitsMap[normKey] = cleanVal
+        }
+
         marksObj.keys().forEach { k ->
             val v = marksObj.optString(k, "").trim()
             if (v.isNotEmpty() && !v.equals("null", ignoreCase = true)) {
-                marksMap[k.trim().uppercase()] = fromBn(v)
+                val salvagedTraitKey = if (looksLikeTraitsSheet) normalizeTraitJsonKey(k) else null
+                if (salvagedTraitKey != null) {
+                    putTraitValue(salvagedTraitKey, v)
+                } else {
+                    marksMap[k.trim().uppercase()] = fromBn(v)
+                }
             }
         }
         val traitsObj = obj.optJSONObject("traits") ?: JSONObject()
-        val traitsMap = mutableMapOf<String, String>()
         traitsObj.keys().forEach { k ->
             val v = traitsObj.optString(k, "").trim()
             if (v.isNotEmpty() && !v.equals("null", ignoreCase = true)) {
-                val upK = k.trim().uppercase()
-                val normKey = when {
-                    upK in setOf("DAYS", "PRES", "ACT", "DISC", "COND", "REM") -> "${upK}_$detectedTerm"
-                    else -> upK
-                }
-                val cleanVal = if (normKey.startsWith("DAYS_") || normKey.startsWith("PRES_")) {
-                    fromBn(v).filter { it.isDigit() }
-                } else v
-                if (cleanVal.isNotEmpty()) traitsMap[normKey] = cleanVal
+                val normKey = normalizeTraitJsonKey(k) ?: k.trim().uppercase()
+                putTraitValue(normKey, v)
             }
         }
         val remarkStr = obj.optString("remark", "").trim()
@@ -1270,31 +1331,41 @@ class DirectGeminiAiRepository(
             "${s.key}(${s.bn}):$compDesc$wrDesc"
         }
 
-        val scopeRule = when (effScope) {
-            ClassSheetImportScope.CONT_ONLY ->
+        val scopeRule = when {
+            effKindHint == ClassSheetKind.ATTENDANCE_TRAITS ->
+                "4. উপস্থিতি ও গুণাবলি শিট (`ATTENDANCE_TRAITS`): উপরের মোট কার্যদিবস স্ট্রিপ থাকলে `sharedWorkingDays` (`\"1\"`,`\"2\"`,`\"3\"`)-এ দিন, এবং প্রতি সারিতে `traits`-এ `DAYS_t`, `PRES_t`, `ACT_t` (সক্রিয়তা/সহপাঠ), `DISC_t` (শৃঙ্খলা), `COND_t` (আচরণ), `REM_t` (মন্তব্য) দিন (১ প্রান্তিকের শিট হলে সংশ্লিষ্ট প্রান্তিকের `_t`, যেমন `PRES_${effTermHint ?: 1}`, `ACT_${effTermHint ?: 1}` দিন; গুণাবলি মান `ক`, `খ` বা `গ`; `marks` ফাঁকা `{}` রাখুন)।"
+            effKindHint == ClassSheetKind.THREE_TERM_MARKS ->
+                "4. ৩ প্রান্তিক নম্বর শিট (`THREE_TERM_MARKS`): পাশাপাশি ১ম, ২য়, ৩য় প্রান্তিকের ধারাবাহিক/সামষ্টিক/মোট `marks`-এ `" +
+                    "\"T1_CONT\",\"T1_WR\",\"T1_TOTAL\",\"T2_CONT\",\"T2_WR\",\"T2_TOTAL\",\"T3_CONT\",\"T3_WR\",\"T3_TOTAL\"` হিসেবে দিন এবং থাকলে `remark` দিন।"
+            effScope == ClassSheetImportScope.CONT_ONLY ->
                 "4. একক প্রান্তিক নম্বর হলে কেবল রোল (ও থাকলে নাম) এবং ধারাবাহিক নম্বর (`sheetContinuousTotal` বা `TB`/`ACT`/`LANG`/`CT`) পড়ুন — `WR` ও `sheetGrandTotal` ফাঁকা রাখুন।"
-            ClassSheetImportScope.WR_ONLY ->
+            effScope == ClassSheetImportScope.WR_ONLY ->
                 "4. একক প্রান্তিক নম্বর হলে কেবল রোল (ও থাকলে নাম) এবং সামষ্টিক/লিখিত (`WR`) পড়ুন — ধারাবাহিক ও `sheetGrandTotal` ফাঁকা রাখুন।"
-            ClassSheetImportScope.BOTH ->
+            effScope == ClassSheetImportScope.BOTH ->
                 "4. একক প্রান্তিক নম্বর হলে থাকা ধারাবাহিক, সামষ্টিক (`WR`), মোট (`sheetGrandTotal`) এবং থাকলে মন্তব্য (`remark`) পড়ুন।"
-            ClassSheetImportScope.AUTO ->
+            else ->
                 """
                 4. ছবির কলাম ও শিরোনাম দেখে সঠিক `sheetKind` বেছে নিন:
                    (ক) "SINGLE_TERM_MARKS": ১ প্রান্তিক নম্বর শিট (পূর্ণাঙ্গ `TB,ACT,LANG,CT,CONT,WR,TOTAL`, সংক্ষিপ্ত `CONT,WR,TOTAL`, শুধু ধারাবাহিক, শুধু সামষ্টিক, অথবা সহজ মোট `TOTAL` + থাকলে `remark`)। কেবল `মোট` থাকলে `sheetGrandTotal` দিন, `CONT`/`WR` অনুমান করবেন না।
                    (খ) "THREE_TERM_MARKS": ৩ প্রান্তিক নম্বর শিট (পাশাপাশি ১ম, ২য়, ৩য় প্রান্তিকের ধারাবাহিক/সামষ্টিক/মোট) → `marks`-এ `"T1_CONT","T1_WR","T1_TOTAL","T2_CONT","T2_WR","T2_TOTAL","T3_CONT","T3_WR","T3_TOTAL"` দিন।
-                   (গ) "ATTENDANCE_TRAITS": উপস্থিতি ও গুণাবলি/হাজিরা শিট → উপরের মোট কার্যদিবস স্ট্রিপ থাকলে `sharedWorkingDays: {"1":"","2":"","3":""}`-এ দিন, এবং প্রতি সারিতে `traits`-এ `DAYS_1..3`, `PRES_1..3`, `ACT_1..3`, `DISC_1..3`, `COND_1..3`, `REM_1..3` দিন (১ প্রান্তিকের হাজিরা হলে কেবল সংশ্লিষ্ট প্রান্তিকের কী যেমন `PRES_1`, `REM_1` দিন; গুণাবলি `ক`/`খ`/`গ`)।
+                   (গ) "ATTENDANCE_TRAITS": উপস্থিতি ও গুণাবলি/হাজিরা শিট (যেমন: রোল, নাম, উপস্থিত/উপস্থিতি, সক্রিয়তা/সহপাঠ, শৃঙ্খলা, আচরণ) → উপরের মোট কার্যদিবস স্ট্রিপ থাকলে `sharedWorkingDays: {"1":"","2":"","3":""}`-এ দিন, এবং প্রতি সারিতে `traits`-এ `DAYS_1..3`, `PRES_1..3`, `ACT_1..3`, `DISC_1..3`, `COND_1..3`, `REM_1..3` দিন (১ প্রান্তিকের শিট হলে কেবল সংশ্লিষ্ট প্রান্তিকের কী যেমন `PRES_1`,`ACT_1`,`DISC_1`,`COND_1`,`REM_1` দিন; গুণাবলি `ক`/`খ`/`গ`)।
                 """.trimIndent()
         }
         val forcedKindHint = effKindHint?.let { "ফরম্যাট অবশ্যই: ${it.name}" } ?: "ফরম্যাট: ছবি অনুযায়ী স্বয়ংক্রিয়"
         val qrInstructionsBlock = resolvedQr?.let { SheetQrCodec.buildAiPromptInstructions(it) }.orEmpty()
+        val structLine = if (effKindHint == ClassSheetKind.ATTENDANCE_TRAITS) {
+            "উপস্থিতি ও গুণাবলি কাঠামো: কার্যদিবস=DAYS_t, উপস্থিত/উপস্থিতি=PRES_t, সক্রিয়তা/সহপাঠ=ACT_t, শৃঙ্খলা=DISC_t, আচরণ=COND_t, মন্তব্য=REM_t; গুণাবলি মান: ক (উত্তম), খ (সন্তোষজনক), গ (উন্নতি প্রয়োজন)"
+        } else {
+            "বিষয় কাঠামো: $subsInfo"
+        }
 
         val prompt = buildString {
             appendLine("বাংলাদেশ প্রাথমিক শ্রেণি-ফর্ম/নম্বরপত্র OCR। নিচের ফুটারে `REF:C...` কোড বা উপরের ব্যানার ও কলাম পড়ে সব সারির তথ্য শুধু JSON-এ দিন।")
-            appendLine("ইঙ্গিত: শ্রেণি=${effClsHint ?: "ছবি_থেকে_শনাক্ত(1-20)"}, প্রান্তিক=${effTermHint ?: "ছবি_থেকে_শনাক্ত(1-3)"}, বিষয়=${effSubHint ?: "ছবি_থেকে_শনাক্ত"}, $forcedKindHint, নোট=${cleanNote.ifBlank { "নেই" }}")
+            appendLine("ইঙ্গিত: শ্রেণি=${effClsHint ?: "ছবি_থেকে_শনাক্ত(1-20)"}, প্রান্তিক=${effTermHint ?: "ছবি_থেকে_শনাক্ত(1-3)"}, বিষয়=${if (effKindHint == ClassSheetKind.ATTENDANCE_TRAITS) "উপস্থিতি ও গুণাবলি (প্রযোজ্য নয়)" else effSubHint ?: "ছবি_থেকে_শনাক্ত"}, $forcedKindHint, নোট=${cleanNote.ifBlank { "নেই" }}")
             if (qrInstructionsBlock.isNotBlank()) {
                 appendLine(qrInstructionsBlock)
             }
-            appendLine("বিষয় কাঠামো: $subsInfo")
+            appendLine(structLine)
             appendLine("নিয়ম:")
             appendLine("1. সব সংখ্যা ইংরেজি অঙ্কে (০৭->\"7\"); নাম ও মন্তব্য থাকলে বাংলায়, না থাকলে \"\"।")
             appendLine("2. CT ঘরে \"০৬+০৭=১৩/২=০৭\" থাকলে \"=\" পরের গড় মান (\"7\") ও `rawNotes`-এ সংক্ষেপে লিখুন।")
@@ -1302,7 +1373,7 @@ class DirectGeminiAiRepository(
             appendLine(scopeRule)
             appendLine("5. অনুপস্থিত বা ফাঁকা কীগুলো বাদ দিন। `refCode`-এ ফুটারে `REF:...` পেলে সেটি দিন, নাহলে \"${resolvedQr?.refCode.orEmpty()}\"।")
             appendLine("6. ছবিতে আসলে কোনো লেখা/সংখ্যা অস্পষ্ট হলে তবেই `uncertainFields`-এ কারণ দিন। `metaFound`-এ শ্রেণি/প্রান্তিক/বিষয় পেলে true দিন।")
-            append("JSON: {\"sheetKind\":\"${effKindHint?.name ?: "SINGLE_TERM_MARKS"}\",\"refCode\":\"${resolvedQr?.refCode.orEmpty()}\",\"cls\":${effClsHint ?: 3},\"term\":${effTermHint ?: 1},\"subKey\":\"${effSubHint ?: "MATH"}\",\"metaFound\":{\"cls\":${effClsHint != null},\"term\":${effTermHint != null},\"sub\":${!effSubHint.isNullOrBlank()}},\"sharedWorkingDays\":{\"1\":\"\",\"2\":\"\",\"3\":\"\"},\"summary\":\"\",\"warnings\":[],\"rows\":[{\"roll\":\"1\",\"name\":\"\",\"marks\":{\"TB\":\"\",\"ACT\":\"\",\"LANG\":\"\",\"CT\":\"\",\"WR\":\"\",\"T1_CONT\":\"\",\"T1_WR\":\"\"},\"sheetContinuousTotal\":\"\",\"sheetGrandTotal\":\"\",\"remark\":\"\",\"traits\":{\"PRES_1\":\"\",\"ACT_1\":\"\",\"DISC_1\":\"\",\"COND_1\":\"\",\"REM_1\":\"\"},\"rawNotes\":\"\",\"uncertainFields\":{}}]}")
+            append("JSON: {\"sheetKind\":\"${effKindHint?.name ?: "SINGLE_TERM_MARKS"}\",\"refCode\":\"${resolvedQr?.refCode.orEmpty()}\",\"cls\":${effClsHint ?: 3},\"term\":${effTermHint ?: 1},\"subKey\":\"${if (effKindHint == ClassSheetKind.ATTENDANCE_TRAITS) "" else effSubHint ?: "MATH"}\",\"metaFound\":{\"cls\":${effClsHint != null},\"term\":${effTermHint != null},\"sub\":${!effSubHint.isNullOrBlank()}},\"sharedWorkingDays\":{\"1\":\"\",\"2\":\"\",\"3\":\"\"},\"summary\":\"\",\"warnings\":[],\"rows\":[{\"roll\":\"1\",\"name\":\"\",\"marks\":{\"TB\":\"\",\"ACT\":\"\",\"LANG\":\"\",\"CT\":\"\",\"WR\":\"\",\"T1_CONT\":\"\",\"T1_WR\":\"\"},\"sheetContinuousTotal\":\"\",\"sheetGrandTotal\":\"\",\"remark\":\"\",\"traits\":{\"PRES_1\":\"\",\"ACT_1\":\"\",\"DISC_1\":\"\",\"COND_1\":\"\",\"REM_1\":\"\"},\"rawNotes\":\"\",\"uncertainFields\":{}}]}")
         }
 
         val payload = buildVisionJsonPayload(encoded.base64, prompt, maxOutputTokens = 8192)
@@ -1387,7 +1458,12 @@ class DirectGeminiAiRepository(
             appendLine("• শুধুমাত্র ১ জন শিক্ষার্থীর একক প্রগ্রেসিভ রিপোর্ট কার্ড / একক নম্বরপত্র হলে `scanMode`: \"SINGLE_STUDENT\" দিন এবং `student`, `marks`, `attendanceAndTraits` পূরণ করুন।")
             appendLine("ঐচ্ছিক ইঙ্গিত: শ্রেণি=${clsHint ?: "ছবি_থেকে_শনাক্ত(1-20)"}, প্রান্তিক=${termHint ?: "ছবি_থেকে_শনাক্ত(1-3)"}, বিষয়=${subKeyHint ?: "ছবি_থেকে_শনাক্ত(BAN/ENG/MATH/SOC/SCI/BGW/REL/PE/ART)"}, শিট=${sheetKindHint?.name ?: "অটো"}, নোট=${cleanNote.ifBlank { "নেই" }}")
             appendLine("বিষয় কাঠামো: $subsInfo")
-            appendLine("নিয়ম: সব সংখ্যা ইংরেজি অঙ্কে (০৭->\"7\"); CLASS_SHEET হলে `sheetKind`=\"SINGLE_TERM_MARKS\"|\"THREE_TERM_MARKS\"|\"ATTENDANCE_TRAITS\", এবং প্রয়োজনে `metaFound`, `sharedWorkingDays`, `rows`, `uncertainFields` দিন।")
+            appendLine("নিয়ম:")
+            appendLine("1. সব সংখ্যা ইংরেজি অঙ্কে (০৭->\"7\"); ফুটারে `REF:...` পেলে `refCode`-এ দিন।")
+            appendLine("2. `CLASS_SHEET` হলে `sheetKind`:")
+            appendLine("   - \"SINGLE_TERM_MARKS\": ১ প্রান্তিক নম্বর (রোল, নাম, `TB,ACT,LANG,CT,CONT,WR,TOTAL`)।")
+            appendLine("   - \"THREE_TERM_MARKS\": ৩ প্রান্তিক নম্বর (`T1_CONT,T1_WR,T1_TOTAL .. T3_TOTAL`)।")
+            appendLine("   - \"ATTENDANCE_TRAITS\": উপস্থিতি ও গুণাবলি শিট (যেমন: রোল, নাম, উপস্থিত/উপস্থিতি, সক্রিয়তা/সহপাঠ, শৃঙ্খলা, আচরণ — ১ প্রান্তিক বা ৩ প্রান্তিক)। উপরের মোট কার্যদিবস থাকলে `sharedWorkingDays` ও প্রতি সারির `traits`-এ `DAYS_t, PRES_t, ACT_t, DISC_t, COND_t, REM_t` দিন (গুণাবলি `ক`/`খ`/`গ`, `marks` `{}` রাখুন)।")
             append("JSON স্কিমা: {\"scanMode\":\"CLASS_SHEET\",\"sheetKind\":\"SINGLE_TERM_MARKS\",\"refCode\":\"\",\"cls\":3,\"term\":1,\"subKey\":\"MATH\",\"metaFound\":{\"cls\":true,\"term\":true,\"sub\":true},\"sharedWorkingDays\":{\"1\":\"\",\"2\":\"\",\"3\":\"\"},\"summary\":\"\",\"warnings\":[],\"rows\":[{\"roll\":\"1\",\"name\":\"\",\"marks\":{\"TB\":\"\",\"ACT\":\"\",\"LANG\":\"\",\"CT\":\"\",\"WR\":\"\",\"T1_CONT\":\"\",\"T1_WR\":\"\"},\"sheetContinuousTotal\":\"\",\"sheetGrandTotal\":\"\",\"remark\":\"\",\"traits\":{\"PRES_1\":\"\",\"ACT_1\":\"\",\"DISC_1\":\"\",\"COND_1\":\"\",\"REM_1\":\"\"},\"rawNotes\":\"\",\"uncertainFields\":{}}],\"student\":{\"name\":\"\",\"cls\":3,\"roll\":1,\"guardian\":\"\",\"religion\":\"ইসলাম\"},\"marks\":[],\"attendanceAndTraits\":{\"days\":\"\",\"present\":\"\",\"act\":\"\",\"disc\":\"\",\"cond\":\"\",\"remark\":\"\"},\"uncertainNotes\":[]}")
         }
 

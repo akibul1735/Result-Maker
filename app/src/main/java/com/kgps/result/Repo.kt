@@ -673,18 +673,30 @@ object Repo {
         }
     }
 
+    fun normalizeTraitCode(raw: String): String {
+        val trimmed = raw.trim()
+        if (trimmed.isEmpty()) return ""
+        return when (trimmed.lowercase()) {
+            "ক", "k", "a", "উত্তম", "খুব ভালো", "খুব ভাল", "অতি উত্তম" -> "ক"
+            "খ", "kh", "b", "সন্তোষজনক", "ভালো", "ভাল", "মোটামুটি" -> "খ"
+            "গ", "g", "c", "উন্নতি প্রয়োজন", "উন্নতি প্রয়োজন", "উন্নতি", "সহায়তা প্রয়োজন" -> "গ"
+            else -> trimmed
+        }
+    }
+
     private fun isSubHeaderKeyword(cell: String): Boolean {
         val n = normHeader(fromBn(cell))
         if (n.isBlank()) return false
         return n.contains("ধারাবাহিক") || n.contains("continuous") || Regex("\\b(cont|ca)\\b").containsMatchIn(n) ||
             n.contains("সামষ্টিক") || n.contains("সামস্টিক") || n.contains("লিখিত") || n.contains("summative") || n.contains("written") || Regex("\\b(wr|sa)\\b").containsMatchIn(n) ||
             n.contains("পাঠ্যবই") || n.contains("পাঠ্যপুস্তক") || n.contains("সহায়িকা") || n.contains("textbook") || Regex("\\btb\\b").containsMatchIn(n) ||
-            n == "কাজ" || n.contains("সক্রিয়তা") || n.contains("শ্রেণিকাজ") || n.contains("activity") || Regex("\\bact\\b").containsMatchIn(n) ||
+            n == "কাজ" || n.contains("সক্রিয়তা") || n.contains("সক্রিয়তা") || n.contains("শ্রেণিকাজ") || n.contains("activity") || Regex("\\bact\\b").containsMatchIn(n) ||
             n == "ভাষা" || n.contains("ভাষাদক্ষতা") || n.contains("বোধগম্যতা") || n.contains("language") || Regex("\\blang\\b").containsMatchIn(n) ||
             n.contains("অভীক্ষা") || n.contains("ক্লাস টেস্ট") || n.contains("class test") || Regex("\\bct\\b").containsMatchIn(n) ||
             n == "মোট" || n == "সর্বমোট" || n == "total" || n.contains("মোট নম্বর") ||
-            n.contains("কার্যদিবস") || n.contains("উপস্থিতি") || n.contains("মন্তব্য") ||
-            n.contains("শৃঙ্খলা") || n.contains("আচরণ") ||
+            n.contains("কার্যদিবস") || n.contains("উপস্থিত") || n.contains("হাজিরা") || n.contains("মন্তব্য") ||
+            n.contains("সহপাঠ") || n.contains("গুণাবলি") || n.contains("গুণাবলী") ||
+            n.contains("শৃঙ্খলা") || n.contains("শৃংখলা") || n.contains("আচরণ") || n.contains("আচরন") ||
             n == "গ্রেড" || n == "জিপি" || n == "স্বাক্ষর"
     }
 
@@ -994,19 +1006,23 @@ object Repo {
         }
 
         val term = parseTermFromToken(header) ?: contextTerm
+        val traitTerm = term ?: if (sheetLooksLikeTraitsSheet) 1 else null
 
-        // Attendance / Traits / Comments with optional term
-        if (term != null) {
+        // Attendance / Traits / Comments with optional term (or inferred term 1 when traits sheet has bare headers)
+        if (traitTerm != null && traitTerm in 1..3) {
             val hasExplicitSubInHeader = parseSubjectKey(header) != null
             val treatActivityAsTrait = sheetLooksLikeTraitsSheet || (!hasExplicitSubInHeader && contextSubjectKey == null)
             when {
-                norm.contains("কার্যদিবস") || norm.contains("working day") -> return "text" to "DAYS_$term"
-                norm.contains("উপস্থিত") || norm.contains("attendance") || norm.contains("present") -> return "text" to "PRES_$term"
-                norm.contains("সহপাঠক্রমিক") || norm.contains("সহপাঠ্য") || norm.contains("co curricular") ||
-                    (treatActivityAsTrait && (norm.contains("সক্রিয়তা") || norm.contains("সক্রিয়তা"))) -> return "text" to "ACT_$term"
-                norm.contains("শৃঙ্খলা") || norm.contains("discipline") -> return "text" to "DISC_$term"
-                norm.contains("আচরণ") || norm.contains("conduct") -> return "text" to "COND_$term"
-                norm.contains("মন্তব্য") || norm.contains("মতামত") || norm.contains("remark") || norm.contains("comment") -> return "text" to "REM_$term"
+                norm.contains("কার্যদিবস") || norm.contains("working day") -> return "text" to "DAYS_$traitTerm"
+                norm.contains("উপস্থিত") || norm.contains("হাজিরা") || norm.contains("attendance") || norm.contains("present") ||
+                    norm == "att" || norm == "pres" || norm.endsWith(" pres") -> return "text" to "PRES_$traitTerm"
+                norm.contains("সহপাঠ") || norm.contains("co curricular") || norm == "trait act" ||
+                    (treatActivityAsTrait && (norm.contains("সক্রিয়তা") || norm.contains("সক্রিয়তা") || norm == "act" || norm.endsWith(" act"))) -> return "text" to "ACT_$traitTerm"
+                norm.contains("শৃঙ্খলা") || norm.contains("শৃংখলা") || norm.contains("discipline") || norm == "trait disc" ||
+                    (sheetLooksLikeTraitsSheet && (norm == "disc" || norm.endsWith(" disc"))) -> return "text" to "DISC_$traitTerm"
+                norm.contains("আচরণ") || norm.contains("আচরন") || norm.contains("conduct") || norm.contains("behavior") || norm.contains("behaviour") || norm == "trait cond" ||
+                    (sheetLooksLikeTraitsSheet && (norm == "cond" || norm.endsWith(" cond"))) -> return "text" to "COND_$traitTerm"
+                norm.contains("মন্তব্য") || norm.contains("মতামত") || norm.contains("remark") || norm.contains("comment") -> return "text" to "REM_$traitTerm"
             }
         }
 
@@ -1042,8 +1058,13 @@ object Repo {
 
         val normHeaders = headers.map { normHeader(fromBn(it)) }
         val hasAnyTraitKw = normHeaders.any {
-            it.contains("উপস্থিত") || it.contains("শৃঙ্খলা") || it.contains("আচরণ") ||
-                it.contains("সহপাঠক্রমিক") || it.contains("কার্যদিবস")
+            it.contains("উপস্থিত") || it.contains("হাজিরা") ||
+                it.contains("শৃঙ্খলা") || it.contains("শৃংখলা") ||
+                it.contains("আচরণ") || it.contains("আচরন") ||
+                it.contains("সহপাঠ") || it.contains("গুণাবলি") || it.contains("গুণাবলী") ||
+                it.contains("কার্যদিবস") || it == "att" || it.startsWith("trait ") ||
+                it.endsWith(" pres") || it.endsWith(" disc") || it.endsWith(" cond") ||
+                it.startsWith("pres ") || it.startsWith("disc ") || it.startsWith("cond ")
         }
         val hasAnyMarkKw = normHeaders.any {
             it.contains("পাঠ্যবই") || it.contains("পাঠ্যপুস্তক") || it.contains("অভীক্ষা") ||
@@ -1154,9 +1175,20 @@ object Repo {
                     "mark" -> if (!isBlankOrDashPlaceholder(raw)) {
                         fromBn(raw).toDoubleOrNull()?.let { importedMarks[col.targetKey] = it }
                     }
-                    "text", "custom" -> {
+                    "text", "custom" -> if (!isBlankOrDashPlaceholder(raw)) {
+                        val normalizedVal = if (col.targetType == "text") {
+                            when {
+                                col.targetKey.startsWith("ACT_") || col.targetKey.startsWith("DISC_") || col.targetKey.startsWith("COND_") ->
+                                    normalizeTraitCode(raw)
+                                col.targetKey.startsWith("DAYS_") || col.targetKey.startsWith("PRES_") -> {
+                                    val stripped = raw.replace(Regex("\\s*(দিন|days?)\\s*$", RegexOption.IGNORE_CASE), "").trim()
+                                    stripped.ifBlank { raw }
+                                }
+                                else -> raw
+                            }
+                        } else raw
                         val prev = x[col.targetKey]
-                        x[col.targetKey] = if (prev != null && prev != raw) "$prev, $raw" else raw
+                        x[col.targetKey] = if (prev != null && prev != normalizedVal) "$prev, $normalizedVal" else normalizedVal
                     }
                 }
             }

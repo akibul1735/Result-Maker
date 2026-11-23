@@ -695,6 +695,10 @@ object CsvImportAssistant {
                     } else {
                         val t = activeTerms.first()
                         if ("ATT" in colSet) add("PRES_$t")
+                        if ("TRAIT_ACT" in colSet) add("ACT_$t")
+                        if ("TRAIT_DISC" in colSet) add("DISC_$t")
+                        if ("TRAIT_COND" in colSet) add("COND_$t")
+                        if (meta.workingDaysByTerm.containsKey(t)) add("DAYS_$t")
                         if (hasRemark) add("REM_$t")
                         if (size <= 3) {
                             addAll(listOf("DAYS_$t", "PRES_$t", "ACT_$t", "DISC_$t", "COND_$t"))
@@ -863,7 +867,7 @@ object CsvImportAssistant {
                 }
             }
             if (selectedKeys.any { it.startsWith("ACT_") || it.startsWith("DISC_") || it.startsWith("COND_") }) {
-                add("ACT/DISC/COND=ক/খ/গ")
+                add("গুণাবলি (ACT/DISC/COND)=কেবল ক (উত্তম), খ (সন্তোষজনক) বা গ (উন্নতি প্রয়োজন)")
             }
             if (config.module == CsvImportModule.ATTENDANCE_TRAITS) {
                 add("মোট কার্যদিবস কাগজের উপরে এক জায়গায় থাকলে ১ম সারি বা '১ম কার্যদিবস: ৬২' আকারে দিন অথবা সব সারিতে বসান")
@@ -1021,34 +1025,39 @@ object CsvImportAssistant {
                         }
                     }
 
-                    "text" -> {
+                    "text" -> if (!Repo.isBlankOrDashPlaceholder(raw)) {
                         val parts = col.targetKey.split("_")
                         val prefix = parts.getOrNull(0).orEmpty()
                         val term = parts.getOrNull(1)?.toIntOrNull()
+                        var previewVal = raw
                         when (prefix) {
                             "DAYS" -> {
-                                val d = fromBn(raw).toIntOrNull()
+                                val stripped = raw.replace(Regex("\\s*(দিন|days?)\\s*$", RegexOption.IGNORE_CASE), "").trim()
+                                val d = fromBn(stripped).toIntOrNull()
                                 if (d == null || d < 0) {
                                     hasWarning = true
                                     messages.add("${col.targetKey} সংখ্যা নয়: \"$raw\"")
                                 } else if (term != null) termDays[term] = d
                             }
                             "PRES" -> {
-                                val p = fromBn(raw).toIntOrNull()
+                                val stripped = raw.replace(Regex("\\s*(দিন|days?)\\s*$", RegexOption.IGNORE_CASE), "").trim()
+                                val p = fromBn(stripped).toIntOrNull()
                                 if (p == null || p < 0) {
                                     hasWarning = true
                                     messages.add("${col.targetKey} সংখ্যা নয়: \"$raw\"")
                                 } else if (term != null) termPres[term] = p
                             }
                             "ACT", "DISC", "COND" -> {
-                                if (raw !in listOf("ক", "খ", "গ")) {
+                                val normTrait = Repo.normalizeTraitCode(raw)
+                                previewVal = normTrait
+                                if (normTrait !in listOf("ক", "খ", "গ")) {
                                     hasWarning = true
                                     messages.add("${col.targetKey} মান \"$raw\" (প্রত্যাশিত: ক, খ, গ)")
                                 }
                             }
                         }
                         if (previewItems.size < 3) {
-                            previewItems.add("${col.targetKey}=$raw")
+                            previewItems.add("${col.targetKey}=$previewVal")
                         }
                     }
 

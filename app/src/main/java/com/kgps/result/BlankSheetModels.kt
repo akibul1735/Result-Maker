@@ -52,6 +52,10 @@ enum class BlankSheetPreset(val labelBn: String, val columnIds: List<String>) {
             "T3_PRES", "T3_ACT", "T3_DISC", "T3_COND"
         )
     ),
+    SINGLE_TERM_ATTENDANCE_TRAITS(
+        "উপস্থিতি ও গুণাবলি",
+        listOf("ROLL", "NAME", "ATT", "TRAIT_ACT", "TRAIT_DISC", "TRAIT_COND")
+    ),
     FULL_MARKS(
         "পূর্ণাঙ্গ নম্বর",
         listOf("ROLL", "NAME", "TB", "ACT", "LANG", "CT", "CONT", "WR", "TOTAL")
@@ -91,6 +95,8 @@ object BlankSheetCatalog {
         "T2_DAYS", "T2_PRES", "T2_ACT", "T2_DISC", "T2_COND",
         "T3_DAYS", "T3_PRES", "T3_ACT", "T3_DISC", "T3_COND"
     )
+
+    val SINGLE_TERM_TRAIT_IDS: Set<String> = setOf("TRAIT_ACT", "TRAIT_DISC", "TRAIT_COND")
 
     private fun threeTermMarkColsFor(term: Int): List<BlankSheetColumn> {
         val tOrd = termOrdinalBn(term)
@@ -132,6 +138,9 @@ object BlankSheetCatalog {
             BlankSheetColumn("GP", "জিপি", widthWeight = 0.72f),
             BlankSheetColumn("MERIT", "মেধাক্রম", widthWeight = 0.88f),
             BlankSheetColumn("ATT", "উপস্থিতি", widthWeight = 0.90f),
+            BlankSheetColumn("TRAIT_ACT", "সক্রিয়তা", widthWeight = 0.90f, pickerLabelBn = "সহপাঠ/সক্রিয়তা"),
+            BlankSheetColumn("TRAIT_DISC", "শৃঙ্খলা", widthWeight = 0.88f),
+            BlankSheetColumn("TRAIT_COND", "আচরণ", widthWeight = 0.88f),
             BlankSheetColumn("REMARK", "মন্তব্য", widthWeight = 1.50f, align = BlankColAlign.LEFT),
             BlankSheetColumn("SIGN", "স্বাক্ষর", widthWeight = 1.00f)
         )
@@ -179,6 +188,15 @@ object BlankSheetCatalog {
 
     fun isThreeTermAttendanceTraitsActive(columns: List<BlankSheetColumn>): Boolean =
         columns.any { it.id in THREE_TERM_TRAIT_IDS }
+
+    fun hasSingleTermTraitColumns(columns: List<BlankSheetColumn>): Boolean =
+        columns.any { it.id in SINGLE_TERM_TRAIT_IDS }
+
+    fun isSingleTermAttendanceTraitsActive(columns: List<BlankSheetColumn>): Boolean =
+        !isThreeTermMarksActive(columns) &&
+            !isThreeTermAttendanceTraitsActive(columns) &&
+            columns.none { it.compKey != null } &&
+            (hasSingleTermTraitColumns(columns) || columns.any { it.id == "ATT" })
 
     fun isThreeTermGroupedActive(columns: List<BlankSheetColumn>): Boolean =
         isThreeTermMarksActive(columns) || isThreeTermAttendanceTraitsActive(columns)
@@ -309,10 +327,11 @@ object BlankSheetCatalog {
         val is3TMarks = isThreeTermMarksActive(columns)
         val is3TTraits = isThreeTermAttendanceTraitsActive(columns)
         val hasAtt = columns.any { it.id == "ATT" }
+        val hasSingleTraits = hasSingleTermTraitColumns(columns)
         val hasMarks = columns.any { it.compKey != null }
         val subPart = when {
             is3TTraits && !is3TMarks && !hasMarks -> "ATT"
-            !is3TTraits && hasAtt && !hasMarks -> "ATT"
+            !is3TTraits && (hasAtt || hasSingleTraits) && !hasMarks -> "ATT"
             !subjectKey.isNullOrBlank() && subjectKey != ALL_SUBJECTS_KEY -> subjectKey
             else -> "GEN"
         }
@@ -325,6 +344,7 @@ object BlankSheetCatalog {
         val layoutPart = when {
             is3TTraits && !is3TMarks -> "TRAITS"
             is3TMarks -> "3MARKS"
+            !is3TTraits && hasSingleTraits && !hasMarks -> "TRAITS"
             hasAtt && !hasMarks -> "ATT"
             columns.any { it.compKey in setOf("TB", "ACT", "LANG", "CT") } -> "FULL"
             columns.any { it.compKey in setOf("CONT", "WR") } -> "COMPACT"
@@ -343,7 +363,8 @@ object BlankSheetCatalog {
         val is3TMarks = isThreeTermMarksActive(cols)
         val is3TTraits = isThreeTermAttendanceTraitsActive(cols)
         val hasMarks = cols.any { it.compKey != null }
-        val hasAttSingle = cols.any { it.id == "ATT" } && !is3TTraits && !hasMarks
+        val hasSingleTraits = hasSingleTermTraitColumns(cols) && !is3TTraits && !hasMarks
+        val hasAttSingle = (cols.any { it.id == "ATT" } || hasSingleTraits) && !is3TTraits && !hasMarks
         val clsLabel = config.selectedClass?.let { "${classNameBn(it, settings)} শ্রেণি ($it)" }
             ?: "ছবির উপরের ব্যানার অনুযায়ী শ্রেণি (${allowedClassIds.joinToString("/")})"
         val termNum = if (config.term in 1..3) config.term else 1
@@ -365,6 +386,9 @@ object BlankSheetCatalog {
                 "WR" -> headers.add("লিখিত")
                 "TOTAL" -> headers.add("মোট")
                 "ATT" -> headers.add("${termNameBn(termNum)} - মোট উপস্থিতি")
+                "TRAIT_ACT" -> headers.add("${termNameBn(termNum)} - সহপাঠক্রমিক")
+                "TRAIT_DISC" -> headers.add("${termNameBn(termNum)} - শৃঙ্খলাবোধ")
+                "TRAIT_COND" -> headers.add("${termNameBn(termNum)} - আচরণ")
                 "REMARK" -> headers.add("${termNameBn(termNum)} - শিক্ষকের মন্তব্য")
                 "T1_CONT" -> headers.add("১ম প্রান্তিক - ধারাবাহিক")
                 "T1_WR" -> headers.add("১ম প্রান্তিক - সামষ্টিক")
@@ -394,13 +418,16 @@ object BlankSheetCatalog {
             }
         }
 
+        val effectiveSubLabel = if (is3TTraits || hasAttSingle) "উপস্থিতি ও গুণাবলি (ATT)" else "$subName ($subKeyLabel)"
+        val effectiveMetaSub = if (is3TTraits || hasAttSingle) "উপস্থিতি ও গুণাবলি" else subName
+
         return buildString {
             appendLine("আমি একটি প্রাথমিক বিদ্যালয়ের পূরণকৃত নম্বর/উপস্থিতি ফর্মের ছবি/PDF দিচ্ছি। ছবির সব সারির তথ্য হুবহু পড়ে কেবল একটি ```csv কোড ব্লকের ভেতরে CSV দিন।")
-            appendLine("তথ্য: শ্রেণি: $clsLabel | বিষয়: $subName ($subKeyLabel) | প্রান্তিক: ${if (is3TMarks || is3TTraits) "৩ প্রান্তিক" else termNameBn(termNum)}")
+            appendLine("তথ্য: শ্রেণি: $clsLabel | বিষয়: $effectiveSubLabel | প্রান্তিক: ${if (is3TMarks || is3TTraits) "৩ প্রান্তিক" else termNameBn(termNum)}")
             appendLine("নিয়ম:")
-            appendLine("১) প্রথম সারিতে মেটা-তথ্য হিসেবে লিখুন: শ্রেণি: ${config.selectedClass ?: "<ছবি থেকে>"}, বিষয়: $subName, প্রান্তিক: ${if (is3TMarks || is3TTraits) "৩ প্রান্তিক" else termNameBn(termNum)}")
+            appendLine("১) প্রথম সারিতে মেটা-তথ্য হিসেবে লিখুন: শ্রেণি: ${config.selectedClass ?: "<ছবি থেকে>"}, বিষয়: $effectiveMetaSub, প্রান্তিক: ${if (is3TMarks || is3TTraits) "৩ প্রান্তিক" else termNameBn(termNum)}")
             if (is3TTraits || hasAttSingle) {
-                appendLine("২) ছবির উপরে 'মোট কার্যদিবস' লেখা থাকলে দ্বিতীয় সারিতে 'মোট কার্যদিবস — ১ম প্রান্তিক: <দিন> দিন ...' লিখুন। গুণাবলির ঘরে কেবল ক, খ বা গ দিন।")
+                appendLine("২) ছবির উপরে 'মোট কার্যদিবস' লেখা থাকলে দ্বিতীয় সারিতে 'মোট কার্যদিবস — ১ম প্রান্তিক: <দিন> দিন ...' লিখুন। গুণাবলির (সক্রিয়তা/সহপাঠ, শৃঙ্খলা, আচরণ) ঘরে কেবল ক (উত্তম), খ (সন্তোষজনক) বা গ (উন্নতি প্রয়োজন) দিন।")
             }
             appendLine("৩) এরপর টেবিলের হেডার হুবহু এই কলামে রাখুন:")
             appendLine(headers.joinToString(","))
@@ -483,9 +510,10 @@ object BlankSheetPlanner {
         val extraBlank = config.extraBlankRowsPerClass.coerceIn(0, 20)
         val isThreeTermMarks = BlankSheetCatalog.isThreeTermMarksActive(safeCols)
         val isThreeTermTraits = BlankSheetCatalog.isThreeTermAttendanceTraitsActive(safeCols)
-        val isClassLevelTraitsOnly = isThreeTermTraits && !isThreeTermMarks && safeCols.none { it.compKey != null }
+        val isSingleTermTraits = BlankSheetCatalog.isSingleTermAttendanceTraitsActive(safeCols)
+        val isClassLevelTraitsOnly = (isThreeTermTraits || isSingleTermTraits) && !isThreeTermMarks && safeCols.none { it.compKey != null }
         val hasPerRowDaysCol = safeCols.any { it.id in setOf("T1_DAYS", "T2_DAYS", "T3_DAYS") }
-        val hasSingleAttCol = safeCols.any { it.id == "ATT" }
+        val hasSingleAttCol = safeCols.any { it.id == "ATT" } || BlankSheetCatalog.hasSingleTermTraitColumns(safeCols)
         val sharedWorkingDaysTerms = if (config.showSharedWorkingDaysHeader) {
             when {
                 isThreeTermTraits && !hasPerRowDaysCol -> listOf(1, 2, 3)

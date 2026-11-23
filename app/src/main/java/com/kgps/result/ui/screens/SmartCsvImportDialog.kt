@@ -309,13 +309,16 @@ fun SmartCsvImportDialog(
         }
         sharedWorkingDaysByTerm = scannedWorkingDaysByTerm + parsedSheet.detectedWorkingDaysByTerm
     }
-    var columns by remember(parsedRows, contextSubjectKey, contextTerm, parsedSheet.detectedTerm, settings.customFields) {
+    val promptFallbackTerm = if (promptConfig.module != CsvImportModule.STUDENT_PROFILE) {
+        promptConfig.targetTerm.takeIf { it in 1..3 }
+    } else null
+    var columns by remember(parsedRows, contextSubjectKey, contextTerm, parsedSheet.detectedTerm, promptFallbackTerm, settings.customFields) {
         mutableStateOf(
             Repo.detectCsvColumns(
                 rows = parsedRows,
                 existingCustomFields = settings.customFields,
                 contextSubjectKey = contextSubjectKey,
-                contextTerm = parsedSheet.detectedTerm ?: contextTerm
+                contextTerm = parsedSheet.detectedTerm ?: contextTerm ?: promptFallbackTerm
             )
         )
     }

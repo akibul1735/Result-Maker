@@ -640,5 +640,33 @@ class CustomClassAndPromptTest {
         assertTrue("Expected class name in summary: $summary", summary.contains("তৃতীয় শ্রেণি"))
         assertTrue(summary.contains("গণিত"))
         assertTrue(summary.contains("৩ প্রান্তিক"))
+
+        // 4. Single-term Attendance & Traits (রোল, নাম, উপস্থিত, সক্রিয়তা, শৃঙ্খলা, আচরণ)
+        val singleTraitsMeta = BlankSheetQrMeta(
+            cls = 3,
+            subjectKey = null,
+            term = 2,
+            sheetKind = ClassSheetKind.ATTENDANCE_TRAITS,
+            importScope = ClassSheetImportScope.BOTH,
+            columnIds = listOf("ROLL", "NAME", "ATT", "TRAIT_ACT", "TRAIT_DISC", "TRAIT_COND"),
+            workingDaysByTerm = mapOf(2 to "65"),
+            numeralStyle = BlankNumeralStyle.BENGALI
+        )
+        val singleTraitsCfg = CsvImportAssistant.configFromScannedSheetMeta(singleTraitsMeta, DEFAULT_SETTINGS)
+        assertEquals(CsvImportModule.ATTENDANCE_TRAITS, singleTraitsCfg.module)
+        assertEquals(2, singleTraitsCfg.targetTerm)
+        assertEquals(setOf(2), singleTraitsCfg.multiTermSelection)
+        assertTrue("DAYS_2" in singleTraitsCfg.selectedColumnKeys)
+        assertTrue("PRES_2" in singleTraitsCfg.selectedColumnKeys)
+        assertTrue("ACT_2" in singleTraitsCfg.selectedColumnKeys)
+        assertTrue("DISC_2" in singleTraitsCfg.selectedColumnKeys)
+        assertTrue("COND_2" in singleTraitsCfg.selectedColumnKeys)
+        assertFalse("PRES_1" in singleTraitsCfg.selectedColumnKeys)
+        val singleTraitsSummary = CsvImportAssistant.buildScannedSheetSummaryBn(singleTraitsMeta, DEFAULT_SETTINGS)
+        assertTrue(singleTraitsSummary.contains("২য় প্রান্তিক"))
+        assertTrue(singleTraitsSummary.contains("উপস্থিতি ও আচরণ"))
+        val codecSummary = SheetQrCodec.buildSummaryLabelBn(singleTraitsMeta, DEFAULT_SETTINGS)
+        assertTrue(codecSummary.contains("২য় প্রান্তিক"))
+        assertTrue(codecSummary.contains("উপস্থিতি ও গুণাবলি"))
     }
 }

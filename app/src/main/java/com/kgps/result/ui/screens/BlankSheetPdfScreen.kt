@@ -261,16 +261,19 @@ fun BlankSheetPdfScreen(
     val isThreeTermTraits = remember(config.columns) {
         BlankSheetCatalog.isThreeTermAttendanceTraitsActive(config.columns)
     }
-    val isClassLevelTraitsOnly = remember(config.columns) {
-        isThreeTermTraits && !isThreeTermMarks && config.columns.none { it.compKey != null }
+    val isSingleTermTraits = remember(config.columns) {
+        BlankSheetCatalog.isSingleTermAttendanceTraitsActive(config.columns)
+    }
+    val isClassLevelTraitsOnly = remember(isThreeTermTraits, isSingleTermTraits, isThreeTermMarks, config.columns) {
+        (isThreeTermTraits || isSingleTermTraits) && !isThreeTermMarks && config.columns.none { it.compKey != null }
     }
     val hasPerRowDaysCol = remember(config.columns) {
         config.columns.any { it.id in setOf("T1_DAYS", "T2_DAYS", "T3_DAYS") }
     }
     val hasSingleAttCol = remember(config.columns) {
-        config.columns.any { it.id == "ATT" }
+        config.columns.any { it.id == "ATT" } || BlankSheetCatalog.hasSingleTermTraitColumns(config.columns)
     }
-    val sharedWorkingDaysTerms = remember(isThreeTermTraits, hasPerRowDaysCol, hasSingleAttCol, config.term) {
+    val sharedWorkingDaysTerms = remember(isThreeTermTraits, isSingleTermTraits, hasPerRowDaysCol, hasSingleAttCol, config.term) {
         when {
             isThreeTermTraits && !hasPerRowDaysCol -> listOf(1, 2, 3)
             !isThreeTermTraits && hasSingleAttCol && config.term in 1..3 -> listOf(config.term)
@@ -303,10 +306,11 @@ fun BlankSheetPdfScreen(
         }
     }
 
-    val exportFileName = remember(config, selectedClassLabel, selectedSubjectLabel, isClassLevelTraitsOnly) {
+    val exportFileName = remember(config, selectedClassLabel, selectedSubjectLabel, isClassLevelTraitsOnly, isThreeTermTraits) {
         val clsPart = if (config.selectedClass == null) "সব-শ্রেণি" else "শ্রেণি-${config.selectedClass}"
         val subPart = when {
-            isClassLevelTraitsOnly -> "৩-প্রান্তিক-উপস্থিতি-গুণাবলি"
+            isClassLevelTraitsOnly && isThreeTermTraits -> "৩-প্রান্তিক-উপস্থিতি-গুণাবলি"
+            isClassLevelTraitsOnly -> "উপস্থিতি-গুণাবলি"
             config.subjectKey == BlankSheetCatalog.ALL_SUBJECTS_KEY -> "সব-বিষয়"
             else -> selectedSubjectLabel.replace(" ", "-")
         }

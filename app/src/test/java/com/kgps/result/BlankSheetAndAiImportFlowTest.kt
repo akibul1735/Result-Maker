@@ -289,4 +289,139 @@ class BlankSheetAndAiImportFlowTest {
         assertEquals(5, ms.student.roll)
         assertEquals("BAN_2_TB", ms.marks.first().key)
     }
+
+    @Test
+    fun singleTermAttendanceAndTraitsWorkAcrossBlankSheetQrCsvAndInternalAi() {
+        val singleTraitCols = BlankSheetCatalog.presetColumns(BlankSheetPreset.SINGLE_TERM_ATTENDANCE_TRAITS)
+        assertEquals(
+            listOf("ROLL", "NAME", "ATT", "TRAIT_ACT", "TRAIT_DISC", "TRAIT_COND"),
+            singleTraitCols.map { it.id }
+        )
+        assertEquals("REF:C3-ATT-T2-TRAITS", BlankSheetCatalog.buildSheetRefCode(3, "BAN", 2, singleTraitCols))
+
+        val pages = BlankSheetPlanner.buildPages(
+            students = listOf(Student(id = "s1", cls = 3, roll = 1, name = "রাফি")),
+            settings = Settings(school = "কাজীপাড়া সপ্রাবি"),
+            config = BlankSheetConfig(
+                selectedClass = 3,
+                subjectKey = "BAN",
+                term = 2,
+                columns = singleTraitCols,
+                workingDaysByTerm = mapOf(2 to "65")
+            ),
+            allowedClassIds = listOf(3)
+        )
+        assertEquals(1, pages.size)
+        val page = pages.first()
+        assertTrue(page.isClassLevelForm)
+        assertEquals("উপস্থিতি ও গুণাবলি", page.subjectTitleBn)
+        assertEquals("২য় প্রান্তিক", page.termTitleBn)
+        assertTrue(page.showSharedWorkingDaysStrip)
+        assertEquals(listOf(2), page.sharedWorkingDaysTerms)
+        assertEquals("REF:C3-ATT-T2-TRAITS", page.sheetRefCode)
+
+        val meta = SheetQrCodec.fromPageConfig(page = page, term = 2)
+        assertEquals(ClassSheetKind.ATTENDANCE_TRAITS, meta.sheetKind)
+        assertEquals(2, meta.term)
+        val qrDecoded = SheetQrCodec.decodePayload(SheetQrCodec.encodePayload(meta))
+        assertEquals(ClassSheetKind.ATTENDANCE_TRAITS, qrDecoded?.sheetKind)
+        assertEquals(2, qrDecoded?.term)
+        assertEquals(singleTraitCols.map { it.id }, qrDecoded?.columnIds)
+        val refDecoded = SheetQrCodec.decodePayload("REF:C3-ATT-T2-TRAITS")
+        assertEquals(ClassSheetKind.ATTENDANCE_TRAITS, refDecoded?.sheetKind)
+        assertEquals(2, refDecoded?.term)
+
+        val externalPrompt = BlankSheetCatalog.buildExternalAiCsvPrompt(
+            config = BlankSheetConfig(
+                selectedClass = 3,
+                subjectKey = "BAN",
+                term = 2,
+                columns = singleTraitCols,
+                workingDaysByTerm = mapOf(2 to "65")
+            ),
+            settings = Settings(school = "কাজীপাড়া সপ্রাবি"),
+            allowedClassIds = listOf(3)
+        )
+        assertTrue(externalPrompt.contains("উপস্থিতি ও গুণাবলি"))
+        assertTrue(externalPrompt.contains("২য় প্রান্তিক"))
+        assertTrue(externalPrompt.contains("সক্রিয়তা"))
+        assertTrue(externalPrompt.contains("শৃঙ্খলা"))
+        assertTrue(externalPrompt.contains("আচরণ"))
+
+        // Bare header CSV with Term 2 context, Bengali day suffix, grade synonyms, and dash placeholder
+        val bareTraitsCsv = """
+            রোল,নাম,উপস্থিত,সক্রিয়তা,শৃঙ্খলা,আচরণ
+            ১,রাফি,৫৬ দিন,উত্তম,খ,-
+        """.trimIndent()
+        val parsedCsv = Repo.parseSmartCsvSheet(bareTraitsCsv)
+        val mappedCols = Repo.detectCsvColumns(
+            rows = parsedCsv.rows,
+            existingCustomFields = emptyList(),
+            contextSubjectKey = "BAN",
+            contextTerm = 2
+        )
+        assertEquals("text" to "PRES_2", mappedCols[2].targetType to mappedCols[2].targetKey)
+        assertEquals("text" to "ACT_2", mappedCols[3].targetType to mappedCols[3].targetKey)
+        assertEquals("text" to "DISC_2", mappedCols[4].targetType to mappedCols[4].targetKey)
+        assertEquals("text" to "COND_2", mappedCols[5].targetType to mappedCols[5].targetKey)
+
+        val csvValidation = CsvImportAssistant.validateCsvData(
+            parsedRows = parsedCsv.rows,
+            columns = mappedCols,
+            existingStudents = emptyList(),
+            fallbackCls = 3,
+            sharedWorkingDaysByTerm = mapOf(2 to "65")
+        )
+        assertEquals(1, csvValidation.validAddCount)
+        assertEquals(0, csvValidation.warningCount)
+
+        val imported = Repo.applyMappedCsvImport(
+            rows = parsedCsv.rows,
+            columns = mappedCols,
+            existingStudents = emptyList(),
+            existingSettings = Settings(),
+            defaultCls = 3,
+            sharedWorkingDaysByTerm = mapOf(2 to "65")
+        )
+        val student = imported.students.single()
+        assertEquals("65", student.x["DAYS_2"])
+        assertEquals("৫৬", student.x["PRES_2"])
+        assertEquals("ক", student.x["ACT_2"])
+        assertEquals("খ", student.x["DISC_2"])
+        assertFalse(student.x.containsKey("COND_2"))
+
+        // Internal AI JSON parser handles single-term ATT/TRAIT_ACT keys even if misplaced in marks
+        val aiSingleTraitsJson = """
+            {
+              "scanMode": "CLASS",
+              "sheetKind": "ATTENDANCE_TRAITS",
+              "refCode": "REF:C3-ATT-T2-TRAITS",
+              "cls": 3,
+              "term": 2,
+              "sharedWorkingDays": {"2": "65"},
+              "rows": [
+                {
+                  "roll": "1",
+                  "name": "রাফি",
+                  "marks": {"ATT": "56"},
+                  "traits": {"TRAIT_ACT": "উত্তম", "TRAIT_DISC": "b", "আচরণ": "গ"}
+                }
+              ]
+            }
+        """.trimIndent()
+        val aiParsed = parseAutoScanJson(
+            raw = aiSingleTraitsJson,
+            clsHint = null,
+            termHint = null,
+            subKeyHint = null
+        ) as AutoScanResult.ClassSheet
+        assertEquals(ClassSheetKind.ATTENDANCE_TRAITS, aiParsed.sheet.sheetKind)
+        assertEquals(2, aiParsed.sheet.term)
+        val aiRow = aiParsed.sheet.rows.single()
+        assertTrue(aiRow.marksText.isEmpty())
+        assertEquals("56", aiRow.traitValues["PRES_2"])
+        assertEquals("ক", aiRow.traitValues["ACT_2"])
+        assertEquals("খ", aiRow.traitValues["DISC_2"])
+        assertEquals("গ", aiRow.traitValues["COND_2"])
+    }
 }

@@ -90,6 +90,9 @@ object SheetQrCodec {
         "GP" to "P",
         "MERIT" to "M",
         "ATT" to "U",
+        "TRAIT_ACT" to "TA",
+        "TRAIT_DISC" to "TD",
+        "TRAIT_COND" to "TC",
         "REMARK" to "E",
         "SIGN" to "Z"
     )
@@ -100,6 +103,7 @@ object SheetQrCodec {
         "\$C" to BlankSheetPreset.COMPACT_MARKS.columnIds,
         "\$T" to BlankSheetPreset.ROLL_NAME_TOTAL.columnIds,
         "\$A" to BlankSheetPreset.ATTENDANCE_SIGN.columnIds,
+        "\$G" to BlankSheetPreset.SINGLE_TERM_ATTENDANCE_TRAITS.columnIds,
         "\$3" to BlankSheetPreset.THREE_TERM_MARKS.columnIds,
         "\$4" to BlankSheetCatalog.threeTermMarksColumns(includeTotal = true).map { it.id },
         "\$R" to BlankSheetPreset.THREE_TERM_ATTENDANCE_TRAITS.columnIds
@@ -112,7 +116,8 @@ object SheetQrCodec {
         val is3TMarks = BlankSheetCatalog.isThreeTermMarksActive(columns)
         val is3TTraits = BlankSheetCatalog.isThreeTermAttendanceTraitsActive(columns)
         val hasMarks = columns.any { it.compKey != null }
-        val hasAttSingle = columns.any { it.id == "ATT" } && !is3TTraits && !hasMarks
+        val hasSingleTraits = BlankSheetCatalog.hasSingleTermTraitColumns(columns) && !is3TTraits && !hasMarks
+        val hasAttSingle = (columns.any { it.id == "ATT" } || hasSingleTraits) && !is3TTraits && !hasMarks
 
         if (is3TTraits && !is3TMarks && !hasMarks) {
             return ClassSheetKind.ATTENDANCE_TRAITS to ClassSheetImportScope.BOTH
@@ -542,8 +547,16 @@ object SheetQrCodec {
             "TC" -> -1
             else -> 1
         }
+        val isThreeTermRef = termRaw.equals("3T", ignoreCase = true)
         val (kind, presetCols) = when (layoutRaw.uppercase()) {
-            "TRAITS", "ATT" -> ClassSheetKind.ATTENDANCE_TRAITS to BlankSheetCatalog.presetColumns(BlankSheetPreset.THREE_TERM_ATTENDANCE_TRAITS)
+            "TRAITS" -> ClassSheetKind.ATTENDANCE_TRAITS to BlankSheetCatalog.presetColumns(
+                if (isThreeTermRef) BlankSheetPreset.THREE_TERM_ATTENDANCE_TRAITS
+                else BlankSheetPreset.SINGLE_TERM_ATTENDANCE_TRAITS
+            )
+            "ATT" -> ClassSheetKind.ATTENDANCE_TRAITS to BlankSheetCatalog.presetColumns(
+                if (isThreeTermRef) BlankSheetPreset.THREE_TERM_ATTENDANCE_TRAITS
+                else BlankSheetPreset.ATTENDANCE_SIGN
+            )
             "3MARKS" -> ClassSheetKind.THREE_TERM_MARKS to BlankSheetCatalog.presetColumns(BlankSheetPreset.THREE_TERM_MARKS)
             "FULL" -> ClassSheetKind.SINGLE_TERM_MARKS to BlankSheetCatalog.presetColumns(BlankSheetPreset.FULL_MARKS)
             "TOTAL" -> ClassSheetKind.SINGLE_TERM_MARKS to BlankSheetCatalog.presetColumns(BlankSheetPreset.ROLL_NAME_TOTAL)
@@ -616,7 +629,11 @@ object SheetQrCodec {
         }
         when (meta.sheetKind) {
             ClassSheetKind.THREE_TERM_MARKS -> parts.add("৩ প্রান্তিক নম্বর")
-            ClassSheetKind.ATTENDANCE_TRAITS -> parts.add("উপস্থিতি ও গুণাবলি")
+            ClassSheetKind.ATTENDANCE_TRAITS -> {
+                val isMultiTerm = meta.columnIds.any { it.startsWith("T2_") || it.startsWith("T3_") } || meta.term !in 1..3
+                if (!isMultiTerm) parts.add(termNameBn(meta.term))
+                parts.add("উপস্থিতি ও গুণাবলি")
+            }
             ClassSheetKind.SINGLE_TERM_MARKS -> {
                 if (meta.term in 1..3) parts.add(termNameBn(meta.term))
                 when (meta.importScope) {
@@ -671,6 +688,9 @@ object SheetQrCodec {
                     "TOTAL" -> "sheetGrandTotal"
                     "REMARK" -> "remark"
                     "ATT" -> "traits.PRES_${meta.term.coerceIn(1, 3)}"
+                    "TRAIT_ACT" -> "traits.ACT_${meta.term.coerceIn(1, 3)}"
+                    "TRAIT_DISC" -> "traits.DISC_${meta.term.coerceIn(1, 3)}"
+                    "TRAIT_COND" -> "traits.COND_${meta.term.coerceIn(1, 3)}"
                     "T1_DAYS" -> "traits.DAYS_1"
                     "T2_DAYS" -> "traits.DAYS_2"
                     "T3_DAYS" -> "traits.DAYS_3"
@@ -704,9 +724,11 @@ object SheetQrCodec {
         } else {
             "উপস্থিতি/সাধারণ"
         }
+        val isMultiTermTraits = meta.sheetKind == ClassSheetKind.ATTENDANCE_TRAITS &&
+            (meta.columnIds.any { it.startsWith("T2_") || it.startsWith("T3_") } || meta.term !in 1..3)
         val termLabel = when {
-            meta.sheetKind == ClassSheetKind.THREE_TERM_MARKS ||
-                meta.sheetKind == ClassSheetKind.ATTENDANCE_TRAITS -> "৩ প্রান্তিক"
+            meta.sheetKind == ClassSheetKind.THREE_TERM_MARKS -> "৩ প্রান্তিক"
+            isMultiTermTraits -> "৩ প্রান্তিক"
             meta.term in 1..3 -> termNameBn(meta.term)
             else -> "বার্ষিক/সাধারণ"
         }
@@ -724,6 +746,10 @@ object SheetQrCodec {
             if (meta.workingDaysByTerm.isNotEmpty()) {
                 val wdStr = meta.workingDaysByTerm.entries.joinToString(", ") { (t, d) -> "${termNameBn(t)}=$d দিন" }
                 appendLine("- প্রাপ্ত মোট কার্যদিবস: $wdStr (sharedWorkingDays-এ বসান)।")
+            }
+            if (meta.sheetKind == ClassSheetKind.ATTENDANCE_TRAITS) {
+                val tSuffix = if (isMultiTermTraits) "1..3" else meta.term.coerceIn(1, 3).toString()
+                appendLine("- এটি উপস্থিতি ও গুণাবলি ফর্ম: উপস্থিতি সংখ্যা `PRES_$tSuffix` এবং গুণাবলি (`ACT_$tSuffix`, `DISC_$tSuffix`, `COND_$tSuffix`) কেবল ক (উত্তম), খ (সন্তোষজনক) বা গ (উন্নতি প্রয়োজন) দিন।")
             }
             if (meta.sheetKind == ClassSheetKind.SINGLE_TERM_MARKS) {
                 if (!hasBreakdown && !hasCont && !hasWr && hasTotal) {
