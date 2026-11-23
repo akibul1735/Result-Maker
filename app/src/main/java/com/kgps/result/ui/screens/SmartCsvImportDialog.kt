@@ -1,8 +1,15 @@
 package com.kgps.result.ui.screens
 
+import android.content.Context
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.graphics.ImageDecoder
+import android.net.Uri
+import android.os.Build
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
@@ -27,7 +34,6 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -36,6 +42,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -50,6 +57,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import androidx.core.content.FileProvider
+import com.kgps.result.BlankSheetCatalog
+import com.kgps.result.BlankSheetQrMeta
 import com.kgps.result.CsvImportAssistant
 import com.kgps.result.CsvImportModule
 import com.kgps.result.CsvPromptConfig
@@ -57,7 +67,9 @@ import com.kgps.result.CsvRowStatus
 import com.kgps.result.Repo
 import com.kgps.result.Settings
 import com.kgps.result.Student
+import com.kgps.result.ai.SheetQrScanner
 import com.kgps.result.bn
+import com.kgps.result.cloud.SheetTemplateCache
 import com.kgps.result.defaultSelectedColumnKeys
 import com.kgps.result.ui.theme.SlateBg
 import com.kgps.result.ui.theme.SlateMuted
@@ -68,6 +80,57 @@ import com.kgps.result.ui.theme.TealContainer
 import com.kgps.result.ui.theme.TealDark
 import com.kgps.result.ui.theme.TealPrimary
 import com.kgps.result.ui.theme.TealSoft
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import java.io.File
+
+private fun createCsvScanTempUri(context: Context): Uri {
+    val imgFile = File(context.cacheDir, "csv_sheet_scan_${System.currentTimeMillis()}.jpg")
+    return FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", imgFile)
+}
+
+private fun decodeScaledSheetBitmap(context: Context, uri: Uri, maxDim: Int = 2800): Bitmap? {
+    return try {
+        val raw = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            val source = ImageDecoder.createSource(context.contentResolver, uri)
+            ImageDecoder.decodeBitmap(source) { decoder, info, _ ->
+                val w = info.size.width
+                val h = info.size.height
+                val longest = maxOf(w, h)
+                if (longest > maxDim) {
+                    val ratio = maxDim.toFloat() / longest
+                    decoder.setTargetSize(
+                        (w * ratio).toInt().coerceAtLeast(1),
+                        (h * ratio).toInt().coerceAtLeast(1)
+                    )
+                }
+                decoder.allocator = ImageDecoder.ALLOCATOR_SOFTWARE
+            }
+        } else {
+            context.contentResolver.openInputStream(uri)?.use { stream ->
+                BitmapFactory.decodeStream(stream)
+            }
+        } ?: return null
+
+        val longest = maxOf(raw.width, raw.height)
+        if (longest <= maxDim) {
+            raw
+        } else {
+            val ratio = maxDim.toFloat() / longest
+            val scaled = Bitmap.createScaledBitmap(
+                raw,
+                (raw.width * ratio).toInt().coerceAtLeast(1),
+                (raw.height * ratio).toInt().coerceAtLeast(1),
+                true
+            )
+            if (scaled !== raw) raw.recycle()
+            scaled
+        }
+    } catch (_: Exception) {
+        null
+    }
+}
 
 private enum class CsvWizardStep(val num: Int, val shortTitle: String) {
     OPTIONS(1, "অপশন"),
@@ -82,12 +145,14 @@ fun SmartCsvImportDialog(
     settings: Settings,
     defaultCls: Int,
     initialText: String,
+    onResolveRemoteTemplate: suspend (String) -> BlankSheetQrMeta? = { null },
     onDismiss: () -> Unit,
     onImported: (Repo.CsvImportSummary) -> Unit,
     onError: (String) -> Unit
 ) {
     val ctx = LocalContext.current
     val clipboard = LocalClipboardManager.current
+    val scope = rememberCoroutineScope()
 
     var currentStep by remember(initialText) {
         mutableStateOf(
@@ -113,6 +178,11 @@ fun SmartCsvImportDialog(
     }
     var promptCopiedRecently by remember { mutableStateOf(false) }
 
+    var isScanningSheet by remember { mutableStateOf(false) }
+    var scannedBanner by remember { mutableStateOf<CsvScannedSheetBannerInfo?>(null) }
+    var scannedWorkingDaysByTerm by remember { mutableStateOf<Map<Int, String>>(emptyMap()) }
+    var pendingCameraUri by remember { mutableStateOf<Uri?>(null) }
+
     var rawText by remember(initialText) { mutableStateOf(initialText) }
     var fallbackCls by remember(defaultCls) { mutableStateOf(defaultCls.coerceIn(1, 20)) }
     val parsedSheet = remember(rawText) {
@@ -123,12 +193,109 @@ fun SmartCsvImportDialog(
     var contextSubjectKey by remember { mutableStateOf<String?>(null) }
     var contextTerm by remember { mutableStateOf<Int?>(null) }
     var sharedWorkingDaysByTerm by remember { mutableStateOf<Map<Int, String>>(emptyMap()) }
+
+    fun scanSheetUri(uri: Uri) {
+        if (isScanningSheet) return
+        scope.launch {
+            isScanningSheet = true
+            try {
+                val (bmpFound, detection, cachedMeta) = withContext(Dispatchers.IO) {
+                    val bmp = decodeScaledSheetBitmap(ctx, uri, 2800)
+                    if (bmp == null) {
+                        Triple(false, com.kgps.result.ai.SheetScanDetection(), null)
+                    } else {
+                        try {
+                            val det = SheetQrScanner.decodeAllFromBitmap(bmp)
+                            val tid = det.templateId?.trim()?.uppercase()?.takeIf { it.length >= 6 }
+                            val cached = tid?.let { SheetTemplateCache(ctx).get(it) }
+                            Triple(true, det, cached)
+                        } finally {
+                            bmp.recycle()
+                        }
+                    }
+                }
+                if (!bmpFound) {
+                    onError("ছবিটি পড়া যায়নি")
+                    return@launch
+                }
+                val tid = detection.templateId?.trim()?.uppercase()?.takeIf { it.length >= 6 }
+                val remoteMeta = if (cachedMeta == null && tid != null) {
+                    runCatching { onResolveRemoteTemplate(tid) }.getOrNull()
+                } else null
+
+                val resolvedMeta = cachedMeta ?: remoteMeta ?: detection.bestLocalMeta
+                if (resolvedMeta != null) {
+                    val nextConfig = CsvImportAssistant.configFromScannedSheetMeta(resolvedMeta, settings, promptConfig)
+                    promptConfig = nextConfig
+                    fallbackCls = resolvedMeta.cls.coerceIn(1, 20)
+                    contextSubjectKey = resolvedMeta.subjectKey?.takeIf {
+                        it.isNotBlank() && it != BlankSheetCatalog.ALL_SUBJECTS_KEY
+                    }
+                    contextTerm = resolvedMeta.term.takeIf { it in 1..3 }
+                    scannedWorkingDaysByTerm = resolvedMeta.workingDaysByTerm
+                    sharedWorkingDaysByTerm = scannedWorkingDaysByTerm + parsedSheet.detectedWorkingDaysByTerm
+
+                    val srcLabel = when {
+                        cachedMeta != null && !detection.detectedFromOfflineQr -> "ক্যাশ টেমপ্লেট"
+                        remoteMeta != null -> "ক্লাউড টেমপ্লেট"
+                        detection.sourceLabelBn.isNotBlank() -> detection.sourceLabelBn
+                        else -> "শীট কোড"
+                    }
+                    scannedBanner = CsvScannedSheetBannerInfo(
+                        summaryBn = CsvImportAssistant.buildScannedSheetSummaryBn(resolvedMeta, settings),
+                        detection = detection,
+                        sourceLabelBn = srcLabel
+                    )
+                    promptCopiedRecently = false
+                    currentStep = CsvWizardStep.PROMPT
+                    Toast.makeText(ctx, "শীট শনাক্ত হয়েছে — AI প্রম্পট প্রস্তুত!", Toast.LENGTH_SHORT).show()
+                } else {
+                    Toast.makeText(
+                        ctx,
+                        "ছবিতে QR বা বারকোড শনাক্ত করা যায়নি — কোণার QR ও নিচের বারকোড স্পষ্ট রেখে আবার তুলুন",
+                        Toast.LENGTH_LONG
+                    ).show()
+                }
+            } finally {
+                isScanningSheet = false
+            }
+        }
+    }
+
+    val sheetGalleryPicker = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.PickVisualMedia()
+    ) { uri ->
+        if (uri != null) scanSheetUri(uri)
+    }
+
+    val sheetCameraLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.TakePicture()
+    ) { success ->
+        val uri = pendingCameraUri
+        if (success && uri != null) {
+            scanSheetUri(uri)
+        }
+    }
+
+    val launchSheetCamera: () -> Unit = {
+        runCatching {
+            val uri = createCsvScanTempUri(ctx)
+            pendingCameraUri = uri
+            sheetCameraLauncher.launch(uri)
+        }.onFailure { e ->
+            onError("ক্যামেরা চালু করা যায়নি: ${e.message ?: "ত্রুটি"}")
+        }
+    }
+    val launchSheetGallery: () -> Unit = {
+        sheetGalleryPicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
+    }
+
     LaunchedEffect(promptConfig.targetCls) {
         if (promptConfig.targetCls > 0 && parsedSheet.detectedCls == null) {
             fallbackCls = promptConfig.targetCls
         }
     }
-    LaunchedEffect(parsedSheet, promptConfig.module, promptConfig.selectedSubjectKeys) {
+    LaunchedEffect(parsedSheet, promptConfig.module, promptConfig.selectedSubjectKeys, scannedWorkingDaysByTerm) {
         parsedSheet.detectedCls?.let { fallbackCls = it }
         if (parsedSheet.detectedTerm != null) {
             contextTerm = parsedSheet.detectedTerm
@@ -137,8 +304,10 @@ fun SmartCsvImportDialog(
             contextSubjectKey = parsedSheet.detectedSubjectKey
         } else if (promptConfig.module == CsvImportModule.SUBJECT_ALL_TERMS) {
             contextSubjectKey = CsvImportAssistant.resolveSubjectForAllTerms(promptConfig).key
+        } else if (promptConfig.module == CsvImportModule.TERM_MARKS && promptConfig.selectedSubjectKeys.size == 1) {
+            contextSubjectKey = promptConfig.selectedSubjectKeys.first()
         }
-        sharedWorkingDaysByTerm = parsedSheet.detectedWorkingDaysByTerm
+        sharedWorkingDaysByTerm = scannedWorkingDaysByTerm + parsedSheet.detectedWorkingDaysByTerm
     }
     var columns by remember(parsedRows, contextSubjectKey, contextTerm, parsedSheet.detectedTerm, settings.customFields) {
         mutableStateOf(
@@ -333,6 +502,10 @@ fun SmartCsvImportDialog(
                         CsvWizardStep.OPTIONS -> CsvStepOptions(
                             config = promptConfig,
                             settings = settings,
+                            isScanningSheet = isScanningSheet,
+                            scannedBanner = scannedBanner,
+                            onScanCamera = launchSheetCamera,
+                            onScanGallery = launchSheetGallery,
                             onConfigChange = {
                                 promptConfig = it
                                 promptCopiedRecently = false
@@ -344,6 +517,14 @@ fun SmartCsvImportDialog(
                             students = students,
                             settings = settings,
                             promptCopiedRecently = promptCopiedRecently,
+                            isScanningSheet = isScanningSheet,
+                            scannedBanner = scannedBanner,
+                            onScanCamera = launchSheetCamera,
+                            onScanGallery = launchSheetGallery,
+                            onConfigChange = {
+                                promptConfig = it
+                                promptCopiedRecently = false
+                            },
                             onCopyPrompt = { txt ->
                                 clipboard.setText(AnnotatedString(txt))
                                 promptCopiedRecently = true
@@ -476,7 +657,7 @@ fun SmartCsvImportDialog(
 
                             CsvWizardStep.PROMPT -> Button(
                                 onClick = {
-                                    val promptText = CsvImportAssistant.buildAiPrompt(promptConfig, settings)
+                                    val promptText = CsvImportAssistant.buildAiPrompt(promptConfig, settings, students)
                                     clipboard.setText(AnnotatedString(promptText))
                                     promptCopiedRecently = true
                                     Toast.makeText(ctx, "প্রম্পট কপি হয়েছে — এবার AI-তে ব্যবহার করুন", Toast.LENGTH_SHORT).show()

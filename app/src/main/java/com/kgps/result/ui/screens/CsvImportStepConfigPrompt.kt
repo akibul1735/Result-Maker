@@ -24,6 +24,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.AutoAwesome
+import androidx.compose.material.icons.rounded.CameraAlt
 import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.ContentCopy
 import androidx.compose.material.icons.rounded.Description
@@ -34,12 +35,15 @@ import androidx.compose.material.icons.rounded.FactCheck
 import androidx.compose.material.icons.rounded.GridOn
 import androidx.compose.material.icons.rounded.Lock
 import androidx.compose.material.icons.rounded.Person
+import androidx.compose.material.icons.rounded.PhotoLibrary
+import androidx.compose.material.icons.rounded.QrCode2
 import androidx.compose.material.icons.rounded.TableChart
 import androidx.compose.material.icons.rounded.TableRows
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.HorizontalDivider
@@ -80,6 +84,7 @@ import com.kgps.result.effectiveTermsForConfig
 import com.kgps.result.mk
 import com.kgps.result.subjectsFor
 import com.kgps.result.termOrdinalBn
+import com.kgps.result.ai.SheetScanDetection
 import com.kgps.result.ui.theme.SlateBg
 import com.kgps.result.ui.theme.SlateMuted
 import com.kgps.result.ui.theme.SlateOutline
@@ -92,11 +97,21 @@ import com.kgps.result.ui.theme.TealSoft
 import com.kgps.result.ui.theme.appFilterChipBorder
 import com.kgps.result.ui.theme.appFilterChipColors
 
+data class CsvScannedSheetBannerInfo(
+    val summaryBn: String,
+    val detection: SheetScanDetection,
+    val sourceLabelBn: String
+)
+
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun CsvStepOptions(
     config: CsvPromptConfig,
     settings: Settings,
+    isScanningSheet: Boolean = false,
+    scannedBanner: CsvScannedSheetBannerInfo? = null,
+    onScanCamera: () -> Unit = {},
+    onScanGallery: () -> Unit = {},
     onConfigChange: (CsvPromptConfig) -> Unit
 ) {
     val customFields = settings.customFields
@@ -129,6 +144,137 @@ fun CsvStepOptions(
             .padding(horizontal = 12.dp, vertical = 8.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
+        // 0. Quick Camera / Gallery Sheet QR-Barcode Scanner -> Auto AI Prompt (বিকল্প ২)
+        Surface(
+            color = TealSoft,
+            shape = RoundedCornerShape(12.dp),
+            border = BorderStroke(1.2.dp, TealPrimary.copy(alpha = 0.42f)),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Column(
+                modifier = Modifier.padding(horizontal = 10.dp, vertical = 9.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(7.dp)
+                ) {
+                    Icon(
+                        Icons.Rounded.QrCode2,
+                        contentDescription = null,
+                        tint = TealPrimary,
+                        modifier = Modifier.size(19.dp)
+                    )
+                    Text(
+                        "শীট স্ক্যান → অটো প্রম্পট",
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 13.sp,
+                        color = TealDark,
+                        modifier = Modifier.weight(1f),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    Surface(color = TealPrimary, shape = RoundedCornerShape(6.dp)) {
+                        Text(
+                            "QR / বারকোড",
+                            fontSize = 9.5.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color.White,
+                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                        )
+                    }
+                }
+                Text(
+                    "হাতে লেখা শীটের ছবি তুলুন বা গ্যালারি থেকে ধরুন — শ্রেণি, বিষয় ও প্রান্তিক নিজে থেকেই ধরে বাইরের AI-এর জন্য রেডি প্রম্পট বানিয়ে দেবে।",
+                    fontSize = 11.sp,
+                    lineHeight = 15.sp,
+                    color = SlateText
+                )
+                if (scannedBanner != null) {
+                    Surface(
+                        color = TealContainer.copy(alpha = 0.72f),
+                        shape = RoundedCornerShape(8.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Icon(Icons.Rounded.Check, contentDescription = null, tint = TealDark, modifier = Modifier.size(14.dp))
+                            Text(
+                                "শনাক্তকৃত: ${scannedBanner.summaryBn}",
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = TealDark,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                    }
+                }
+                if (isScanningSheet) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        modifier = Modifier.padding(vertical = 4.dp)
+                    ) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(16.dp),
+                            strokeWidth = 2.dp,
+                            color = TealPrimary
+                        )
+                        Text(
+                            "ছবির QR ও বারকোড স্ক্যান হচ্ছে...",
+                            fontSize = 11.5.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = TealDark
+                        )
+                    }
+                } else {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Button(
+                            onClick = onScanCamera,
+                            colors = ButtonDefaults.buttonColors(containerColor = TealPrimary),
+                            shape = RoundedCornerShape(9.dp),
+                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 8.dp),
+                            modifier = Modifier
+                                .weight(1f)
+                                .testTag("csv_scan_camera_btn")
+                        ) {
+                            Icon(Icons.Rounded.CameraAlt, contentDescription = "ক্যামেরা দিয়ে শীট স্ক্যান", modifier = Modifier.size(17.dp))
+                            Spacer(Modifier.width(6.dp))
+                            Text("ক্যামেরা", fontSize = 12.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+                        }
+                        OutlinedButton(
+                            onClick = onScanGallery,
+                            shape = RoundedCornerShape(9.dp),
+                            border = BorderStroke(1.dp, TealPrimary),
+                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 8.dp),
+                            modifier = Modifier
+                                .weight(1f)
+                                .testTag("csv_scan_gallery_btn")
+                        ) {
+                            Icon(Icons.Rounded.PhotoLibrary, contentDescription = "গ্যালারি থেকে শীট স্ক্যান", tint = TealDark, modifier = Modifier.size(17.dp))
+                            Spacer(Modifier.width(6.dp))
+                            Text("গ্যালারি", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = TealDark, maxLines = 1)
+                        }
+                    }
+                }
+            }
+        }
+
+        Text(
+            "অথবা নিচ থেকে ম্যানুয়ালি অপশন বাছুন:",
+            fontSize = 11.sp,
+            fontWeight = FontWeight.SemiBold,
+            color = SlateMuted,
+            modifier = Modifier.padding(top = 2.dp)
+        )
+
         // 1. Module selector cards: Featured 3-Term Subject Sheet FIRST + 2x2 grid
         val gridModules = listOf(
             CsvImportModule.STUDENT_PROFILE,
@@ -966,20 +1112,31 @@ private fun CompactOptionPill(
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun CsvStepPrompt(
     config: CsvPromptConfig,
     students: List<Student>,
     settings: Settings,
     promptCopiedRecently: Boolean,
+    isScanningSheet: Boolean = false,
+    scannedBanner: CsvScannedSheetBannerInfo? = null,
+    onScanCamera: () -> Unit = {},
+    onScanGallery: () -> Unit = {},
+    onConfigChange: (CsvPromptConfig) -> Unit = {},
     onCopyPrompt: (String) -> Unit,
     onCopyHeaderOnly: (String) -> Unit,
     onCopyRosterTemplate: (String, Boolean) -> Unit,
     onSaveTemplateFile: (String) -> Unit = {},
     onGoToStep3: () -> Unit
 ) {
-    val promptText = remember(config, settings) {
-        CsvImportAssistant.buildAiPrompt(config, settings)
+    val promptText = remember(config, settings, students) {
+        CsvImportAssistant.buildAiPrompt(config, settings, students)
+    }
+    val classRosterCount = remember(config.targetCls, students) {
+        if (config.targetCls in 1..20) {
+            students.count { it.cls == config.targetCls && it.name.isNotBlank() }
+        } else 0
     }
     val headerOnly = remember(config, settings) {
         CsvImportAssistant.buildHeaderLine(config, settings.customFields, settings)
@@ -998,41 +1155,121 @@ fun CsvStepPrompt(
         modifier = Modifier
             .fillMaxSize()
             .verticalScroll(rememberScrollState())
-            .padding(horizontal = 16.dp, vertical = 12.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp)
+            .padding(horizontal = 14.dp, vertical = 10.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
         Surface(
-            color = TealSoft,
+            color = if (scannedBanner != null) TealContainer.copy(alpha = 0.52f) else TealSoft,
             shape = RoundedCornerShape(12.dp),
-            border = BorderStroke(1.dp, TealContainer)
+            border = BorderStroke(1.dp, if (scannedBanner != null) TealPrimary.copy(alpha = 0.45f) else TealContainer)
         ) {
-            Row(
-                modifier = Modifier.padding(12.dp),
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
-                verticalAlignment = Alignment.Top
+            Column(
+                modifier = Modifier.padding(11.dp),
+                verticalArrangement = Arrangement.spacedBy(7.dp)
             ) {
-                Icon(Icons.Rounded.AutoAwesome, contentDescription = null, tint = TealPrimary, modifier = Modifier.size(20.dp))
-                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                    Text(
-                        "ধাপ ২: AI প্রম্পট ও রেডি এক্সেল/CSV শিট",
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 13.5.sp,
-                        color = TealDark
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(9.dp),
+                    verticalAlignment = Alignment.Top
+                ) {
+                    Icon(
+                        if (scannedBanner != null) Icons.Rounded.QrCode2 else Icons.Rounded.AutoAwesome,
+                        contentDescription = null,
+                        tint = TealPrimary,
+                        modifier = Modifier.size(20.dp)
                     )
-                    Text(
-                        "AI-তে ছবি/PDF থেকে ডেটা আনতে 'প্রম্পট কপি করুন', অথবা এক্সেল/গুগল শিটে নিজের হাতে নম্বর বসাতে 'রোল-নামসহ শিট কপি' ব্যবহার করুন।",
-                        fontSize = 11.5.sp,
-                        lineHeight = 16.sp,
-                        color = SlateText
-                    )
+                    Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                        Text(
+                            if (scannedBanner != null) {
+                                "শীট শনাক্ত (${scannedBanner.sourceLabelBn})"
+                            } else {
+                                "ধাপ ২: AI প্রম্পট ও রেডি এক্সেল/CSV শিট"
+                            },
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 13.sp,
+                            color = TealDark
+                        )
+                        Text(
+                            scannedBanner?.summaryBn
+                                ?: "বাইরের AI-তে ছবিসহ 'প্রম্পট কপি করুন' পেস্ট করুন, অথবা এক্সেল/গ্যালারি-ক্যামেরা থেকে আরেকটি শীট স্ক্যান করুন।",
+                            fontSize = 11.5.sp,
+                            lineHeight = 16.sp,
+                            fontWeight = if (scannedBanner != null) FontWeight.SemiBold else FontWeight.Normal,
+                            color = SlateText
+                        )
+                    }
+                }
+
+                if (scannedBanner != null) {
+                    val det = scannedBanner.detection
+                    FlowRow(
+                        horizontalArrangement = Arrangement.spacedBy(5.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        if (det.detectedFromThinQr) {
+                            Surface(color = Color.White, shape = RoundedCornerShape(6.dp), border = BorderStroke(1.dp, TealContainer)) {
+                                Text("QR 1 ✓", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = TealDark, modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp))
+                            }
+                        }
+                        if (det.detectedFromOfflineQr) {
+                            Surface(color = Color.White, shape = RoundedCornerShape(6.dp), border = BorderStroke(1.dp, TealContainer)) {
+                                Text("QR 2 ✓", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = TealDark, modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp))
+                            }
+                        }
+                        if (det.detectedFromBarcode) {
+                            Surface(color = Color.White, shape = RoundedCornerShape(6.dp), border = BorderStroke(1.dp, TealContainer)) {
+                                Text("Bar 1 ✓", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = TealDark, modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp))
+                            }
+                        }
+                    }
+                }
+
+                // Quick camera / gallery scan strip right from Step 2
+                if (isScanningSheet) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(7.dp)
+                    ) {
+                        CircularProgressIndicator(modifier = Modifier.size(15.dp), strokeWidth = 2.dp, color = TealPrimary)
+                        Text("শীট স্ক্যান হচ্ছে...", fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = TealDark)
+                    }
+                } else {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(7.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        OutlinedButton(
+                            onClick = onScanCamera,
+                            shape = RoundedCornerShape(8.dp),
+                            border = BorderStroke(1.dp, TealPrimary.copy(alpha = 0.6f)),
+                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                            modifier = Modifier.weight(1f).testTag("csv_prompt_rescan_camera_btn")
+                        ) {
+                            Icon(Icons.Rounded.CameraAlt, contentDescription = "ক্যামেরা দিয়ে নতুন শীট স্ক্যান", tint = TealDark, modifier = Modifier.size(15.dp))
+                            Spacer(Modifier.width(5.dp))
+                            Text(if (scannedBanner != null) "অন্য শীট (ক্যামেরা)" else "ক্যামেরা স্ক্যান", fontSize = 11.sp, color = TealDark, maxLines = 1)
+                        }
+                        OutlinedButton(
+                            onClick = onScanGallery,
+                            shape = RoundedCornerShape(8.dp),
+                            border = BorderStroke(1.dp, TealPrimary.copy(alpha = 0.6f)),
+                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                            modifier = Modifier.weight(1f).testTag("csv_prompt_rescan_gallery_btn")
+                        ) {
+                            Icon(Icons.Rounded.PhotoLibrary, contentDescription = "গ্যালারি থেকে শীট স্ক্যান", tint = TealDark, modifier = Modifier.size(15.dp))
+                            Spacer(Modifier.width(5.dp))
+                            Text(if (scannedBanner != null) "অন্য শীট (গ্যালারি)" else "গ্যালারি স্ক্যান", fontSize = 11.sp, color = TealDark, maxLines = 1)
+                        }
+                    }
                 }
             }
         }
 
-        // Metadata badges
-        Row(
+        // Metadata badges + Roster Toggle Chip
+        FlowRow(
             modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
+            horizontalArrangement = Arrangement.spacedBy(7.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp)
         ) {
             Surface(color = SlateSurfaceVariant, shape = RoundedCornerShape(8.dp)) {
                 Text(
@@ -1050,6 +1287,25 @@ fun CsvStepPrompt(
                     fontWeight = FontWeight.SemiBold,
                     color = SlateText,
                     modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
+                )
+            }
+            if (classRosterCount > 0) {
+                FilterChip(
+                    selected = config.includeRosterInPrompt,
+                    onClick = { onConfigChange(config.copy(includeRosterInPrompt = !config.includeRosterInPrompt)) },
+                    leadingIcon = if (config.includeRosterInPrompt) {
+                        { Icon(Icons.Rounded.Check, contentDescription = null, modifier = Modifier.size(14.dp)) }
+                    } else null,
+                    colors = appFilterChipColors(),
+                    border = appFilterChipBorder(config.includeRosterInPrompt),
+                    label = {
+                        Text(
+                            "রোল-নাম তালিকা (${bn(classRosterCount.toString())} জন)",
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    },
+                    modifier = Modifier.testTag("csv_toggle_roster_prompt")
                 )
             }
         }

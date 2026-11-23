@@ -3179,6 +3179,14 @@ class ResultMakerViewModel(
         }
     }
 
+    suspend fun resolveSheetTemplateRemote(templateId: String): BlankSheetQrMeta? {
+        val schoolId = activeSchool.value?.id?.takeIf { it.isNotBlank() } ?: return null
+        val tid = templateId.trim().uppercase().takeIf { it.length >= 6 } ?: return null
+        return cloudRepo.fetchSheetTemplate(schoolId, tid).getOrNull()?.also { fetched ->
+            withContext(Dispatchers.IO) { sheetTemplateCache.put(fetched) }
+        }
+    }
+
     private fun decodeAndScaleBitmap(uri: Uri, maxDim: Int): Bitmap? {
         return try {
             val raw = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {

@@ -1,5 +1,8 @@
 package com.kgps.result
 
+import com.kgps.result.ai.ClassSheetImportScope
+import com.kgps.result.ai.ClassSheetKind
+
 enum class CsvImportModule(
     val id: String,
     val titleBn: String,
@@ -74,7 +77,8 @@ data class CsvPromptConfig(
     val allTermsSelection: Set<Int> = setOf(1, 2, 3),
     val useTwoRowGroupedHeader: Boolean = true,
     val multiTermSelection: Set<Int> = emptySet(),
-    val conciseMarks: Boolean = false
+    val conciseMarks: Boolean = false,
+    val includeRosterInPrompt: Boolean = false
 )
 
 fun effectiveTermsForConfig(config: CsvPromptConfig): List<Int> = when (config.module) {
@@ -562,7 +566,226 @@ object CsvImportAssistant {
         return (headerLines + dataLines).joinToString("\n")
     }
 
-    fun buildAiPrompt(config: CsvPromptConfig, settings: Settings): String {
+    fun buildScannedSheetSummaryBn(
+        meta: BlankSheetQrMeta,
+        settings: Settings = DEFAULT_SETTINGS
+    ): String {
+        val clsLabel = "${classNameBn(meta.cls.coerceIn(1, 20), settings)} শ্রেণি"
+        val cleanSub = meta.subjectKey?.trim()?.uppercase()?.takeIf {
+            it.isNotBlank() && it != BlankSheetCatalog.ALL_SUBJECTS_KEY
+        }
+        val subLabel = cleanSub?.let { k ->
+            subjectsFor(meta.cls.coerceIn(1, 20), "ইসলাম").find { it.key == k }?.bn?.substringBefore(" (") ?: k
+        }
+        return when (meta.sheetKind) {
+            ClassSheetKind.THREE_TERM_MARKS -> {
+                val hasTotal = meta.columnIds.any { it.endsWith("_TOTAL") }
+                val colsDesc = if (hasTotal) "ধারাবাহিক, সামষ্টিক ও মোট" else "ধারাবাহিক ও সামষ্টিক"
+                listOfNotNull(clsLabel, subLabel, "সব ৩ প্রান্তিক ($colsDesc)").joinToString(" · ")
+            }
+            ClassSheetKind.ATTENDANCE_TRAITS -> {
+                val termDesc = if (meta.term in 1..3 && meta.columnIds.none { it.startsWith("T2_") || it.startsWith("T3_") }) {
+                    termNameBn(meta.term)
+                } else {
+                    "৩ প্রান্তিক"
+                }
+                "$clsLabel · উপস্থিতি ও আচরণ ($termDesc)"
+            }
+            ClassSheetKind.SINGLE_TERM_MARKS -> {
+                val tName = termNameBn(meta.term.coerceIn(1, 3))
+                val scopeDesc = when (meta.importScope) {
+                    ClassSheetImportScope.CONT_ONLY -> "ধারাবাহিক"
+                    ClassSheetImportScope.WR_ONLY -> "সামষ্টিক"
+                    else -> "নম্বর"
+                }
+                listOfNotNull(clsLabel, subLabel ?: "বিষয়সমূহ", "$tName ($scopeDesc)").joinToString(" · ")
+            }
+        }
+    }
+
+    fun configFromScannedSheetMeta(
+        meta: BlankSheetQrMeta,
+        settings: Settings = DEFAULT_SETTINGS,
+        currentConfig: CsvPromptConfig = CsvPromptConfig()
+    ): CsvPromptConfig {
+        val safeCls = meta.cls.coerceIn(1, 20)
+        val digitMode = if (meta.numeralStyle == BlankNumeralStyle.ENGLISH) {
+            CsvDigitMode.ENGLISH
+        } else {
+            CsvDigitMode.BANGLA
+        }
+        val clsSubjects = subjectsFor(safeCls, "ইসলাম")
+        val cleanSub = meta.subjectKey?.trim()?.uppercase()?.takeIf {
+            it.isNotBlank() && it != BlankSheetCatalog.ALL_SUBJECTS_KEY
+        }
+        val colSet = meta.columnIds.toSet()
+
+        val notes = buildList {
+            if (meta.customColumnTitles.isNotEmpty()) {
+                add("শীটের কাস্টম কলাম (${meta.customColumnTitles.joinToString(", ")}) বাদ দিন")
+            }
+            if (meta.workingDaysByTerm.isNotEmpty()) {
+                val wdStr = meta.workingDaysByTerm.toSortedMap().entries.joinToString(", ") { (t, d) ->
+                    "${termOrdinalBn(t)}=${if (digitMode == CsvDigitMode.BANGLA) bn(d) else d}"
+                }
+                add("কার্যদিবস: $wdStr")
+            }
+        }
+
+        return when (meta.sheetKind) {
+            ClassSheetKind.THREE_TERM_MARKS -> {
+                val targetSub = cleanSub?.let { k -> clsSubjects.find { it.key == k } } ?: clsSubjects.first()
+                val detectedTerms = listOf(1, 2, 3)
+                    .filter { t -> meta.columnIds.any { it.startsWith("T${t}_") } }
+                    .toSet()
+                    .ifEmpty { setOf(1, 2, 3) }
+                val cols = linkedSetOf("roll", "name").apply {
+                    detectedTerms.sorted().forEach { t ->
+                        if ("T${t}_CONT" in colSet) add(mk(targetSub.key, t, "CONT"))
+                        if ("T${t}_WR" in colSet && targetSub.written > 0) add(mk(targetSub.key, t, "WR"))
+                        if ("T${t}_TOTAL" in colSet) add(mk(targetSub.key, t, "TOTAL"))
+                    }
+                    if (size <= 2) {
+                        addAll(
+                            defaultSelectedColumnKeys(
+                                module = CsvImportModule.SUBJECT_ALL_TERMS,
+                                targetCls = safeCls,
+                                targetTerm = 1,
+                                customFields = settings.customFields,
+                                selectedSubjects = setOf(targetSub.key),
+                                allTermsSelection = detectedTerms
+                            )
+                        )
+                    }
+                }
+                currentConfig.copy(
+                    module = CsvImportModule.SUBJECT_ALL_TERMS,
+                    targetCls = safeCls,
+                    targetTerm = 1,
+                    selectedSubjectKeys = setOf(targetSub.key),
+                    selectedColumnKeys = cols,
+                    digitMode = digitMode,
+                    allTermsSelection = detectedTerms,
+                    useTwoRowGroupedHeader = true,
+                    includeRosterInPrompt = true,
+                    extraInstruction = notes.joinToString(" | ")
+                )
+            }
+
+            ClassSheetKind.ATTENDANCE_TRAITS -> {
+                val termColsFound = listOf(1, 2, 3).filter { t ->
+                    meta.columnIds.any { it.startsWith("T${t}_") }
+                }
+                val activeTerms = if (termColsFound.isNotEmpty()) {
+                    termColsFound.toSet()
+                } else {
+                    setOf(meta.term.takeIf { it in 1..3 } ?: 1)
+                }
+                val hasRemark = "REMARK" in colSet
+                val cols = linkedSetOf("cls", "roll", "name").apply {
+                    if (termColsFound.isNotEmpty()) {
+                        activeTerms.sorted().forEach { t ->
+                            if ("T${t}_DAYS" in colSet || meta.workingDaysByTerm.containsKey(t)) add("DAYS_$t")
+                            if ("T${t}_PRES" in colSet) add("PRES_$t")
+                            if ("T${t}_ACT" in colSet) add("ACT_$t")
+                            if ("T${t}_DISC" in colSet) add("DISC_$t")
+                            if ("T${t}_COND" in colSet) add("COND_$t")
+                            if (hasRemark) add("REM_$t")
+                        }
+                    } else {
+                        val t = activeTerms.first()
+                        if ("ATT" in colSet) add("PRES_$t")
+                        if (hasRemark) add("REM_$t")
+                        if (size <= 3) {
+                            addAll(listOf("DAYS_$t", "PRES_$t", "ACT_$t", "DISC_$t", "COND_$t"))
+                        }
+                    }
+                }
+                currentConfig.copy(
+                    module = CsvImportModule.ATTENDANCE_TRAITS,
+                    targetCls = safeCls,
+                    targetTerm = activeTerms.first(),
+                    multiTermSelection = activeTerms,
+                    selectedSubjectKeys = emptySet(),
+                    selectedColumnKeys = cols,
+                    digitMode = digitMode,
+                    includeRosterInPrompt = true,
+                    extraInstruction = notes.joinToString(" | ")
+                )
+            }
+
+            ClassSheetKind.SINGLE_TERM_MARKS -> {
+                val safeTerm = meta.term.takeIf { it in 1..3 } ?: 1
+                val selectedSubs = if (cleanSub != null && clsSubjects.any { it.key == cleanSub }) {
+                    setOf(cleanSub)
+                } else {
+                    emptySet()
+                }
+                val subsToMap = if (selectedSubs.isEmpty()) clsSubjects else clsSubjects.filter { it.key in selectedSubs }
+                val granularKeys = listOf("TB", "ACT", "LANG", "CT").filter { it in colSet }
+                val hasCont = "CONT" in colSet
+                val hasWr = "WR" in colSet
+                val hasTotal = "TOTAL" in colSet
+                val concise = granularKeys.isEmpty()
+
+                val cols = linkedSetOf("cls", "roll", "name").apply {
+                    subsToMap.forEach { s ->
+                        var addedAny = false
+                        granularKeys.forEach { ck ->
+                            if (s.comps.any { it.key == ck }) {
+                                add(mk(s.key, safeTerm, ck))
+                                addedAny = true
+                            }
+                        }
+                        if (hasCont && s.comps.sumOf { it.max } > 0) {
+                            add(mk(s.key, safeTerm, "CONT"))
+                            addedAny = true
+                        }
+                        if (hasWr && s.written > 0) {
+                            add(mk(s.key, safeTerm, "WR"))
+                            addedAny = true
+                        }
+                        if (hasTotal) {
+                            add(mk(s.key, safeTerm, "TOTAL"))
+                            addedAny = true
+                        }
+                        if (!addedAny) {
+                            when (meta.importScope) {
+                                ClassSheetImportScope.CONT_ONLY -> {
+                                    if (s.comps.sumOf { it.max } > 0) add(mk(s.key, safeTerm, "CONT"))
+                                }
+                                ClassSheetImportScope.WR_ONLY -> {
+                                    if (s.written > 0) add(mk(s.key, safeTerm, "WR"))
+                                }
+                                else -> {
+                                    if (s.comps.sumOf { it.max } > 0) add(mk(s.key, safeTerm, "CONT"))
+                                    if (s.written > 0) add(mk(s.key, safeTerm, "WR"))
+                                }
+                            }
+                        }
+                    }
+                }
+                currentConfig.copy(
+                    module = CsvImportModule.TERM_MARKS,
+                    targetCls = safeCls,
+                    targetTerm = safeTerm,
+                    multiTermSelection = setOf(safeTerm),
+                    selectedSubjectKeys = selectedSubs,
+                    selectedColumnKeys = cols,
+                    conciseMarks = concise,
+                    digitMode = digitMode,
+                    includeRosterInPrompt = true,
+                    extraInstruction = notes.joinToString(" | ")
+                )
+            }
+        }
+    }
+
+    fun buildAiPrompt(
+        config: CsvPromptConfig,
+        settings: Settings,
+        students: List<Student> = emptyList()
+    ): String {
         val cols = selectedColumnSpecs(config, settings.customFields)
         val sep = config.format.sep
         val headerLines = if (config.module == CsvImportModule.SUBJECT_ALL_TERMS) {
@@ -647,6 +870,13 @@ object CsvImportAssistant {
             }
         }.joinToString(" | ")
 
+        val classRoster = if (config.includeRosterInPrompt && config.targetCls in 1..20 && students.isNotEmpty()) {
+            students.filter { it.cls == config.targetCls && it.name.isNotBlank() }
+                .sortedBy { it.roll }
+        } else {
+            emptyList()
+        }
+
         return buildString {
             val targetInfo = buildString {
                 append("${config.module.titleBn} · $classLabel")
@@ -663,6 +893,10 @@ object CsvImportAssistant {
             }
             if (rulesSummary.isNotBlank()) {
                 appendLine("নিয়ম: $rulesSummary")
+            }
+            if (classRoster.isNotEmpty()) {
+                val rosterText = classRoster.joinToString(", ") { "${it.roll}=${it.name.trim()}" }
+                appendLine("রোল ও নাম (${classShortBn(config.targetCls, settings)} - বানান হুবহু রাখুন): $rosterText")
             }
             if (config.extraInstruction.isNotBlank()) {
                 appendLine("নোট: ${config.extraInstruction.trim()}")

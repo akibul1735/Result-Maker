@@ -1100,6 +1100,7 @@ fun ResultMakerWorkspace(
                 settings = settings,
                 defaultCls = cls,
                 initialText = csvImportState.initialText,
+                onResolveRemoteTemplate = vm::resolveSheetTemplateRemote,
                 onDismiss = vm::closeCsvImport,
                 onImported = vm::applyCsvImport,
                 onError = vm::showMessage

@@ -1,5 +1,7 @@
 package com.kgps.result
 
+import com.kgps.result.ai.ClassSheetImportScope
+import com.kgps.result.ai.ClassSheetKind
 import com.kgps.result.cloud.TeacherPermissions
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -548,5 +550,95 @@ class CustomClassAndPromptTest {
         assertEquals("62", s2.x["DAYS_1"])
         assertEquals("65", s2.x["DAYS_2"])
         assertEquals("64", s2.x["DAYS_3"])
+    }
+
+    @Test
+    fun scannedSheetMetaBuildsTailoredCsvConfigAndRosterPromptForAllSheetKinds() {
+        val students = listOf(
+            Student(id = "s-3-1", cls = 3, roll = 1, name = "তানভীর হাসান"),
+            Student(id = "s-3-2", cls = 3, roll = 2, name = "নুসরাত জাহান"),
+            Student(id = "s-4-1", cls = 4, roll = 1, name = "অন্য শ্রেণির ছাত্র")
+        )
+
+        // 1. 3-Term Subject Marks (with optional TOTAL + English digits)
+        val threeTermMeta = BlankSheetQrMeta(
+            cls = 3,
+            subjectKey = "MATH",
+            term = -1,
+            sheetKind = ClassSheetKind.THREE_TERM_MARKS,
+            importScope = ClassSheetImportScope.BOTH,
+            columnIds = listOf(
+                "ROLL", "NAME",
+                "T1_CONT", "T1_WR", "T1_TOTAL",
+                "T2_CONT", "T2_WR", "T2_TOTAL",
+                "T3_CONT", "T3_WR", "T3_TOTAL"
+            ),
+            numeralStyle = BlankNumeralStyle.ENGLISH
+        )
+        val threeTermCfg = CsvImportAssistant.configFromScannedSheetMeta(threeTermMeta, DEFAULT_SETTINGS)
+        assertEquals(CsvImportModule.SUBJECT_ALL_TERMS, threeTermCfg.module)
+        assertEquals(3, threeTermCfg.targetCls)
+        assertEquals(setOf("MATH"), threeTermCfg.selectedSubjectKeys)
+        assertEquals(CsvDigitMode.ENGLISH, threeTermCfg.digitMode)
+        assertTrue(threeTermCfg.includeRosterInPrompt)
+        assertTrue("MATH_1_CONT" in threeTermCfg.selectedColumnKeys)
+        assertTrue("MATH_3_TOTAL" in threeTermCfg.selectedColumnKeys)
+
+        val promptWithRoster = CsvImportAssistant.buildAiPrompt(threeTermCfg, DEFAULT_SETTINGS, students)
+        assertTrue(promptWithRoster.contains("গণিত"))
+        assertTrue(promptWithRoster.contains("1=তানভীর হাসান"))
+        assertTrue(promptWithRoster.contains("2=নুসরাত জাহান"))
+        assertFalse("Prompt must only include target class students", promptWithRoster.contains("অন্য শ্রেণির ছাত্র"))
+
+        val promptWithoutRoster = CsvImportAssistant.buildAiPrompt(
+            threeTermCfg.copy(includeRosterInPrompt = false),
+            DEFAULT_SETTINGS,
+            students
+        )
+        assertFalse(promptWithoutRoster.contains("তানভীর হাসান"))
+
+        // 2. Single-term concise CONT_ONLY sheet
+        val contOnlyMeta = BlankSheetQrMeta(
+            cls = 4,
+            subjectKey = "BAN",
+            term = 2,
+            sheetKind = ClassSheetKind.SINGLE_TERM_MARKS,
+            importScope = ClassSheetImportScope.CONT_ONLY,
+            columnIds = listOf("ROLL", "NAME", "CONT"),
+            numeralStyle = BlankNumeralStyle.BENGALI
+        )
+        val contOnlyCfg = CsvImportAssistant.configFromScannedSheetMeta(contOnlyMeta, DEFAULT_SETTINGS)
+        assertEquals(CsvImportModule.TERM_MARKS, contOnlyCfg.module)
+        assertEquals(4, contOnlyCfg.targetCls)
+        assertEquals(2, contOnlyCfg.targetTerm)
+        assertEquals(setOf("BAN"), contOnlyCfg.selectedSubjectKeys)
+        assertTrue(contOnlyCfg.conciseMarks)
+        assertTrue("BAN_2_CONT" in contOnlyCfg.selectedColumnKeys)
+        assertFalse("BAN_2_WR" in contOnlyCfg.selectedColumnKeys)
+        assertEquals(CsvDigitMode.BANGLA, contOnlyCfg.digitMode)
+
+        // 3. 3-Term Attendance & Traits with shared working days
+        val traitsMeta = BlankSheetQrMeta(
+            cls = 3,
+            subjectKey = null,
+            term = -1,
+            sheetKind = ClassSheetKind.ATTENDANCE_TRAITS,
+            importScope = ClassSheetImportScope.BOTH,
+            columnIds = listOf("ROLL", "NAME", "T1_PRES", "T1_ACT", "T2_PRES", "T2_COND", "T3_PRES", "T3_DISC"),
+            workingDaysByTerm = mapOf(1 to "62", 2 to "65"),
+            numeralStyle = BlankNumeralStyle.BENGALI
+        )
+        val traitsCfg = CsvImportAssistant.configFromScannedSheetMeta(traitsMeta, DEFAULT_SETTINGS)
+        assertEquals(CsvImportModule.ATTENDANCE_TRAITS, traitsCfg.module)
+        assertEquals(setOf(1, 2, 3), traitsCfg.multiTermSelection)
+        assertTrue("DAYS_1" in traitsCfg.selectedColumnKeys)
+        assertTrue("PRES_1" in traitsCfg.selectedColumnKeys)
+        assertTrue("COND_2" in traitsCfg.selectedColumnKeys)
+        assertTrue(traitsCfg.extraInstruction.contains("৬২"))
+
+        val summary = CsvImportAssistant.buildScannedSheetSummaryBn(threeTermMeta, DEFAULT_SETTINGS)
+        assertTrue("Expected class name in summary: $summary", summary.contains("তৃতীয় শ্রেণি"))
+        assertTrue(summary.contains("গণিত"))
+        assertTrue(summary.contains("৩ প্রান্তিক"))
     }
 }
