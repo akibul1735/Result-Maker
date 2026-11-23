@@ -30,7 +30,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.AddCircleOutline
 import androidx.compose.material.icons.rounded.Badge
 import androidx.compose.material.icons.rounded.Check
-import androidx.compose.material.icons.rounded.Class
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.ContentCopy
 import androidx.compose.material.icons.rounded.ContentPaste
@@ -196,6 +195,9 @@ fun BasicStudentImportDialog(
     }
     val detectedUnregisteredClasses = remember(rawClsValues, settings.customClasses) {
         ClassResolver.detectUnregisteredClasses(rawClsValues, settings.customClasses)
+    }
+    val excludedNonClasses = remember(rawClsValues, settings.customClasses, classOverrides) {
+        ClassResolver.detectExcludedNonClasses(rawClsValues, settings.customClasses, classOverrides)
     }
 
     val validationReport = remember(
@@ -439,6 +441,7 @@ fun BasicStudentImportDialog(
                             fallbackCls = fallbackCls,
                             onFallbackClsChange = { fallbackCls = it },
                             detectedUnregisteredClasses = detectedUnregisteredClasses,
+                            excludedNonClasses = excludedNonClasses,
                             classOverrides = classOverrides,
                             onClassOverridesChange = { classOverrides = it },
                             isAdmin = isAdmin
@@ -814,6 +817,7 @@ private fun BasicImportStepMapping(
     fallbackCls: Int,
     onFallbackClsChange: (Int) -> Unit,
     detectedUnregisteredClasses: List<ClassResolver.DetectedUnregisteredClass>,
+    excludedNonClasses: List<ClassResolver.ExcludedNonClassGroup>,
     classOverrides: Map<String, ClassResolver.ClassOverride>,
     onClassOverridesChange: (Map<String, ClassResolver.ClassOverride>) -> Unit,
     isAdmin: Boolean
@@ -872,194 +876,18 @@ private fun BasicImportStepMapping(
             }
         }
 
-        // Unregistered / Variant Classes Card
+        if (excludedNonClasses.isNotEmpty()) {
+            ExcludedNonClassSummaryBanner(excludedGroups = excludedNonClasses)
+        }
+
         if (detectedUnregisteredClasses.isNotEmpty()) {
-            Card(
-                modifier = Modifier.fillMaxWidth(),
-                colors = CardDefaults.cardColors(containerColor = TealSoft),
-                border = BorderStroke(1.dp, TealPrimary.copy(alpha = 0.35f)),
-                shape = RoundedCornerShape(12.dp)
-            ) {
-                Column(
-                    modifier = Modifier.padding(12.dp),
-                    verticalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
-                        Icon(Icons.Rounded.Class, contentDescription = null, tint = TealDark, modifier = Modifier.size(18.dp))
-                        Text(
-                            "নতুন শ্রেণি শনাক্ত হয়েছে (${bn(detectedUnregisteredClasses.size.toString())}টি)",
-                            fontSize = 13.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = TealDark
-                        )
-                    }
-                    Text(
-                        "একই শ্রেণির বিভিন্ন বানান বা রূপ একসাথে দলবদ্ধ করা হয়েছে। এগুলো স্বয়ংক্রিয়ভাবে নতুন শ্রেণি হিসেবে যুক্ত হবে অথবা বিদ্যমান শ্রেণির সাথে যুক্ত করতে পারবেন:",
-                        fontSize = 11.sp,
-                        color = SlateText
-                    )
-
-                    detectedUnregisteredClasses.forEach { det ->
-                        val currentOv = classOverrides[det.canonicalKey]
-                        val mappedId = (currentOv as? ClassResolver.ClassOverride.MapToExisting)?.classId
-                        val customOv = currentOv as? ClassResolver.ClassOverride.CreateCustom
-                        val displayName = customOv?.nameBn ?: det.suggestedNameBn
-                        val displayShort = customOv?.shortBn ?: det.suggestedShortBn
-                        val displayTier = customOv?.syllabusTier ?: det.suggestedTier
-                        var mapMenuOpen by remember(det.canonicalKey) { mutableStateOf(false) }
-
-                        Surface(
-                            color = Color.White,
-                            shape = RoundedCornerShape(10.dp),
-                            border = BorderStroke(1.dp, SlateOutline)
-                        ) {
-                            Column(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(10.dp),
-                                verticalArrangement = Arrangement.spacedBy(8.dp)
-                            ) {
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Column(modifier = Modifier.weight(1f)) {
-                                        Text(
-                                            displayName,
-                                            fontWeight = FontWeight.Bold,
-                                            fontSize = 13.sp,
-                                            color = TealDark
-                                        )
-                                        Text(
-                                            "পাওয়া বানান: ${det.rawVariants.joinToString(", ")} (${bn(det.rowCount.toString())} সারি)",
-                                            fontSize = 11.sp,
-                                            color = SlateMuted
-                                        )
-                                    }
-                                    Box {
-                                        OutlinedButton(
-                                            onClick = { mapMenuOpen = true },
-                                            shape = RoundedCornerShape(8.dp),
-                                            modifier = Modifier
-                                                .heightIn(min = 48.dp)
-                                                .testTag("basic_class_override_btn_${det.canonicalKey}")
-                                        ) {
-                                            val modeLabel = if (mappedId != null) {
-                                                val target = activeClasses.find { it.id == mappedId }
-                                                "মিলান: ${target?.shortBn ?: mappedId} ▾"
-                                            } else {
-                                                "+ নতুন শ্রেণি ▾"
-                                            }
-                                            Text(modeLabel, fontSize = 11.sp)
-                                        }
-                                        DropdownMenu(
-                                            expanded = mapMenuOpen,
-                                            onDismissRequest = { mapMenuOpen = false }
-                                        ) {
-                                            DropdownMenuItem(
-                                                text = { Text("+ নতুন শ্রেণি হিসেবে তৈরি করুন ($displayName)", fontSize = 12.sp, fontWeight = FontWeight.SemiBold) },
-                                                onClick = {
-                                                    val next = classOverrides.toMutableMap()
-                                                    next[det.canonicalKey] = ClassResolver.ClassOverride.CreateCustom(
-                                                        nameBn = displayName,
-                                                        shortBn = displayShort,
-                                                        syllabusTier = displayTier
-                                                    )
-                                                    onClassOverridesChange(next)
-                                                    mapMenuOpen = false
-                                                }
-                                            )
-                                            HorizontalDivider()
-                                            activeClasses.forEach { existingCls ->
-                                                DropdownMenuItem(
-                                                    text = { Text("বিদ্যমান শ্রেণি: ${existingCls.nameBn} (${existingCls.shortBn})", fontSize = 12.sp) },
-                                                    onClick = {
-                                                        val next = classOverrides.toMutableMap()
-                                                        next[det.canonicalKey] = ClassResolver.ClassOverride.MapToExisting(existingCls.id)
-                                                        onClassOverridesChange(next)
-                                                        mapMenuOpen = false
-                                                    }
-                                                )
-                                            }
-                                        }
-                                    }
-                                }
-
-                                if (mappedId == null) {
-                                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                        OutlinedTextField(
-                                            value = displayShort,
-                                            onValueChange = { sVal ->
-                                                val next = classOverrides.toMutableMap()
-                                                next[det.canonicalKey] = ClassResolver.ClassOverride.CreateCustom(
-                                                    nameBn = displayName,
-                                                    shortBn = sVal.take(12),
-                                                    syllabusTier = displayTier
-                                                )
-                                                onClassOverridesChange(next)
-                                            },
-                                            label = { Text("সংক্ষিপ্ত নাম", fontSize = 10.sp) },
-                                            singleLine = true,
-                                            modifier = Modifier.weight(1f)
-                                        )
-                                        OutlinedTextField(
-                                            value = displayName,
-                                            onValueChange = { nVal ->
-                                                val next = classOverrides.toMutableMap()
-                                                next[det.canonicalKey] = ClassResolver.ClassOverride.CreateCustom(
-                                                    nameBn = nVal.take(40),
-                                                    shortBn = displayShort,
-                                                    syllabusTier = displayTier
-                                                )
-                                                onClassOverridesChange(next)
-                                            },
-                                            label = { Text("পূর্ণ নাম", fontSize = 10.sp) },
-                                            singleLine = true,
-                                            modifier = Modifier.weight(1.4f)
-                                        )
-                                    }
-                                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                        FilterChip(
-                                            selected = displayTier <= 2,
-                                            onClick = {
-                                                val next = classOverrides.toMutableMap()
-                                                next[det.canonicalKey] = ClassResolver.ClassOverride.CreateCustom(
-                                                    nameBn = displayName,
-                                                    shortBn = displayShort,
-                                                    syllabusTier = 1
-                                                )
-                                                onClassOverridesChange(next)
-                                            },
-                                            colors = appFilterChipColors(),
-                                            border = appFilterChipBorder(displayTier <= 2),
-                                            label = { Text("১ম–২য় ধরন (সমন্বিত)", fontSize = 11.sp) }
-                                        )
-                                        FilterChip(
-                                            selected = displayTier > 2,
-                                            onClick = {
-                                                val next = classOverrides.toMutableMap()
-                                                next[det.canonicalKey] = ClassResolver.ClassOverride.CreateCustom(
-                                                    nameBn = displayName,
-                                                    shortBn = displayShort,
-                                                    syllabusTier = 3
-                                                )
-                                                onClassOverridesChange(next)
-                                            },
-                                            colors = appFilterChipColors(),
-                                            border = appFilterChipBorder(displayTier > 2),
-                                            label = { Text("৩য়–৫ম ধরন (বিজ্ঞান/বাওবি)", fontSize = 11.sp) }
-                                        )
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
+            UnregisteredClassesResolutionCard(
+                detectedUnregisteredClasses = detectedUnregisteredClasses,
+                settings = settings,
+                classOverrides = classOverrides,
+                onClassOverridesChange = onClassOverridesChange,
+                tagPrefix = "basic"
+            )
         }
 
         // Field quota & admin status banner
@@ -1123,7 +951,11 @@ private fun BasicImportStepMapping(
             }
         }
 
-        if (!isAdmin && (newColsCount > 0 || detectedUnregisteredClasses.isNotEmpty())) {
+        val hasPendingNewClasses = detectedUnregisteredClasses.any { det ->
+            val ov = classOverrides[det.canonicalKey]
+            ov !is ClassResolver.ClassOverride.Reject && ov !is ClassResolver.ClassOverride.MapToExisting
+        }
+        if (!isAdmin && (newColsCount > 0 || hasPendingNewClasses)) {
             Surface(
                 color = AmberBg,
                 shape = RoundedCornerShape(10.dp),

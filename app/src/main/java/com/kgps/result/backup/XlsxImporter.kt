@@ -72,6 +72,9 @@ object XlsxImporter {
     ): String? {
         detectedCls?.let { return it.toString() }
         Repo.parseClassNum(sheetName)?.let { return it.toString() }
+        if (ClassResolver.isNonClassStatus(sheetName)) {
+            return sheetName.trim()
+        }
         if (ClassResolver.looksValidAsNewCustomClass(sheetName, isSheetTabName = true)) {
             return sheetName.trim()
         }

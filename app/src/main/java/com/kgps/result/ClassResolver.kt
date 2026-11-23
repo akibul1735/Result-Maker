@@ -39,11 +39,20 @@ object ClassResolver {
         val rowCount: Int
     )
 
+    data class ExcludedNonClassGroup(
+        val key: String,
+        val displayLabel: String,
+        val rawVariants: List<String>,
+        val rowCount: Int,
+        val isAutoStatus: Boolean
+    )
+
     data class ClassResolutionPlan(
         val resolvedByNormalizedRaw: Map<String, Int>,
         val plannedClasses: List<PlannedCustomClass>,
         val autoCreatedClassIds: Set<Int>,
         val rejectedRaws: Set<String>,
+        val autoExcludedStatusRaws: Set<String> = emptySet(),
         val limitReachedRaws: Set<String>
     ) {
         fun resolve(raw: String): Int? = resolvedByNormalizedRaw[normalizeLookupKey(raw)]
@@ -251,6 +260,27 @@ object ClassResolver {
         "শ্রেণি", "শ্রেণী", "শ্রেণির", "শ্রেণীর", "ক্লাস"
     )
 
+    private val NON_CLASS_STATUS_WORDS = setOf(
+        "hold", "on hold", "onhold", "hold on", "held",
+        "pending", "wait", "waiting", "waitlist", "wait list",
+        "drop", "dropped", "dropout", "drop out",
+        "tc", "t c", "transfer", "transferred", "left", "leave",
+        "inactive", "suspend", "suspended", "pause", "paused",
+        "cancel", "canceled", "cancelled", "reject", "rejected",
+        "absent", "draft", "skip", "skipped", "exclude", "excluded",
+        "none", "null", "na", "n a", "unknown", "temp", "temporary", "old",
+        "হোল্ড", "হোল্ডে", "হোল্ডিং", "স্থগিত", "অপেক্ষমাণ", "অপেক্ষমান",
+        "ঝরে পড়া", "ঝরে পড়া", "টিসি", "টি সি", "বদলি", "বাতিল",
+        "বাদ", "বাদ দিন", "প্রত্যাহার", "অনুপস্থিত", "অজানা", "ফাঁকা", "খালি"
+    )
+
+    private val NON_CLASS_STATUS_COMPACT = NON_CLASS_STATUS_WORDS.map { it.replace(" ", "") }.toSet()
+
+    private val NON_CLASS_PREFIX_TOKENS = setOf(
+        "hold", "onhold", "pending", "dropout", "transferred", "cancelled", "canceled",
+        "হোল্ড", "হোল্ডে", "স্থগিত", "বাতিল"
+    )
+
     private val SECTION_PREFIX_WORDS = setOf("sec", "section", "শাখা", "বিভাগ")
 
     fun normalizeUnicode(raw: String): String {
@@ -271,6 +301,23 @@ object ClassResolver {
             .replace(Regex("[?:*।.,;()\\[\\]{}_\\-–—/|]+"), " ")
             .replace(Regex("\\s+"), " ")
             .trim()
+    }
+
+    fun isNonClassStatus(raw: String): Boolean {
+        val trimmed = raw.trim()
+        if (trimmed.isBlank() || Repo.isBlankOrDashPlaceholder(trimmed)) return false
+        val lookup = normalizeLookupKey(trimmed)
+        val punct = stripPunctuation(trimmed)
+        val stripped = stripClassWordsAndSection(trimmed)
+        val candidates = listOf(lookup, punct, stripped).filter { it.isNotBlank() }
+        for (c in candidates) {
+            if (c in NON_CLASS_STATUS_WORDS || c.replace(" ", "") in NON_CLASS_STATUS_COMPACT) {
+                return true
+            }
+        }
+        val firstToken = punct.split(" ").firstOrNull().orEmpty()
+        if (firstToken in NON_CLASS_PREFIX_TOKENS) return true
+        return false
     }
 
     private fun stripClassWordsAndSection(raw: String): String {
@@ -383,7 +430,7 @@ object ClassResolver {
         customClasses: List<CustomClassDef> = SchoolClassRegistry.currentCustom(),
         allowLegacyFallbackIds: Boolean = true
     ): Int? {
-        if (Repo.isBlankOrDashPlaceholder(raw)) return null
+        if (Repo.isBlankOrDashPlaceholder(raw) || isNonClassStatus(raw)) return null
         val stripped = stripClassWordsAndSection(raw)
         if (stripped.isBlank()) return null
 
@@ -436,6 +483,7 @@ object ClassResolver {
     fun looksValidAsNewCustomClass(raw: String, isSheetTabName: Boolean = false): Boolean {
         val trimmed = raw.trim()
         if (trimmed.isBlank() || Repo.isBlankOrDashPlaceholder(trimmed)) return false
+        if (isNonClassStatus(trimmed)) return false
         val lookup = normalizeLookupKey(trimmed)
         if (isSheetTabName && (lookup in GENERIC_SHEET_TABS || Regex("^sheet\\s*\\d+$").matches(lookup))) {
             return false
@@ -458,7 +506,7 @@ object ClassResolver {
         return stripped.any { ch -> ch in 'a'..'z' || ch in '\u0980'..'\u09FF' }
     }
 
-    private fun canonicalBucketForNewClass(raw: String): DetectedUnregisteredClass? {
+    fun canonicalBucketForNewClass(raw: String): DetectedUnregisteredClass? {
         if (!looksValidAsNewCustomClass(raw)) return null
         val stripped = stripClassWordsAndSection(raw)
         val fam = matchKnownFamily(stripped)
@@ -550,6 +598,63 @@ object ClassResolver {
         return byBucket.values.toList()
     }
 
+    fun detectExcludedNonClasses(
+        rawClassValues: List<String>,
+        existingCustomClasses: List<CustomClassDef>,
+        overrides: Map<String, ClassOverride> = emptyMap()
+    ): List<ExcludedNonClassGroup> {
+        val groups = linkedMapOf<String, ExcludedNonClassGroup>()
+        rawClassValues.forEach { raw ->
+            val trimmed = raw.trim()
+            if (trimmed.isBlank() || Repo.isBlankOrDashPlaceholder(trimmed)) return@forEach
+
+            val isStatus = isNonClassStatus(trimmed)
+            if (isStatus) {
+                val key = "STATUS_${normalizeLookupKey(trimmed)}"
+                val prev = groups[key]
+                groups[key] = if (prev == null) {
+                    ExcludedNonClassGroup(
+                        key = key,
+                        displayLabel = trimmed,
+                        rawVariants = listOf(trimmed),
+                        rowCount = 1,
+                        isAutoStatus = true
+                    )
+                } else {
+                    prev.copy(
+                        rawVariants = if (trimmed in prev.rawVariants) prev.rawVariants else prev.rawVariants + trimmed,
+                        rowCount = prev.rowCount + 1
+                    )
+                }
+                return@forEach
+            }
+
+            if (resolveExistingClassId(trimmed, existingCustomClasses, allowLegacyFallbackIds = false) != null) {
+                return@forEach
+            }
+            val bucket = canonicalBucketForNewClass(trimmed)
+            if (bucket != null && overrides[bucket.canonicalKey] is ClassOverride.Reject) {
+                val key = bucket.canonicalKey
+                val prev = groups[key]
+                groups[key] = if (prev == null) {
+                    ExcludedNonClassGroup(
+                        key = key,
+                        displayLabel = bucket.suggestedNameBn,
+                        rawVariants = listOf(trimmed),
+                        rowCount = 1,
+                        isAutoStatus = false
+                    )
+                } else {
+                    prev.copy(
+                        rawVariants = if (trimmed in prev.rawVariants) prev.rawVariants else prev.rawVariants + trimmed,
+                        rowCount = prev.rowCount + 1
+                    )
+                }
+            }
+        }
+        return groups.values.toList()
+    }
+
     /**
      * Produces a complete class resolution plan for import preview & saving,
      * allocating free custom class IDs (6..20, max 15 custom classes) for valid unmatched classes.
@@ -563,6 +668,7 @@ object ClassResolver {
         val plannedList = mutableListOf<PlannedCustomClass>()
         val autoCreatedIds = linkedSetOf<Int>()
         val rejected = linkedSetOf<String>()
+        val autoExcludedStatuses = linkedSetOf<String>()
         val limitReached = linkedSetOf<String>()
 
         val workingCustom = existingCustomClasses.toMutableList()
@@ -573,6 +679,12 @@ object ClassResolver {
             if (trimmed.isBlank()) return@forEach
             val lookupKey = normalizeLookupKey(trimmed)
             if (resolvedMap.containsKey(lookupKey) || lookupKey in rejected || lookupKey in limitReached) {
+                return@forEach
+            }
+
+            if (isNonClassStatus(trimmed)) {
+                rejected.add(lookupKey)
+                autoExcludedStatuses.add(lookupKey)
                 return@forEach
             }
 
@@ -647,6 +759,7 @@ object ClassResolver {
             plannedClasses = plannedList,
             autoCreatedClassIds = autoCreatedIds,
             rejectedRaws = rejected,
+            autoExcludedStatusRaws = autoExcludedStatuses,
             limitReachedRaws = limitReached
         )
     }

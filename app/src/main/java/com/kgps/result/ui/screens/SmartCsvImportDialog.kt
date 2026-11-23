@@ -600,6 +600,8 @@ fun SmartCsvImportDialog(
                             sharedWorkingDaysByTerm = sharedWorkingDaysByTerm,
                             onSharedWorkingDaysChange = { sharedWorkingDaysByTerm = it },
                             settings = settings,
+                            classOverrides = classOverrides,
+                            onClassOverridesChange = { classOverrides = it },
                             onPickFile = { filePicker.launch(arrayOf("*/*")) },
                             onPasteClipboard = {
                                 val pasted = clipboard.getText()?.text.orEmpty()

@@ -250,6 +250,145 @@ class BasicImportAndClassResolverTest {
         assertEquals(setOf("প্রাক-প্রাথমিক", "নার্সারি"), summary.createdClasses.map { it.nameBn }.toSet())
     }
 
+    @Test
+    fun holdAndOtherNonClassStatuses_areExcludedAndNeverCreateCustomClasses() {
+        val statusSamples = listOf("Hold", "on hold", "Pending", "TC", "Dropout", "হোল্ড", "স্থগিত", "বাতিল")
+        statusSamples.forEach { sample ->
+            assertTrue("Expected non-class status for '$sample'", ClassResolver.isNonClassStatus(sample))
+            assertFalse("Expected looksValid=false for '$sample'", ClassResolver.looksValidAsNewCustomClass(sample))
+            assertNull(ClassResolver.canonicalBucketForNewClass(sample))
+        }
+
+        val csv = """
+            শ্রেণি,রোল,নাম,আইডি
+            প্রাক-প্রাথমিক,২৬,মো. আলিফ মোল্যা,০২৬
+            Hold,১২,স্থগিত শিক্ষার্থী ১,৫০১
+            On Hold,১৩,স্থগিত শিক্ষার্থী ২,৫০২
+            হোল্ড,১৪,স্থগিত শিক্ষার্থী ৩,৫০৩
+            ১ম,১,মোসাঃ ছিনতিয়া,১০১
+        """.trimIndent()
+
+        val parsed = Repo.parseSmartCsvSheet(csv)
+        val cols = Repo.detectCsvColumns(parsed.rows, emptyList(), profileOnly = true)
+
+        val detected = ClassResolver.detectUnregisteredClasses(
+            listOf("প্রাক-প্রাথমিক", "Hold", "On Hold", "হোল্ড", "১ম"),
+            emptyList()
+        )
+        assertEquals(listOf("PRE_PRIMARY"), detected.map { it.canonicalKey })
+
+        val excludedGroups = ClassResolver.detectExcludedNonClasses(
+            listOf("প্রাক-প্রাথমিক", "Hold", "On Hold", "হোল্ড", "১ম"),
+            emptyList()
+        )
+        assertEquals(3, excludedGroups.size)
+        assertTrue(excludedGroups.all { it.isAutoStatus })
+
+        val report = CsvImportAssistant.validateCsvData(
+            parsedRows = parsed.rows,
+            columns = cols,
+            existingStudents = emptyList(),
+            fallbackCls = 1,
+            customClasses = emptyList()
+        )
+
+        assertEquals(2, report.validAddCount)
+        assertEquals(3, report.errorCount)
+        assertEquals(3, report.excludedNonClassCount)
+        assertEquals(listOf("Hold", "On Hold", "হোল্ড"), report.excludedClassValues)
+        assertEquals(1, report.autoCreatedClasses.size)
+        assertEquals("প্রাক-প্রাথমিক", report.autoCreatedClasses.first().nameBn)
+        assertTrue(report.rows[1].isExcludedNonClass)
+        assertTrue(report.rows[2].isExcludedNonClass)
+        assertTrue(report.rows[3].isExcludedNonClass)
+        assertTrue(report.rows[1].messages.any { it.contains("শ্রেণি নয়") && it.contains("Hold") })
+
+        // Even if selectedIndices accidentally passed all rows, applyMappedCsvImport still skips Hold rows & never creates Hold class
+        val summary = Repo.applyMappedCsvImport(
+            rows = parsed.rows,
+            columns = cols,
+            existingStudents = emptyList(),
+            existingSettings = Settings(),
+            defaultCls = 1
+        )
+        assertEquals(2, summary.addedCount)
+        assertEquals(2, summary.students.size)
+        assertEquals(1, summary.createdClasses.size)
+        assertFalse(summary.settings.customClasses.any { it.nameBn.equals("Hold", ignoreCase = true) })
+    }
+
+    @Test
+    fun explicitRejectOverride_excludesCustomNonClassValueWithoutCreatingClass() {
+        val csv = """
+            শ্রেণি,রোল,নাম
+            SpecialNote,৫,অনির্দিষ্ট শিক্ষার্থী
+            ১ম,২,রাহিম
+        """.trimIndent()
+
+        val parsed = Repo.parseSmartCsvSheet(csv)
+        val cols = Repo.detectCsvColumns(parsed.rows, emptyList(), profileOnly = true)
+        val detected = ClassResolver.detectUnregisteredClasses(listOf("SpecialNote", "১ম"), emptyList())
+        assertEquals(1, detected.size)
+
+        val overrides = mapOf(detected.first().canonicalKey to ClassResolver.ClassOverride.Reject)
+        val report = CsvImportAssistant.validateCsvData(
+            parsedRows = parsed.rows,
+            columns = cols,
+            existingStudents = emptyList(),
+            fallbackCls = 1,
+            customClasses = emptyList(),
+            classOverrides = overrides
+        )
+
+        assertEquals(1, report.validAddCount)
+        assertEquals(1, report.excludedNonClassCount)
+        assertEquals(0, report.autoCreatedClasses.size)
+        assertTrue(report.rows[0].isExcludedNonClass)
+
+        val summary = Repo.applyMappedCsvImport(
+            rows = parsed.rows,
+            columns = cols,
+            existingStudents = emptyList(),
+            existingSettings = Settings(),
+            defaultCls = 1,
+            classOverrides = overrides
+        )
+        assertEquals(1, summary.addedCount)
+        assertEquals(0, summary.createdClasses.size)
+        assertEquals(listOf("রাহিম"), summary.students.map { it.name })
+    }
+
+    @Test
+    fun xlsxImporter_holdTab_isExcludedAndNeverCreatesHoldClassOrFallsBackToDefaultCls() {
+        val xlsxBytes = buildMinimalXlsx(
+            sheets = listOf(
+                "Hold" to listOf(
+                    listOf("রোল", "নাম"),
+                    listOf("১০", "বাদ পড়া শিক্ষার্থী")
+                ),
+                "১ম" to listOf(
+                    listOf("রোল", "নাম"),
+                    listOf("১", "নিয়মিত শিক্ষার্থী")
+                )
+            )
+        )
+        val csvText = XlsxImporter.importWorkbookAsCsvText(xlsxBytes)
+        val parsed = Repo.parseSmartCsvSheet(csvText)
+        val cols = Repo.detectCsvColumns(parsed.rows, emptyList(), profileOnly = true)
+
+        val summary = Repo.applyMappedCsvImport(
+            rows = parsed.rows,
+            columns = cols,
+            existingStudents = emptyList(),
+            existingSettings = Settings(),
+            defaultCls = 2
+        )
+        assertEquals(1, summary.addedCount)
+        assertEquals(0, summary.createdClasses.size)
+        assertEquals(listOf("নিয়মিত শিক্ষার্থী"), summary.students.map { it.name })
+        assertEquals(listOf(1), summary.students.map { it.cls })
+    }
+
     private fun buildMinimalXlsx(sheets: List<Pair<String, List<List<String>>>>): ByteArray {
         val baos = ByteArrayOutputStream()
         ZipOutputStream(baos).use { zos ->

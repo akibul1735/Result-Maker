@@ -104,7 +104,8 @@ data class CsvValidatedRow(
     val messages: List<String>,
     val rawCells: List<String>,
     val resolvedClassLabel: String = "",
-    val isAutoCreatedClass: Boolean = false
+    val isAutoCreatedClass: Boolean = false,
+    val isExcludedNonClass: Boolean = false
 )
 
 data class CsvValidationReport(
@@ -117,7 +118,9 @@ data class CsvValidationReport(
     val hasMissingRollOrNameMapping: Boolean,
     val autoCreatedClasses: List<ClassResolver.PlannedCustomClass> = emptyList(),
     val classLimitErrorCount: Int = 0,
-    val customFieldLimitWarning: Boolean = false
+    val customFieldLimitWarning: Boolean = false,
+    val excludedNonClassCount: Int = 0,
+    val excludedClassValues: List<String> = emptyList()
 )
 
 fun defaultSelectedColumnKeys(
@@ -998,6 +1001,8 @@ object CsvImportAssistant {
 
         val validatedRows = mutableListOf<CsvValidatedRow>()
         var classLimitErrorCount = 0
+        var excludedNonClassCount = 0
+        val excludedClassValueSet = linkedSetOf<String>()
         val dataRows = parsedRows.drop(1)
 
         dataRows.forEachIndexed { idx, r ->
@@ -1006,6 +1011,7 @@ object CsvImportAssistant {
             val messages = mutableListOf<String>()
             var hasError = false
             var hasWarning = false
+            var isExcludedNonClass = false
 
             var rawClsText = ""
             var parsedCls: Int? = null
@@ -1030,11 +1036,25 @@ object CsvImportAssistant {
                             if (parsedCls == null && !Repo.isBlankOrDashPlaceholder(raw)) {
                                 hasError = true
                                 val normKey = ClassResolver.normalizeLookupKey(raw)
-                                if (normKey in classPlan.limitReachedRaws) {
-                                    classLimitErrorCount++
-                                    messages.add("কাস্টম শ্রেণির সর্বোচ্চ সীমা (১৫টি) পূর্ণ হওয়ায় \"$raw\" যোগ করা যাচ্ছে না")
-                                } else {
-                                    messages.add("অবৈধ শ্রেণি: \"$raw\"")
+                                val bucketKey = ClassResolver.canonicalBucketForNewClass(raw)?.canonicalKey
+                                val isUserRejected = bucketKey != null &&
+                                    classOverrides[bucketKey] is ClassResolver.ClassOverride.Reject
+                                val isAutoStatusExcluded = ClassResolver.isNonClassStatus(raw) ||
+                                    normKey in classPlan.autoExcludedStatusRaws
+                                when {
+                                    isUserRejected || isAutoStatusExcluded -> {
+                                        isExcludedNonClass = true
+                                        excludedNonClassCount++
+                                        excludedClassValueSet.add(raw)
+                                        messages.add("শ্রেণি নয় — বাদ দেওয়া হয়েছে: \"$raw\" (ইমপোর্ট হবে না ও নতুন শ্রেণি তৈরি হবে না)")
+                                    }
+                                    normKey in classPlan.limitReachedRaws -> {
+                                        classLimitErrorCount++
+                                        messages.add("কাস্টম শ্রেণির সর্বোচ্চ সীমা (১৫টি) পূর্ণ হওয়ায় \"$raw\" যোগ করা যাচ্ছে না")
+                                    }
+                                    else -> {
+                                        messages.add("অবৈধ শ্রেণি: \"$raw\"")
+                                    }
                                 }
                             }
                         }
@@ -1238,7 +1258,8 @@ object CsvImportAssistant {
                     messages = messages.distinct(),
                     rawCells = r,
                     resolvedClassLabel = resolvedClassLabel,
-                    isAutoCreatedClass = isAutoCreatedClass
+                    isAutoCreatedClass = isAutoCreatedClass,
+                    isExcludedNonClass = isExcludedNonClass
                 )
             )
         }
@@ -1254,7 +1275,9 @@ object CsvImportAssistant {
             hasMissingRollOrNameMapping = !hasRollOrNameMapping,
             autoCreatedClasses = classPlan.plannedClasses,
             classLimitErrorCount = classLimitErrorCount,
-            customFieldLimitWarning = customFieldLimitWarning
+            customFieldLimitWarning = customFieldLimitWarning,
+            excludedNonClassCount = excludedNonClassCount,
+            excludedClassValues = excludedClassValueSet.toList()
         )
     }
 

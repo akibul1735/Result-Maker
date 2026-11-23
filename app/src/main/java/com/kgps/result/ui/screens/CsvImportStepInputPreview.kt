@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -27,7 +28,9 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.CheckCircle
+import androidx.compose.material.icons.rounded.Class
 import androidx.compose.material.icons.rounded.ContentPaste
+import androidx.compose.material.icons.rounded.DoNotDisturbOn
 import androidx.compose.material.icons.rounded.ErrorOutline
 import androidx.compose.material.icons.rounded.ExpandLess
 import androidx.compose.material.icons.rounded.ExpandMore
@@ -63,6 +66,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.kgps.result.ClassResolver
 import com.kgps.result.CsvRowStatus
 import com.kgps.result.CsvValidatedRow
 import com.kgps.result.CsvValidationReport
@@ -116,6 +120,8 @@ fun CsvStepInputAndMapping(
     sharedWorkingDaysByTerm: Map<Int, String> = emptyMap(),
     onSharedWorkingDaysChange: (Map<Int, String>) -> Unit = {},
     settings: Settings,
+    classOverrides: Map<String, ClassResolver.ClassOverride> = emptyMap(),
+    onClassOverridesChange: (Map<String, ClassResolver.ClassOverride>) -> Unit = {},
     onPickFile: () -> Unit,
     onPasteClipboard: () -> Unit,
     onGoToPreview: () -> Unit
@@ -127,6 +133,21 @@ fun CsvStepInputAndMapping(
     val newCols = columns.count { it.isNew }
     val matchedCols = columns.size - newCols
     val clsSubjects = remember(fallbackCls, settings.customClasses) { subjectsFor(fallbackCls.coerceIn(1, 20), "ইসলাম", settings) }
+    val clsColIndices = remember(columns) {
+        columns.filter { it.targetType == "standard" && it.targetKey == "cls" }.map { it.colIndex }
+    }
+    val rawClsValues = remember(parsedRows, clsColIndices) {
+        if (parsedRows.size < 2 || clsColIndices.isEmpty()) emptyList()
+        else parsedRows.drop(1).flatMap { r ->
+            clsColIndices.mapNotNull { idx -> r.getOrNull(idx)?.trim()?.takeIf { it.isNotBlank() } }
+        }
+    }
+    val detectedUnregisteredClasses = remember(rawClsValues, settings.customClasses) {
+        ClassResolver.detectUnregisteredClasses(rawClsValues, settings.customClasses)
+    }
+    val excludedNonClasses = remember(rawClsValues, settings.customClasses, classOverrides) {
+        ClassResolver.detectExcludedNonClasses(rawClsValues, settings.customClasses, classOverrides)
+    }
 
     Column(
         modifier = Modifier
@@ -322,6 +343,19 @@ fun CsvStepInputAndMapping(
                                 modifier = Modifier.testTag("csv_fallback_cls_$c")
                             )
                         }
+                    }
+
+                    if (excludedNonClasses.isNotEmpty()) {
+                        ExcludedNonClassSummaryBanner(excludedGroups = excludedNonClasses)
+                    }
+                    if (detectedUnregisteredClasses.isNotEmpty()) {
+                        UnregisteredClassesResolutionCard(
+                            detectedUnregisteredClasses = detectedUnregisteredClasses,
+                            settings = settings,
+                            classOverrides = classOverrides,
+                            onClassOverridesChange = onClassOverridesChange,
+                            tagPrefix = "csv"
+                        )
                     }
 
                     Text("প্রান্তিক (শিরোনামে না থাকলে একক প্রান্তিক কলামের জন্য):", fontSize = 11.5.sp, color = SlateMuted)
@@ -830,6 +864,36 @@ fun CsvStepPreviewAndSave(
             }
         }
 
+        if (report.excludedNonClassCount > 0) {
+            Surface(
+                color = SlateBg,
+                shape = RoundedCornerShape(10.dp),
+                border = BorderStroke(1.dp, SlateOutline),
+                modifier = Modifier.testTag("csv_excluded_non_class_banner")
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(10.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(
+                        Icons.Rounded.DoNotDisturbOn,
+                        contentDescription = null,
+                        tint = SlateMuted,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Text(
+                        "শ্রেণি নয় — ${bn(report.excludedNonClassCount.toString())}টি সারি বাদ দেওয়া হয়েছে (${report.excludedClassValues.joinToString(", ")})। এগুলো নতুন শ্রেণি হিসেবে যুক্ত হবে না এবং ইমপোর্ট হবে না।",
+                        fontSize = 11.5.sp,
+                        color = SlateText,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                }
+            }
+        }
+
         if (report.customFieldLimitWarning) {
             Surface(
                 color = AmberBg,
@@ -952,22 +1016,29 @@ private fun CsvPreviewRowCard(
     onToggle: () -> Unit
 ) {
     val isError = row.status == CsvRowStatus.ERROR
-    val bg = when (row.status) {
-        CsvRowStatus.ERROR -> RoseBg
-        CsvRowStatus.WARNING -> AmberBg
-        CsvRowStatus.VALID -> if (selected) TealContainer.copy(alpha = 0.4f) else Color.White
+    val isExcluded = row.isExcludedNonClass
+    val bg = when {
+        isExcluded -> SlateBg
+        row.status == CsvRowStatus.ERROR -> RoseBg
+        row.status == CsvRowStatus.WARNING -> AmberBg
+        selected -> TealContainer.copy(alpha = 0.4f)
+        else -> Color.White
     }
-    val border = when (row.status) {
-        CsvRowStatus.ERROR -> RoseDanger.copy(alpha = 0.4f)
-        CsvRowStatus.WARNING -> if (selected) AmberNotice else AmberBorder
-        CsvRowStatus.VALID -> if (selected) TealPrimary else SlateOutline
+    val border = when {
+        isExcluded -> SlateOutline
+        row.status == CsvRowStatus.ERROR -> RoseDanger.copy(alpha = 0.4f)
+        row.status == CsvRowStatus.WARNING -> if (selected) AmberNotice else AmberBorder
+        selected -> TealPrimary
+        else -> SlateOutline
     }
     val badgeText = when {
+        isExcluded -> "বাদ"
         isError -> "ত্রুটি"
         row.isUpdate -> "হালনাগাদ"
         else -> "নতুন"
     }
     val badgeColor = when {
+        isExcluded -> SlateMuted
         isError -> RoseDanger
         row.isUpdate -> TealPrimary
         else -> EmeraldGrade
@@ -1061,8 +1132,16 @@ private fun CsvPreviewRowCard(
                 }
 
                 if (row.messages.isNotEmpty()) {
-                    val msgIcon = if (isError) Icons.Rounded.ErrorOutline else Icons.Rounded.WarningAmber
-                    val msgColor = if (isError) RoseDanger else AmberNotice
+                    val msgIcon = when {
+                        isExcluded -> Icons.Rounded.DoNotDisturbOn
+                        isError -> Icons.Rounded.ErrorOutline
+                        else -> Icons.Rounded.WarningAmber
+                    }
+                    val msgColor = when {
+                        isExcluded -> SlateText
+                        isError -> RoseDanger
+                        else -> AmberNotice
+                    }
                     row.messages.forEach { msg ->
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
@@ -1079,6 +1158,317 @@ private fun CsvPreviewRowCard(
                     ) {
                         Icon(Icons.Rounded.CheckCircle, contentDescription = null, tint = EmeraldGrade, modifier = Modifier.size(13.dp))
                         Text("সারি ${bn(row.lineNumber.toString())} · সব তথ্য বৈধ", fontSize = 10.5.sp, color = EmeraldGrade)
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+internal fun ExcludedNonClassSummaryBanner(
+    excludedGroups: List<ClassResolver.ExcludedNonClassGroup>
+) {
+    if (excludedGroups.isEmpty()) return
+    val autoGroups = excludedGroups.filter { it.isAutoStatus }
+    if (autoGroups.isEmpty()) return
+    val totalAutoRows = autoGroups.sumOf { it.rowCount }
+    val labels = autoGroups.joinToString(", ") { "${it.displayLabel} (${bn(it.rowCount.toString())})" }
+    Surface(
+        color = SlateBg,
+        shape = RoundedCornerShape(10.dp),
+        border = BorderStroke(1.dp, SlateOutline),
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag("excluded_non_class_auto_banner")
+    ) {
+        Row(
+            modifier = Modifier.padding(10.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.Top
+        ) {
+            Icon(
+                Icons.Rounded.DoNotDisturbOn,
+                contentDescription = null,
+                tint = SlateMuted,
+                modifier = Modifier.size(18.dp)
+            )
+            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text(
+                    "শ্রেণি নয় — ${bn(totalAutoRows.toString())}টি সারি স্বয়ংক্রিয়ভাবে বাদ দেওয়া হয়েছে",
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = SlateText
+                )
+                Text(
+                    "শনাক্তকৃত মান: $labels — এগুলো নতুন শ্রেণি হিসেবে তৈরি হবে না ও এই সারিগুলো ইমপোর্ট থেকে বাদ যাবে।",
+                    fontSize = 11.sp,
+                    color = SlateMuted
+                )
+            }
+        }
+    }
+}
+
+@Composable
+internal fun UnregisteredClassesResolutionCard(
+    detectedUnregisteredClasses: List<ClassResolver.DetectedUnregisteredClass>,
+    settings: Settings,
+    classOverrides: Map<String, ClassResolver.ClassOverride>,
+    onClassOverridesChange: (Map<String, ClassResolver.ClassOverride>) -> Unit,
+    tagPrefix: String
+) {
+    if (detectedUnregisteredClasses.isEmpty()) return
+    val activeClasses = remember(settings.customClasses) { activeSchoolClasses(settings) }
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = TealSoft),
+        border = BorderStroke(1.dp, TealPrimary.copy(alpha = 0.35f)),
+        shape = RoundedCornerShape(12.dp)
+    ) {
+        Column(
+            modifier = Modifier.padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                Icon(Icons.Rounded.Class, contentDescription = null, tint = TealDark, modifier = Modifier.size(18.dp))
+                Text(
+                    "অ্যাপে না থাকা শ্রেণি / মান শনাক্ত (${bn(detectedUnregisteredClasses.size.toString())}টি)",
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = TealDark
+                )
+            }
+            Text(
+                "একই শ্রেণির বিভিন্ন বানান বা রূপ একসাথে দলবদ্ধ করা হয়েছে। চাইলে নতুন শ্রেণি হিসেবে যুক্ত করুন, বিদ্যমান শ্রেণির সাথে মিলান, অথবা শ্রেণি না হলে 'বাদ দিন' চাপুন:",
+                fontSize = 11.sp,
+                color = SlateText
+            )
+
+            detectedUnregisteredClasses.forEach { det ->
+                val currentOv = classOverrides[det.canonicalKey]
+                val isRejected = currentOv is ClassResolver.ClassOverride.Reject
+                val mappedId = (currentOv as? ClassResolver.ClassOverride.MapToExisting)?.classId
+                val customOv = currentOv as? ClassResolver.ClassOverride.CreateCustom
+                val displayName = customOv?.nameBn ?: det.suggestedNameBn
+                val displayShort = customOv?.shortBn ?: det.suggestedShortBn
+                val displayTier = customOv?.syllabusTier ?: det.suggestedTier
+                var mapMenuOpen by remember(det.canonicalKey) { mutableStateOf(false) }
+
+                Surface(
+                    color = if (isRejected) SlateBg else Color.White,
+                    shape = RoundedCornerShape(10.dp),
+                    border = BorderStroke(1.dp, if (isRejected) RoseDanger.copy(alpha = 0.35f) else SlateOutline)
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(10.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    if (isRejected) "$displayName (বাদ)" else displayName,
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 13.sp,
+                                    color = if (isRejected) SlateMuted else TealDark
+                                )
+                                Text(
+                                    "পাওয়া মান: ${det.rawVariants.joinToString(", ")} (${bn(det.rowCount.toString())} সারি)",
+                                    fontSize = 11.sp,
+                                    color = SlateMuted
+                                )
+                            }
+                            Row(
+                                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                FilterChip(
+                                    selected = isRejected,
+                                    onClick = {
+                                        val next = classOverrides.toMutableMap()
+                                        if (isRejected) {
+                                            next.remove(det.canonicalKey)
+                                        } else {
+                                            next[det.canonicalKey] = ClassResolver.ClassOverride.Reject
+                                        }
+                                        onClassOverridesChange(next)
+                                    },
+                                    colors = appFilterChipColors(),
+                                    border = appFilterChipBorder(isRejected),
+                                    label = {
+                                        Text(
+                                            if (isRejected) "বাদ হয়েছে" else "✕ বাদ দিন",
+                                            fontSize = 11.sp,
+                                            fontWeight = if (isRejected) FontWeight.Bold else FontWeight.SemiBold,
+                                            color = if (isRejected) RoseDanger else SlateText
+                                        )
+                                    },
+                                    modifier = Modifier
+                                        .heightIn(min = 48.dp)
+                                        .testTag("${tagPrefix}_class_reject_btn_${det.canonicalKey}")
+                                )
+
+                                Box {
+                                    OutlinedButton(
+                                        onClick = { mapMenuOpen = true },
+                                        shape = RoundedCornerShape(8.dp),
+                                        modifier = Modifier
+                                            .heightIn(min = 48.dp)
+                                            .testTag("${tagPrefix}_class_override_btn_${det.canonicalKey}")
+                                    ) {
+                                        val modeLabel = when {
+                                            isRejected -> "বাদ ▾"
+                                            mappedId != null -> {
+                                                val target = activeClasses.find { it.id == mappedId }
+                                                "মিলান: ${target?.shortBn ?: mappedId} ▾"
+                                            }
+                                            else -> "+ নতুন শ্রেণি ▾"
+                                        }
+                                        Text(modeLabel, fontSize = 11.sp)
+                                    }
+                                    DropdownMenu(
+                                        expanded = mapMenuOpen,
+                                        onDismissRequest = { mapMenuOpen = false }
+                                    ) {
+                                        DropdownMenuItem(
+                                            text = {
+                                                Text(
+                                                    "+ নতুন শ্রেণি হিসেবে তৈরি করুন ($displayName)",
+                                                    fontSize = 12.sp,
+                                                    fontWeight = FontWeight.SemiBold
+                                                )
+                                            },
+                                            onClick = {
+                                                val next = classOverrides.toMutableMap()
+                                                next[det.canonicalKey] = ClassResolver.ClassOverride.CreateCustom(
+                                                    nameBn = displayName,
+                                                    shortBn = displayShort,
+                                                    syllabusTier = displayTier
+                                                )
+                                                onClassOverridesChange(next)
+                                                mapMenuOpen = false
+                                            }
+                                        )
+                                        DropdownMenuItem(
+                                            text = {
+                                                Text(
+                                                    "✕ শ্রেণি নয় — বাদ দিন (ইমপোর্ট হবে না)",
+                                                    fontSize = 12.sp,
+                                                    fontWeight = FontWeight.SemiBold,
+                                                    color = RoseDanger
+                                                )
+                                            },
+                                            onClick = {
+                                                val next = classOverrides.toMutableMap()
+                                                next[det.canonicalKey] = ClassResolver.ClassOverride.Reject
+                                                onClassOverridesChange(next)
+                                                mapMenuOpen = false
+                                            }
+                                        )
+                                        HorizontalDivider()
+                                        activeClasses.forEach { existingCls ->
+                                            DropdownMenuItem(
+                                                text = {
+                                                    Text(
+                                                        "বিদ্যমান শ্রেণি: ${existingCls.nameBn} (${existingCls.shortBn})",
+                                                        fontSize = 12.sp
+                                                    )
+                                                },
+                                                onClick = {
+                                                    val next = classOverrides.toMutableMap()
+                                                    next[det.canonicalKey] = ClassResolver.ClassOverride.MapToExisting(existingCls.id)
+                                                    onClassOverridesChange(next)
+                                                    mapMenuOpen = false
+                                                }
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        if (isRejected) {
+                            Text(
+                                "শ্রেণি হিসেবে যুক্ত হবে না — এই মান থাকা ${bn(det.rowCount.toString())}টি সারি ইমপোর্ট থেকে বাদ যাবে।",
+                                fontSize = 11.sp,
+                                color = RoseDanger,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        } else if (mappedId == null) {
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                OutlinedTextField(
+                                    value = displayShort,
+                                    onValueChange = { sVal ->
+                                        val next = classOverrides.toMutableMap()
+                                        next[det.canonicalKey] = ClassResolver.ClassOverride.CreateCustom(
+                                            nameBn = displayName,
+                                            shortBn = sVal.take(12),
+                                            syllabusTier = displayTier
+                                        )
+                                        onClassOverridesChange(next)
+                                    },
+                                    label = { Text("সংক্ষিপ্ত নাম", fontSize = 10.sp) },
+                                    singleLine = true,
+                                    modifier = Modifier.weight(1f)
+                                )
+                                OutlinedTextField(
+                                    value = displayName,
+                                    onValueChange = { nVal ->
+                                        val next = classOverrides.toMutableMap()
+                                        next[det.canonicalKey] = ClassResolver.ClassOverride.CreateCustom(
+                                            nameBn = nVal.take(40),
+                                            shortBn = displayShort,
+                                            syllabusTier = displayTier
+                                        )
+                                        onClassOverridesChange(next)
+                                    },
+                                    label = { Text("পূর্ণ নাম", fontSize = 10.sp) },
+                                    singleLine = true,
+                                    modifier = Modifier.weight(1.4f)
+                                )
+                            }
+                            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                FilterChip(
+                                    selected = displayTier <= 2,
+                                    onClick = {
+                                        val next = classOverrides.toMutableMap()
+                                        next[det.canonicalKey] = ClassResolver.ClassOverride.CreateCustom(
+                                            nameBn = displayName,
+                                            shortBn = displayShort,
+                                            syllabusTier = 1
+                                        )
+                                        onClassOverridesChange(next)
+                                    },
+                                    colors = appFilterChipColors(),
+                                    border = appFilterChipBorder(displayTier <= 2),
+                                    label = { Text("১ম–২য় ধরন (সমন্বিত)", fontSize = 11.sp) }
+                                )
+                                FilterChip(
+                                    selected = displayTier > 2,
+                                    onClick = {
+                                        val next = classOverrides.toMutableMap()
+                                        next[det.canonicalKey] = ClassResolver.ClassOverride.CreateCustom(
+                                            nameBn = displayName,
+                                            shortBn = displayShort,
+                                            syllabusTier = 3
+                                        )
+                                        onClassOverridesChange(next)
+                                    },
+                                    colors = appFilterChipColors(),
+                                    border = appFilterChipBorder(displayTier > 2),
+                                    label = { Text("৩য়–৫ম ধরন (বিজ্ঞান/বাওবি)", fontSize = 11.sp) }
+                                )
+                            }
+                        }
                     }
                 }
             }
