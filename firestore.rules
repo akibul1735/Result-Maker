@@ -449,12 +449,12 @@ service cloud.firestore {
                          canDeleteStudentDoc(schoolData(schoolId), existing());
       }
 
-      // 9. Smart Blank Sheet Templates Subcollection (Thin QR & Barcode metadata)
+      // 9. Smart Blank Sheet Templates Subcollection (Thin QR & Offline Pre-cache metadata)
       match /sheetTemplates/{templateId} {
         allow get: if isValidId(schoolId) &&
                       isValidTemplateId(templateId) &&
                       isSchoolMember(schoolId);
-        allow list: if false;
+        allow list: if isValidId(schoolId) && isSchoolMember(schoolId);
 
         allow create: if isSignedIn() &&
                          isValidId(schoolId) &&

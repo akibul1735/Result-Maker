@@ -1062,7 +1062,7 @@ private enum class SheetCodeChannel(
     val shortTag: String,
     val titleBn: String
 ) {
-    QR_1(shortTag = "১", titleBn = "QR 1 · স্মার্ট ID (বাম কোণা)"),
+    QR_1(shortTag = "১", titleBn = "QR 1 · স্মার্ট ID (উপরে/নিচে-বাম)"),
     QR_2(shortTag = "২", titleBn = "QR 2 · অফলাইন কাঠামো (ডান কোণা)"),
     BAR_1(shortTag = "বার", titleBn = "Bar 1 · নিচের বারকোড (Code-128)")
 }
@@ -1332,7 +1332,7 @@ private fun SheetDetectedChannelDetailCard(
                     } else {
                         val otherHint = buildOtherDetectedFallbackHint(detection, fallbackSource)
                         Text(
-                            text = "ছবির উপরের বাম কোণায় পাতলা QR 1 পড়া যায়নি।$otherHint",
+                            text = "ছবির উপরের বাম বা নিচের বাম কোণায় স্মার্ট ID (KT1) QR পড়া যায়নি।$otherHint",
                             fontSize = 9.5.sp,
                             color = SlateMuted
                         )

@@ -140,6 +140,7 @@ class ResultMakerViewModel(
     private val sampleAiRepository = PlaceholderAiRepository()
     private val sheetTemplateCache = SheetTemplateCache(appContext)
     private val syncedTemplateIdsInSession = mutableSetOf<String>()
+    private val preloadedTemplateSchoolKeys = mutableSetOf<String>()
     private var originalMarksheetBitmap: Bitmap? = null
 
     val localSeedCount: Int get() = initialLocalSnapshot?.first?.size ?: 0
@@ -451,6 +452,34 @@ class ResultMakerViewModel(
                     if (school != null) {
                         autoBackupManager.refreshLocalSnapshots(school.id)
                         autoBackupManager.refreshCsvSnapshots(school.id)
+                    }
+                }
+        }
+
+        // Pre-sync all school blank sheet templates from Firestore into local offline cache
+        viewModelScope.launch {
+            combine(
+                activeSchool.map { it?.id }.distinctUntilChanged(),
+                _cloudRetryTrigger
+            ) { schoolId, retry -> schoolId to retry }
+                .collectLatest { (schoolId, retry) ->
+                    val cleanId = schoolId?.trim().orEmpty()
+                    if (cleanId.isEmpty()) return@collectLatest
+                    val sessionKey = "$cleanId|$retry"
+                    val alreadyPreloaded = synchronized(preloadedTemplateSchoolKeys) {
+                        preloadedTemplateSchoolKeys.contains(sessionKey)
+                    }
+                    if (alreadyPreloaded) return@collectLatest
+                    withContext(Dispatchers.IO) {
+                        val res = cloudRepo.fetchAllSheetTemplates(cleanId)
+                        if (res.isSuccess) {
+                            res.getOrNull()?.takeIf { it.isNotEmpty() }?.let { templates ->
+                                sheetTemplateCache.putAll(templates)
+                            }
+                            synchronized(preloadedTemplateSchoolKeys) {
+                                preloadedTemplateSchoolKeys.add(sessionKey)
+                            }
+                        }
                     }
                 }
         }

@@ -212,7 +212,26 @@ class SheetQrCodecTest {
         assertTrue(first.templateId.isNotBlank())
         assertTrue(first.thinQrPayload.startsWith("KT1:"))
         assertTrue(first.qrPayload.startsWith("K2/"))
+        assertEquals(BlankBottomCodeStyle.THIN_QR, first.bottomCodeStyle)
+        assertEquals(first.thinQrPayload, first.bottomThinQrPayload)
         assertTrue(first.barcodeText.contains(first.templateId))
+
+        // Switching bottom style to CODE_128 disables bottomThinQrPayload while preserving barcodeText
+        val code128Pages = BlankSheetPlanner.buildPages(
+            students = listOf(Student(id = "s1", cls = 5, roll = 1, name = "সাদিয়া")),
+            settings = Settings(),
+            config = BlankSheetConfig(
+                selectedClass = 5,
+                term = 1,
+                columns = traitsCols,
+                includeBarcode = true,
+                bottomCodeStyle = BlankBottomCodeStyle.CODE_128
+            ),
+            allowedClassIds = listOf(1, 2, 3, 4, 5)
+        )
+        assertEquals(BlankBottomCodeStyle.CODE_128, code128Pages.first().bottomCodeStyle)
+        assertEquals("", code128Pages.first().bottomThinQrPayload)
+        assertTrue(code128Pages.first().barcodeText.contains(code128Pages.first().templateId))
 
         val decodedTraits = SheetQrCodec.decodePayload(first.qrPayload)
         assertNotNull(decodedTraits)
@@ -240,6 +259,7 @@ class SheetQrCodecTest {
         assertTrue(noCodePages.first().templateId.isNotBlank())
         assertEquals("", noCodePages.first().thinQrPayload)
         assertEquals("", noCodePages.first().qrPayload)
+        assertEquals("", noCodePages.first().bottomThinQrPayload)
         assertEquals("", noCodePages.first().barcodeText)
     }
 

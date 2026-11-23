@@ -65,10 +65,12 @@ object SheetQrScanner {
     private val qrTopLeftRegion = CropRegion(0.00f, 0.00f, 0.44f, 0.34f)
     private val qrTopRightRegion = CropRegion(0.56f, 0.00f, 1.00f, 0.34f)
     private val qrSecondaryRegions = listOf(
+        CropRegion(0.00f, 0.74f, 0.36f, 1.00f), // নিচে-বাম ছোট স্মার্ট ID QR (সবচেয়ে কাছের ক্রপ)
+        CropRegion(0.00f, 0.62f, 0.46f, 0.96f), // নিচে বাড়তি মার্জিনসহ নিচে-বাম অঞ্চল
+        CropRegion(0.64f, 0.74f, 1.00f, 1.00f), // উল্টানো ছবির জন্য নিচে-ডান
+        CropRegion(0.54f, 0.62f, 1.00f, 1.00f),
         CropRegion(0.00f, 0.00f, 0.50f, 0.42f),
-        CropRegion(0.50f, 0.00f, 1.00f, 0.42f),
-        CropRegion(0.00f, 0.64f, 0.46f, 1.00f),
-        CropRegion(0.54f, 0.64f, 1.00f, 1.00f)
+        CropRegion(0.50f, 0.00f, 1.00f, 0.42f)
     )
 
     private val barcodePrimaryRegions = listOf(

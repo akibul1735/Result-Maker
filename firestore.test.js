@@ -527,9 +527,12 @@ test("School members can sync and fetch thin-QR sheetTemplates while outsiders a
   await assertSucceeds(aliceTplRef.set(tplPayload(ALICE_UID)));
   await assertSucceeds(bobTplRef.get());
 
-  // Outsider Eve cannot get it; list query is disallowed even for members
+  // Alice and Bob (school members) can list templates for offline pre-cache; outsider Eve and unauthenticated fail
+  await assertSucceeds(aliceDb.collection("schools").doc("school_tpl").collection("sheetTemplates").limit(200).get());
+  await assertSucceeds(bobDb.collection("schools").doc("school_tpl").collection("sheetTemplates").limit(200).get());
   await assertFails(eveTplRef.get());
-  await assertFails(aliceDb.collection("schools").doc("school_tpl").collection("sheetTemplates").get());
+  await assertFails(eveDb.collection("schools").doc("school_tpl").collection("sheetTemplates").get());
+  await assertFails(unauthDb.collection("schools").doc("school_tpl").collection("sheetTemplates").get());
 
   // Bob cannot delete Alice's template, but admin Alice can
   await assertFails(bobTplRef.delete());

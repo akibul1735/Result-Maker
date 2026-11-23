@@ -1392,6 +1392,29 @@ class SchoolCloudRepository(
         }
     }
 
+    suspend fun fetchAllSheetTemplates(
+        schoolId: String,
+        limitCount: Long = 200L
+    ): Result<List<BlankSheetQrMeta>> {
+        if (auth.currentUser == null) return Result.success(emptyList())
+        val cleanSchoolId = schoolId.trim()
+        if (cleanSchoolId.isBlank()) return Result.success(emptyList())
+        val path = "schools/$cleanSchoolId/sheetTemplates"
+        return try {
+            val snap = db.collection("schools").document(cleanSchoolId)
+                .collection("sheetTemplates")
+                .limit(limitCount.coerceIn(1L, 250L))
+                .get()
+                .await()
+            Result.success(snap.documents.mapNotNull { parseSheetTemplateDoc(it) })
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.LIST, path)
+            Result.failure(e)
+        }
+    }
+
     private fun parseSheetTemplateDoc(doc: DocumentSnapshot): BlankSheetQrMeta? {
         val cls = (doc.get("cls") as? Number)?.toInt()?.takeIf { it in 1..20 } ?: return null
         val sub = doc.getString("subjectKey")?.trim()?.takeIf { it.isNotEmpty() }

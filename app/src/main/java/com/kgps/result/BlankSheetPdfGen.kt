@@ -203,8 +203,14 @@ object BlankSheetPdfGen {
         val qrBoxSize = 42f
         val qrTop = marginTop - 3f
 
-        fun drawQrBox(matrix: com.google.zxing.common.BitMatrix, qrLeft: Float) {
-            val qrBox = RectF(qrLeft, qrTop, qrLeft + qrBoxSize, qrTop + qrBoxSize)
+        fun drawQrBox(
+            matrix: com.google.zxing.common.BitMatrix,
+            qrLeft: Float,
+            topY: Float = qrTop,
+            boxSize: Float = qrBoxSize,
+            quietPad: Float = 2.8f
+        ) {
+            val qrBox = RectF(qrLeft, topY, qrLeft + boxSize, topY + boxSize)
             val whitePaint = Paint().apply {
                 color = Color.WHITE
                 style = Paint.Style.FILL
@@ -221,22 +227,21 @@ object BlankSheetPdfGen {
             c.drawRoundRect(qrBox, 2f, 2f, whitePaint)
             c.drawRoundRect(qrBox, 2f, 2f, qrFramePaint)
 
-            val quietPad = 2.8f
             val matrixW = matrix.width.coerceAtLeast(1)
             val matrixH = matrix.height.coerceAtLeast(1)
-            val drawArea = qrBoxSize - quietPad * 2f
+            val drawArea = boxSize - quietPad * 2f
             val modW = drawArea / matrixW.toFloat()
             val modH = drawArea / matrixH.toFloat()
             val originX = qrLeft + quietPad
-            val originY = qrTop + quietPad
+            val originY = topY + quietPad
             for (my in 0 until matrixH) {
-                val topY = originY + my * modH
-                val bottomY = originY + (my + 1) * modH
+                val cellTopY = originY + my * modH
+                val cellBottomY = originY + (my + 1) * modH
                 for (mx in 0 until matrixW) {
                     if (matrix.get(mx, my)) {
                         val leftX = originX + mx * modW
                         val rightX = originX + (mx + 1) * modW
-                        c.drawRect(leftX, topY, rightX, bottomY, qrModulePaint)
+                        c.drawRect(leftX, cellTopY, rightX, cellBottomY, qrModulePaint)
                     }
                 }
             }
@@ -382,8 +387,24 @@ object BlankSheetPdfGen {
         }
 
         // 3. Table Geometry
-        val barcodeMatrix = if (page.barcodeText.isNotBlank()) SheetQrCodec.encodeBarcodeMatrix(page.barcodeText) else null
-        val footerReservedH = if (barcodeMatrix != null) 56f else 22f
+        val bottomQrMatrix = if (
+            page.bottomCodeStyle == BlankBottomCodeStyle.THIN_QR &&
+            page.bottomThinQrPayload.isNotBlank()
+        ) {
+            SheetQrCodec.encodeQrMatrix(page.bottomThinQrPayload)
+        } else null
+        val barcodeMatrix = if (
+            page.bottomCodeStyle == BlankBottomCodeStyle.CODE_128 &&
+            bottomQrMatrix == null &&
+            page.barcodeText.isNotBlank()
+        ) {
+            SheetQrCodec.encodeBarcodeMatrix(page.barcodeText)
+        } else null
+        val footerReservedH = when {
+            bottomQrMatrix != null -> 46f
+            barcodeMatrix != null -> 56f
+            else -> 22f
+        }
         val tableBottomLimit = pageH - marginBottom - footerReservedH
         val hasMaxSubHeader = page.showSubjectMaxInHeader && cols.any { col ->
             BlankSheetCatalog.resolveMaxHint(page.cls, page.subjectKey, col.compKey) != null
@@ -576,10 +597,27 @@ object BlankSheetPdfGen {
 
         c.drawRect(marginX, tableTop, marginX + contentW, curY, headerStrokePaint)
 
-        // 6. Optional Code-128 Barcode + Monochrome Footer Line
+        // 6. Optional Bottom-Left Thin Cache/Cloud QR or Code-128 Barcode + Monochrome Footer Line
         val footerY = pageH - marginBottom + 2f
 
-        if (barcodeMatrix != null) {
+        if (bottomQrMatrix != null) {
+            val bottomQrSize = 31f
+            val bottomQrTop = footerY - 39f
+            drawQrBox(
+                matrix = bottomQrMatrix,
+                qrLeft = marginX,
+                topY = bottomQrTop,
+                boxSize = bottomQrSize,
+                quietPad = 2.2f
+            )
+            val infoX = marginX + bottomQrSize + 7f
+            val refLine = page.sheetRefCode.ifBlank { "REF:${page.barcodeText.substringBeforeLast('-')}" }
+            val refPaint = dualTextPaint(ctx, 7.1f, bold = true, bnFontId = fontId, enFontId = enFontId, color = 0xFF1A1A1A.toInt())
+            val idPaint = dualTextPaint(ctx, 6.4f, bold = false, bnFontId = fontId, enFontId = enFontId, color = 0xFF3A3A3A.toInt())
+            PdfGen.drawMixedText(c, refLine, infoX, bottomQrTop + 12f, refPaint, Paint.Align.LEFT)
+            val tidSuffix = page.templateId.takeIf { it.isNotBlank() }?.let { "ID: $it · " }.orEmpty()
+            PdfGen.drawMixedText(c, "${tidSuffix}অফলাইন ক্যাশ/ক্লাউড QR", infoX, bottomQrTop + 23f, idPaint, Paint.Align.LEFT)
+        } else if (barcodeMatrix != null) {
             val barH = 22f
             val barQuietX = 12f
             val maxAvailBarW = max(120f, contentW - barQuietX * 2f)
@@ -629,7 +667,7 @@ object BlankSheetPdfGen {
         PdfGen.drawMixedText(c, leftFooter, marginX, footerY, footerLeftPaint, Paint.Align.LEFT)
         PdfGen.drawMixedText(c, rightFooter, marginX + contentW, footerY, footerRightPaint, Paint.Align.RIGHT)
 
-        if (BlankSheetCatalog.isThreeTermAttendanceTraitsActive(cols)) {
+        if (BlankSheetCatalog.isThreeTermAttendanceTraitsActive(cols) || BlankSheetCatalog.isSingleTermAttendanceTraitsActive(cols)) {
             val legendText = "গুণাবলি: ক = উত্তম · খ = সন্তোষজনক · গ = উন্নতি প্রয়োজন"
             val legendPaint = dualTextPaint(ctx, 7.6f, bold = false, bnFontId = fontId, enFontId = enFontId, color = 0xFF333333.toInt())
             val leftW = PdfGen.measureMixedText(leftFooter, footerLeftPaint)

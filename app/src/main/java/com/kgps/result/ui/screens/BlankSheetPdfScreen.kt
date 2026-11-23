@@ -858,9 +858,31 @@ fun BlankSheetPdfScreen(
                                             onClick = { config = config.copy(includeBarcode = !config.includeBarcode) },
                                             colors = appFilterChipColors(),
                                             border = appFilterChipBorder(config.includeBarcode),
-                                            label = { Text("নিচে বারকোড", fontSize = 10.5.sp) },
+                                            label = { Text(config.bottomCodeStyle.labelBn, fontSize = 10.5.sp) },
                                             modifier = Modifier.testTag("blank_sheet_barcode_toggle")
                                         )
+                                        if (config.includeBarcode) {
+                                            FilterChip(
+                                                selected = config.bottomCodeStyle == com.kgps.result.BlankBottomCodeStyle.THIN_QR,
+                                                onClick = {
+                                                    val next = if (config.bottomCodeStyle == com.kgps.result.BlankBottomCodeStyle.THIN_QR) {
+                                                        com.kgps.result.BlankBottomCodeStyle.CODE_128
+                                                    } else {
+                                                        com.kgps.result.BlankBottomCodeStyle.THIN_QR
+                                                    }
+                                                    config = config.copy(bottomCodeStyle = next)
+                                                },
+                                                colors = appFilterChipColors(),
+                                                border = appFilterChipBorder(config.bottomCodeStyle == com.kgps.result.BlankBottomCodeStyle.THIN_QR),
+                                                label = {
+                                                    Text(
+                                                        if (config.bottomCodeStyle == com.kgps.result.BlankBottomCodeStyle.THIN_QR) "ধরন: ছোট QR" else "ধরন: বারকোড",
+                                                        fontSize = 10.5.sp
+                                                    )
+                                                },
+                                                modifier = Modifier.testTag("blank_sheet_bottom_style_toggle")
+                                            )
+                                        }
                                         FilterChip(
                                             selected = config.fillRemainingPageRows,
                                             onClick = { config = config.copy(fillRemainingPageRows = !config.fillRemainingPageRows) },

@@ -21,6 +21,11 @@ enum class BlankNumeralStyle(val shortLabelBn: String, val labelBn: String) {
     ENGLISH("English (123)", "ইংরেজি সংখ্যা (1, 2, 3)")
 }
 
+enum class BlankBottomCodeStyle(val labelBn: String) {
+    THIN_QR("নিচে ছোট QR"),
+    CODE_128("নিচে বারকোড")
+}
+
 data class BlankSheetColumn(
     val id: String,
     val titleBn: String,
@@ -459,7 +464,8 @@ data class BlankSheetConfig(
     val showSharedWorkingDaysHeader: Boolean = true,
     val workingDaysByTerm: Map<Int, String> = emptyMap(),
     val includeQrCode: Boolean = true,
-    val includeBarcode: Boolean = true
+    val includeBarcode: Boolean = true,
+    val bottomCodeStyle: BlankBottomCodeStyle = BlankBottomCodeStyle.THIN_QR
 )
 
 data class BlankSheetRow(
@@ -491,6 +497,8 @@ data class BlankSheetPageSpec(
     val templateId: String = "",
     val thinQrPayload: String = "",
     val qrPayload: String = "",
+    val bottomThinQrPayload: String = "",
+    val bottomCodeStyle: BlankBottomCodeStyle = BlankBottomCodeStyle.THIN_QR,
     val barcodeText: String = ""
 ) {
     val showSharedWorkingDaysStrip: Boolean
@@ -652,10 +660,13 @@ object BlankSheetPlanner {
                 )
             )
             val meta = SheetQrCodec.fromPageConfig(baseSpec, config.term)
+            val thinPayload = SheetQrCodec.encodeThinTemplateQr(meta.templateId)
             baseSpec.copy(
                 templateId = meta.templateId,
-                thinQrPayload = if (config.includeQrCode) SheetQrCodec.encodeThinTemplateQr(meta.templateId) else "",
+                thinQrPayload = if (config.includeQrCode) thinPayload else "",
                 qrPayload = if (config.includeQrCode) SheetQrCodec.encodePayload(meta) else "",
+                bottomThinQrPayload = if (config.includeBarcode && config.bottomCodeStyle == BlankBottomCodeStyle.THIN_QR) thinPayload else "",
+                bottomCodeStyle = config.bottomCodeStyle,
                 barcodeText = if (config.includeBarcode) {
                     SheetQrCodec.encodeBarcodeText(
                         cls = raw.cls,
