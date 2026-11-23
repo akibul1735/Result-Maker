@@ -60,6 +60,7 @@ import androidx.compose.ui.window.DialogProperties
 import androidx.core.content.FileProvider
 import com.kgps.result.BlankSheetCatalog
 import com.kgps.result.BlankSheetQrMeta
+import com.kgps.result.ClassResolver
 import com.kgps.result.CsvImportAssistant
 import com.kgps.result.CsvImportModule
 import com.kgps.result.CsvPromptConfig
@@ -324,13 +325,29 @@ fun SmartCsvImportDialog(
         )
     }
 
-    val validationReport = remember(parsedRows, columns, students, fallbackCls, sharedWorkingDaysByTerm) {
+    var classOverrides by remember(rawText, settings.customClasses) {
+        mutableStateOf<Map<String, ClassResolver.ClassOverride>>(emptyMap())
+    }
+
+    val validationReport = remember(
+        parsedRows,
+        columns,
+        students,
+        fallbackCls,
+        sharedWorkingDaysByTerm,
+        settings.customClasses,
+        settings.customFields,
+        classOverrides
+    ) {
         CsvImportAssistant.validateCsvData(
             parsedRows = parsedRows,
             columns = columns,
             existingStudents = students,
             fallbackCls = fallbackCls,
-            sharedWorkingDaysByTerm = sharedWorkingDaysByTerm
+            sharedWorkingDaysByTerm = sharedWorkingDaysByTerm,
+            customClasses = settings.customClasses,
+            classOverrides = classOverrides,
+            existingCustomFieldsCount = settings.customFields.size
         )
     }
 
@@ -374,7 +391,16 @@ fun SmartCsvImportDialog(
         }
     }
 
-    val finalSummary = remember(parsedRows, columns, selectedRowIndices, students, settings, fallbackCls, sharedWorkingDaysByTerm) {
+    val finalSummary = remember(
+        parsedRows,
+        columns,
+        selectedRowIndices,
+        students,
+        settings,
+        fallbackCls,
+        sharedWorkingDaysByTerm,
+        classOverrides
+    ) {
         CsvImportAssistant.buildFilteredImportSummary(
             parsedRows = parsedRows,
             columns = columns,
@@ -382,7 +408,8 @@ fun SmartCsvImportDialog(
             existingStudents = students,
             existingSettings = settings,
             fallbackCls = fallbackCls,
-            sharedWorkingDaysByTerm = sharedWorkingDaysByTerm
+            sharedWorkingDaysByTerm = sharedWorkingDaysByTerm,
+            classOverrides = classOverrides
         )
     }
 

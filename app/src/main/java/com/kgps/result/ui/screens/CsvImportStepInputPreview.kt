@@ -126,7 +126,7 @@ fun CsvStepInputAndMapping(
     val hasCodeFences = remember(rawText) { rawText.contains("```") }
     val newCols = columns.count { it.isNew }
     val matchedCols = columns.size - newCols
-    val clsSubjects = remember(fallbackCls, settings.customClasses) { subjectsFor(fallbackCls.coerceIn(1, 20), "ইসলাম") }
+    val clsSubjects = remember(fallbackCls, settings.customClasses) { subjectsFor(fallbackCls.coerceIn(1, 20), "ইসলাম", settings) }
 
     Column(
         modifier = Modifier
@@ -509,7 +509,7 @@ private fun CsvColumnMappingCard(
         "text" -> Repo.friendlyTextHeader(col.targetKey, com.kgps.result.CsvHeaderStyle.FRIENDLY_BN)
         else -> col.targetKey
     }
-    val clsSubs = remember(fallbackCls, settings.customClasses) { subjectsFor(fallbackCls.coerceIn(1, 20), "ইসলাম") }
+    val clsSubs = remember(fallbackCls, settings.customClasses) { subjectsFor(fallbackCls.coerceIn(1, 20), "ইসলাম", settings) }
     val activeSub = contextSubjectKey?.let { key -> clsSubs.find { it.key == key } } ?: clsSubs.first()
     val quickMarkTargets = remember(activeSub) {
         buildList {
@@ -788,6 +788,64 @@ fun CsvStepPreviewAndSave(
             }
         }
 
+        if (report.autoCreatedClasses.isNotEmpty()) {
+            Surface(
+                color = TealSoft,
+                shape = RoundedCornerShape(10.dp),
+                border = BorderStroke(1.dp, TealPrimary.copy(alpha = 0.35f))
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(10.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    Text(
+                        "অ্যাপের তালিকায় না থাকা নতুন শ্রেণি স্বয়ংক্রিয়ভাবে যুক্ত হবে (${bn(report.autoCreatedClasses.size.toString())}টি):",
+                        fontSize = 11.5.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = TealDark
+                    )
+                    FlowRow(
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        report.autoCreatedClasses.forEach { pc ->
+                            Surface(
+                                color = TealContainer,
+                                shape = RoundedCornerShape(6.dp),
+                                border = BorderStroke(1.dp, TealPrimary.copy(alpha = 0.3f))
+                            ) {
+                                Text(
+                                    "+ ${pc.nameBn} (${pc.shortBn})",
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = TealDark,
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        if (report.customFieldLimitWarning) {
+            Surface(
+                color = AmberBg,
+                shape = RoundedCornerShape(10.dp),
+                border = BorderStroke(1.dp, AmberBorder)
+            ) {
+                Text(
+                    "সতর্কতা: কাস্টম ফিল্ডের সর্বোচ্চ সীমা ৩০টি পূর্ণ হয়েছে — অতিরিক্ত নতুন কলাম স্কিপ হতে পারে।",
+                    fontSize = 11.5.sp,
+                    color = AmberNotice,
+                    fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.padding(10.dp)
+                )
+            }
+        }
+
         // Summary metrics strip
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -943,7 +1001,7 @@ private fun CsvPreviewRowCard(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    val clsStr = row.resolvedCls?.let { classShortBn(it) } ?: "?"
+                    val clsStr = row.resolvedClassLabel.ifBlank { row.resolvedCls?.let { classShortBn(it) } ?: "?" }
                     val rollStr = row.resolvedRoll?.let { "রোল ${bn(it.toString())}" } ?: "স্বয়ংক্রিয় রোল"
                     val nameStr = row.resolvedName.ifBlank { "(নাম নেই)" }
                     Text(
@@ -955,17 +1013,36 @@ private fun CsvPreviewRowCard(
                         overflow = TextOverflow.Ellipsis,
                         modifier = Modifier.weight(1f)
                     )
-                    Surface(
-                        color = badgeColor.copy(alpha = 0.14f),
-                        shape = RoundedCornerShape(6.dp)
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Text(
-                            badgeText,
-                            fontSize = 10.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = badgeColor,
-                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
-                        )
+                        if (row.isAutoCreatedClass) {
+                            Surface(
+                                color = TealContainer,
+                                shape = RoundedCornerShape(6.dp)
+                            ) {
+                                Text(
+                                    "নতুন শ্রেণি",
+                                    fontSize = 9.5.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = TealDark,
+                                    modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp)
+                                )
+                            }
+                        }
+                        Surface(
+                            color = badgeColor.copy(alpha = 0.14f),
+                            shape = RoundedCornerShape(6.dp)
+                        ) {
+                            Text(
+                                badgeText,
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = badgeColor,
+                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                            )
+                        }
                     }
                 }
 

@@ -102,7 +102,9 @@ data class CsvValidatedRow(
     val parsedMarksCount: Int,
     val parsedFieldsPreview: String,
     val messages: List<String>,
-    val rawCells: List<String>
+    val rawCells: List<String>,
+    val resolvedClassLabel: String = "",
+    val isAutoCreatedClass: Boolean = false
 )
 
 data class CsvValidationReport(
@@ -112,7 +114,10 @@ data class CsvValidationReport(
     val validUpdateCount: Int,
     val warningCount: Int,
     val errorCount: Int,
-    val hasMissingRollOrNameMapping: Boolean
+    val hasMissingRollOrNameMapping: Boolean,
+    val autoCreatedClasses: List<ClassResolver.PlannedCustomClass> = emptyList(),
+    val classLimitErrorCount: Int = 0,
+    val customFieldLimitWarning: Boolean = false
 )
 
 fun defaultSelectedColumnKeys(
@@ -913,13 +918,19 @@ object CsvImportAssistant {
         }
     }
 
+    @JvmOverloads
     fun validateCsvData(
         parsedRows: List<List<String>>,
         columns: List<Repo.CsvColMapping>,
         existingStudents: List<Student>,
         fallbackCls: Int,
-        sharedWorkingDaysByTerm: Map<Int, String> = emptyMap()
+        sharedWorkingDaysByTerm: Map<Int, String> = emptyMap(),
+        customClasses: List<CustomClassDef> = SchoolClassRegistry.currentCustom(),
+        classOverrides: Map<String, ClassResolver.ClassOverride> = emptyMap(),
+        existingCustomFieldsCount: Int = 0
     ): CsvValidationReport {
+        val createNewColsCount = columns.count { it.targetType == "create_new" }
+        val customFieldLimitWarning = existingCustomFieldsCount + createNewColsCount > 30
         if (parsedRows.size < 2 || columns.isEmpty()) {
             return CsvValidationReport(
                 rows = emptyList(),
@@ -928,13 +939,36 @@ object CsvImportAssistant {
                 validUpdateCount = 0,
                 warningCount = 0,
                 errorCount = 0,
-                hasMissingRollOrNameMapping = true
+                hasMissingRollOrNameMapping = true,
+                autoCreatedClasses = emptyList(),
+                classLimitErrorCount = 0,
+                customFieldLimitWarning = customFieldLimitWarning
             )
         }
 
         val hasRollOrNameMapping = columns.any {
             it.targetType == "standard" && (it.targetKey == "roll" || it.targetKey == "name")
         }
+
+        val clsColIndices = columns
+            .filter { it.targetType == "standard" && it.targetKey == "cls" }
+            .map { it.colIndex }
+        val rawClsValues = if (clsColIndices.isEmpty()) {
+            emptyList()
+        } else {
+            parsedRows.drop(1).flatMap { r ->
+                clsColIndices.mapNotNull { idx -> r.getOrNull(idx)?.trim()?.takeIf { it.isNotBlank() } }
+            }
+        }
+        val classPlan = ClassResolver.planForImport(
+            rawClassValues = rawClsValues,
+            existingCustomClasses = customClasses,
+            overrides = classOverrides
+        )
+        val tempCustomClasses = (customClasses + classPlan.plannedClasses.map { it.toCustomClassDef() })
+            .distinctBy { it.id }
+            .sortedBy { it.id }
+        val tempSettings = Settings(customClasses = tempCustomClasses)
 
         val existingPairs = existingStudents.map { it.cls to it.roll }.toSet()
         val seenPairsInCsv = mutableSetOf<Pair<Int, Int>>()
@@ -948,7 +982,10 @@ object CsvImportAssistant {
             columns.forEach { col ->
                 if (col.targetType == "standard") {
                     val raw = r.getOrNull(col.colIndex)?.trim().orEmpty()
-                    if (col.targetKey == "cls" && raw.isNotBlank()) clsVal = Repo.parseClassNum(raw)
+                    if (col.targetKey == "cls" && raw.isNotBlank()) {
+                        clsVal = classPlan.resolve(raw)
+                            ?: ClassResolver.resolveExistingClassId(raw, tempCustomClasses, allowLegacyFallbackIds = false)
+                    }
                     if (col.targetKey == "roll" && raw.isNotBlank()) rollVal = fromBn(raw).toIntOrNull()?.takeIf { it > 0 }
                 }
             }
@@ -960,6 +997,7 @@ object CsvImportAssistant {
         }
 
         val validatedRows = mutableListOf<CsvValidatedRow>()
+        var classLimitErrorCount = 0
         val dataRows = parsedRows.drop(1)
 
         dataRows.forEachIndexed { idx, r ->
@@ -987,10 +1025,17 @@ object CsvImportAssistant {
                     "standard" -> when (col.targetKey) {
                         "cls" -> {
                             rawClsText = raw
-                            parsedCls = Repo.parseClassNum(raw)
-                            if (parsedCls == null) {
+                            parsedCls = classPlan.resolve(raw)
+                                ?: ClassResolver.resolveExistingClassId(raw, tempCustomClasses, allowLegacyFallbackIds = false)
+                            if (parsedCls == null && !Repo.isBlankOrDashPlaceholder(raw)) {
                                 hasError = true
-                                messages.add("অবৈধ শ্রেণি: \"$raw\"")
+                                val normKey = ClassResolver.normalizeLookupKey(raw)
+                                if (normKey in classPlan.limitReachedRaws) {
+                                    classLimitErrorCount++
+                                    messages.add("কাস্টম শ্রেণির সর্বোচ্চ সীমা (১৫টি) পূর্ণ হওয়ায় \"$raw\" যোগ করা যাচ্ছে না")
+                                } else {
+                                    messages.add("অবৈধ শ্রেণি: \"$raw\"")
+                                }
                             }
                         }
                         "roll" -> {
@@ -1070,11 +1115,16 @@ object CsvImportAssistant {
                 }
             }
 
-            val effectiveCls = parsedCls ?: if (rawClsText.isBlank()) fallbackCls else null
+            val effectiveCls = parsedCls ?: if (rawClsText.isBlank() || Repo.isBlankOrDashPlaceholder(rawClsText)) fallbackCls else null
             if (effectiveCls == null || effectiveCls !in 1..20) {
                 hasError = true
-                if (rawClsText.isBlank()) messages.add("বৈধ শ্রেণি নির্বাচন করুন")
+                if (rawClsText.isBlank() || Repo.isBlankOrDashPlaceholder(rawClsText)) {
+                    messages.add("বৈধ শ্রেণি নির্বাচন করুন")
+                }
             }
+
+            val isAutoCreatedClass = effectiveCls != null && effectiveCls in classPlan.autoCreatedClassIds
+            val resolvedClassLabel = effectiveCls?.let { classShortBn(it, tempSettings) }.orEmpty()
 
             val studentName = stdMap["name"].orEmpty()
             if (parsedRoll == null && studentName.isBlank()) {
@@ -1087,7 +1137,7 @@ object CsvImportAssistant {
 
             // Check mark max limits against effectiveCls
             if (effectiveCls != null && effectiveCls in 1..20) {
-                val clsSubjects = subjectsFor(effectiveCls, stdMap["religion"] ?: "ইসলাম")
+                val clsSubjects = subjectsFor(effectiveCls, stdMap["religion"] ?: "ইসলাম", tempSettings)
                 columns.filter { it.targetType == "mark" }.forEach { col ->
                     val raw = r.getOrNull(col.colIndex)?.trim().orEmpty()
                     if (Repo.isBlankOrDashPlaceholder(raw)) return@forEach
@@ -1099,7 +1149,7 @@ object CsvImportAssistant {
                         val sub = clsSubjects.find { it.key == subKey }
                         if (sub == null) {
                             hasWarning = true
-                            messages.add("${classShortBn(effectiveCls)} শ্রেণিতে \"$subKey\" বিষয় নেই")
+                            messages.add("${classShortBn(effectiveCls, tempSettings)} শ্রেণিতে \"$subKey\" বিষয় নেই")
                         } else {
                             val maxMark = when (compKey) {
                                 "WR" -> sub.written
@@ -1162,6 +1212,7 @@ object CsvImportAssistant {
             }
 
             stdMap["guardian"]?.let { if (previewItems.size < 3) previewItems.add("অভিভাবক: $it") }
+            stdMap["post"]?.let { if (previewItems.size < 3) previewItems.add("ডাকঘর: $it") }
             stdMap["union"]?.let { if (previewItems.size < 3) previewItems.add("ইউনিয়ন: $it") }
             stdMap["mobile"]?.let { if (previewItems.size < 3) previewItems.add("মোবাইল: $it") }
 
@@ -1185,7 +1236,9 @@ object CsvImportAssistant {
                     parsedMarksCount = parsedMarksCount,
                     parsedFieldsPreview = previewItems.joinToString(" · "),
                     messages = messages.distinct(),
-                    rawCells = r
+                    rawCells = r,
+                    resolvedClassLabel = resolvedClassLabel,
+                    isAutoCreatedClass = isAutoCreatedClass
                 )
             )
         }
@@ -1198,10 +1251,14 @@ object CsvImportAssistant {
             validUpdateCount = usableRows.count { it.isUpdate },
             warningCount = validatedRows.count { it.status == CsvRowStatus.WARNING },
             errorCount = validatedRows.count { it.status == CsvRowStatus.ERROR },
-            hasMissingRollOrNameMapping = !hasRollOrNameMapping
+            hasMissingRollOrNameMapping = !hasRollOrNameMapping,
+            autoCreatedClasses = classPlan.plannedClasses,
+            classLimitErrorCount = classLimitErrorCount,
+            customFieldLimitWarning = customFieldLimitWarning
         )
     }
 
+    @JvmOverloads
     fun buildFilteredImportSummary(
         parsedRows: List<List<String>>,
         columns: List<Repo.CsvColMapping>,
@@ -1209,7 +1266,8 @@ object CsvImportAssistant {
         existingStudents: List<Student>,
         existingSettings: Settings,
         fallbackCls: Int,
-        sharedWorkingDaysByTerm: Map<Int, String> = emptyMap()
+        sharedWorkingDaysByTerm: Map<Int, String> = emptyMap(),
+        classOverrides: Map<String, ClassResolver.ClassOverride> = emptyMap()
     ): Repo.CsvImportSummary? {
         if (parsedRows.size < 2 || columns.isEmpty()) return null
         val header = parsedRows.first()
@@ -1222,7 +1280,8 @@ object CsvImportAssistant {
             existingStudents = existingStudents,
             existingSettings = existingSettings,
             defaultCls = fallbackCls,
-            sharedWorkingDaysByTerm = sharedWorkingDaysByTerm
+            sharedWorkingDaysByTerm = sharedWorkingDaysByTerm,
+            classOverrides = classOverrides
         )
     }
 }

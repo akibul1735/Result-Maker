@@ -22,6 +22,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Backup
+import androidx.compose.material.icons.rounded.Badge
 import androidx.compose.material.icons.rounded.CloudDone
 import androidx.compose.material.icons.rounded.Description
 import androidx.compose.material.icons.rounded.DocumentScanner
@@ -101,6 +102,7 @@ fun DashboardScreen(
     onOpenApprovals: () -> Unit,
     onOpenSettings: () -> Unit,
     onCsvImport: () -> Unit,
+    onBasicStudentImport: () -> Unit = {},
     onBatchEdit: () -> Unit,
     onAiScan: () -> Unit,
     onAllPdf: () -> Unit,
@@ -395,6 +397,15 @@ fun DashboardScreen(
                             horizontalArrangement = Arrangement.spacedBy(6.dp)
                         ) {
                             if (permissions.canManageStudents) {
+                                QuickShortcutTile(
+                                    icon = Icons.Rounded.Badge,
+                                    title = "বেসিক ইমপোর্ট",
+                                    subtitle = "পূর্ণ প্রোফাইল",
+                                    tint = TealDark,
+                                    testTag = "dash_basic_import_btn",
+                                    onClick = onBasicStudentImport,
+                                    modifier = Modifier.weight(1f)
+                                )
                                 QuickShortcutTile(
                                     icon = Icons.Rounded.UploadFile,
                                     title = "CSV ইমপোর্ট",

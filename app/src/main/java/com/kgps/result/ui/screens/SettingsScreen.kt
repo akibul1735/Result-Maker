@@ -181,6 +181,7 @@ fun SettingsScreen(
     onAddCustomClass: (String, String, Int) -> Boolean = { _, _, _ -> false },
     onRemoveCustomClass: (Int) -> Unit = {},
     onOpenCsvImport: (String) -> Unit,
+    onOpenBasicImport: () -> Unit = {},
     onRestoreBackupJson: (String) -> Unit,
     onBuildBackupJson: (() -> String)? = null,
     onExportAllPdf: () -> Unit,
@@ -1391,6 +1392,7 @@ fun SettingsScreen(
                     },
                     onExportPerClassCsvZip = { csvZipExportLauncher.launch("students_per_class_csv.zip") },
                     onOpenSmartCsvImport = { onOpenCsvImport("") },
+                    onOpenBasicStudentImport = onOpenBasicImport,
                     onPickCsvFile = { csvFilePickLauncher.launch(arrayOf("*/*")) },
                     onExportJson = { jsonExportLauncher.launch("result_maker_backup.json") },
                     onRestoreJsonFile = { jsonRestoreLauncher.launch(arrayOf("application/json", "*/*")) }

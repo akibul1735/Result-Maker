@@ -398,6 +398,7 @@ fun StudentEditorScreen(
                             subtitle = listOf(
                                 s.village,
                                 s.union,
+                                s.post,
                                 s.upazila.ifBlank { DEFAULT_UPAZILA },
                                 s.district.ifBlank { DEFAULT_DISTRICT }
                             ).filter { it.isNotBlank() }.joinToString(", "),
@@ -412,6 +413,7 @@ fun StudentEditorScreen(
                                         Box(Modifier.weight(1f)) { EditorTextField("গ্রাম / মহল্লা", s.village, enabled = canEditProfile) { s = s.copy(village = it) } }
                                         Box(Modifier.weight(1f)) { EditorTextField("ইউনিয়ন (ঐচ্ছিক)", s.union, enabled = canEditProfile) { s = s.copy(union = it) } }
                                     }
+                                    EditorTextField("ডাকঘর / পোস্ট অফিস (ঐচ্ছিক)", s.post, enabled = canEditProfile) { s = s.copy(post = it) }
                                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                         Box(Modifier.weight(1f)) { EditorTextField("উপজেলা / থানা", s.upazila, enabled = canEditProfile) { s = s.copy(upazila = it) } }
                                         Box(Modifier.weight(1f)) { EditorTextField("জেলা", s.district, enabled = canEditProfile) { s = s.copy(district = it) } }
@@ -437,9 +439,15 @@ fun StudentEditorScreen(
                             }
                         }
 
+                        val registeredCustomKeys = settings.customFields.map { it.key }.toSet()
+                        val textKeySet = com.kgps.result.Repo.TEXT_KEYS.toSet()
+                        val orphanCustomEntries = s.x.entries
+                            .filter { (k, v) -> v.isNotBlank() && k !in registeredCustomKeys && k !in textKeySet }
+                            .sortedBy { it.key }
+
                         TreeGroupCard(
                             title = "অতিরিক্ত ও কাস্টম ফিল্ড",
-                            subtitle = "${bn(settings.customFields.size.toString())}টি কাস্টম ডাটাবেস ফিল্ড",
+                            subtitle = "${bn((settings.customFields.size + orphanCustomEntries.size).toString())}টি কাস্টম ডাটাবেস ফিল্ড",
                             icon = Icons.Rounded.Tune,
                             expanded = infoExpandedGroup == "custom",
                             headerTestTag = "editor_group_custom",
@@ -475,6 +483,9 @@ fun StudentEditorScreen(
                                     }
                                     settings.customFields.forEach { cf ->
                                         EditorTextField(cf.label, s.x[cf.key] ?: "", enabled = canEditProfile) { setX(cf.key, it) }
+                                    }
+                                    orphanCustomEntries.forEach { (k, v) ->
+                                        EditorTextField(k, v, enabled = canEditProfile) { setX(k, it) }
                                     }
                                 }
                             }

@@ -21,6 +21,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.KeyboardArrowRight
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.AddCircleOutline
+import androidx.compose.material.icons.rounded.Badge
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.FolderOpen
 import androidx.compose.material.icons.rounded.Lock
@@ -76,6 +77,7 @@ fun RosterScreen(
     permissions: TeacherPermissions,
     isAdmin: Boolean = false,
     onAddCustomClass: ((nameBn: String, shortBn: String, syllabusTier: Int) -> Boolean)? = null,
+    onBasicImport: (() -> Unit)? = null,
     onSelectClass: (Int) -> Unit,
     onOpenStudent: (Student) -> Unit,
     onNewStudentInClass: (Int) -> Unit
@@ -159,26 +161,52 @@ fun RosterScreen(
                     "শ্রেণিতে ট্যাপ করে শিক্ষার্থী দেখুন (${bn(visibleClasses.size.toString())}টি শ্রেণি)",
                     fontSize = 11.5.sp,
                     color = SlateMuted,
-                    fontWeight = FontWeight.Medium
+                    fontWeight = FontWeight.Medium,
+                    modifier = Modifier.weight(1f)
                 )
-                if (isAdmin && onAddCustomClass != null) {
-                    OutlinedButton(
-                        onClick = { showAddClassDialog = true },
-                        shape = RoundedCornerShape(8.dp),
-                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
-                        border = BorderStroke(1.dp, TealPrimary.copy(alpha = 0.5f)),
-                        modifier = Modifier
-                            .heightIn(min = 34.dp)
-                            .testTag("roster_add_custom_class_btn")
-                    ) {
-                        Icon(
-                            Icons.Rounded.AddCircleOutline,
-                            contentDescription = null,
-                            tint = TealPrimary,
-                            modifier = Modifier.size(15.dp)
-                        )
-                        Spacer(Modifier.size(4.dp))
-                        Text("নতুন শ্রেণি", fontSize = 11.5.sp, fontWeight = FontWeight.SemiBold, color = TealPrimary)
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    if (permissions.canManageStudents && onBasicImport != null) {
+                        OutlinedButton(
+                            onClick = onBasicImport,
+                            shape = RoundedCornerShape(8.dp),
+                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                            border = BorderStroke(1.dp, TealPrimary.copy(alpha = 0.5f)),
+                            modifier = Modifier
+                                .heightIn(min = 48.dp)
+                                .testTag("roster_basic_import_btn")
+                        ) {
+                            Icon(
+                                Icons.Rounded.Badge,
+                                contentDescription = null,
+                                tint = TealPrimary,
+                                modifier = Modifier.size(15.dp)
+                            )
+                            Spacer(Modifier.size(4.dp))
+                            Text("বেসিক ইমপোর্ট", fontSize = 11.5.sp, fontWeight = FontWeight.SemiBold, color = TealPrimary)
+                        }
+                    }
+                    if (isAdmin && onAddCustomClass != null) {
+                        OutlinedButton(
+                            onClick = { showAddClassDialog = true },
+                            shape = RoundedCornerShape(8.dp),
+                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                            border = BorderStroke(1.dp, TealPrimary.copy(alpha = 0.5f)),
+                            modifier = Modifier
+                                .heightIn(min = 48.dp)
+                                .testTag("roster_add_custom_class_btn")
+                        ) {
+                            Icon(
+                                Icons.Rounded.AddCircleOutline,
+                                contentDescription = null,
+                                tint = TealPrimary,
+                                modifier = Modifier.size(15.dp)
+                            )
+                            Spacer(Modifier.size(4.dp))
+                            Text("নতুন শ্রেণি", fontSize = 11.5.sp, fontWeight = FontWeight.SemiBold, color = TealPrimary)
+                        }
                     }
                 }
             }

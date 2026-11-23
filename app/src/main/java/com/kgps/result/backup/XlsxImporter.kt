@@ -2,6 +2,7 @@ package com.kgps.result.backup
 
 import android.content.ContentResolver
 import android.net.Uri
+import com.kgps.result.ClassResolver
 import com.kgps.result.Repo
 import org.w3c.dom.Element
 import org.w3c.dom.Node
@@ -64,6 +65,19 @@ object XlsxImporter {
         }
     }
 
+    private fun inferSheetClassText(
+        sheetName: String,
+        detectedCls: Int?,
+        defaultCls: Int?
+    ): String? {
+        detectedCls?.let { return it.toString() }
+        Repo.parseClassNum(sheetName)?.let { return it.toString() }
+        if (ClassResolver.looksValidAsNewCustomClass(sheetName, isSheetTabName = true)) {
+            return sheetName.trim()
+        }
+        return defaultCls?.toString()
+    }
+
     fun importWorkbookAsCsvText(bytes: ByteArray, defaultCls: Int? = null): String {
         val sheets = parseWorkbookSheets(bytes).filter { s ->
             s.rows.any { row -> row.any { it.isNotBlank() } }
@@ -83,8 +97,8 @@ object XlsxImporter {
                     contextTerm = parsed.detectedTerm
                 )
                 val hasClsCol = cols.any { it.targetType == "standard" && it.targetKey == "cls" }
-                val tabCls = parsed.detectedCls ?: Repo.parseClassNum(only.name) ?: defaultCls
-                if (hasClsCol || tabCls == null) {
+                val tabClsText = inferSheetClassText(only.name, parsed.detectedCls, defaultCls)
+                if (hasClsCol || tabClsText == null) {
                     return sheetCsv
                 }
             } else {
@@ -115,21 +129,21 @@ object XlsxImporter {
                 contextTerm = parsed.detectedTerm
             )
             val clsColIdx = detectedCols.indexOfFirst { it.targetType == "standard" && it.targetKey == "cls" }
-            val inferredCls = parsed.detectedCls ?: Repo.parseClassNum(sheet.name) ?: defaultCls
+            val inferredClsText = inferSheetClassText(sheet.name, parsed.detectedCls, defaultCls)
 
             val headersOut = origHeaders.toMutableList()
             val dataOut = origData.map { it.toMutableList() }
 
             if (clsColIdx >= 0) {
-                if (inferredCls != null) {
+                if (inferredClsText != null) {
                     dataOut.forEach { r ->
                         while (r.size <= clsColIdx) r.add("")
-                        if (r[clsColIdx].isBlank()) r[clsColIdx] = inferredCls.toString()
+                        if (r[clsColIdx].isBlank()) r[clsColIdx] = inferredClsText
                     }
                 }
-            } else if (inferredCls != null) {
+            } else if (inferredClsText != null) {
                 headersOut.add(0, "cls")
-                dataOut.forEach { r -> r.add(0, inferredCls.toString()) }
+                dataOut.forEach { r -> r.add(0, inferredClsText) }
             }
 
             // Preserve sheet-level working days banner (if sheet itself didn't include a DAYS_t column)

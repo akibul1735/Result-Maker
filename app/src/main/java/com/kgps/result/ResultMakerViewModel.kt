@@ -380,6 +380,9 @@ class ResultMakerViewModel(
     private val _csvImportState = MutableStateFlow(CsvImportModalState())
     val csvImportState: StateFlow<CsvImportModalState> = _csvImportState.asStateFlow()
 
+    private val _basicStudentImportState = MutableStateFlow(CsvImportModalState())
+    val basicStudentImportState: StateFlow<CsvImportModalState> = _basicStudentImportState.asStateFlow()
+
     private val _batchEditOpen = MutableStateFlow(false)
     val batchEditOpen: StateFlow<Boolean> = _batchEditOpen.asStateFlow()
 
@@ -1041,6 +1044,18 @@ class ResultMakerViewModel(
         _csvImportState.value = CsvImportModalState(isOpen = false, initialText = "")
     }
 
+    fun openBasicStudentImport(initialText: String = "") {
+        if (!activePermissions.value.canManageStudents) {
+            showMessage("শিক্ষার্থীর বেসিক ডেটা ইমপোর্টের অনুমতি শুধুমাত্র অনুমোদিত শিক্ষক বা অ্যাডমিনের")
+            return
+        }
+        _basicStudentImportState.value = CsvImportModalState(isOpen = true, initialText = initialText)
+    }
+
+    fun closeBasicStudentImport() {
+        _basicStudentImportState.value = CsvImportModalState(isOpen = false, initialText = "")
+    }
+
     fun openBatchEdit(initialCls: Int? = null) {
         if (!activePermissions.value.canManageStudents) {
             showMessage("শিক্ষার্থীদের তথ্য ব্যাচ পরিবর্তনের অনুমতি আপনার নেই")
@@ -1587,11 +1602,20 @@ class ResultMakerViewModel(
         if (!perm.canManageStudents) {
             showMessage("CSV ইমপোর্টের অনুমতি আপনার নেই")
             closeCsvImport()
+            closeBasicStudentImport()
+            return
+        }
+        val isUserAdmin = school.isAdmin(currentUserId)
+        val hasSchemaAdditions = summary.createdFields.isNotEmpty() || summary.createdClasses.isNotEmpty()
+        if (hasSchemaAdditions && !isUserAdmin) {
+            showMessage("নতুন শ্রেণি বা কাস্টম ফিল্ড যোগ করতে বিদ্যালয়ের অ্যাডমিন অনুমতি প্রয়োজন")
+            closeCsvImport()
+            closeBasicStudentImport()
             return
         }
         val prevList = students.value
         val existingById = prevList.associateBy { it.id }
-        val safeStudents = if (school.isAdmin(currentUserId)) {
+        val safeStudents = if (isUserAdmin) {
             summary.students
         } else {
             summary.students.mapNotNull { candidate ->
@@ -1599,15 +1623,26 @@ class ResultMakerViewModel(
             }
         }
         closeCsvImport()
+        closeBasicStudentImport()
         viewModelScope.launch {
-            if (summary.createdFields.isNotEmpty() && school.isAdmin(currentUserId)) {
-                cloudRepo.updateSchoolSettings(school, summary.settings)
+            if (hasSchemaAdditions && isUserAdmin) {
+                if (summary.createdClasses.isNotEmpty()) {
+                    SchoolClassRegistry.update(summary.settings.customClasses)
+                }
+                val settingsRes = cloudRepo.updateSchoolSettings(school, summary.settings)
+                if (settingsRes.isFailure) {
+                    showMessage(friendlyFirestoreErrorMessage(settingsRes.exceptionOrNull()!!))
+                    return@launch
+                }
             }
             cloudRepo.syncBatchStudents(school.id, prevList, safeStudents, deleteRemoved = false)
                 .onSuccess {
                     val msg = buildString {
                         append("ইমপোর্ট সম্পন্ন: নতুন ${bn(summary.addedCount.toString())} জন, হালনাগাদ ${bn(summary.updatedCount.toString())} জন")
-                        if (summary.createdFields.isNotEmpty() && school.isAdmin(currentUserId)) {
+                        if (summary.createdClasses.isNotEmpty() && isUserAdmin) {
+                            append(", নতুন শ্রেণি ${bn(summary.createdClasses.size.toString())}টি")
+                        }
+                        if (summary.createdFields.isNotEmpty() && isUserAdmin) {
                             append(", নতুন ফিল্ড ${bn(summary.createdFields.size.toString())}টি")
                         }
                     }

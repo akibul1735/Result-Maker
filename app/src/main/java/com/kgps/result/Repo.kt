@@ -5,6 +5,7 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.io.ByteArrayOutputStream
 import java.io.File
+import java.text.Normalizer
 import java.util.UUID
 import java.util.zip.ZipEntry
 import java.util.zip.ZipOutputStream
@@ -649,41 +650,11 @@ object Repo {
         return v.isEmpty() || v in setOf("-", "—", "–", "--", "n/a", "na", "nil", "none", "নাই", "নেই", "প্রযোজ্য নয়", "প্রযোজ্য নহে")
     }
 
-    fun parseClassNum(raw: String): Int? {
-        val s = fromBn(raw).trim().lowercase()
-        if (s.isBlank()) return null
-        s.toIntOrNull()?.takeIf { it in 1..20 }?.let { return it }
-        SchoolClassRegistry.currentCustom().forEach { cc ->
-            val nameNorm = fromBn(cc.nameBn).trim().lowercase()
-            val shortNorm = fromBn(cc.shortBn).trim().lowercase()
-            if ((nameNorm.isNotBlank() && s.contains(nameNorm)) ||
-                (shortNorm.isNotBlank() && s.contains(shortNorm))) {
-                return cc.id
-            }
-        }
-        if (s.contains("প্রথম") || s.contains("১ম") || s.contains("1st") || s.contains("class 1 ")) return 1
-        if (s.contains("দ্বিতীয়") || s.contains("দ্বিতীয়") || s.contains("২য়") || s.contains("২য়") || s.contains("2nd") || s.contains("class 2")) return 2
-        if (s.contains("তৃতীয়") || s.contains("তৃতীয়") || s.contains("৩য়") || s.contains("৩য়") || s.contains("3rd") || s.contains("class 3")) return 3
-        if (s.contains("চতুর্থ") || s.contains("৪র্থ") || s.contains("4th") || s.contains("class 4")) return 4
-        if (s.contains("পঞ্চম") || s.contains("৫ম") || s.contains("5th") || s.contains("class 5")) return 5
-        if (s.contains("ষষ্ঠ") || s.contains("৬ষ্ঠ") || s.contains("6th") || s.contains("class 6")) {
-            return SchoolClassRegistry.activeClasses().firstOrNull { it.nameBn.contains("৬ষ্ঠ") || it.id == 6 }?.id ?: 6
-        }
-        if (s.contains("সপ্তম") || s.contains("৭ম") || s.contains("7th") || s.contains("class 7")) {
-            return SchoolClassRegistry.activeClasses().firstOrNull { it.nameBn.contains("৭ম") || it.id == 7 }?.id ?: 7
-        }
-        if (s.contains("অষ্টম") || s.contains("৮ম") || s.contains("8th") || s.contains("class 8")) {
-            return SchoolClassRegistry.activeClasses().firstOrNull { it.nameBn.contains("৮ম") || it.id == 8 }?.id ?: 8
-        }
-        if (s.contains("প্রাক") || s.contains("শিশু") || s.contains("pre")) {
-            return SchoolClassRegistry.currentCustom().firstOrNull {
-                it.nameBn.contains("প্রাক") || it.nameBn.contains("শিশু")
-            }?.id
-        }
-        val numToken = Regex("\\b([1-9]|1[0-9]|20)\\b").find(s)?.groupValues?.getOrNull(1)?.toIntOrNull()
-        if (numToken != null && numToken in 1..20) return numToken
-        return null
-    }
+    @JvmOverloads
+    fun parseClassNum(
+        raw: String,
+        customClasses: List<CustomClassDef> = SchoolClassRegistry.currentCustom()
+    ): Int? = ClassResolver.resolveExistingClassId(raw, customClasses, allowLegacyFallbackIds = true)
 
     fun parseSubjectKey(raw: String): String? {
         val s = normHeader(fromBn(raw))
@@ -714,26 +685,31 @@ object Repo {
         "mobile" to "মোবাইল নম্বর (mobile)",
         "village" to "গ্রাম (village)",
         "union" to "ইউনিয়ন (union)",
+        "post" to "ডাকঘর / পোস্ট অফিস (post)",
         "upazila" to "উপজেলা (upazila)",
         "district" to "জেলা (district)",
         "religion" to "ধর্ম (religion)"
     )
 
-    private fun normHeader(h: String): String = h.trim().lowercase()
-        .replace(Regex("[?:*।.,()_\\-]+"), " ")
+    private fun normHeader(h: String): String = Normalizer.normalize(h, Normalizer.Form.NFC)
+        .trim()
+        .lowercase()
+        .replace("\u09AF\u09BC", "\u09DF")
+        .replace(Regex("[?:*।.,()_\\-/|]+"), " ")
         .replace(Regex("\\s+"), " ")
         .trim()
 
     private val FIELD_ALIASES: Map<String, List<String>> = mapOf(
-        "cls" to listOf("cls", "class", "class name", "শ্রেণি", "শ্রেণী", "শ্রেণি নাম"),
-        "roll" to listOf("roll", "roll no", "roll number", "রোল", "রোল নম্বর", "রোল নং", "ক্রমিক", "ক্রমিক নং", "sl", "sl no", "serial", "serial no"),
-        "name" to listOf("name", "student name", "শিক্ষার্থীর নাম", "নাম", "ছাত্র ছাত্রীর নাম"),
-        "guardian" to listOf("guardian", "guardian name", "father", "father name", "fathers name", "father's name", "অভিভাবক", "অভিভাবকের নাম", "পিতার নাম", "পিতা অভিভাবক", "পিতা/অভিভাবকের নাম", "পিতা অভিভাবকের নাম"),
-        "mobile" to listOf("mobile", "mobile no", "mobile number", "phone", "phone number", "contact", "মোবাইল", "মোবাইল নম্বর", "মোবাইল নং", "ফোন", "অভিভাবকের মোবাইল"),
-        "village" to listOf("village", "গ্রাম", "গ্রাম মহল্লা", "মহল্লা"),
+        "cls" to listOf("cls", "class", "class name", "শ্রেণি", "শ্রেণী", "শ্রেণি নাম", "শ্রেণির নাম", "শ্রেণীর নাম", "ক্লাস"),
+        "roll" to listOf("roll", "roll no", "roll number", "রোল", "রোল নম্বর", "রোল নং", "ক্রমিক", "ক্রমিক নং", "ক্রমিক নম্বর", "sl", "sl no", "serial", "serial no"),
+        "name" to listOf("name", "student name", "student's name", "শিক্ষার্থীর নাম", "নাম", "ছাত্র ছাত্রীর নাম", "ছাত্রের নাম", "ছাত্রীর নাম"),
+        "guardian" to listOf("guardian", "guardian name", "father", "father name", "fathers name", "father's name", "অভিভাবক", "অভিভাবকের নাম", "পিতা", "পিতার নাম", "পিতা অভিভাবক", "পিতা/অভিভাবকের নাম", "পিতা অভিভাবকের নাম"),
+        "mobile" to listOf("mobile", "mobile no", "mobile number", "phone", "phone no", "phone number", "contact", "contact no", "মোবাইল", "মোবাইল নম্বর", "মোবাইল নং", "ফোন", "ফোন নম্বর", "অভিভাবকের মোবাইল", "অভিভাবকের মোবাইল নম্বর"),
+        "village" to listOf("village", "vill", "গ্রাম", "গ্রাম মহল্লা", "মহল্লা"),
         "union" to listOf("union", "union parishad", "up", "ইউনিয়ন", "ইউনিয়ন", "ইউপি"),
-        "upazila" to listOf("upazila", "thana", "উপজেলা", "থানা"),
-        "district" to listOf("district", "zilla", "জেলা"),
+        "post" to listOf("post", "post office", "po", "p o", "ডাকঘর", "ডাক", "পোস্ট", "পোস্ট অফিস", "পোষ্ট", "পোষ্ট অফিস"),
+        "upazila" to listOf("upazila", "upazilla", "thana", "উপজেলা", "থানা"),
+        "district" to listOf("district", "zilla", "dist", "জেলা"),
         "religion" to listOf("religion", "ধর্ম")
     )
 
@@ -1089,7 +1065,8 @@ object Repo {
         val settings: Settings,
         val addedCount: Int,
         val updatedCount: Int,
-        val createdFields: List<CustomFieldDef>
+        val createdFields: List<CustomFieldDef>,
+        val createdClasses: List<CustomClassDef> = emptyList()
     )
 
     private fun matchSemanticColumn(
@@ -1151,11 +1128,13 @@ object Repo {
         return null
     }
 
+    @JvmOverloads
     fun detectCsvColumns(
         rows: List<List<String>>,
         existingCustomFields: List<CustomFieldDef>,
         contextSubjectKey: String? = null,
-        contextTerm: Int? = null
+        contextTerm: Int? = null,
+        profileOnly: Boolean = false
     ): List<CsvColMapping> {
         if (rows.isEmpty()) return emptyList()
         val headers = rows[0]
@@ -1164,7 +1143,7 @@ object Repo {
         val textSet = TEXT_KEYS.toSet()
 
         val normHeaders = headers.map { normHeader(fromBn(it)) }
-        val hasAnyTraitKw = normHeaders.any {
+        val hasAnyTraitKw = !profileOnly && normHeaders.any {
             it.contains("উপস্থিত") || it.contains("হাজিরা") ||
                 it.contains("শৃঙ্খলা") || it.contains("শৃংখলা") ||
                 it.contains("আচরণ") || it.contains("আচরন") ||
@@ -1173,7 +1152,7 @@ object Repo {
                 it.endsWith(" pres") || it.endsWith(" disc") || it.endsWith(" cond") ||
                 it.startsWith("pres ") || it.startsWith("disc ") || it.startsWith("cond ")
         }
-        val hasAnyMarkKw = normHeaders.any {
+        val hasAnyMarkKw = !profileOnly && normHeaders.any {
             it.contains("পাঠ্যবই") || it.contains("পাঠ্যপুস্তক") || it.contains("অভীক্ষা") ||
                 it.contains("লিখিত") || it.contains("সামষ্টিক") || it.contains("ধারাবাহিক")
         }
@@ -1182,13 +1161,14 @@ object Repo {
         return headers.mapIndexed { colIndex, rawHeader ->
             val header = rawHeader.trim().ifBlank { "কলাম_${colIndex + 1}" }
             val norm = normHeader(header)
+            val normCompact = norm.replace(" ", "")
             val samples = dataRows.mapNotNull { r -> r.getOrNull(colIndex)?.trim()?.takeIf { it.isNotBlank() } }.take(2)
 
             val matchedStd = FIELD_ALIASES.entries.firstOrNull { (_, aliases) ->
                 aliases.any { normHeader(it) == norm }
             }?.key
-            val friendlyMatch = FRIENDLY_HEADER_REVERSE[norm]
-            val semanticMatch = if (matchedStd == null && friendlyMatch == null) {
+            val friendlyMatch = if (!profileOnly) FRIENDLY_HEADER_REVERSE[norm] else null
+            val semanticMatch = if (!profileOnly && matchedStd == null && friendlyMatch == null) {
                 matchSemanticColumn(header, contextSubjectKey, contextTerm, sheetLooksLikeTraitsSheet)
             } else null
 
@@ -1196,10 +1176,10 @@ object Repo {
                 matchedStd != null -> {
                     CsvColMapping(colIndex, header, samples, isNew = false, targetType = "standard", targetKey = matchedStd, newLabel = header)
                 }
-                markSet.contains(header) -> {
+                !profileOnly && markSet.contains(header) -> {
                     CsvColMapping(colIndex, header, samples, isNew = false, targetType = "mark", targetKey = header, newLabel = header)
                 }
-                textSet.contains(header) -> {
+                !profileOnly && textSet.contains(header) -> {
                     CsvColMapping(colIndex, header, samples, isNew = false, targetType = "text", targetKey = header, newLabel = header)
                 }
                 friendlyMatch != null -> {
@@ -1211,7 +1191,11 @@ object Repo {
                     CsvColMapping(colIndex, header, samples, isNew = false, targetType = tType, targetKey = tKey, newLabel = header)
                 }
                 else -> {
-                    val existingCf = existingCustomFields.find { it.key == header || normHeader(it.label) == norm }
+                    val existingCf = existingCustomFields.find {
+                        it.key == header ||
+                            normHeader(it.label) == norm ||
+                            (normCompact.length >= 2 && normHeader(it.label).replace(" ", "") == normCompact)
+                    }
                     if (existingCf != null) {
                         CsvColMapping(colIndex, header, samples, isNew = false, targetType = "custom", targetKey = existingCf.key, newLabel = existingCf.label)
                     } else {
@@ -1222,36 +1206,68 @@ object Repo {
         }
     }
 
+    @JvmOverloads
     fun applyMappedCsvImport(
         rows: List<List<String>>,
         columns: List<CsvColMapping>,
         existingStudents: List<Student>,
         existingSettings: Settings,
         defaultCls: Int = 1,
-        sharedWorkingDaysByTerm: Map<Int, String> = emptyMap()
+        sharedWorkingDaysByTerm: Map<Int, String> = emptyMap(),
+        classOverrides: Map<String, ClassResolver.ClassOverride> = emptyMap()
     ): CsvImportSummary {
-        if (rows.size < 2) return CsvImportSummary(existingStudents, existingSettings, 0, 0, emptyList())
+        if (rows.size < 2) return CsvImportSummary(existingStudents, existingSettings, 0, 0, emptyList(), emptyList())
 
         val nextCustomFields = existingSettings.customFields.toMutableList()
         val existingKeySet = (nextCustomFields.map { it.key } + TEXT_KEYS).toMutableSet()
         val createdFields = mutableListOf<CustomFieldDef>()
+        val maxCustomFields = 30
 
         val resolvedCols = columns.map { col ->
             if (col.targetType == "create_new") {
-                val label = col.newLabel.trim().ifBlank { col.header }
-                val already = nextCustomFields.find { normHeader(it.label) == normHeader(label) }
+                val label = Normalizer.normalize(col.newLabel.trim().ifBlank { col.header }, Normalizer.Form.NFC)
+                    .take(80)
+                val labelNorm = normHeader(label)
+                val labelCompact = labelNorm.replace(" ", "")
+                val already = nextCustomFields.find {
+                    val n = normHeader(it.label)
+                    n == labelNorm || (labelCompact.length >= 2 && n.replace(" ", "") == labelCompact)
+                }
                 if (already != null) {
                     col.copy(targetType = "custom", targetKey = already.key)
-                } else {
+                } else if (nextCustomFields.size < maxCustomFields) {
                     val key = makeCustomFieldKey(label, existingKeySet)
                     existingKeySet.add(key)
                     val def = CustomFieldDef(key, label)
                     nextCustomFields.add(def)
                     createdFields.add(def)
                     col.copy(targetType = "custom", targetKey = key)
+                } else {
+                    col.copy(targetType = "skip")
                 }
             } else col
         }
+
+        val clsColIndices = resolvedCols
+            .filter { it.targetType == "standard" && it.targetKey == "cls" }
+            .map { it.colIndex }
+        val rawClsValues = if (clsColIndices.isEmpty()) {
+            emptyList()
+        } else {
+            rows.drop(1).flatMap { r ->
+                clsColIndices.mapNotNull { idx -> r.getOrNull(idx)?.trim()?.takeIf { it.isNotBlank() } }
+            }
+        }
+        val classPlan = ClassResolver.planForImport(
+            rawClassValues = rawClsValues,
+            existingCustomClasses = existingSettings.customClasses,
+            overrides = classOverrides
+        )
+        val createdClasses = classPlan.plannedClasses.map { it.toCustomClassDef() }
+        val nextCustomClasses = (existingSettings.customClasses + createdClasses)
+            .distinctBy { it.id }
+            .sortedBy { it.id }
+            .take(15)
 
         val out = existingStudents.toMutableList()
         var addedCount = 0
@@ -1261,6 +1277,7 @@ object Repo {
         for (r in rows.drop(1)) {
             if (r.all { it.isBlank() }) continue
             var clsVal: Int? = null
+            var hasExplicitInvalidCls = false
             var rollVal: Int? = null
             val stdMap = mutableMapOf<String, String>()
             val importedMarks = mutableMapOf<String, Double>()
@@ -1272,8 +1289,16 @@ object Repo {
                 if (raw.isBlank()) continue
                 when (col.targetType) {
                     "standard" -> when (col.targetKey) {
-                        "cls" -> clsVal = parseClassNum(raw)
-                        "roll" -> rollVal = fromBn(raw).toIntOrNull()?.takeIf { it > 0 }
+                        "cls" -> {
+                            val resolved = classPlan.resolve(raw)
+                                ?: ClassResolver.resolveExistingClassId(raw, nextCustomClasses, allowLegacyFallbackIds = false)
+                            if (resolved != null) {
+                                clsVal = resolved
+                            } else if (!isBlankOrDashPlaceholder(raw)) {
+                                hasExplicitInvalidCls = true
+                            }
+                        }
+                        "roll" -> rollVal = fromBn(raw).toIntOrNull()?.takeIf { it in 1..9999 }
                         else -> {
                             val prev = stdMap[col.targetKey]
                             stdMap[col.targetKey] = if (prev != null && prev != raw) "$prev, $raw" else raw
@@ -1310,6 +1335,7 @@ object Repo {
                 }
             }
 
+            if (hasExplicitInvalidCls) continue
             val cls = clsVal ?: defaultCls
             if (cls !in 1..20) continue
             if (rollVal == null && stdMap["name"].isNullOrBlank()) continue
@@ -1318,10 +1344,15 @@ object Repo {
                 autoRollByCls[cls] = nextAuto
                 nextAuto
             }
+            if (roll !in 1..9999) continue
 
             val pos = out.indexOfFirst { it.cls == cls && it.roll == roll }
             val base = if (pos >= 0) out[pos] else Student(UUID.randomUUID().toString(), cls, roll, "")
-            val clsSubs = subjectsFor(cls, stdMap["religion"]?.ifBlank { base.religion } ?: base.religion)
+            val clsSubs = subjectsFor(
+                cls,
+                stdMap["religion"]?.ifBlank { base.religion } ?: base.religion,
+                existingSettings.copy(customClasses = nextCustomClasses)
+            )
 
             // Reconcile CONT vs granular components (TB/ACT/LANG/CT) & avoid storing redundant CONT/TOTAL on round-trip
             val mergedMarks = base.m.toMutableMap()
@@ -1407,17 +1438,17 @@ object Repo {
             mergedMarks.putAll(finalImported)
 
             val upd = base.copy(
-                name = stdMap["name"]?.ifBlank { base.name } ?: base.name,
-                guardian = stdMap["guardian"]?.ifBlank { base.guardian } ?: base.guardian,
-                village = stdMap["village"]?.ifBlank { base.village } ?: base.village,
-                union = stdMap["union"]?.ifBlank { base.union } ?: base.union,
-                post = base.post,
-                upazila = (stdMap["upazila"]?.ifBlank { base.upazila } ?: base.upazila).ifBlank { DEFAULT_UPAZILA },
-                district = (stdMap["district"]?.ifBlank { base.district } ?: base.district).ifBlank { DEFAULT_DISTRICT },
-                mobile = stdMap["mobile"]?.ifBlank { base.mobile } ?: base.mobile,
-                religion = stdMap["religion"]?.ifBlank { base.religion } ?: base.religion,
+                name = (stdMap["name"]?.ifBlank { base.name } ?: base.name).take(120),
+                guardian = (stdMap["guardian"]?.ifBlank { base.guardian } ?: base.guardian).take(120),
+                village = (stdMap["village"]?.ifBlank { base.village } ?: base.village).take(120),
+                union = (stdMap["union"]?.ifBlank { base.union } ?: base.union).take(120),
+                post = (stdMap["post"]?.ifBlank { base.post } ?: base.post).take(120),
+                upazila = ((stdMap["upazila"]?.ifBlank { base.upazila } ?: base.upazila).ifBlank { DEFAULT_UPAZILA }).take(120),
+                district = ((stdMap["district"]?.ifBlank { base.district } ?: base.district).ifBlank { DEFAULT_DISTRICT }).take(120),
+                mobile = (stdMap["mobile"]?.ifBlank { base.mobile } ?: base.mobile).take(30),
+                religion = ((stdMap["religion"]?.ifBlank { base.religion } ?: base.religion).ifBlank { "ইসলাম" }).take(40),
                 m = mergedMarks,
-                x = base.x + x
+                x = (base.x + x).entries.take(120).associate { it.key to it.value }
             )
             if (pos >= 0) {
                 out[pos] = upd; updatedCount++
@@ -1428,10 +1459,14 @@ object Repo {
 
         return CsvImportSummary(
             students = out,
-            settings = existingSettings.copy(customFields = nextCustomFields),
+            settings = existingSettings.copy(
+                customFields = nextCustomFields,
+                customClasses = nextCustomClasses
+            ),
             addedCount = addedCount,
             updatedCount = updatedCount,
-            createdFields = createdFields
+            createdFields = createdFields,
+            createdClasses = createdClasses
         )
     }
 

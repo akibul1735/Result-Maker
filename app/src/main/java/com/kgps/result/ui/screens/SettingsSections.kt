@@ -1023,6 +1023,7 @@ internal fun SettingsCsvJsonContent(
     onExportCsvTemplateForClass: (Int) -> Unit,
     onExportPerClassCsvZip: () -> Unit,
     onOpenSmartCsvImport: () -> Unit,
+    onOpenBasicStudentImport: () -> Unit = {},
     onPickCsvFile: () -> Unit,
     onExportJson: () -> Unit,
     onRestoreJsonFile: () -> Unit
@@ -1178,6 +1179,16 @@ internal fun SettingsCsvJsonContent(
                 }
             }
             if (permissions.canManageStudents) {
+                Button(
+                    onClick = onOpenBasicStudentImport,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(min = 48.dp)
+                        .testTag("settings_basic_import_btn"),
+                    shape = RoundedCornerShape(8.dp)
+                ) {
+                    Text("শিক্ষার্থীর পূর্ণাঙ্গ বেসিক ডেটা ইমপোর্ট (.xlsx / CSV)", fontSize = 12.sp)
+                }
                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.fillMaxWidth()) {
                     OutlinedButton(
                         onClick = onOpenSmartCsvImport,

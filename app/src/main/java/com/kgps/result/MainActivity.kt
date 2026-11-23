@@ -105,6 +105,7 @@ import com.kgps.result.cloud.signOutFromGoogle
 import com.kgps.result.ui.components.SummaryTableConfigCard
 import com.kgps.result.ui.screens.AiAssistantScreen
 import com.kgps.result.ui.screens.AuthScreen
+import com.kgps.result.ui.screens.BasicStudentImportDialog
 import com.kgps.result.ui.screens.BatchStudentEditDialog
 import com.kgps.result.ui.screens.BlankSheetPdfScreen
 import com.kgps.result.ui.screens.BulkSheetScreen
@@ -473,6 +474,7 @@ fun ResultMakerWorkspace(
     val editingStudent by vm.editingStudent.collectAsStateWithLifecycle()
     val studioStudentId by vm.studioStudentId.collectAsStateWithLifecycle()
     val csvImportState by vm.csvImportState.collectAsStateWithLifecycle()
+    val basicStudentImportState by vm.basicStudentImportState.collectAsStateWithLifecycle()
     val batchEditOpen by vm.batchEditOpen.collectAsStateWithLifecycle()
     val batchEditInitialClass by vm.batchEditInitialClass.collectAsStateWithLifecycle()
     val aiState by vm.aiState.collectAsStateWithLifecycle()
@@ -614,6 +616,7 @@ fun ResultMakerWorkspace(
                         onBackFromSecondary = { vm.navigate(NavSection.DASHBOARD) },
                         onOpenSettings = { vm.navigate(NavSection.SETTINGS) },
                         onCsvImport = { vm.openCsvImport("") },
+                        onBasicImport = { vm.openBasicStudentImport("") },
                         onAiScan = vm::openAiScanner,
                         onAllPdf = {
                             val allowedCls = permissions.effectiveClasses().toSet()
@@ -731,6 +734,7 @@ fun ResultMakerWorkspace(
                                     onOpenApprovals = { vm.navigate(NavSection.SETTINGS) },
                                     onOpenSettings = { vm.navigate(NavSection.SETTINGS) },
                                     onCsvImport = { vm.openCsvImport("") },
+                                    onBasicStudentImport = { vm.openBasicStudentImport("") },
                                     onBatchEdit = { vm.openBatchEdit(null) },
                                     onAiScan = vm::openAiScanner,
                                     onAllPdf = {
@@ -776,6 +780,7 @@ fun ResultMakerWorkspace(
                                     permissions = permissions,
                                     isAdmin = isAdmin,
                                     onAddCustomClass = vm::addCustomClass,
+                                    onBasicImport = { vm.openBasicStudentImport("") },
                                     onSelectClass = vm::selectClass,
                                     onOpenStudent = { vm.openEditor(it, NavSection.ROSTER) },
                                     onNewStudentInClass = { targetCls ->
@@ -1045,6 +1050,7 @@ fun ResultMakerWorkspace(
                                     onAddCustomClass = vm::addCustomClass,
                                     onRemoveCustomClass = vm::removeCustomClass,
                                     onOpenCsvImport = { txt -> vm.openCsvImport(txt) },
+                                    onOpenBasicImport = { vm.openBasicStudentImport("") },
                                     onRestoreBackupJson = vm::restoreBackupJson,
                                     onBuildBackupJson = vm::buildFullBackupJson,
                                     onExportAllPdf = {
@@ -1103,6 +1109,19 @@ fun ResultMakerWorkspace(
                 initialText = csvImportState.initialText,
                 onResolveRemoteTemplate = vm::resolveSheetTemplateRemote,
                 onDismiss = vm::closeCsvImport,
+                onImported = vm::applyCsvImport,
+                onError = vm::showMessage
+            )
+        }
+
+        if (basicStudentImportState.isOpen) {
+            BasicStudentImportDialog(
+                students = students,
+                settings = settings,
+                defaultCls = cls,
+                initialText = basicStudentImportState.initialText,
+                isAdmin = isAdmin,
+                onDismiss = vm::closeBasicStudentImport,
                 onImported = vm::applyCsvImport,
                 onError = vm::showMessage
             )
@@ -1253,6 +1272,7 @@ private fun ResultMakerTopBar(
     onBackFromSecondary: () -> Unit,
     onOpenSettings: () -> Unit,
     onCsvImport: () -> Unit,
+    onBasicImport: () -> Unit = {},
     onAiScan: () -> Unit,
     onAllPdf: () -> Unit,
     onOpenBlankSheetPdf: () -> Unit,
@@ -1340,6 +1360,11 @@ private fun ResultMakerTopBar(
                     }
                     DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
                         if (permissions.canManageStudents) {
+                            DropdownMenuItem(
+                                text = { Text("পূর্ণাঙ্গ বেসিক ডেটা ইমপোর্ট") },
+                                onClick = { menuOpen = false; onBasicImport() },
+                                modifier = Modifier.testTag("menu_basic_student_import")
+                            )
                             DropdownMenuItem(
                                 text = { Text("স্মার্ট CSV ইমপোর্ট") },
                                 onClick = { menuOpen = false; onCsvImport() }

@@ -229,8 +229,9 @@ private fun comps(tb: Int, ct: Int) = listOf(
     Comp("CT", "ক্লাস টেস্ট", ct)
 )
 
-fun subjectsFor(cls: Int, religion: String): List<Sub> {
-    val low = syllabusTierForClass(cls) <= 2
+@JvmOverloads
+fun subjectsFor(cls: Int, religion: String, settings: Settings? = null): List<Sub> {
+    val low = syllabusTierForClass(cls, settings) <= 2
     fun full(k: String, n: String) =
         if (low) Sub(k, n, 100, comps(20, 20), 50) else Sub(k, n, 100, comps(10, 10), 70)
     fun half(k: String, n: String) = Sub(k, n, 50, comps(20, 20), 0)
