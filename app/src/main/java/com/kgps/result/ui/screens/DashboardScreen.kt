@@ -6,10 +6,12 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -38,6 +40,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -356,138 +359,158 @@ fun DashboardScreen(
 
             // 3. Quick Tools & Export / Backup Shortcuts Card
             item(key = "quick_tools") {
+                val dataEntryTools = buildList {
+                    if (permissions.canManageStudents) {
+                        add(
+                            QuickToolSpec(
+                                icon = Icons.Rounded.Badge,
+                                title = "বেসিক ইমপোর্ট",
+                                subtitle = "পূর্ণ প্রোফাইল",
+                                tint = TealDark,
+                                testTag = "dash_basic_import_btn",
+                                onClick = onBasicStudentImport
+                            )
+                        )
+                        add(
+                            QuickToolSpec(
+                                icon = Icons.Rounded.UploadFile,
+                                title = "CSV ইমপোর্ট",
+                                subtitle = "ফাইল / টেক্সট",
+                                tint = TealPrimary,
+                                testTag = "dash_csv_import_btn",
+                                onClick = onCsvImport
+                            )
+                        )
+                        add(
+                            QuickToolSpec(
+                                icon = Icons.Rounded.EditNote,
+                                title = "ব্যাচ আপডেট",
+                                subtitle = "একসাথে তথ্য",
+                                tint = Color(0xFF0369A1),
+                                testTag = "dash_batch_edit_btn",
+                                onClick = onBatchEdit
+                            )
+                        )
+                    }
+                    if (canScanSheet) {
+                        add(
+                            QuickToolSpec(
+                                icon = Icons.Rounded.DocumentScanner,
+                                title = "AI ছবি স্ক্যান",
+                                subtitle = "নম্বরপত্র স্ক্যান",
+                                tint = EmeraldGrade,
+                                testTag = "dash_ai_scan_btn",
+                                onClick = onAiScan
+                            )
+                        )
+                    }
+                }
+
+                val reportBackupTools = buildList {
+                    if (permissions.canExportPdf) {
+                        add(
+                            QuickToolSpec(
+                                icon = Icons.Rounded.Description,
+                                title = "সব শ্রেণির PDF",
+                                subtitle = "এক ফাইলে সব",
+                                tint = TealPrimary,
+                                testTag = "dash_all_pdf_btn",
+                                onClick = onAllPdf
+                            )
+                        )
+                        add(
+                            QuickToolSpec(
+                                icon = Icons.Rounded.LibraryBooks,
+                                title = "ব্যাচ প্রিন্ট / PDF",
+                                subtitle = "শ্রেণি বা কাস্টম",
+                                tint = AmberNotice,
+                                testTag = "dash_batch_print_btn",
+                                onClick = { showBatchDialog = true }
+                            )
+                        )
+                        add(
+                            QuickToolSpec(
+                                icon = Icons.Rounded.TableChart,
+                                title = "ফাঁকা ফর্ম PDF",
+                                subtitle = "হাতে লেখার শিট",
+                                tint = TealDark,
+                                testTag = "dash_blank_sheet_pdf_btn",
+                                onClick = onOpenBlankSheetPdf
+                            )
+                        )
+                    }
+                    add(
+                        QuickToolSpec(
+                            icon = if (latestBackupMs > 0L) Icons.Rounded.CloudDone else Icons.Rounded.Backup,
+                            title = "দ্রুত ব্যাকআপ",
+                            subtitle = formatBackupShortTime(latestBackupMs),
+                            tint = EmeraldGrade,
+                            testTag = "dash_backup_now_btn",
+                            onClick = onBackupNowAll
+                        )
+                    )
+                }
+
                 Card(
                     modifier = Modifier.fillMaxWidth(),
                     colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
                     border = BorderStroke(1.dp, SlateOutline),
                     shape = RoundedCornerShape(14.dp)
                 ) {
-                    Column(Modifier.padding(11.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.SpaceBetween
+                    BoxWithConstraints(Modifier.fillMaxWidth()) {
+                        val columns = if (maxWidth >= 520.dp) 4 else 2
+                        Column(
+                            modifier = Modifier.padding(11.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
-                            Text(
-                                "দ্রুত টুলস, প্রিন্ট ও ব্যাকআপ",
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 13.5.sp,
-                                color = SlateText
-                            )
-                            Surface(
-                                onClick = onOpenSettings,
-                                color = SlateBg,
-                                border = BorderStroke(1.dp, SlateOutline),
-                                shape = RoundedCornerShape(8.dp),
-                                modifier = Modifier.testTag("dash_backup_settings_btn")
-                            ) {
-                                Row(
-                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(4.dp)
-                                ) {
-                                    Icon(Icons.Rounded.Settings, contentDescription = null, tint = SlateMuted, modifier = Modifier.size(13.dp))
-                                    Text("সেটিংস", fontSize = 10.5.sp, color = SlateText)
-                                }
-                            }
-                        }
-
-                        // Row 1: Data Entry & AI Shortcuts
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(6.dp)
-                        ) {
-                            if (permissions.canManageStudents) {
-                                QuickShortcutTile(
-                                    icon = Icons.Rounded.Badge,
-                                    title = "বেসিক ইমপোর্ট",
-                                    subtitle = "পূর্ণ প্রোফাইল",
-                                    tint = TealDark,
-                                    testTag = "dash_basic_import_btn",
-                                    onClick = onBasicStudentImport,
-                                    modifier = Modifier.weight(1f)
-                                )
-                                QuickShortcutTile(
-                                    icon = Icons.Rounded.UploadFile,
-                                    title = "CSV ইমপোর্ট",
-                                    subtitle = "ফাইল/টেক্সট",
-                                    tint = TealPrimary,
-                                    testTag = "dash_csv_import_btn",
-                                    onClick = onCsvImport,
-                                    modifier = Modifier.weight(1f)
-                                )
-                                QuickShortcutTile(
-                                    icon = Icons.Rounded.EditNote,
-                                    title = "ব্যাচ আপডেট",
-                                    subtitle = "একসাথে তথ্য",
-                                    tint = Color(0xFF0369A1),
-                                    testTag = "dash_batch_edit_btn",
-                                    onClick = onBatchEdit,
-                                    modifier = Modifier.weight(1f)
-                                )
-                            }
-                            if (canScanSheet) {
-                                QuickShortcutTile(
-                                    icon = Icons.Rounded.DocumentScanner,
-                                    title = "AI ছবি স্ক্যান",
-                                    subtitle = "নম্বরপত্র স্ক্যান",
-                                    tint = EmeraldGrade,
-                                    testTag = "dash_ai_scan_btn",
-                                    onClick = onAiScan,
-                                    modifier = Modifier.weight(1f)
-                                )
-                            }
-                        }
-
-                        // Row 2: PDF, Batch Print & Backup
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(6.dp)
-                        ) {
-                            if (permissions.canExportPdf) {
-                                QuickShortcutTile(
-                                    icon = Icons.Rounded.Description,
-                                    title = "সব শ্রেণির PDF",
-                                    subtitle = "এক ফাইলে সব",
-                                    tint = TealPrimary,
-                                    testTag = "dash_all_pdf_btn",
-                                    onClick = onAllPdf,
-                                    modifier = Modifier.weight(1f)
-                                )
-                                QuickShortcutTile(
-                                    icon = Icons.Rounded.LibraryBooks,
-                                    title = "ব্যাচ প্রিন্ট/PDF",
-                                    subtitle = "শ্রেণি বা কাস্টম",
-                                    tint = AmberNotice,
-                                    testTag = "dash_batch_print_btn",
-                                    onClick = { showBatchDialog = true },
-                                    modifier = Modifier.weight(1f)
-                                )
-                            }
-                            QuickShortcutTile(
-                                icon = if (latestBackupMs > 0L) Icons.Rounded.CloudDone else Icons.Rounded.Backup,
-                                title = "দ্রুত ব্যাকআপ",
-                                subtitle = formatBackupShortTime(latestBackupMs),
-                                tint = EmeraldGrade,
-                                testTag = "dash_backup_now_btn",
-                                onClick = onBackupNowAll,
-                                modifier = Modifier.weight(1f)
-                            )
-                        }
-
-                        if (permissions.canExportPdf) {
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween
                             ) {
-                                QuickShortcutTile(
-                                    icon = Icons.Rounded.TableChart,
-                                    title = "ফাঁকা ফর্ম / শিট PDF",
-                                    subtitle = "রোল-নামসহ হাতে লেখার ফর্ম",
-                                    tint = TealDark,
-                                    testTag = "dash_blank_sheet_pdf_btn",
-                                    onClick = onOpenBlankSheetPdf,
-                                    modifier = Modifier.weight(1f)
+                                Text(
+                                    "দ্রুত টুলস, প্রিন্ট ও ব্যাকআপ",
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 13.5.sp,
+                                    color = SlateText
+                                )
+                                Surface(
+                                    onClick = onOpenSettings,
+                                    color = SlateBg,
+                                    border = BorderStroke(1.dp, SlateOutline),
+                                    shape = RoundedCornerShape(8.dp),
+                                    modifier = Modifier
+                                        .defaultMinSize(minHeight = 36.dp)
+                                        .testTag("dash_backup_settings_btn")
+                                ) {
+                                    Row(
+                                        modifier = Modifier.padding(horizontal = 9.dp, vertical = 6.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                    ) {
+                                        Icon(Icons.Rounded.Settings, contentDescription = null, tint = SlateMuted, modifier = Modifier.size(14.dp))
+                                        Text("সেটিংস", fontSize = 11.sp, fontWeight = FontWeight.Medium, color = SlateText)
+                                    }
+                                }
+                            }
+
+                            if (dataEntryTools.isNotEmpty()) {
+                                QuickToolGroupSection(
+                                    header = "তথ্য এন্ট্রি ও স্ক্যান",
+                                    items = dataEntryTools,
+                                    columns = columns
+                                )
+                            }
+
+                            if (dataEntryTools.isNotEmpty() && reportBackupTools.isNotEmpty()) {
+                                HorizontalDivider(color = SlateOutline.copy(alpha = 0.45f))
+                            }
+
+                            if (reportBackupTools.isNotEmpty()) {
+                                QuickToolGroupSection(
+                                    header = "প্রিন্ট, PDF ও ব্যাকআপ",
+                                    items = reportBackupTools,
+                                    columns = columns
                                 )
                             }
                         }
@@ -646,6 +669,55 @@ private fun HeroMetricBox(
     }
 }
 
+private data class QuickToolSpec(
+    val icon: ImageVector,
+    val title: String,
+    val subtitle: String,
+    val tint: Color,
+    val testTag: String,
+    val onClick: () -> Unit
+)
+
+@Composable
+private fun QuickToolGroupSection(
+    header: String,
+    items: List<QuickToolSpec>,
+    columns: Int
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
+        Text(
+            text = header,
+            fontSize = 10.5.sp,
+            fontWeight = FontWeight.SemiBold,
+            color = SlateMuted,
+            modifier = Modifier.padding(horizontal = 2.dp)
+        )
+        items.chunked(columns).forEach { rowItems ->
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                rowItems.forEach { spec ->
+                    QuickShortcutTile(
+                        icon = spec.icon,
+                        title = spec.title,
+                        subtitle = spec.subtitle,
+                        tint = spec.tint,
+                        testTag = spec.testTag,
+                        onClick = spec.onClick,
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+                if (rowItems.size in 2 until columns) {
+                    repeat(columns - rowItems.size) {
+                        Spacer(Modifier.weight(1f))
+                    }
+                }
+            }
+        }
+    }
+}
+
 @Composable
 private fun QuickShortcutTile(
     icon: ImageVector,
@@ -659,36 +731,55 @@ private fun QuickShortcutTile(
     Surface(
         onClick = onClick,
         color = SlateBg,
-        border = BorderStroke(1.dp, SlateOutline),
+        border = BorderStroke(1.dp, SlateOutline.copy(alpha = 0.7f)),
         shape = RoundedCornerShape(10.dp),
-        modifier = modifier.heightIn(min = 52.dp).testTag(testTag)
+        modifier = modifier
+            .heightIn(min = 52.dp)
+            .testTag(testTag)
     ) {
-        Column(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 6.dp),
-            verticalArrangement = Arrangement.spacedBy(2.dp),
-            horizontalAlignment = Alignment.Start
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 8.dp, vertical = 7.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(4.dp)
+            Surface(
+                color = tint.copy(alpha = 0.12f),
+                shape = RoundedCornerShape(8.dp)
             ) {
-                Icon(icon, contentDescription = null, tint = tint, modifier = Modifier.size(15.dp))
+                Box(
+                    modifier = Modifier.padding(6.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        icon,
+                        contentDescription = null,
+                        tint = tint,
+                        modifier = Modifier.size(16.dp)
+                    )
+                }
+            }
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(1.dp)
+            ) {
                 Text(
                     title,
                     fontWeight = FontWeight.SemiBold,
-                    fontSize = 11.sp,
+                    fontSize = 11.5.sp,
                     color = SlateText,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
+                Text(
+                    subtitle,
+                    fontSize = 9.5.sp,
+                    color = SlateMuted,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
             }
-            Text(
-                subtitle,
-                fontSize = 9.5.sp,
-                color = SlateMuted,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
         }
     }
 }
