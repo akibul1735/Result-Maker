@@ -1143,10 +1143,12 @@ class ResultMakerViewModel(
                 perm.canEditSubject(sub)
             }
             val attendancePrefixes = listOf("DAYS_", "PRES_", "ACT_", "DISC_", "COND_", "REM_")
-            val filteredX = if (perm.canEditAttendance) {
-                student.x
-            } else {
-                student.x.filterKeys { k -> attendancePrefixes.none { p -> k.startsWith(p) } }
+            val filteredX = student.x.filterKeys { k ->
+                when {
+                    attendancePrefixes.any { k.startsWith(it) } -> perm.canEditAttendance
+                    isAbsentXKey(k) -> absentSubjectFromXKey(k)?.let { perm.canEditSubject(it) } == true
+                    else -> true
+                }
             }
             return student.copy(m = filteredM, x = filteredX)
         }
@@ -1171,15 +1173,27 @@ class ResultMakerViewModel(
 
         val attendancePrefixKeys = setOf("DAYS_", "PRES_", "ACT_", "DISC_", "COND_", "REM_")
         fun isAttendanceKey(k: String): Boolean = attendancePrefixKeys.any { k.startsWith(it) }
+        fun isPermittedAbsentKey(k: String): Boolean =
+            isAbsentXKey(k) && absentSubjectFromXKey(k)?.let { perm.canEditSubject(it) } == true
 
         val nextX = existing.x.toMutableMap().apply {
             if (perm.canEditAttendance) {
                 keys.toList().forEach { k -> if (isAttendanceKey(k) && !student.x.containsKey(k)) remove(k) }
                 student.x.forEach { (k, v) -> if (isAttendanceKey(k)) put(k, v) }
             }
+            keys.toList().forEach { k ->
+                if (isPermittedAbsentKey(k) && !student.x.containsKey(k)) remove(k)
+            }
+            student.x.forEach { (k, v) ->
+                if (isPermittedAbsentKey(k)) put(k, v)
+            }
             if (perm.canManageStudents) {
-                keys.toList().forEach { k -> if (!isAttendanceKey(k) && !student.x.containsKey(k)) remove(k) }
-                student.x.forEach { (k, v) -> if (!isAttendanceKey(k)) put(k, v) }
+                keys.toList().forEach { k ->
+                    if (!isAttendanceKey(k) && !isAbsentXKey(k) && !student.x.containsKey(k)) remove(k)
+                }
+                student.x.forEach { (k, v) ->
+                    if (!isAttendanceKey(k) && !isAbsentXKey(k)) put(k, v)
+                }
             }
         }
 
@@ -1222,7 +1236,11 @@ class ResultMakerViewModel(
             fieldPath.startsWith("x.") -> {
                 val xKey = fieldPath.removePrefix("x.")
                 val isAtt = listOf("DAYS_", "PRES_", "ACT_", "DISC_", "COND_", "REM_").any { xKey.startsWith(it) }
-                if (isAtt) perm.canEditAttendance else perm.canManageStudents
+                when {
+                    isAtt -> perm.canEditAttendance
+                    isAbsentXKey(xKey) -> absentSubjectFromXKey(xKey)?.let { perm.canEditSubject(it) } == true
+                    else -> perm.canManageStudents
+                }
             }
             else -> perm.canManageStudents
         }
@@ -2260,13 +2278,18 @@ class ResultMakerViewModel(
     }
 
     private fun buildStudentAiContext(s: Student): String {
-        val pct = s.overallPct()
-        val grade = gradeOf(pct)
-        val hasEval = (1..3).any { s.hasTerm(it) }
+        val rules = settings.value.resultRules
+        val peers = students.value.filter { it.cls == s.cls }
+        val activeTerms = ResultRulesEngine.activeTermsForClass(peers, rules.dynamicTermAveraging)
+        val eval = ResultRulesEngine.evaluateStudent(s, rules, activeTerms)
         return buildString {
             append("নাম: ${s.name}, শ্রেণি: ${classNameBn(s.cls, settings.value)}, রোল: ${s.roll}, ধর্ম: ${s.religion}")
+            if (s.isSpecialNeeds) append(", বিশেষ চাহিদাসম্পন্ন (৩৩%)")
             if (s.guardian.isNotBlank()) append(", অভিভাবক: ${s.guardian}")
-            if (hasEval) append(", গড়: ${fmtEn(pct)}% ($grade - ${gradeLabelBn(grade)})")
+            if (eval.hasAnyData) {
+                append(", গড়: ${fmtEn(eval.pct)}% (${eval.grade} - ${gradeLabelBn(eval.grade)})")
+                append(", অবস্থা: ${if (eval.isPromoted) "উত্তীর্ণ" else "অনুত্তীর্ণ"}")
+            }
         }
     }
 

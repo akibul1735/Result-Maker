@@ -101,9 +101,11 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.kgps.result.RELIGIONS
+import com.kgps.result.ResultRulesEngine
 import com.kgps.result.Settings
 import com.kgps.result.Student
 import com.kgps.result.TeacherRemarkEngine
+import com.kgps.result.absKey
 import com.kgps.result.activeClassIds
 import com.kgps.result.avg
 import com.kgps.result.bn
@@ -115,6 +117,9 @@ import com.kgps.result.fmtEn
 import com.kgps.result.fromBn
 import com.kgps.result.gradeOf
 import com.kgps.result.hasSub
+import com.kgps.result.isAbsentToken
+import com.kgps.result.isCompAbsent
+import com.kgps.result.isSubFullyAbsent
 import com.kgps.result.mk
 import com.kgps.result.subjectsFor
 import com.kgps.result.subs
@@ -205,6 +210,7 @@ fun BulkSheetScreen(
     var mode by remember { mutableStateOf(availableModes.firstOrNull()?.first ?: "subject") }
     var navDir by remember { mutableStateOf("down") }
     var isEditMode by remember { mutableStateOf(false) }
+    var absentTapMode by remember { mutableStateOf(false) }
     var useBnDigits by remember { mutableStateOf(true) }
     var traitBatchSelectMode by remember { mutableStateOf(false) }
     var selectedTraitStudentIds by remember { mutableStateOf<Set<String>>(emptySet()) }
@@ -221,6 +227,7 @@ fun BulkSheetScreen(
     var remarkPickerStudent by remember { mutableStateOf<Student?>(null) }
 
     LaunchedEffect(activeCls, mode) {
+        absentTapMode = false
         traitBatchSelectMode = false
         selectedTraitStudentIds = emptySet()
         activeTraitMenuCellKey = null
@@ -238,7 +245,10 @@ fun BulkSheetScreen(
         }
     }
     LaunchedEffect(isEditMode) {
-        if (!isEditMode) activeTraitMenuCellKey = null
+        if (!isEditMode) {
+            activeTraitMenuCellKey = null
+            absentTapMode = false
+        }
     }
 
     fun fmtSheetNum(v: Double): String = if (useBnDigits) fmt(v) else fmtEn(v)
@@ -411,18 +421,33 @@ fun BulkSheetScreen(
                 if (!isColumnEditable(col)) return@forEachIndexed
                 val trimmed = rawVal.trim()
                 if (col.isMark && col.markSubKey != null && col.markCompKey != null) {
-                    val d = fromBn(trimmed).toDoubleOrNull()
-                    if (d != null && d in 0.0..col.max.toDouble()) {
-                        nextM[mk(col.markSubKey, term, col.markCompKey)] = d
-                        if (col.markCompKey == "CONT") {
-                            listOf("TB", "ACT", "LANG", "CT", "TOTAL").forEach { comp ->
+                    val absComp = if (col.markCompKey == "WR") "WR" else "CONT"
+                    val aKey = absKey(col.markSubKey, term, absComp)
+                    if (isAbsentToken(trimmed)) {
+                        nextX[aKey] = "1"
+                        if (absComp == "WR") {
+                            nextM.remove(mk(col.markSubKey, term, "WR"))
+                        } else {
+                            listOf("TB", "ACT", "LANG", "CT", "CONT", "TOTAL").forEach { comp ->
                                 nextM.remove(mk(col.markSubKey, term, comp))
                             }
-                        } else if (col.markCompKey in listOf("TB", "ACT", "LANG", "CT")) {
-                            nextM.remove(mk(col.markSubKey, term, "CONT"))
-                            nextM.remove(mk(col.markSubKey, term, "TOTAL"))
                         }
                         updatedCells++
+                    } else {
+                        val d = fromBn(trimmed).toDoubleOrNull()
+                        if (d != null && d in 0.0..col.max.toDouble()) {
+                            nextX.remove(aKey)
+                            nextM[mk(col.markSubKey, term, col.markCompKey)] = d
+                            if (col.markCompKey == "CONT") {
+                                listOf("TB", "ACT", "LANG", "CT", "TOTAL").forEach { comp ->
+                                    nextM.remove(mk(col.markSubKey, term, comp))
+                                }
+                            } else if (col.markCompKey in listOf("TB", "ACT", "LANG", "CT")) {
+                                nextM.remove(mk(col.markSubKey, term, "CONT"))
+                                nextM.remove(mk(col.markSubKey, term, "TOTAL"))
+                            }
+                            updatedCells++
+                        }
                     }
                 } else if (col.xKey != null) {
                     if (col.isNumeric) {
@@ -926,6 +951,39 @@ fun BulkSheetScreen(
                                     fontSize = 11.sp,
                                     fontWeight = FontWeight.Bold,
                                     color = Color.White,
+                                    maxLines = 1,
+                                    softWrap = false
+                                )
+                            }
+                        }
+                    }
+
+                    if ((mode == "subject" || mode == "all") && canPasteCurrentSheet) {
+                        Surface(
+                            onClick = {
+                                if (!absentTapMode) {
+                                    focusManager.clearFocus(force = true)
+                                    isEditMode = true
+                                    absentTapMode = true
+                                    onShowMessage("নম্বরের ঘরে ট্যাপ করলে 'A' (অনুপস্থিত) চালু/বন্ধ হবে")
+                                } else {
+                                    absentTapMode = false
+                                }
+                            },
+                            shape = RoundedCornerShape(7.dp),
+                            color = if (absentTapMode) RoseDanger else RoseBg,
+                            border = BorderStroke(1.dp, if (absentTapMode) RoseDanger else RoseDanger.copy(alpha = 0.35f)),
+                            modifier = Modifier.height(32.dp).testTag("sheet_absent_tap_toggle")
+                        ) {
+                            Box(
+                                modifier = Modifier.padding(horizontal = 8.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    if (absentTapMode) "A চালু ✓" else "A অনুপস্থিত",
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = if (absentTapMode) Color.White else RoseDanger,
                                     maxLines = 1,
                                     softWrap = false
                                 )
@@ -1557,6 +1615,13 @@ fun BulkSheetScreen(
                     }
                     HorizontalDivider(color = SlateOutline)
 
+                    val classActiveTerms = remember(classStudents, settings.resultRules.dynamicTermAveraging) {
+                        ResultRulesEngine.activeTermsForClass(
+                            classStudents = classStudents,
+                            dynamicTermAveraging = settings.resultRules.dynamicTermAveraging
+                        )
+                    }
+
                     LazyColumn(Modifier.fillMaxSize()) {
                         itemsIndexed(classStudents, key = { _, s -> s.id }) { rIdx, s ->
                             val rowHeight = 48.dp
@@ -1629,7 +1694,13 @@ fun BulkSheetScreen(
                                             if (mode == "subject" && col.markCompKey == "WR" && !renderedContCell && subForStudent != null) {
                                                 renderedContCell = true
                                                 val cScore = s.cont(subForStudent, term)
-                                                SheetComputedCell(fmtSheetNum(cScore), SlateBg, SlateMuted)
+                                                val contAbs = s.isCompAbsent(subForStudent.key, term, "CONT")
+                                                SheetComputedCell(
+                                                    text = if (contAbs) "A" else fmtSheetNum(cScore),
+                                                    bg = if (contAbs) RoseBg else SlateBg,
+                                                    fg = if (contAbs) RoseDanger else SlateMuted,
+                                                    bold = contAbs
+                                                )
                                             }
                                             val hasPerm = isColumnEditable(col)
                                             val colEditable = isEditMode && hasPerm
@@ -1840,17 +1911,25 @@ fun BulkSheetScreen(
                                                 return@forEachIndexed
                                             }
 
-                                            val initialVal = remember(s.id, s.m, s.x, s.guardian, s.mobile, s.village, s.union, s.upazila, s.district, s.religion, col.key, term, useBnDigits) {
+                                            val cellAbsComp = if (col.markCompKey == "WR") "WR" else "CONT"
+                                            val cellIsAbsent = col.isMark && col.markSubKey != null && col.markCompKey != null &&
+                                                s.isCompAbsent(col.markSubKey, term, cellAbsComp)
+
+                                            val initialVal = remember(s.id, s.m, s.x, s.guardian, s.mobile, s.village, s.union, s.upazila, s.district, s.religion, col.key, term, useBnDigits, cellIsAbsent) {
                                                 when {
                                                     col.isMark && col.markSubKey != null && col.markCompKey != null -> {
-                                                        val explicit = s.m[mk(col.markSubKey, term, col.markCompKey)]
-                                                        if (explicit != null) {
-                                                            fmtSheetNum(explicit)
-                                                        } else if (col.markCompKey == "CONT") {
-                                                            val subDef = allSubsForClass.find { it.key == col.markSubKey }
-                                                            if (subDef != null && s.hasSub(subDef, term)) fmtSheetNum(s.cont(subDef, term)) else ""
+                                                        if (cellIsAbsent) {
+                                                            "A"
                                                         } else {
-                                                            ""
+                                                            val explicit = s.m[mk(col.markSubKey, term, col.markCompKey)]
+                                                            if (explicit != null) {
+                                                                fmtSheetNum(explicit)
+                                                            } else if (col.markCompKey == "CONT") {
+                                                                val subDef = allSubsForClass.find { it.key == col.markSubKey }
+                                                                if (subDef != null && s.hasSub(subDef, term)) fmtSheetNum(s.cont(subDef, term)) else ""
+                                                            } else {
+                                                                ""
+                                                            }
                                                         }
                                                     }
                                                     col.xKey != null -> {
@@ -1879,17 +1958,54 @@ fun BulkSheetScreen(
                                                 }
                                             }
 
-                                            val parsedNum = if (col.isNumeric && col.infoFieldKey != "mobile") fromBn(draft.trim()).toDoubleOrNull() else null
-                                            val invalid = col.isNumeric && col.infoFieldKey != "mobile" && draft.isNotBlank() &&
+                                            val draftIsAbsent = col.isMark && isAbsentToken(draft)
+                                            val parsedNum = if (col.isNumeric && col.infoFieldKey != "mobile" && !draftIsAbsent) fromBn(draft.trim()).toDoubleOrNull() else null
+                                            val invalid = col.isNumeric && col.infoFieldKey != "mobile" && !draftIsAbsent && draft.isNotBlank() &&
                                                 (parsedNum == null || parsedNum < 0 || parsedNum > col.max)
+
+                                            fun toggleCellAbsent() {
+                                                if (!hasPerm || !col.isMark || col.markSubKey == null || col.markCompKey == null) return
+                                                val aKey = absKey(col.markSubKey, term, cellAbsComp)
+                                                if (cellIsAbsent) {
+                                                    onPatchStudentField(s.id, "x.$aKey", null)
+                                                } else {
+                                                    onPatchStudentField(s.id, "x.$aKey", "1")
+                                                    if (cellAbsComp == "WR") {
+                                                        val k = mk(col.markSubKey, term, "WR")
+                                                        if (s.m.containsKey(k)) onPatchStudentField(s.id, "m.$k", null)
+                                                    } else {
+                                                        listOf("TB", "ACT", "LANG", "CT", "CONT", "TOTAL").forEach { comp ->
+                                                            val ck = mk(col.markSubKey, term, comp)
+                                                            if (s.m.containsKey(ck)) onPatchStudentField(s.id, "m.$ck", null)
+                                                        }
+                                                    }
+                                                }
+                                            }
 
                                             fun commitDraft(text: String) {
                                                 if (!hasPerm) return
-                                                val clean = fromBn(text.trim())
+                                                val rawTrimmed = text.trim()
+                                                val clean = fromBn(rawTrimmed)
                                                 if (col.isMark && col.markSubKey != null && col.markCompKey != null) {
                                                     val k = mk(col.markSubKey, term, col.markCompKey)
+                                                    val aKey = absKey(col.markSubKey, term, cellAbsComp)
                                                     val subDef = allSubsForClass.find { it.key == col.markSubKey }
-                                                    if (clean.isEmpty()) {
+                                                    if (isAbsentToken(rawTrimmed)) {
+                                                        if (!cellIsAbsent) {
+                                                            onPatchStudentField(s.id, "x.$aKey", "1")
+                                                        }
+                                                        if (cellAbsComp == "WR") {
+                                                            if (s.m.containsKey(k)) onPatchStudentField(s.id, "m.$k", null)
+                                                        } else {
+                                                            listOf("TB", "ACT", "LANG", "CT", "CONT", "TOTAL").forEach { comp ->
+                                                                val ck = mk(col.markSubKey, term, comp)
+                                                                if (s.m.containsKey(ck)) onPatchStudentField(s.id, "m.$ck", null)
+                                                            }
+                                                        }
+                                                    } else if (clean.isEmpty()) {
+                                                        if (cellIsAbsent) {
+                                                            onPatchStudentField(s.id, "x.$aKey", null)
+                                                        }
                                                         if (s.m.containsKey(k)) {
                                                             onPatchStudentField(s.id, "m.$k", null)
                                                         }
@@ -1902,8 +2018,11 @@ fun BulkSheetScreen(
                                                     } else {
                                                         clean.toDoubleOrNull()?.let { d ->
                                                             if (d in 0.0..col.max.toDouble()) {
+                                                                if (cellIsAbsent) {
+                                                                    onPatchStudentField(s.id, "x.$aKey", null)
+                                                                }
                                                                 val currentShown = s.m[k] ?: if (col.markCompKey == "CONT" && subDef != null && s.hasSub(subDef, term)) s.cont(subDef, term) else null
-                                                                if (currentShown != d) {
+                                                                if (currentShown != d || cellIsAbsent) {
                                                                     onPatchStudentField(s.id, "m.$k", d)
                                                                     if (col.markCompKey == "CONT") {
                                                                         listOf("TB", "ACT", "LANG", "CT", "TOTAL").forEach { comp ->
@@ -1958,12 +2077,14 @@ fun BulkSheetScreen(
                                                 }
                                             }
 
+                                            val useAbsentTapHere = absentTapMode && colEditable && col.isMark
                                             Box(
                                                 Modifier
                                                     .width(col.width)
                                                     .fillMaxHeight()
                                                     .background(
                                                         when {
+                                                            cellIsAbsent -> RoseBg
                                                             invalid -> RoseDanger.copy(alpha = 0.08f)
                                                             isRowSelected -> TealContainer.copy(alpha = 0.7f)
                                                             !colEditable -> SlateBg
@@ -1971,54 +2092,74 @@ fun BulkSheetScreen(
                                                             else -> MaterialTheme.colorScheme.surface
                                                         }
                                                     )
+                                                    .then(
+                                                        if (useAbsentTapHere) {
+                                                            Modifier.clickable { toggleCellAbsent() }
+                                                        } else {
+                                                            Modifier
+                                                        }
+                                                    )
                                                     .padding(horizontal = 4.dp),
                                                 contentAlignment = Alignment.Center
                                             ) {
-                                                BasicTextField(
-                                                    value = draft,
-                                                    onValueChange = { v ->
-                                                        if (colEditable) {
-                                                            draft = if (col.isNumeric && col.infoFieldKey != "mobile") {
-                                                                if (useBnDigits) bn(v) else fromBn(v)
-                                                            } else {
-                                                                v
-                                                            }
-                                                        }
-                                                    },
-                                                    enabled = colEditable,
-                                                    readOnly = !colEditable,
-                                                    singleLine = true,
-                                                    textStyle = TextStyle(
+                                                if (useAbsentTapHere) {
+                                                    Text(
+                                                        text = if (cellIsAbsent) "A" else draft.ifEmpty { "—" },
                                                         fontSize = 13.sp,
-                                                        fontWeight = FontWeight.Medium,
-                                                        color = when {
-                                                            !colEditable -> SlateMuted
-                                                            invalid -> RoseDanger
-                                                            else -> SlateText
+                                                        fontWeight = if (cellIsAbsent) FontWeight.Bold else FontWeight.Medium,
+                                                        color = if (cellIsAbsent) RoseDanger else if (draft.isEmpty()) SlateOutline else SlateText,
+                                                        textAlign = TextAlign.Center
+                                                    )
+                                                } else {
+                                                    BasicTextField(
+                                                        value = draft,
+                                                        onValueChange = { v ->
+                                                            if (colEditable) {
+                                                                draft = if (col.isMark && isAbsentToken(v)) {
+                                                                    "A"
+                                                                } else if (col.isNumeric && col.infoFieldKey != "mobile") {
+                                                                    if (useBnDigits) bn(v) else fromBn(v)
+                                                                } else {
+                                                                    v
+                                                                }
+                                                            }
                                                         },
-                                                        textAlign = if (col.isNumeric) TextAlign.Center else TextAlign.Start
-                                                    ),
-                                                    cursorBrush = SolidColor(TealPrimary),
-                                                    keyboardOptions = KeyboardOptions(
-                                                        keyboardType = if (col.isNumeric) KeyboardType.Decimal else KeyboardType.Text,
-                                                        imeAction = ImeAction.Next
-                                                    ),
-                                                    keyboardActions = KeyboardActions(
-                                                        onNext = {
-                                                            commitDraft(draft)
-                                                            moveFocusFrom(rIdx, cIdx)
-                                                        }
-                                                    ),
-                                                    modifier = Modifier
-                                                        .fillMaxWidth()
-                                                        .focusRequester(focusMatrix[rIdx][cIdx])
-                                                        .onFocusChanged { fs ->
-                                                            if (isFocused && !fs.isFocused) commitDraft(draft)
-                                                            isFocused = fs.isFocused
-                                                        }
-                                                )
-                                                if (draft.isEmpty() && !isFocused) {
-                                                    Text("—", fontSize = 12.sp, color = SlateOutline)
+                                                        enabled = colEditable,
+                                                        readOnly = !colEditable,
+                                                        singleLine = true,
+                                                        textStyle = TextStyle(
+                                                            fontSize = 13.sp,
+                                                            fontWeight = if (cellIsAbsent) FontWeight.Bold else FontWeight.Medium,
+                                                            color = when {
+                                                                cellIsAbsent -> RoseDanger
+                                                                !colEditable -> SlateMuted
+                                                                invalid -> RoseDanger
+                                                                else -> SlateText
+                                                            },
+                                                            textAlign = if (col.isNumeric) TextAlign.Center else TextAlign.Start
+                                                        ),
+                                                        cursorBrush = SolidColor(TealPrimary),
+                                                        keyboardOptions = KeyboardOptions(
+                                                            keyboardType = if (col.isNumeric) KeyboardType.Decimal else KeyboardType.Text,
+                                                            imeAction = ImeAction.Next
+                                                        ),
+                                                        keyboardActions = KeyboardActions(
+                                                            onNext = {
+                                                                commitDraft(draft)
+                                                                moveFocusFrom(rIdx, cIdx)
+                                                            }
+                                                        ),
+                                                        modifier = Modifier
+                                                            .fillMaxWidth()
+                                                            .focusRequester(focusMatrix[rIdx][cIdx])
+                                                            .onFocusChanged { fs ->
+                                                                if (isFocused && !fs.isFocused) commitDraft(draft)
+                                                                isFocused = fs.isFocused
+                                                            }
+                                                    )
+                                                    if (draft.isEmpty() && !isFocused) {
+                                                        Text("—", fontSize = 12.sp, color = SlateOutline)
+                                                    }
                                                 }
                                             }
                                             Box(Modifier.width(1.dp).fillMaxHeight().background(SlateOutline))
@@ -2027,17 +2168,51 @@ fun BulkSheetScreen(
                                         if (mode == "subject" && subForStudent != null) {
                                             if (!renderedContCell) {
                                                 val cScore = s.cont(subForStudent, term)
-                                                SheetComputedCell(fmtSheetNum(cScore), SlateBg, SlateMuted)
+                                                val contAbs = s.isCompAbsent(subForStudent.key, term, "CONT")
+                                                SheetComputedCell(
+                                                    text = if (contAbs) "A" else fmtSheetNum(cScore),
+                                                    bg = if (contAbs) RoseBg else SlateBg,
+                                                    fg = if (contAbs) RoseDanger else SlateMuted,
+                                                    bold = contAbs
+                                                )
                                             }
                                             val tScore = s.total(subForStudent, term)
+                                            val subAbs = s.isSubFullyAbsent(subForStudent, term)
+                                            val subFailed = ResultRulesEngine.isSubjectTermFailed(
+                                                student = s,
+                                                sub = subForStudent,
+                                                term = term,
+                                                rules = settings.resultRules
+                                            )
+                                            val rawTotText = if (subAbs) "A" else fmtSheetNum(tScore)
+                                            val displayTotText = ResultRulesEngine.formatTermTotalCell(
+                                                rawValueText = rawTotText,
+                                                failed = subFailed,
+                                                rules = settings.resultRules
+                                            )
+                                            val showFailHighlight = subFailed && settings.resultRules.showFailIndicator
                                             val grade = gradeOf((tScore / subForStudent.max.toDouble()) * 100.0)
-                                            SheetComputedCell(fmtSheetNum(tScore), TealContainer.copy(alpha = 0.25f), TealPrimary, bold = true)
-                                            SheetComputedCell(grade, SlateBg, TealPrimary, bold = true)
+                                            SheetComputedCell(
+                                                text = displayTotText,
+                                                bg = if (showFailHighlight || subAbs) RoseBg else TealContainer.copy(alpha = 0.25f),
+                                                fg = if (showFailHighlight || subAbs) RoseDanger else TealPrimary,
+                                                bold = true
+                                            )
+                                            SheetComputedCell(grade, SlateBg, if (showFailHighlight) RoseDanger else TealPrimary, bold = true)
                                         } else if (mode == "all" && (permissions.allSubjects || permissions.canViewOtherSubjects)) {
-                                            val maxSum = allSubsForClass.sumOf { it.max }.coerceAtLeast(1)
-                                            val avgSum = allSubsForClass.sumOf { s.avg(it) }
-                                            val pct = avgSum / maxSum * 100.0
-                                            SheetComputedCell("${fmtSheetNum(pct)}%", TealContainer.copy(alpha = 0.25f), TealPrimary, bold = true)
+                                            val eval = ResultRulesEngine.evaluateStudent(
+                                                student = s,
+                                                rules = settings.resultRules,
+                                                classActiveTerms = classActiveTerms
+                                            )
+                                            val pctText = if (eval.hasAnyData) "${fmtSheetNum(eval.pct)}%" else "—"
+                                            val failedPromo = eval.hasAnyData && !eval.isPromoted
+                                            SheetComputedCell(
+                                                text = pctText,
+                                                bg = if (failedPromo) RoseBg else TealContainer.copy(alpha = 0.25f),
+                                                fg = if (failedPromo) RoseDanger else TealPrimary,
+                                                bold = true
+                                            )
                                         } else if (mode == "attendance") {
                                             val dVal = s.x["DAYS_$term"]?.let { fromBn(it).toDoubleOrNull() }
                                             val pVal = s.x["PRES_$term"]?.let { fromBn(it).toDoubleOrNull() }

@@ -539,4 +539,99 @@ test("School members can sync and fetch thin-QR sheetTemplates while outsiders a
   await assertSucceeds(aliceTplRef.delete());
 });
 
+test("Admin can configure resultRules on school and subject-restricted teacher can toggle ABS_* only for allowed subjects", async () => {
+  const aliceDb = testEnv.authenticatedContext(ALICE_UID).firestore();
+  const bobDb = testEnv.authenticatedContext(BOB_UID).firestore();
+
+  await testEnv.withSecurityRulesDisabled(async (ctx) => {
+    const adminDb = ctx.firestore();
+    const school = makeSchoolPayload(ALICE_UID, "RUL700", true);
+    school.memberUids = [ALICE_UID, BOB_UID];
+    school.memberProfiles[BOB_UID] = {
+      uid: BOB_UID,
+      name: "Bob",
+      email: "bob@x.com",
+      role: "TEACHER",
+      allClasses: false,
+      allowedClasses: [3],
+      allSubjects: false,
+      allowedSubjects: ["MATH"],
+      canViewOtherSubjects: false,
+      canEditAttendance: false,
+      canManageStudents: false,
+      canExportPdf: false,
+    };
+    await adminDb.collection("schools").doc("school_rules").set(school);
+    await adminDb.collection("schoolCodes").doc("RUL700").set(makeCodePayload("school_rules", ALICE_UID));
+  });
+
+  // Admin can update valid resultRules, while non-map or non-admin fails
+  await assertSucceeds(
+    aliceDb.collection("schools").doc("school_rules").update({
+      resultRules: {
+        attendanceRuleEnabled: true,
+        minAttendancePct: 85.0,
+        showFailIndicator: true,
+        failIndicatorStyle: "CROSS",
+        specialNeedsRuleEnabled: true,
+        jointMeritEnabled: true,
+      },
+      updatedAt: pastDate(300),
+    })
+  );
+  await assertFails(
+    aliceDb.collection("schools").doc("school_rules").update({
+      resultRules: "invalid",
+      updatedAt: pastDate(250),
+    })
+  );
+  await assertFails(
+    bobDb.collection("schools").doc("school_rules").update({
+      resultRules: { attendanceRuleEnabled: false },
+      updatedAt: pastDate(240),
+    })
+  );
+
+  // Admin creates Class 3 student
+  const c3Ref = aliceDb.collection("schools").doc("school_rules").collection("students").doc("st_r3");
+  await assertSucceeds(c3Ref.set(makeStudentPayload(ALICE_UID, 1, "সাজিদ", 3)));
+
+  const bobC3 = bobDb.collection("schools").doc("school_rules").collection("students").doc("st_r3");
+
+  // Bob (MATH only) can mark & clear ABS_MATH_1_WR, but NOT ABS_BAN_1_WR or SPECIAL_NEEDS
+  await assertSucceeds(
+    bobC3.update({
+      "x.ABS_MATH_1_WR": "1",
+      updatedByUid: BOB_UID,
+      updatedByName: "Bob",
+      updatedAt: pastDate(200),
+    })
+  );
+  await assertSucceeds(
+    bobC3.update({
+      "x.ABS_MATH_1_WR": null,
+      updatedByUid: BOB_UID,
+      updatedByName: "Bob",
+      updatedAt: pastDate(180),
+    })
+  );
+  await assertFails(
+    bobC3.update({
+      "x.ABS_BAN_1_WR": "1",
+      updatedByUid: BOB_UID,
+      updatedByName: "Bob",
+      updatedAt: pastDate(160),
+    })
+  );
+  await assertFails(
+    bobC3.update({
+      "x.SPECIAL_NEEDS": "1",
+      updatedByUid: BOB_UID,
+      updatedByName: "Bob",
+      updatedAt: pastDate(140),
+    })
+  );
+});
+
+
 

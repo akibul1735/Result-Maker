@@ -370,7 +370,7 @@ fun MeritAndResultsCard(
                                     border = BorderStroke(1.dp, rankFg.copy(alpha = 0.25f))
                                 ) {
                                     Text(
-                                        bn(entry.rank.toString()),
+                                        if (entry.isJointRank) "${bn(entry.rank.toString())} (যৌথ)" else bn(entry.rank.toString()),
                                         fontWeight = FontWeight.Bold,
                                         fontSize = 11.5.sp,
                                         color = rankFg,
@@ -386,10 +386,15 @@ fun MeritAndResultsCard(
                                         maxLines = 1,
                                         overflow = TextOverflow.Ellipsis
                                     )
+                                    val subMeta = buildString {
+                                        append("${classShortLabel(entry.student.cls)} · রোল ${bn(entry.student.roll.toString().padStart(2, '0'))} · ${fmt(entry.obtained)}/${fmt(entry.maxMarks)}")
+                                        if (entry.isSpecialNeeds) append(" · বিশেষ")
+                                        if (!entry.isPromoted) append(" · অনুত্তীর্ণ")
+                                    }
                                     Text(
-                                        "${classShortLabel(entry.student.cls)} · রোল ${bn(entry.student.roll.toString().padStart(2, '0'))} · ${fmt(entry.obtained)}/${fmt(entry.maxMarks)}",
+                                        subMeta,
                                         fontSize = 10.5.sp,
-                                        color = SlateMuted,
+                                        color = if (!entry.isPromoted) RoseDanger else SlateMuted,
                                         maxLines = 1,
                                         overflow = TextOverflow.Ellipsis
                                     )

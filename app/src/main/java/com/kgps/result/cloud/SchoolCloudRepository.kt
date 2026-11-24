@@ -319,6 +319,7 @@ class SchoolCloudRepository(
                         "syllabusTier" to if (it.syllabusTier <= 2) 1 else 3
                     )
                 },
+                "resultRules" to settings.resultRules.toFirestoreMap(),
                 "createdAt" to FieldValue.serverTimestamp(),
                 "updatedAt" to FieldValue.serverTimestamp()
             )
@@ -799,6 +800,9 @@ class SchoolCloudRepository(
                 )
             }
 
+            val nextRules = nextSettings.resultRules.toFirestoreMap()
+            val prevRules = prev.resultRules.toFirestoreMap()
+
             val updates = mutableMapOf<String, Any>()
             if (cleanSchoolName != cleanPrevSchoolName) updates["school"] = cleanSchoolName
             if (cleanAddress != cleanPrevAddress) updates["schoolAddress"] = cleanAddress
@@ -809,6 +813,7 @@ class SchoolCloudRepository(
             if (cleanLogo != cleanPrevLogo) updates["dpeLogo"] = cleanLogo
             if (nextFields != prevFields) updates["customFields"] = nextFields
             if (nextClasses != prevClasses) updates["customClasses"] = nextClasses
+            if (nextRules != prevRules) updates["resultRules"] = nextRules
             if (updates.isEmpty()) return Result.success(Unit)
             updates["updatedAt"] = FieldValue.serverTimestamp()
 
@@ -1209,6 +1214,7 @@ class SchoolCloudRepository(
 
         val dpeLogo = if (doc.getString("dpeLogo") == "color") "color" else "simple"
         val decodedFonts = com.kgps.result.decodePdfFontPair(doc.getString("pdfFont"))
+        val resultRules = com.kgps.result.ResultEvaluationRules.fromMap(doc.get("resultRules") as? Map<*, *>)
         val settings = Settings(
             school = doc.getString("school").orEmpty(),
             schoolAddress = doc.getString("schoolAddress").orEmpty(),
@@ -1219,7 +1225,8 @@ class SchoolCloudRepository(
             pdfEnglishFont = decodedFonts.englishFontId,
             dpeLogo = dpeLogo,
             customFields = customFields,
-            customClasses = customClasses
+            customClasses = customClasses,
+            resultRules = resultRules
         )
 
         return SchoolWorkspace(

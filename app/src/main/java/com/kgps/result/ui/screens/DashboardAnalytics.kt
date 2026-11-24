@@ -1,5 +1,7 @@
 package com.kgps.result.ui.screens
 
+import com.kgps.result.ResultEvaluationRules
+import com.kgps.result.ResultRulesEngine
 import com.kgps.result.Student
 import com.kgps.result.bn
 import com.kgps.result.classShortBn
@@ -8,7 +10,7 @@ import com.kgps.result.fromBn
 import com.kgps.result.gradeOf
 import com.kgps.result.hasSub
 import com.kgps.result.hasTerm
-import com.kgps.result.overallPct
+import com.kgps.result.isSpecialNeeds
 import com.kgps.result.subs
 import com.kgps.result.total
 import java.text.SimpleDateFormat
@@ -28,7 +30,10 @@ data class MeritEntry(
     val pct: Double,
     val obtained: Double,
     val maxMarks: Double,
-    val grade: String
+    val grade: String,
+    val isJointRank: Boolean = false,
+    val isPromoted: Boolean = true,
+    val isSpecialNeeds: Boolean = false
 )
 
 data class ClassProgressItem(
@@ -73,7 +78,8 @@ fun buildDashboardSummary(
     visibleClasses: List<Int>,
     classFilter: Int?, // null = সব অনুমোদিত শ্রেণি
     termFilter: Int,   // 0 = বার্ষিক (গড়), 1..3 = নির্দিষ্ট প্রান্তিক
-    permissions: TeacherPermissions
+    permissions: TeacherPermissions,
+    rules: ResultEvaluationRules = ResultEvaluationRules()
 ): DashboardSummary {
     val allowedClsSet = visibleClasses.toSet()
     val allowedSubKeys = permissions.effectiveSubjects().toSet()
@@ -128,6 +134,12 @@ fun buildDashboardSummary(
         return hasTraits || hasRem
     }
 
+    val classActiveTermsCache = visibleClasses.associateWith { c ->
+        val clsPeers = visibleStudents.filter { it.cls == c }
+        if (termFilter in 1..3) listOf(termFilter)
+        else ResultRulesEngine.activeTermsForClass(clsPeers, rules.dynamicTermAveraging)
+    }
+
     fun scoreFor(s: Student): Triple<Double, Double, Double>? {
         val subs = scopedSubsFor(s)
         if (subs.isEmpty()) return null
@@ -140,17 +152,14 @@ fun buildDashboardSummary(
             val pct = (obtained / maxSum) * 100.0
             return Triple(obtained, maxSum, pct)
         } else {
-            val hasAny = (1..3).any { hasTermMarks(s, it) }
+            val activeTerms = classActiveTermsCache[s.cls]
+                ?: ResultRulesEngine.activeTermsForStudent(s, rules.dynamicTermAveraging)
+            if (activeTerms.isEmpty()) return null
+            val hasAny = activeTerms.any { hasTermMarks(s, it) }
             if (!hasAny) return null
-            if (showAllSubjects) {
-                val pct = s.overallPct()
-                val obtained = subs.sumOf { sub -> (1..3).sumOf { t -> s.total(sub, t) } / 3.0 }
-                return Triple(obtained, maxSum, pct)
-            } else {
-                val obtained = subs.sumOf { sub -> (1..3).sumOf { t -> s.total(sub, t) } / 3.0 }
-                val pct = (obtained / maxSum) * 100.0
-                return Triple(obtained, maxSum, pct)
-            }
+            val obtained = subs.sumOf { sub -> ResultRulesEngine.subjectAvg(s, sub, activeTerms) }
+            val pct = (obtained / maxSum) * 100.0
+            return Triple(obtained, maxSum, pct)
         }
     }
 
@@ -202,22 +211,40 @@ fun buildDashboardSummary(
 
     val avgScorePct = if (scored.isNotEmpty()) scored.sumOf { it.third } / scored.size else 0.0
 
-    val meritList = scored
-        .sortedWith(
-            compareByDescending<Triple<Student, Pair<Double, Double>, Double>> { it.third }
-                .thenBy { it.first.cls }
-                .thenBy { it.first.roll }
-        )
-        .mapIndexed { idx, (student, pair, pct) ->
-            MeritEntry(
-                rank = idx + 1,
-                student = student,
-                pct = pct,
-                obtained = pair.first,
-                maxMarks = pair.second,
-                grade = gradeOf(pct)
+    val meritList = if (showAllSubjects) {
+        ResultRulesEngine.rankClassStudents(scopedStudents, rules, scopedTerm = termFilter)
+            .filter { it.eval.hasAnyData && it.rank > 0 }
+            .map { r ->
+                MeritEntry(
+                    rank = r.rank,
+                    student = r.student,
+                    pct = r.eval.pct,
+                    obtained = r.eval.obtainedAvgTotal,
+                    maxMarks = r.eval.maxTotal,
+                    grade = r.eval.grade,
+                    isJointRank = r.isJointRank,
+                    isPromoted = r.eval.isPromoted,
+                    isSpecialNeeds = r.student.isSpecialNeeds && rules.specialNeedsRuleEnabled
+                )
+            }
+    } else {
+        scored
+            .sortedWith(
+                compareByDescending<Triple<Student, Pair<Double, Double>, Double>> { it.third }
+                    .thenBy { it.first.cls }
+                    .thenBy { it.first.roll }
             )
-        }
+            .mapIndexed { idx, (student, pair, pct) ->
+                MeritEntry(
+                    rank = idx + 1,
+                    student = student,
+                    pct = pct,
+                    obtained = pair.first,
+                    maxMarks = pair.second,
+                    grade = gradeOf(pct)
+                )
+            }
+    }
 
     val classBreakdown = visibleClasses.map { c ->
         val inCls = visibleStudents.filter { it.cls == c }

@@ -125,13 +125,14 @@ fun DashboardScreen(
         students.filter { it.cls in allowed }.sortedWith(compareBy({ it.cls }, { it.roll }))
     }
 
-    val summary = remember(students, visibleClasses, classFilter, termFilter, permissions) {
+    val summary = remember(students, visibleClasses, classFilter, termFilter, permissions, settings.resultRules) {
         buildDashboardSummary(
             allStudents = students,
             visibleClasses = visibleClasses,
             classFilter = classFilter,
             termFilter = termFilter,
-            permissions = permissions
+            permissions = permissions,
+            rules = settings.resultRules
         )
     }
 

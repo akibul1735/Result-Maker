@@ -264,12 +264,13 @@ object PdfGen {
         bold: Boolean = false,
         fill: Boolean = false,
         fontId: String = "noto_serif",
-        enFontId: String = "times_new_roman"
+        enFontId: String = "times_new_roman",
+        textColor: Int = 0xFF0F172A.toInt()
     ) {
         if (fill) c.drawRect(l, top, l + w, top + h, gray)
         c.drawRect(l, top, l + w, top + h, stroke)
         if (t.isEmpty()) return
-        val dp = dualPaint(ctx, size, bold, fontId, enFontId)
+        val dp = dualPaint(ctx, size, bold, fontId, enFontId, textColor)
         val lines = t.split("\n")
         while (lines.maxOf { measureMixedText(it, dp) } > w - 4 && dp.textSize > 4.5f) {
             dp.textSize -= 0.4f
@@ -721,9 +722,18 @@ object PdfGen {
         val fe = st.pdfEnglishFont
         drawPanelFrames(c, showFoldGuide)
 
+        val rules = st.resultRules
+        val classPeers = (allStudents + s).distinctBy { it.id }.filter { it.cls == s.cls }
+        val activeTerms = ResultRulesEngine.activeTermsForClass(classPeers, rules.dynamicTermAveraging)
+            .ifEmpty { ResultRulesEngine.activeTermsForStudent(s, rules.dynamicTermAveraging) }
+        val eval = ResultRulesEngine.evaluateStudent(s, rules, activeTerms)
+        val rankedResult = ResultRulesEngine.rankMapForClass(classPeers, rules)[s.id]
+
         val subs = s.subs()
-        val anyData = (1..3).any { s.hasTerm(it) }
+        val anyData = eval.hasAnyData
         val totMax = subs.sumOf { it.max }
+        val failColor = 0xFFDC2626.toInt()
+        val normalColor = 0xFF0F172A.toInt()
 
         // উভয় ভেতরের পাতার শীর্ষে সংক্ষিপ্ত পরিচিতি (মাঝ বরাবর)
         val page2Cx = 18f + 391f / 2f
@@ -731,7 +741,8 @@ object PdfGen {
         val page2NameText = "শিক্ষার্থীর নাম: ${s.name}"
         center(ctx, c, page2NameText, page2Cx, 38f, 8.8f, true, 368f, f, 0xFF334155.toInt(), fe)
 
-        val page3InfoText = "শ্রেণি: ${classNameBn(s.cls, st)}   ·   রোল/আইডি: ${bn(s.roll.toString())}"
+        val specialSuffix = if (s.isSpecialNeeds && rules.specialNeedsRuleEnabled) "   ·   বিশেষ (৩৩%)" else ""
+        val page3InfoText = "শ্রেণি: ${classNameBn(s.cls, st)}   ·   রোল/আইডি: ${bn(s.roll.toString())}$specialSuffix"
         center(ctx, c, page3InfoText, page3Cx, 38f, 8.8f, true, 368f, f, 0xFF334155.toInt(), fe)
 
         // ---- বাম ভেতরের অর্ধেক (x: 28..399) ----
@@ -762,14 +773,33 @@ object PdfGen {
             cell(ctx, c, "${sub.bn} (${bn(sub.max.toString())})", lx, ry, sw, rh, 8f, false, false, f, fe)
             for (t in 1..2) {
                 val has = s.hasSub(sub, t)
+                val contAbs = s.isCompAbsent(sub.key, t, "CONT")
+                val wrAbs = sub.written > 0 && s.isCompAbsent(sub.key, t, "WR")
+                val subAbs = s.isSubFullyAbsent(sub, t)
+                val subFailed = ResultRulesEngine.isSubjectTermFailed(s, sub, t, rules)
                 val b = lx + sw + (t - 1) * 3 * lcw
-                val contTxt = if (has) fmt(s.cont(sub, t)) else ""
-                val wrTxt = if (sub.written == 0) "......" else if (has) fmt(s.wr(sub, t)) else ""
-                val totTxt = if (has) fmt(s.total(sub, t)) else ""
+                val contTxt = if (contAbs) "A" else if (has) fmt(s.cont(sub, t)) else ""
+                val wrTxt = if (sub.written == 0) "......" else if (wrAbs) "A" else if (has) fmt(s.wr(sub, t)) else ""
+                val rawTotTxt = if (subAbs) "A" else if (has) fmt(s.total(sub, t)) else ""
+                val totTxt = if (has) ResultRulesEngine.formatTermTotalCell(rawTotTxt, subFailed, rules) else ""
 
-                cell(ctx, c, contTxt, b, ry, lcw, rh, 8f, false, false, f, fe)
-                cell(ctx, c, wrTxt, b + lcw, ry, lcw, rh, 8f, false, false, f, fe)
-                cell(ctx, c, totTxt, b + 2 * lcw, ry, lcw, rh, 8.5f, true, false, f, fe)
+                cell(ctx, c, contTxt, b, ry, lcw, rh, 8f, contAbs, false, f, fe, if (contAbs) failColor else normalColor)
+                cell(ctx, c, wrTxt, b + lcw, ry, lcw, rh, 8f, wrAbs, false, f, fe, if (wrAbs) failColor else normalColor)
+                cell(
+                    ctx,
+                    c,
+                    totTxt,
+                    b + 2 * lcw,
+                    ry,
+                    lcw,
+                    rh,
+                    8.5f,
+                    true,
+                    false,
+                    f,
+                    fe,
+                    if ((subFailed && rules.showFailIndicator) || subAbs) failColor else normalColor
+                )
             }
         }
 
@@ -852,8 +882,7 @@ object PdfGen {
         // ---- ডান ভেতরের অর্ধেক (x: 443..814) ----
         val rx = 443f
         val rW = 371f
-        val classPeers = (allStudents + s).distinctBy { it.id }.filter { it.cls == s.cls }
-        val pct = s.overallPct()
+        val pct = eval.pct
 
         if (!showClassHighest) {
             val rcw = rW / 6f
@@ -870,15 +899,34 @@ object PdfGen {
             subs.forEachIndexed { i, sub ->
                 val ry = rowsStartY + i * rh
                 val has3 = s.hasSub(sub, 3)
-                val cont3 = if (has3) fmt(s.cont(sub, 3)) else ""
-                val wr3 = if (sub.written == 0) "......" else if (has3) fmt(s.wr(sub, 3)) else ""
-                val tot3 = if (has3) fmt(s.total(sub, 3)) else ""
+                val contAbs3 = s.isCompAbsent(sub.key, 3, "CONT")
+                val wrAbs3 = sub.written > 0 && s.isCompAbsent(sub.key, 3, "WR")
+                val subAbs3 = s.isSubFullyAbsent(sub, 3)
+                val subFailed3 = ResultRulesEngine.isSubjectTermFailed(s, sub, 3, rules)
+                val cont3 = if (contAbs3) "A" else if (has3) fmt(s.cont(sub, 3)) else ""
+                val wr3 = if (sub.written == 0) "......" else if (wrAbs3) "A" else if (has3) fmt(s.wr(sub, 3)) else ""
+                val rawTot3 = if (subAbs3) "A" else if (has3) fmt(s.total(sub, 3)) else ""
+                val tot3 = if (has3) ResultRulesEngine.formatTermTotalCell(rawTot3, subFailed3, rules) else ""
 
-                cell(ctx, c, cont3, rx, ry, rcw, rh, 8f, false, false, f, fe)
-                cell(ctx, c, wr3, rx + rcw, ry, rcw, rh, 8f, false, false, f, fe)
-                cell(ctx, c, tot3, rx + 2 * rcw, ry, rcw, rh, 8.5f, true, false, f, fe)
+                cell(ctx, c, cont3, rx, ry, rcw, rh, 8f, contAbs3, false, f, fe, if (contAbs3) failColor else normalColor)
+                cell(ctx, c, wr3, rx + rcw, ry, rcw, rh, 8f, wrAbs3, false, f, fe, if (wrAbs3) failColor else normalColor)
+                cell(
+                    ctx,
+                    c,
+                    tot3,
+                    rx + 2 * rcw,
+                    ry,
+                    rcw,
+                    rh,
+                    8.5f,
+                    true,
+                    false,
+                    f,
+                    fe,
+                    if ((subFailed3 && rules.showFailIndicator) || subAbs3) failColor else normalColor
+                )
 
-                val a = s.avg(sub)
+                val a = ResultRulesEngine.subjectAvg(s, sub, activeTerms)
                 cell(ctx, c, if (anyData) fmt(a) else "", rx + 3 * rcw, ry, rcw, rh, 8.5f, true, false, f, fe)
                 cell(ctx, c, if (anyData) gradeOf(a / sub.max * 100) else "", rx + 4 * rcw, ry, rcw, rh, 9.5f, true, false, f, fe)
             }
@@ -886,7 +934,7 @@ object PdfGen {
             cell(
                 ctx,
                 c,
-                if (anyData) "${gradeOf(pct)}\n${fmt(pct)}%" else "",
+                if (anyData) "${eval.grade}\n${fmt(pct)}%" else "",
                 rx + 5 * rcw,
                 rowsStartY,
                 rcw,
@@ -918,7 +966,7 @@ object PdfGen {
             cell(
                 ctx,
                 c,
-                if (anyData) fmt(subs.sumOf { s.avg(it) }) else "",
+                if (anyData) fmt(eval.obtainedAvgTotal) else "",
                 rx + 4 * rcw,
                 ty,
                 rcw,
@@ -973,24 +1021,43 @@ object PdfGen {
             }
 
             val classHighestTotal = classPeers
-                .filter { peer -> (1..3).any { peer.hasTerm(it) } }
-                .maxOfOrNull { peer -> peer.subs().sumOf { peer.avg(it) } }
+                .filter { peer -> activeTerms.any { peer.hasTerm(it) } }
+                .maxOfOrNull { peer -> peer.subs().sumOf { ResultRulesEngine.subjectAvg(peer, it, activeTerms) } }
 
             subs.forEachIndexed { i, sub ->
                 val ry = rowsStartY + i * rh
                 val has3 = s.hasSub(sub, 3)
-                val cont3 = if (has3) fmt(s.cont(sub, 3)) else ""
-                val wr3 = if (sub.written == 0) "......" else if (has3) fmt(s.wr(sub, 3)) else ""
-                val tot3 = if (has3) fmt(s.total(sub, 3)) else ""
+                val contAbs3 = s.isCompAbsent(sub.key, 3, "CONT")
+                val wrAbs3 = sub.written > 0 && s.isCompAbsent(sub.key, 3, "WR")
+                val subAbs3 = s.isSubFullyAbsent(sub, 3)
+                val subFailed3 = ResultRulesEngine.isSubjectTermFailed(s, sub, 3, rules)
+                val cont3 = if (contAbs3) "A" else if (has3) fmt(s.cont(sub, 3)) else ""
+                val wr3 = if (sub.written == 0) "......" else if (wrAbs3) "A" else if (has3) fmt(s.wr(sub, 3)) else ""
+                val rawTot3 = if (subAbs3) "A" else if (has3) fmt(s.total(sub, 3)) else ""
+                val tot3 = if (has3) ResultRulesEngine.formatTermTotalCell(rawTot3, subFailed3, rules) else ""
 
-                cell(ctx, c, cont3, rxCols[0], ry, rw[0], rh, 7.8f, false, false, f, fe)
-                cell(ctx, c, wr3, rxCols[1], ry, rw[1], rh, 7.8f, false, false, f, fe)
-                cell(ctx, c, tot3, rxCols[2], ry, rw[2], rh, 8.2f, true, false, f, fe)
+                cell(ctx, c, cont3, rxCols[0], ry, rw[0], rh, 7.8f, contAbs3, false, f, fe, if (contAbs3) failColor else normalColor)
+                cell(ctx, c, wr3, rxCols[1], ry, rw[1], rh, 7.8f, wrAbs3, false, f, fe, if (wrAbs3) failColor else normalColor)
+                cell(
+                    ctx,
+                    c,
+                    tot3,
+                    rxCols[2],
+                    ry,
+                    rw[2],
+                    rh,
+                    8.2f,
+                    true,
+                    false,
+                    f,
+                    fe,
+                    if ((subFailed3 && rules.showFailIndicator) || subAbs3) failColor else normalColor
+                )
 
-                val a = s.avg(sub)
+                val a = ResultRulesEngine.subjectAvg(s, sub, activeTerms)
                 val classMaxSub = classPeers
-                    .filter { peer -> (1..3).any { peer.hasSub(sub, it) } }
-                    .maxOfOrNull { peer -> peer.avg(sub) }
+                    .filter { peer -> activeTerms.any { peer.hasSub(sub, it) } }
+                    .maxOfOrNull { peer -> ResultRulesEngine.subjectAvg(peer, sub, activeTerms) }
 
                 cell(ctx, c, if (anyData) fmt(a) else "", rxCols[3], ry, rw[3], rh, 8.2f, true, false, f, fe)
                 cell(ctx, c, if (classMaxSub != null) fmt(classMaxSub) else "", rxCols[4], ry, rw[4], rh, 8.2f, true, false, f, fe)
@@ -1000,7 +1067,7 @@ object PdfGen {
             cell(
                 ctx,
                 c,
-                if (anyData) "${gradeOf(pct)}\n${fmt(pct)}%" else "",
+                if (anyData) "${eval.grade}\n${fmt(pct)}%" else "",
                 rxCols[6],
                 rowsStartY,
                 rw[6],
@@ -1031,7 +1098,7 @@ object PdfGen {
             cell(
                 ctx,
                 c,
-                if (anyData) "গড় মোট\n${fmt(subs.sumOf { s.avg(it) })}" else "গড় মোট",
+                if (anyData) "গড় মোট\n${fmt(eval.obtainedAvgTotal)}" else "গড় মোট",
                 rxCols[3],
                 ty,
                 rw[3],
@@ -1088,30 +1155,12 @@ object PdfGen {
                 else -> 8.0f
             }
 
-            val totalAvgObtained = subs.sumOf { s.avg(it) }
-            val studentMeritRank: Int? = if (!anyData) {
-                null
-            } else {
-                val evaluatedPeers = classPeers.filter { peer -> (1..3).any { peer.hasTerm(it) } }
-                1 + evaluatedPeers.count { peer ->
-                    val peerPct = peer.overallPct()
-                    val peerAvg = peer.subs().sumOf { peer.avg(it) }
-                    peerPct > pct + 0.0001 || (abs(peerPct - pct) <= 0.0001 && peerAvg > totalAvgObtained + 0.0001)
-                }
-            }
-            val attendanceAvgPct: Double? = run {
-                var sumDays = 0.0
-                var sumPres = 0.0
-                for (t in 1..3) {
-                    val d = s.x["DAYS_$t"]?.let { fromBn(it).toDoubleOrNull() }
-                    val p = s.x["PRES_$t"]?.let { fromBn(it).toDoubleOrNull() }
-                    if (d != null && d > 0.0 && p != null && p >= 0.0) {
-                        sumDays += d
-                        sumPres += p.coerceAtMost(d)
-                    }
-                }
-                if (sumDays > 0.0) (sumPres / sumDays) * 100.0 else null
-            }
+            val totalAvgObtained = eval.obtainedAvgTotal
+            val meritRankLabel = rankedResult?.takeIf { anyData && it.rank > 0 }?.let { r ->
+                val base = bn(r.rank.toString())
+                if (r.isJointRank) "$base (যৌথ)" else base
+            } ?: ""
+            val attendanceAvgPct = eval.attendancePct
 
             var sx = rx
             activeSummaryCols.forEachIndexed { idx, col ->
@@ -1123,14 +1172,20 @@ object PdfGen {
                 val hdrLabel = if (useCompactHeaders) col.compactHeaderBn else col.headerBn
                 val valueLabel = when (col) {
                     ReportSummaryColumn.PERCENTAGE -> if (anyData) "${fmt(pct)}%" else ""
-                    ReportSummaryColumn.GRADE_POSITION -> if (anyData) gradeLabelBn(gradeOf(pct)) else ""
-                    ReportSummaryColumn.MERIT_RANK -> studentMeritRank?.let { bn(it.toString()) } ?: ""
-                    ReportSummaryColumn.OVERALL_GRADE -> if (anyData) gradeOf(pct) else ""
+                    ReportSummaryColumn.GRADE_POSITION -> if (anyData) gradeLabelBn(eval.grade) else ""
+                    ReportSummaryColumn.MERIT_RANK -> meritRankLabel
+                    ReportSummaryColumn.OVERALL_GRADE -> if (anyData) eval.grade else ""
                     ReportSummaryColumn.ATTENDANCE_RATE -> attendanceAvgPct?.let { "${fmt(it)}%" } ?: ""
                     ReportSummaryColumn.TOTAL_AVERAGE -> if (anyData) "${fmt(totalAvgObtained)} / ${bn(totMax.toString())}" else ""
+                    ReportSummaryColumn.PROMOTION_STATUS -> if (!anyData) "" else if (eval.isPromoted) "উত্তীর্ণ" else "অনুত্তীর্ণ"
+                }
+                val valColor = if (col == ReportSummaryColumn.PROMOTION_STATUS && anyData && !eval.isPromoted) {
+                    failColor
+                } else {
+                    normalColor
                 }
                 cell(ctx, c, hdrLabel, sx, summaryY, colW, sumHdrH, hdrFontSize, true, true, f, fe)
-                cell(ctx, c, valueLabel, sx, summaryY + sumHdrH, colW, sumValH, valFontSize, true, false, f, fe)
+                cell(ctx, c, valueLabel, sx, summaryY + sumHdrH, colW, sumValH, valFontSize, true, false, f, fe, valColor)
                 sx += colW
             }
 

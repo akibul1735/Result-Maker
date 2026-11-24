@@ -44,6 +44,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Tab
 import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
@@ -67,9 +68,12 @@ import androidx.compose.ui.unit.sp
 import com.kgps.result.DEFAULT_DISTRICT
 import com.kgps.result.DEFAULT_UPAZILA
 import com.kgps.result.RELIGIONS
+import com.kgps.result.ResultRulesEngine
 import com.kgps.result.Settings
 import com.kgps.result.Student
 import com.kgps.result.TeacherRemarkEngine
+import com.kgps.result.X_KEY_SPECIAL_NEEDS
+import com.kgps.result.absKey
 import com.kgps.result.activeClassIds
 import com.kgps.result.bn
 import com.kgps.result.classShortBn
@@ -82,8 +86,11 @@ import com.kgps.result.gradeLabelBn
 import com.kgps.result.gradeOf
 import com.kgps.result.hasSub
 import com.kgps.result.hasTerm
+import com.kgps.result.isAbsentXKey
+import com.kgps.result.isCompAbsent
+import com.kgps.result.isSpecialNeeds
+import com.kgps.result.isSubFullyAbsent
 import com.kgps.result.mk
-import com.kgps.result.overallPct
 import com.kgps.result.subs
 import com.kgps.result.termNameBn
 import com.kgps.result.total
@@ -94,15 +101,19 @@ import com.kgps.result.ui.theme.AmberBg
 import com.kgps.result.ui.theme.AmberBorder
 import com.kgps.result.ui.theme.AmberNotice
 import com.kgps.result.ui.theme.EmeraldGrade
+import com.kgps.result.ui.theme.RoseBg
 import com.kgps.result.ui.theme.RoseDanger
 import com.kgps.result.ui.theme.SlateMuted
 import com.kgps.result.ui.theme.SlateOutline
+import com.kgps.result.ui.theme.SlateText
 import com.kgps.result.ui.theme.TealContainer
 import com.kgps.result.ui.theme.TealDark
 import com.kgps.result.ui.theme.TealPrimary
 import com.kgps.result.ui.theme.TealSoft
 import com.kgps.result.ui.theme.appFilterChipBorder
 import com.kgps.result.ui.theme.appFilterChipColors
+import com.kgps.result.withCompAbsent
+import com.kgps.result.withSpecialNeeds
 
 @Composable
 fun StudentEditorScreen(
@@ -389,6 +400,42 @@ fun StudentEditorScreen(
                                             )
                                         }
                                     }
+                                    Surface(
+                                        color = if (s.isSpecialNeeds) TealSoft else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
+                                        border = BorderStroke(1.dp, if (s.isSpecialNeeds) TealContainer else SlateOutline.copy(alpha = 0.45f)),
+                                        shape = RoundedCornerShape(10.dp),
+                                        modifier = Modifier.fillMaxWidth().padding(top = 6.dp)
+                                    ) {
+                                        Row(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .padding(horizontal = 10.dp, vertical = 6.dp),
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.SpaceBetween
+                                        ) {
+                                            Column(Modifier.weight(1f).padding(end = 8.dp)) {
+                                                Text(
+                                                    "বিশেষ চাহিদাসম্পন্ন শিক্ষার্থী (৩৩% পাশ)",
+                                                    fontSize = 12.sp,
+                                                    fontWeight = FontWeight.SemiBold,
+                                                    color = SlateText
+                                                )
+                                                Text(
+                                                    "চালু থাকলে ৩৩% নম্বরে উত্তীর্ণ ও মেধাক্রম গণ্য হবে",
+                                                    fontSize = 10.5.sp,
+                                                    color = SlateMuted
+                                                )
+                                            }
+                                            Switch(
+                                                checked = s.isSpecialNeeds,
+                                                enabled = canEditProfile,
+                                                onCheckedChange = { checked ->
+                                                    if (canEditProfile) s = s.withSpecialNeeds(checked)
+                                                },
+                                                modifier = Modifier.testTag("editor_special_needs_switch")
+                                            )
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -442,7 +489,13 @@ fun StudentEditorScreen(
                         val registeredCustomKeys = settings.customFields.map { it.key }.toSet()
                         val textKeySet = com.kgps.result.Repo.TEXT_KEYS.toSet()
                         val orphanCustomEntries = s.x.entries
-                            .filter { (k, v) -> v.isNotBlank() && k !in registeredCustomKeys && k !in textKeySet }
+                            .filter { (k, v) ->
+                                v.isNotBlank() &&
+                                    k !in registeredCustomKeys &&
+                                    k !in textKeySet &&
+                                    k != X_KEY_SPECIAL_NEEDS &&
+                                    !isAbsentXKey(k)
+                            }
                             .sortedBy { it.key }
 
                         TreeGroupCard(
@@ -499,36 +552,78 @@ fun StudentEditorScreen(
                             return@Column
                         }
 
+                        val rules = settings.resultRules
+                        val studentActiveTerms = ResultRulesEngine.activeTermsForStudent(s, rules.dynamicTermAveraging)
+                        val studentEval = ResultRulesEngine.evaluateStudent(s, rules, studentActiveTerms)
+
                         // Show full overall grade card only when all subjects are viewable
                         if (permissions.allSubjects || permissions.canViewOtherSubjects) {
-                            val overall = s.overallPct()
-                            val overallGrade = gradeOf(overall)
+                            val overall = studentEval.pct
+                            val overallGrade = studentEval.grade
+                            val termsHint = if (studentEval.activeTerms.isEmpty()) {
+                                "সমন্বিত ফলাফল (এখনো নম্বর নেই)"
+                            } else if (studentEval.activeTerms.size < 3 && rules.dynamicTermAveraging) {
+                                "চলমান ফলাফল (${bn(studentEval.activeTerms.size.toString())} প্রান্তিকের গড়)"
+                            } else {
+                                "সমন্বিত চূড়ান্ত ফলাফল (৩ প্রান্তিক)"
+                            }
                             Card(
                                 Modifier.fillMaxWidth(),
-                                colors = CardDefaults.cardColors(containerColor = TealSoft),
-                                border = BorderStroke(1.dp, TealPrimary.copy(alpha = 0.35f))
+                                colors = CardDefaults.cardColors(
+                                    containerColor = if (studentEval.hasAnyData && !studentEval.isPromoted) RoseBg else TealSoft
+                                ),
+                                border = BorderStroke(
+                                    1.dp,
+                                    if (studentEval.hasAnyData && !studentEval.isPromoted) RoseDanger.copy(alpha = 0.4f) else TealPrimary.copy(alpha = 0.35f)
+                                )
                             ) {
-                                Row(
-                                    Modifier.fillMaxWidth().padding(10.dp),
-                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Column {
-                                        Text("সমন্বিত চূড়ান্ত ফলাফল", fontSize = 11.5.sp, color = SlateMuted)
-                                        Text(
-                                            "${fmt(overall)}% — ${gradeLabelBn(overallGrade)}",
-                                            fontWeight = FontWeight.Bold,
-                                            fontSize = 15.sp,
-                                            color = TealPrimary
-                                        )
+                                Column(Modifier.fillMaxWidth().padding(10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                    Row(
+                                        Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Column(Modifier.weight(1f)) {
+                                            Text(termsHint, fontSize = 11.5.sp, color = SlateMuted)
+                                            Text(
+                                                "${fmt(overall)}% — ${gradeLabelBn(overallGrade)}",
+                                                fontWeight = FontWeight.Bold,
+                                                fontSize = 15.sp,
+                                                color = if (studentEval.hasAnyData && !studentEval.isPromoted) RoseDanger else TealPrimary
+                                            )
+                                        }
+                                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+                                            if (studentEval.hasAnyData) {
+                                                Surface(
+                                                    color = if (studentEval.isPromoted) TealSoft else RoseBg,
+                                                    border = BorderStroke(1.dp, if (studentEval.isPromoted) EmeraldGrade.copy(alpha = 0.4f) else RoseDanger.copy(alpha = 0.4f)),
+                                                    shape = RoundedCornerShape(8.dp)
+                                                ) {
+                                                    Text(
+                                                        if (studentEval.isPromoted) "উত্তীর্ণ" else "অনুত্তীর্ণ",
+                                                        color = if (studentEval.isPromoted) EmeraldGrade else RoseDanger,
+                                                        fontWeight = FontWeight.Bold,
+                                                        fontSize = 11.5.sp,
+                                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                                                    )
+                                                }
+                                            }
+                                            Surface(color = TealPrimary, shape = RoundedCornerShape(8.dp)) {
+                                                Text(
+                                                    "গ্রেড $overallGrade",
+                                                    color = MaterialTheme.colorScheme.onPrimary,
+                                                    fontWeight = FontWeight.Bold,
+                                                    fontSize = 13.sp,
+                                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
+                                                )
+                                            }
+                                        }
                                     }
-                                    Surface(color = TealPrimary, shape = RoundedCornerShape(8.dp)) {
+                                    if (studentEval.hasAnyData && !studentEval.isPromoted && studentEval.promotionFailureReasons.isNotEmpty()) {
                                         Text(
-                                            "গ্রেড $overallGrade",
-                                            color = MaterialTheme.colorScheme.onPrimary,
-                                            fontWeight = FontWeight.Bold,
-                                            fontSize = 13.sp,
-                                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
+                                            "কারণ: ${studentEval.promotionFailureReasons.joinToString(" · ")}",
+                                            fontSize = 10.5.sp,
+                                            color = RoseDanger
                                         )
                                     }
                                 }
@@ -563,14 +658,26 @@ fun StudentEditorScreen(
                                     val subTot = s.total(sub, t)
                                     val subHas = s.hasSub(sub, t)
                                     val subGrade = gradeOf(subTot / sub.max.toDouble() * 100.0)
+                                    val subFailed = ResultRulesEngine.isSubjectTermFailed(s, sub, t, rules)
+                                    val subFullyAbs = s.isSubFullyAbsent(sub, t)
+                                    val isContAbs = s.isCompAbsent(sub.key, t, "CONT")
+                                    val isWrAbs = sub.written > 0 && s.isCompAbsent(sub.key, t, "WR")
                                     val canEditSub = permissions.canEditSubject(sub.key)
+                                    val rawTotalLabel = if (subFullyAbs) "A" else fmt(subTot)
+                                    val formattedTotalLabel = ResultRulesEngine.formatTermTotalCell(rawTotalLabel, subFailed, rules)
 
                                     TreeBranchItem(isLast = isLastSub) {
                                         TreeGroupCard(
                                             title = sub.bn + if (!canEditSub) " (শুধু দেখা)" else "",
-                                            subtitle = "পূর্ণমান ${bn(sub.max.toString())}",
-                                            badgeText = if (subHas) "${fmt(subTot)} ($subGrade)" else "—",
-                                            badgeColor = if (subHas) TealPrimary else SlateMuted,
+                                            subtitle = "পূর্ণমান ${bn(sub.max.toString())}" +
+                                                if (subFailed) " · অকৃতকার্য (<${fmt(ResultRulesEngine.effectivePassPct(s, rules))}%)" else "",
+                                            badgeText = if (subHas) "$formattedTotalLabel ($subGrade)" else "—",
+                                            badgeColor = when {
+                                                !subHas -> SlateMuted
+                                                subFailed -> RoseDanger
+                                                else -> TealPrimary
+                                            },
+                                            badgeContainerColor = if (subFailed) RoseBg else TealSoft,
                                             icon = Icons.AutoMirrored.Rounded.MenuBook,
                                             expanded = expandedSubKey == subKeyForTerm,
                                             headerTestTag = "editor_sub_${t}_${sub.key}",
@@ -578,6 +685,46 @@ fun StudentEditorScreen(
                                                 expandedSubKey = if (expandedSubKey == subKeyForTerm) null else subKeyForTerm
                                             }
                                         ) {
+                                            // Absent (A) toggle chips for Continuous & Written
+                                            if (canEditSub) {
+                                                Row(
+                                                    modifier = Modifier
+                                                        .fillMaxWidth()
+                                                        .horizontalScroll(rememberScrollState())
+                                                        .padding(bottom = 4.dp),
+                                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                                ) {
+                                                    FilterChip(
+                                                        selected = isContAbs,
+                                                        onClick = { s = s.withCompAbsent(sub, t, "CONT", !isContAbs) },
+                                                        label = {
+                                                            Text(
+                                                                if (isContAbs) "ধারাবাহিক: A (অনুপস্থিত)" else "ধারাবাহিক অনুপস্থিত (A)",
+                                                                fontSize = 11.sp
+                                                            )
+                                                        },
+                                                        colors = appFilterChipColors(),
+                                                        border = appFilterChipBorder(isContAbs),
+                                                        modifier = Modifier.testTag("editor_abs_${t}_${sub.key}_CONT")
+                                                    )
+                                                    if (sub.written > 0) {
+                                                        FilterChip(
+                                                            selected = isWrAbs,
+                                                            onClick = { s = s.withCompAbsent(sub, t, "WR", !isWrAbs) },
+                                                            label = {
+                                                                Text(
+                                                                    if (isWrAbs) "লিখিত: A (অনুপস্থিত)" else "লিখিত অনুপস্থিত (A)",
+                                                                    fontSize = 11.sp
+                                                                )
+                                                            },
+                                                            colors = appFilterChipColors(),
+                                                            border = appFilterChipBorder(isWrAbs),
+                                                            modifier = Modifier.testTag("editor_abs_${t}_${sub.key}_WR")
+                                                        )
+                                                    }
+                                                }
+                                            }
+
                                             val chunked = sub.comps.chunked(2)
                                             chunked.forEach { pair ->
                                                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -600,7 +747,9 @@ fun StudentEditorScreen(
                                                                 k = k,
                                                                 enabled = canEditSub
                                                             ) { v ->
-                                                                s = s.copy(m = if (v == null) s.m - k else (s.m - ck - tk) + (k to v))
+                                                                val nextM = if (v == null) s.m - k else (s.m - ck - tk) + (k to v)
+                                                                val nextX = if (v != null) s.x - absKey(sub.key, t, "CONT") else s.x
+                                                                s = s.copy(m = nextM, x = nextX)
                                                             }
                                                         }
                                                     }
@@ -624,19 +773,23 @@ fun StudentEditorScreen(
                                                     k = legacyKey,
                                                     enabled = canEditSub
                                                 ) { v ->
-                                                    s = s.copy(m = if (v == null) s.m - legacyKey else s.m + (legacyKey to v))
+                                                    val nextM = if (v == null) s.m - legacyKey else s.m + (legacyKey to v)
+                                                    val nextX = if (v != null) s.x - absKey(sub.key, t, "CONT") else s.x
+                                                    s = s.copy(m = nextM, x = nextX)
                                                 }
                                             }
                                             if (sub.written > 0) {
                                                 val wk = mk(sub.key, t, "WR")
                                                 MarkField(
-                                                    label = "সামষ্টিক / লিখিত (সর্বোচ্চ ${bn(sub.written.toString())})",
+                                                    label = if (isWrAbs) "সামষ্টিক / লিখিত — অনুপস্থিত (A)" else "সামষ্টিক / লিখিত (সর্বোচ্চ ${bn(sub.written.toString())})",
                                                     max = sub.written.toDouble(),
                                                     value = s.m[wk],
                                                     k = wk,
                                                     enabled = canEditSub
                                                 ) { v ->
-                                                    s = s.copy(m = if (v == null) s.m - wk else s.m + (wk to v))
+                                                    val nextM = if (v == null) s.m - wk else s.m + (wk to v)
+                                                    val nextX = if (v != null) s.x - absKey(sub.key, t, "WR") else s.x
+                                                    s = s.copy(m = nextM, x = nextX)
                                                 }
                                             }
                                         }

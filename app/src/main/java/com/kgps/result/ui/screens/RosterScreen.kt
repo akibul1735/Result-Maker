@@ -57,9 +57,11 @@ import com.kgps.result.bn
 import com.kgps.result.classNameBn
 import com.kgps.result.cloud.TeacherPermissions
 import com.kgps.result.fromBn
+import com.kgps.result.isSpecialNeeds
 import com.kgps.result.ui.components.AddCustomClassDialog
 import com.kgps.result.ui.components.TreeBranchItem
 import com.kgps.result.ui.components.TreeGroupCard
+import com.kgps.result.ui.theme.AmberBg
 import com.kgps.result.ui.theme.AmberNotice
 import com.kgps.result.ui.theme.SlateBg
 import com.kgps.result.ui.theme.SlateMuted
@@ -363,6 +365,20 @@ fun RosterScreen(
                                                         color = SlateMuted,
                                                         maxLines = 1,
                                                         overflow = TextOverflow.Ellipsis
+                                                    )
+                                                }
+                                            }
+                                            if (s.isSpecialNeeds && settings.resultRules.specialNeedsRuleEnabled) {
+                                                Surface(
+                                                    color = AmberBg,
+                                                    shape = RoundedCornerShape(999.dp)
+                                                ) {
+                                                    Text(
+                                                        "বিশেষ",
+                                                        fontSize = 9.5.sp,
+                                                        fontWeight = FontWeight.Bold,
+                                                        color = AmberNotice,
+                                                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
                                                     )
                                                 }
                                             }

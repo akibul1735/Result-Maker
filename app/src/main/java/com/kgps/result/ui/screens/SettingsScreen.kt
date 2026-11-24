@@ -44,6 +44,7 @@ import androidx.compose.material.icons.rounded.DeleteOutline
 import androidx.compose.material.icons.rounded.Description
 import androidx.compose.material.icons.rounded.Fingerprint
 import androidx.compose.material.icons.rounded.FontDownload
+import androidx.compose.material.icons.rounded.Gavel
 import androidx.compose.material.icons.rounded.Image
 import androidx.compose.material.icons.rounded.PersonRemove
 import androidx.compose.material.icons.rounded.QrCode2
@@ -66,11 +67,14 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Tab
+import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -227,6 +231,7 @@ fun SettingsScreen(
     val isOwner = activeSchool?.ownerUid == currentUserId
 
     var s by remember(settings) { mutableStateOf(settings) }
+    var selectedSettingsTab by remember { mutableIntStateOf(0) }
     // All settings groups start collapsed by default
     var expandedGroup by remember { mutableStateOf("") }
     var newFieldLabel by remember { mutableStateOf("") }
@@ -456,6 +461,46 @@ fun SettingsScreen(
                     }
                 }
             }
+
+            Surface(
+                color = MaterialTheme.colorScheme.surface,
+                border = BorderStroke(1.dp, SlateOutline.copy(alpha = 0.5f)),
+                shape = RoundedCornerShape(12.dp),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                TabRow(
+                    selectedTabIndex = selectedSettingsTab,
+                    containerColor = MaterialTheme.colorScheme.surface
+                ) {
+                    Tab(
+                        selected = selectedSettingsTab == 0,
+                        onClick = { selectedSettingsTab = 0 },
+                        icon = { Icon(Icons.Rounded.Tune, contentDescription = null, modifier = Modifier.size(18.dp)) },
+                        text = { Text("সাধারণ সেটিংস", fontWeight = FontWeight.SemiBold, fontSize = 12.5.sp, maxLines = 1) },
+                        modifier = Modifier.testTag("settings_tab_general")
+                    )
+                    Tab(
+                        selected = selectedSettingsTab == 1,
+                        onClick = { selectedSettingsTab = 1 },
+                        icon = { Icon(Icons.Rounded.Gavel, contentDescription = null, modifier = Modifier.size(18.dp)) },
+                        text = { Text("শর্তাবলী", fontWeight = FontWeight.SemiBold, fontSize = 12.5.sp, maxLines = 1) },
+                        modifier = Modifier.testTag("settings_tab_rules")
+                    )
+                }
+            }
+
+            if (selectedSettingsTab == 1) {
+                SettingsRulesTab(
+                    rules = s.resultRules,
+                    isAdmin = isAdmin,
+                    onUpdateRules = { nextRules ->
+                        val updated = s.copy(resultRules = nextRules)
+                        s = updated
+                        onUpdateSettings(updated)
+                    },
+                    onShowMessage = onShowMessage
+                )
+            } else {
 
             // Category 1: School & Team
             SettingsCategoryHeader(title = "বিদ্যালয় ও শিক্ষক দল", icon = Icons.Rounded.School)
@@ -1558,6 +1603,7 @@ fun SettingsScreen(
                         }
                     }
                 }
+            }
             }
 
             Spacer(Modifier.height(12.dp))

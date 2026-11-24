@@ -52,6 +52,7 @@
         "dpeLogo": { "type": "string", "enum": ["simple", "color"] },
         "customFields": { "type": "array" },
         "customClasses": { "type": "array" },
+        "resultRules": { "type": "object", "description": "Evaluation, fail indicator, special-needs, promotion, merit tier, and tie-breaker rules" },
         "createdAt": { "type": "string", "format": "date-time" },
         "updatedAt": { "type": "string", "format": "date-time" }
       },
@@ -107,7 +108,7 @@
         "mobile": { "type": "string" },
         "religion": { "type": "string" },
         "m": { "type": "object" },
-        "x": { "type": "object" },
+        "x": { "type": "object", "description": "Attendance, traits, remarks, custom fields, SPECIAL_NEEDS, and ABS_{SUB}_{TERM}_{WR|CONT} absent flags" },
         "updatedByUid": { "type": "string" },
         "updatedByName": { "type": "string" },
         "createdAt": { "type": "string", "format": "date-time" },

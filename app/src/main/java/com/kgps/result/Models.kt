@@ -50,7 +50,8 @@ data class Settings(
     val pdfEnglishFont: String = "times_new_roman",
     val dpeLogo: String = "simple",
     val customFields: List<CustomFieldDef> = emptyList(),
-    val customClasses: List<CustomClassDef> = emptyList()
+    val customClasses: List<CustomClassDef> = emptyList(),
+    val resultRules: ResultEvaluationRules = ResultEvaluationRules()
 )
 
 data class DpeLogoInfo(val id: String, val labelBn: String, val descriptionBn: String)
@@ -276,9 +277,10 @@ fun fmtEn(d: Double): String { val r = Math.round(d * 10) / 10.0; return if (r =
 fun fmt(d: Double): String = bn(fmtEn(d))
 
 fun Student.subs() = subjectsFor(cls, religion)
-fun Student.hasTerm(t: Int) = m.keys.any { it.contains("_${t}_") }
-fun Student.hasSub(s: Sub, t: Int) = m.keys.any { it.startsWith("${s.key}_${t}_") }
+fun Student.hasTerm(t: Int) = m.keys.any { it.contains("_${t}_") } || hasTermAbsent(t)
+fun Student.hasSub(s: Sub, t: Int) = m.keys.any { it.startsWith("${s.key}_${t}_") } || hasSubAbsent(s, t)
 fun Student.cont(s: Sub, t: Int): Double {
+    if (isCompAbsent(s.key, t, "CONT")) return 0.0
     val hasBreakdown = s.comps.any { m.containsKey(mk(s.key, t, it.key)) }
     return if (hasBreakdown) {
         s.comps.sumOf { m[mk(s.key, t, it.key)] ?: 0.0 }
@@ -288,7 +290,8 @@ fun Student.cont(s: Sub, t: Int): Double {
             ?: 0.0
     }
 }
-fun Student.wr(s: Sub, t: Int) = if (s.written > 0) (m[mk(s.key, t, "WR")] ?: 0.0) else 0.0
+fun Student.wr(s: Sub, t: Int) =
+    if (s.written > 0 && !isCompAbsent(s.key, t, "WR")) (m[mk(s.key, t, "WR")] ?: 0.0) else 0.0
 fun Student.total(s: Sub, t: Int): Double {
     val hasParts = s.comps.any { m.containsKey(mk(s.key, t, it.key)) } ||
         m.containsKey(mk(s.key, t, "CONT")) ||
@@ -296,10 +299,18 @@ fun Student.total(s: Sub, t: Int): Double {
     return if (hasParts) {
         cont(s, t) + wr(s, t)
     } else {
-        m[mk(s.key, t, "TOTAL")] ?: 0.0
+        if (isCompAbsent(s.key, t, "CONT") && (s.written == 0 || isCompAbsent(s.key, t, "WR"))) 0.0
+        else m[mk(s.key, t, "TOTAL")] ?: 0.0
     }
 }
-fun Student.avg(s: Sub) = (1..3).sumOf { total(s, it) } / 3.0
+fun Student.avg(s: Sub, activeTerms: List<Int>): Double {
+    if (activeTerms.isEmpty()) return 0.0
+    return activeTerms.sumOf { total(s, it) } / activeTerms.size.toDouble()
+}
+fun Student.avg(s: Sub): Double {
+    val active = ResultRulesEngine.activeTermsForStudent(this, dynamicTermAveraging = true)
+    return if (active.isEmpty()) 0.0 else avg(s, active)
+}
 fun gradeOf(p: Double) = when { p >= 80 -> "A"; p >= 60 -> "B"; p >= 40 -> "C"; else -> "D" }
 fun gradeLabelBn(g: String) = when (g) {
     "A" -> "অতি উত্তম"
@@ -307,10 +318,15 @@ fun gradeLabelBn(g: String) = when (g) {
     "C" -> "সন্তোষজনক"
     else -> "সহায়তা প্রয়োজন"
 }
-fun Student.overallPct(): Double {
+fun Student.overallPct(activeTerms: List<Int>): Double {
+    if (activeTerms.isEmpty()) return 0.0
     val ss = subs()
     val maxSum = ss.sumOf { it.max }
-    return if (maxSum == 0) 0.0 else ss.sumOf { avg(it) } / maxSum * 100
+    return if (maxSum == 0) 0.0 else ss.sumOf { avg(it, activeTerms) } / maxSum * 100.0
+}
+fun Student.overallPct(): Double {
+    val active = ResultRulesEngine.activeTermsForStudent(this, dynamicTermAveraging = true)
+    return overallPct(active)
 }
 
 fun createEmptyStudent(cls: Int, roll: Int, religion: String = "ইসলাম"): Student = Student(
@@ -376,6 +392,14 @@ enum class ReportSummaryColumn(
         shortLabelBn = "গড় মোট নম্বর",
         sampleValueBn = "৫৫০/৬৫০",
         tableWeight = 1.05f
+    ),
+    PROMOTION_STATUS(
+        id = "PROMOTION_STATUS",
+        headerBn = "ফলাফল\nঅবস্থা",
+        compactHeaderBn = "ফলাফল\nঅবস্থা",
+        shortLabelBn = "উত্তীর্ণ/অবস্থা",
+        sampleValueBn = "উত্তীর্ণ",
+        tableWeight = 0.96f
     );
 
     companion object {

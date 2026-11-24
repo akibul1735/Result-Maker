@@ -110,11 +110,65 @@ service cloud.firestore {
       ];
     }
 
+    function subjectAbsentXKeys(sub) {
+      return sub == 'BAN' ? ['ABS_BAN_1_WR', 'ABS_BAN_2_WR', 'ABS_BAN_3_WR', 'ABS_BAN_1_CONT', 'ABS_BAN_2_CONT', 'ABS_BAN_3_CONT']
+        : sub == 'ENG' ? ['ABS_ENG_1_WR', 'ABS_ENG_2_WR', 'ABS_ENG_3_WR', 'ABS_ENG_1_CONT', 'ABS_ENG_2_CONT', 'ABS_ENG_3_CONT']
+        : sub == 'MATH' ? ['ABS_MATH_1_WR', 'ABS_MATH_2_WR', 'ABS_MATH_3_WR', 'ABS_MATH_1_CONT', 'ABS_MATH_2_CONT', 'ABS_MATH_3_CONT']
+        : sub == 'SOC' ? ['ABS_SOC_1_WR', 'ABS_SOC_2_WR', 'ABS_SOC_3_WR', 'ABS_SOC_1_CONT', 'ABS_SOC_2_CONT', 'ABS_SOC_3_CONT']
+        : sub == 'SCI' ? ['ABS_SCI_1_WR', 'ABS_SCI_2_WR', 'ABS_SCI_3_WR', 'ABS_SCI_1_CONT', 'ABS_SCI_2_CONT', 'ABS_SCI_3_CONT']
+        : sub == 'BGW' ? ['ABS_BGW_1_WR', 'ABS_BGW_2_WR', 'ABS_BGW_3_WR', 'ABS_BGW_1_CONT', 'ABS_BGW_2_CONT', 'ABS_BGW_3_CONT']
+        : sub == 'REL' ? ['ABS_REL_1_WR', 'ABS_REL_2_WR', 'ABS_REL_3_WR', 'ABS_REL_1_CONT', 'ABS_REL_2_CONT', 'ABS_REL_3_CONT']
+        : sub == 'PE' ? ['ABS_PE_1_WR', 'ABS_PE_2_WR', 'ABS_PE_3_WR', 'ABS_PE_1_CONT', 'ABS_PE_2_CONT', 'ABS_PE_3_CONT']
+        : sub == 'ART' ? ['ABS_ART_1_WR', 'ABS_ART_2_WR', 'ABS_ART_3_WR', 'ABS_ART_1_CONT', 'ABS_ART_2_CONT', 'ABS_ART_3_CONT']
+        : [];
+    }
+
+    function allowedSubjectAbsentKeysFor(allowedSubs) {
+      return ('BAN' in allowedSubs ? subjectAbsentXKeys('BAN') : [])
+        .concat('ENG' in allowedSubs ? subjectAbsentXKeys('ENG') : [])
+        .concat('MATH' in allowedSubs ? subjectAbsentXKeys('MATH') : [])
+        .concat('SOC' in allowedSubs ? subjectAbsentXKeys('SOC') : [])
+        .concat('SCI' in allowedSubs ? subjectAbsentXKeys('SCI') : [])
+        .concat('BGW' in allowedSubs ? subjectAbsentXKeys('BGW') : [])
+        .concat('REL' in allowedSubs ? subjectAbsentXKeys('REL') : [])
+        .concat('PE' in allowedSubs ? subjectAbsentXKeys('PE') : [])
+        .concat('ART' in allowedSubs ? subjectAbsentXKeys('ART') : []);
+    }
+
+    function allSubjectAbsentKeys() {
+      return [
+        'ABS_BAN_1_WR', 'ABS_BAN_2_WR', 'ABS_BAN_3_WR', 'ABS_BAN_1_CONT', 'ABS_BAN_2_CONT', 'ABS_BAN_3_CONT',
+        'ABS_ENG_1_WR', 'ABS_ENG_2_WR', 'ABS_ENG_3_WR', 'ABS_ENG_1_CONT', 'ABS_ENG_2_CONT', 'ABS_ENG_3_CONT',
+        'ABS_MATH_1_WR', 'ABS_MATH_2_WR', 'ABS_MATH_3_WR', 'ABS_MATH_1_CONT', 'ABS_MATH_2_CONT', 'ABS_MATH_3_CONT',
+        'ABS_SOC_1_WR', 'ABS_SOC_2_WR', 'ABS_SOC_3_WR', 'ABS_SOC_1_CONT', 'ABS_SOC_2_CONT', 'ABS_SOC_3_CONT',
+        'ABS_SCI_1_WR', 'ABS_SCI_2_WR', 'ABS_SCI_3_WR', 'ABS_SCI_1_CONT', 'ABS_SCI_2_CONT', 'ABS_SCI_3_CONT',
+        'ABS_BGW_1_WR', 'ABS_BGW_2_WR', 'ABS_BGW_3_WR', 'ABS_BGW_1_CONT', 'ABS_BGW_2_CONT', 'ABS_BGW_3_CONT',
+        'ABS_REL_1_WR', 'ABS_REL_2_WR', 'ABS_REL_3_WR', 'ABS_REL_1_CONT', 'ABS_REL_2_CONT', 'ABS_REL_3_CONT',
+        'ABS_PE_1_WR', 'ABS_PE_2_WR', 'ABS_PE_3_WR', 'ABS_PE_1_CONT', 'ABS_PE_2_CONT', 'ABS_PE_3_CONT',
+        'ABS_ART_1_WR', 'ABS_ART_2_WR', 'ABS_ART_3_WR', 'ABS_ART_1_CONT', 'ABS_ART_2_CONT', 'ABS_ART_3_CONT'
+      ];
+    }
+
+    function canWriteAbsentWithSubs(allowedSubs, keySet) {
+      return !keySet.hasAny(allSubjectAbsentKeys()) || (
+        ('BAN' in allowedSubs || !keySet.hasAny(subjectAbsentXKeys('BAN'))) &&
+        ('ENG' in allowedSubs || !keySet.hasAny(subjectAbsentXKeys('ENG'))) &&
+        ('MATH' in allowedSubs || !keySet.hasAny(subjectAbsentXKeys('MATH'))) &&
+        ('SOC' in allowedSubs || !keySet.hasAny(subjectAbsentXKeys('SOC'))) &&
+        ('SCI' in allowedSubs || !keySet.hasAny(subjectAbsentXKeys('SCI'))) &&
+        ('BGW' in allowedSubs || !keySet.hasAny(subjectAbsentXKeys('BGW'))) &&
+        ('REL' in allowedSubs || !keySet.hasAny(subjectAbsentXKeys('REL'))) &&
+        ('PE' in allowedSubs || !keySet.hasAny(subjectAbsentXKeys('PE'))) &&
+        ('ART' in allowedSubs || !keySet.hasAny(subjectAbsentXKeys('ART')))
+      );
+    }
+
     function canTeacherCreateWithProfile(mp, newDoc) {
       return canManageInProfile(mp) &&
              classAllowedInProfile(mp, newDoc.cls) &&
              (allSubjectsInProfile(mp) || newDoc.m.keys().hasOnly(allowedSubjectKeysFor(allowedSubjectsInProfile(mp)))) &&
-             (canAttendanceInProfile(mp) || !newDoc.x.keys().hasAny(attendanceXKeys()));
+             (canAttendanceInProfile(mp) || !newDoc.x.keys().hasAny(attendanceXKeys())) &&
+             (allSubjectsInProfile(mp) || canWriteAbsentWithSubs(allowedSubjectsInProfile(mp), newDoc.x.keys()));
     }
 
     function canCreateStudentDoc(s, newDoc) {
@@ -133,11 +187,20 @@ service cloud.firestore {
              newM.diff(oldM).affectedKeys().hasOnly(allowedSubjectKeysFor(allowedSubjectsInProfile(mp)));
     }
 
+    function canTeacherUpdateXKeys(mp, affected) {
+      return canManageInProfile(mp)
+        ? (
+            (canAttendanceInProfile(mp) || !affected.hasAny(attendanceXKeys())) &&
+            (allSubjectsInProfile(mp) || canWriteAbsentWithSubs(allowedSubjectsInProfile(mp), affected))
+          )
+        : affected.hasOnly(
+            (canAttendanceInProfile(mp) ? attendanceXKeys() : [])
+              .concat(allSubjectsInProfile(mp) ? allSubjectAbsentKeys() : allowedSubjectAbsentKeysFor(allowedSubjectsInProfile(mp)))
+          );
+    }
+
     function canTeacherUpdateX(mp, newX, oldX) {
-      return newX == oldX ||
-             (canAttendanceInProfile(mp) && canManageInProfile(mp)) ||
-             (canAttendanceInProfile(mp) && newX.diff(oldX).affectedKeys().hasOnly(attendanceXKeys())) ||
-             (canManageInProfile(mp) && !newX.diff(oldX).affectedKeys().hasAny(attendanceXKeys()));
+      return newX == oldX || canTeacherUpdateXKeys(mp, newX.diff(oldX).affectedKeys());
     }
 
     function canTeacherUpdateWithProfile(mp, newDoc, oldDoc) {
@@ -219,6 +282,7 @@ service cloud.firestore {
              data.customFields is list && data.customFields.size() <= 30 &&
              (data.customFields.size() == 0 || data.customFields[0] is map) &&
              (!('customClasses' in data) || (data.customClasses is list && data.customClasses.size() <= 15 && (data.customClasses.size() == 0 || data.customClasses[0] is map))) &&
+             (!('resultRules' in data) || (data.resultRules is map && data.resultRules.size() <= 30)) &&
              data.createdAt is timestamp && data.createdAt <= request.time &&
              data.updatedAt is timestamp && data.updatedAt <= request.time;
     }
@@ -349,7 +413,7 @@ service cloud.firestore {
                        incoming().memberProfiles[request.auth.uid].uid == request.auth.uid &&
                        incoming().memberProfiles[request.auth.uid].role == 'ADMIN' &&
                        incoming().keys().hasAll(['ownerUid', 'joinCode', 'approvalRequired', 'memberUids', 'adminUids', 'memberProfiles', 'school', 'schoolAddress', 'year', 'teachers', 'teacherMobiles', 'pdfFont', 'dpeLogo', 'customFields', 'createdAt', 'updatedAt']) &&
-                       incoming().keys().hasOnly(['ownerUid', 'joinCode', 'approvalRequired', 'memberUids', 'adminUids', 'memberProfiles', 'school', 'schoolAddress', 'year', 'teachers', 'teacherMobiles', 'pdfFont', 'dpeLogo', 'customFields', 'customClasses', 'createdAt', 'updatedAt']) &&
+                       incoming().keys().hasOnly(['ownerUid', 'joinCode', 'approvalRequired', 'memberUids', 'adminUids', 'memberProfiles', 'school', 'schoolAddress', 'year', 'teachers', 'teacherMobiles', 'pdfFont', 'dpeLogo', 'customFields', 'customClasses', 'resultRules', 'createdAt', 'updatedAt']) &&
                        isValidSchool(incoming()) &&
                        existsAfter(/databases/$(database)/documents/schoolCodes/$(incoming().joinCode));
 
@@ -366,7 +430,7 @@ service cloud.firestore {
                            incoming().diff(existing()).affectedKeys().hasOnly([
                              'joinCode', 'approvalRequired', 'memberUids', 'adminUids', 'memberProfiles',
                              'school', 'schoolAddress', 'year', 'teachers', 'teacherMobiles',
-                             'pdfFont', 'dpeLogo', 'customFields', 'customClasses', 'updatedAt'
+                             'pdfFont', 'dpeLogo', 'customFields', 'customClasses', 'resultRules', 'updatedAt'
                            ])
                          ) ||
                          // Action 2: Non-owner member leaves school

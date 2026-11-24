@@ -97,6 +97,7 @@ object Repo {
         o.put("pdfFont", st.pdfFont)
         o.put("pdfEnglishFont", st.pdfEnglishFont)
         o.put("dpeLogo", st.dpeLogo)
+        o.put("resultRules", st.resultRules.toJsonObject())
         o.put("customFields", JSONArray().also { arr ->
             st.customFields.forEach { cf ->
                 arr.put(JSONObject().apply { put("key", cf.key); put("label", cf.label) })
@@ -182,7 +183,8 @@ object Repo {
             pdfEnglishFont = decodedFonts.englishFontId,
             dpeLogo = if (rawLogo == "color") "color" else "simple",
             customFields = customFields,
-            customClasses = customClasses
+            customClasses = customClasses,
+            resultRules = ResultEvaluationRules.fromJsonObject(o.optJSONObject("resultRules"))
         )
         val rpObj = o.optJSONObject("reportPrefs")
         val reportPrefs = if (rpObj != null) {
@@ -502,16 +504,21 @@ object Repo {
                 customFields.map { cf -> s.x[cf.key] ?: "" } +
                 summaryCells +
                 markKeyList.map { k ->
+                    val parts = k.split('_')
+                    val subKey = parts.getOrNull(0)
+                    val term = parts.getOrNull(1)?.toIntOrNull()
+                    val comp = parts.getOrNull(2)
+                    val subObj = if (subKey != null) subs.firstOrNull { it.key == subKey } else null
+                    val isWrAbs = subKey != null && term != null && comp == "WR" && s.isCompAbsent(subKey, term, "WR")
+                    val isContAbs = subKey != null && term != null && comp == "CONT" && s.isCompAbsent(subKey, term, "CONT")
+                    val isTotAbs = subObj != null && term != null && comp == "TOTAL" && s.isSubTermAbsent(subObj, term)
+
                     val explicit = s.m[k]
-                    if (explicit != null) {
-                        fmtEn(explicit)
-                    } else if (style != CsvHeaderStyle.SYSTEM_KEYS) {
-                        val parts = k.split('_')
-                        val subKey = parts.getOrNull(0)
-                        val term = parts.getOrNull(1)?.toIntOrNull()
-                        val comp = parts.getOrNull(2)
-                        val subObj = if (subKey != null) subs.firstOrNull { it.key == subKey } else null
-                        if (subObj != null && term != null && s.hasSub(subObj, term)) {
+                    when {
+                        isWrAbs || isContAbs -> "A"
+                        isTotAbs -> if (s.isSubFullyAbsent(subObj!!, term!!)) "A" else fmtEn(s.total(subObj, term))
+                        explicit != null -> fmtEn(explicit)
+                        style != CsvHeaderStyle.SYSTEM_KEYS && subObj != null && term != null && s.hasSub(subObj, term) -> {
                             val hasGranularOrCont = subObj.comps.any { s.m.containsKey(mk(subObj.key, term, it.key)) } ||
                                 s.m.containsKey(mk(subObj.key, term, "CONT"))
                             when {
@@ -519,8 +526,9 @@ object Repo {
                                 comp == "TOTAL" -> fmtEn(s.total(subObj, term))
                                 else -> ""
                             }
-                        } else ""
-                    } else ""
+                        }
+                        else -> ""
+                    }
                 } +
                 TEXT_KEYS.map { k -> s.x[k] ?: "" }
         }
@@ -1281,6 +1289,7 @@ object Repo {
             var rollVal: Int? = null
             val stdMap = mutableMapOf<String, String>()
             val importedMarks = mutableMapOf<String, Double>()
+            val importedAbsents = mutableSetOf<Triple<String, Int, String>>()
             val x = mutableMapOf<String, String>()
 
             for (col in resolvedCols) {
@@ -1305,7 +1314,24 @@ object Repo {
                         }
                     }
                     "mark" -> if (!isBlankOrDashPlaceholder(raw)) {
-                        fromBn(raw).toDoubleOrNull()?.let { importedMarks[col.targetKey] = it }
+                        if (isAbsentToken(raw)) {
+                            val parts = col.targetKey.split('_')
+                            val subKey = parts.getOrNull(0)
+                            val termNum = parts.getOrNull(1)?.toIntOrNull()
+                            val compKey = parts.getOrNull(2)
+                            if (subKey != null && termNum != null && termNum in 1..3 && compKey != null) {
+                                when (compKey) {
+                                    "WR" -> importedAbsents.add(Triple(subKey, termNum, "WR"))
+                                    "CONT", "TB", "ACT", "LANG", "CT" -> importedAbsents.add(Triple(subKey, termNum, "CONT"))
+                                    "TOTAL" -> {
+                                        importedAbsents.add(Triple(subKey, termNum, "CONT"))
+                                        importedAbsents.add(Triple(subKey, termNum, "WR"))
+                                    }
+                                }
+                            }
+                        } else {
+                            fromBn(raw).toDoubleOrNull()?.let { importedMarks[col.targetKey] = it }
+                        }
                     }
                     "text", "custom" -> if (!isBlankOrDashPlaceholder(raw)) {
                         val normalizedVal = if (col.targetType == "text") {
@@ -1436,6 +1462,39 @@ object Repo {
                 }
             }
             mergedMarks.putAll(finalImported)
+            val mergedX = base.x.toMutableMap()
+            mergedX.putAll(x)
+
+            // Clear old absent flags where valid numeric marks were imported
+            finalImported.keys.forEach { mkKey ->
+                val parts = mkKey.split('_')
+                val subKey = parts.getOrNull(0)
+                val termNum = parts.getOrNull(1)?.toIntOrNull()
+                val compKey = parts.getOrNull(2)
+                if (subKey != null && termNum != null && termNum in 1..3 && compKey != null) {
+                    when (compKey) {
+                        "WR" -> mergedX.remove(absKey(subKey, termNum, "WR"))
+                        "CONT", "TB", "ACT", "LANG", "CT" -> mergedX.remove(absKey(subKey, termNum, "CONT"))
+                        "TOTAL" -> {
+                            mergedX.remove(absKey(subKey, termNum, "CONT"))
+                            mergedX.remove(absKey(subKey, termNum, "WR"))
+                        }
+                    }
+                }
+            }
+            // Apply newly imported absent flags (and clear corresponding numeric cells unless explicit mark provided)
+            importedAbsents.forEach { (subKey, termNum, compKey) ->
+                val subObj = clsSubs.find { it.key == subKey }
+                if (compKey == "WR" && subObj != null && subObj.written == 0) return@forEach
+                mergedX[absKey(subKey, termNum, compKey)] = "1"
+                if (compKey == "WR") {
+                    mergedMarks.remove(mk(subKey, termNum, "WR"))
+                } else if (compKey == "CONT") {
+                    listOf("TB", "ACT", "LANG", "CT", "CONT", "TOTAL").forEach { c ->
+                        mergedMarks.remove(mk(subKey, termNum, c))
+                    }
+                }
+            }
 
             val upd = base.copy(
                 name = (stdMap["name"]?.ifBlank { base.name } ?: base.name).take(120),
@@ -1448,7 +1507,7 @@ object Repo {
                 mobile = (stdMap["mobile"]?.ifBlank { base.mobile } ?: base.mobile).take(30),
                 religion = ((stdMap["religion"]?.ifBlank { base.religion } ?: base.religion).ifBlank { "ইসলাম" }).take(40),
                 m = mergedMarks,
-                x = (base.x + x).entries.take(120).associate { it.key to it.value }
+                x = mergedX.entries.take(120).associate { it.key to it.value }
             )
             if (pos >= 0) {
                 out[pos] = upd; updatedCount++
