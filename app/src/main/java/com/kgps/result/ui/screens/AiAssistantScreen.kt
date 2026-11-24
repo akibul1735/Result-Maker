@@ -123,6 +123,7 @@ import com.kgps.result.AiAssistantState
 import com.kgps.result.BlankSheetCatalog
 import com.kgps.result.RELIGIONS
 import com.kgps.result.Student
+import com.kgps.result.ui.components.BiometricDeleteConfirmDialog
 import com.kgps.result.ai.AiModelMode
 import com.kgps.result.ai.ClassSheetImportScope
 import com.kgps.result.ai.ClassSheetKind
@@ -224,6 +225,8 @@ fun AiAssistantScreen(
     var contextDropdownOpen by remember { mutableStateOf(false) }
     var askClearChat by remember { mutableStateOf(false) }
     var askClearImage by remember { mutableStateOf(false) }
+    var pendingRemoveScannedRowId by remember { mutableStateOf<String?>(null) }
+    var pendingRemoveModelId by remember { mutableStateOf<String?>(null) }
     var showModelPicker by remember { mutableStateOf(false) }
 
     // Scanner mode & selectors (auto-detect until scanned or manually overridden)
@@ -1010,7 +1013,7 @@ fun AiAssistantScreen(
                             onSetAllSelected = onSetAllScannedRowsSelected,
                             onUpdateRowField = onUpdateScannedRowField,
                             onAddBlankRow = onAddBlankScannedRow,
-                            onRemoveRow = onRemoveScannedRow,
+                            onRemoveRow = { rowId -> pendingRemoveScannedRowId = rowId },
                             onMarkAllVerified = onMarkAllScannedIssuesVerified,
                             onDismissPreview = onDismissClassSheetPreview,
                             onRequestCommit = { unreviewed ->
@@ -1149,23 +1152,14 @@ fun AiAssistantScreen(
     }
 
     if (askClearChat) {
-        AlertDialog(
-            onDismissRequest = { askClearChat = false },
-            title = { Text("চ্যাট কথোপকথন মুছবেন?") },
-            text = { Text("বর্তমান চ্যাট ইতিহাস মুছে নতুন কথোপকথন শুরু করা হবে।") },
-            confirmButton = {
-                Button(
-                    onClick = {
-                        askClearChat = false
-                        onClearChat()
-                    },
-                    colors = ButtonDefaults.buttonColors(containerColor = RoseDanger),
-                    modifier = Modifier.testTag("ai_confirm_clear_chat_btn")
-                ) { Text("হ্যাঁ, মুছুন") }
-            },
-            dismissButton = {
-                TextButton(onClick = { askClearChat = false }) { Text("বাতিল") }
-            }
+        BiometricDeleteConfirmDialog(
+            title = "চ্যাট কথোপকথন মুছবেন?",
+            description = "বর্তমান চ্যাট ইতিহাস মুছে নতুন কথোপকথন শুরু করা হবে।",
+            warningDescription = "চ্যাট ইতিহাস মুছে ফেলতে আপনার ফিঙ্গারপ্রিন্ট অনুমতি দিন।",
+            confirmActionLabel = "ফিঙ্গারপ্রিন্ট অনুমতি দিয়ে মুছুন",
+            confirmButtonTestTag = "ai_confirm_clear_chat_btn",
+            onDismiss = { askClearChat = false },
+            onConfirmedDelete = onClearChat
         )
     }
 
@@ -1183,7 +1177,7 @@ fun AiAssistantScreen(
                 showModelPicker = false
             },
             onRefreshModels = onRefreshModels,
-            onRemoveCustomModel = onRemoveCustomModel,
+            onRemoveCustomModel = { modelId -> pendingRemoveModelId = modelId },
             onOpenAiSettings = {
                 showModelPicker = false
                 onOpenAiSettings()
@@ -1193,24 +1187,41 @@ fun AiAssistantScreen(
     }
 
     if (askClearImage) {
-        AlertDialog(
-            onDismissRequest = { askClearImage = false },
-            title = { Text("নির্বাচিত ছবি মুছবেন?") },
-            text = { Text("নম্বরপত্রের ছবি ও বিশ্লেষিত প্রিভিউ মুছে ফেলা হবে।") },
-            confirmButton = {
-                Button(
-                    onClick = {
-                        askClearImage = false
-                        resetToAuto()
-                        onClearImage()
-                    },
-                    colors = ButtonDefaults.buttonColors(containerColor = RoseDanger),
-                    modifier = Modifier.testTag("ai_confirm_clear_photo_btn")
-                ) { Text("হ্যাঁ, মুছুন") }
-            },
-            dismissButton = {
-                TextButton(onClick = { askClearImage = false }) { Text("বাতিল") }
+        BiometricDeleteConfirmDialog(
+            title = "নির্বাচিত ছবি মুছবেন?",
+            description = "নম্বরপত্রের ছবি ও বিশ্লেষিত প্রিভিউ মুছে ফেলা হবে।",
+            warningDescription = "নির্বাচিত নম্বরপত্রের ছবি ও প্রিভিউ মুছতে আপনার ফিঙ্গারপ্রিন্ট অনুমতি দিন।",
+            confirmActionLabel = "ফিঙ্গারপ্রিন্ট অনুমতি দিয়ে মুছুন",
+            confirmButtonTestTag = "ai_confirm_clear_photo_btn",
+            onDismiss = { askClearImage = false },
+            onConfirmedDelete = {
+                resetToAuto()
+                onClearImage()
             }
+        )
+    }
+
+    pendingRemoveScannedRowId?.let { rowId ->
+        BiometricDeleteConfirmDialog(
+            title = "স্ক্যান করা সারি মুছবেন?",
+            description = "নম্বরপত্রের প্রিভিউ থেকে এই শিক্ষার্থীর সারিটি মুছে ফেলা হবে।",
+            warningDescription = "স্ক্যান করা সারিটি মুছে ফেলতে আপনার ফিঙ্গারপ্রিন্ট অনুমতি দিন।",
+            confirmActionLabel = "ফিঙ্গারপ্রিন্ট অনুমতি দিয়ে মুছুন",
+            confirmButtonTestTag = "ai_confirm_remove_row_btn",
+            onDismiss = { pendingRemoveScannedRowId = null },
+            onConfirmedDelete = { onRemoveScannedRow(rowId) }
+        )
+    }
+
+    pendingRemoveModelId?.let { modelId ->
+        BiometricDeleteConfirmDialog(
+            title = "কাস্টম মডেল মুছবেন?",
+            description = "\"$modelId\" মডেলটি কাস্টম তালিকা থেকে মুছে ফেলা হবে।",
+            warningDescription = "\"$modelId\" মডেলটি মুছতে আপনার ফিঙ্গারপ্রিন্ট অনুমতি দিন।",
+            confirmActionLabel = "ফিঙ্গারপ্রিন্ট অনুমতি দিয়ে মুছুন",
+            confirmButtonTestTag = "ai_confirm_remove_model_btn",
+            onDismiss = { pendingRemoveModelId = null },
+            onConfirmedDelete = { onRemoveCustomModel(modelId) }
         )
     }
 }

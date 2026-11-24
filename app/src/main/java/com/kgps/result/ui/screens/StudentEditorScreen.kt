@@ -33,7 +33,6 @@ import androidx.compose.material.icons.rounded.Home
 import androidx.compose.material.icons.rounded.Lock
 import androidx.compose.material.icons.rounded.Tune
 import androidx.compose.material.icons.rounded.Visibility
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -94,6 +93,7 @@ import com.kgps.result.mk
 import com.kgps.result.subs
 import com.kgps.result.termNameBn
 import com.kgps.result.total
+import com.kgps.result.ui.components.BiometricDeleteConfirmDialog
 import com.kgps.result.ui.components.InlineTeacherRemarkSection
 import com.kgps.result.ui.components.TreeBranchItem
 import com.kgps.result.ui.components.TreeGroupCard
@@ -906,24 +906,18 @@ fun StudentEditorScreen(
     }
 
     if (askDelete) {
-        AlertDialog(
-            onDismissRequest = { askDelete = false },
-            title = { Text("শিক্ষার্থী মুছুন?") },
-            text = { Text("${s.name.ifBlank { "এই শিক্ষার্থী" }}-এর সমস্ত তথ্য স্থায়ীভাবে মুছে যাবে।") },
-            confirmButton = {
-                Button(
-                    onClick = {
-                        deleted[0] = true
-                        onDeleteStudent(s.id)
-                        askDelete = false
-                        onBack()
-                    },
-                    colors = ButtonDefaults.buttonColors(containerColor = RoseDanger),
-                    modifier = Modifier.testTag("editor_confirm_delete_btn")
-                ) { Text("হ্যাঁ, মুছুন") }
-            },
-            dismissButton = {
-                TextButton(onClick = { askDelete = false }) { Text("না") }
+        val studentLabel = s.name.ifBlank { "এই শিক্ষার্থী" }
+        BiometricDeleteConfirmDialog(
+            title = "শিক্ষার্থী মুছুন?",
+            description = "$studentLabel-এর সমস্ত তথ্য স্থায়ীভাবে মুছে যাবে।",
+            warningDescription = "$studentLabel-এর সকল তথ্য স্থায়ীভাবে মুছে ফেলতে আপনার ফিঙ্গারপ্রিন্ট অনুমতি দিন।",
+            confirmActionLabel = "ফিঙ্গারপ্রিন্ট অনুমতি দিয়ে মুছুন",
+            confirmButtonTestTag = "editor_confirm_delete_btn",
+            onDismiss = { askDelete = false },
+            onConfirmedDelete = {
+                deleted[0] = true
+                onDeleteStudent(s.id)
+                onBack()
             }
         )
     }

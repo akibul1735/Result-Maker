@@ -127,6 +127,7 @@ import com.kgps.result.cloud.SchoolWorkspace
 import com.kgps.result.cloud.SheetTemplateCache
 import com.kgps.result.cloud.TeacherPermissions
 import com.kgps.result.ui.components.AddCustomClassDialog
+import com.kgps.result.ui.components.BiometricDeleteConfirmDialog
 import com.kgps.result.ui.components.DataResetDialog
 import com.kgps.result.ui.components.TeacherPermissionsEditorDialog
 import com.kgps.result.ui.components.TreeBranchItem
@@ -2026,44 +2027,27 @@ fun SettingsScreen(
     }
 
     pendingRemoveField?.let { field ->
-        AlertDialog(
-            onDismissRequest = { pendingRemoveField = null },
-            title = { Text("কাস্টম ফিল্ড মুছবেন?") },
-            text = { Text("\"${field.label}\" কাস্টম ফিল্ডটি তালিকা থেকে মুছে ফেলা হবে।") },
-            confirmButton = {
-                Button(
-                    onClick = {
-                        onRemoveCustomField(field.key)
-                        pendingRemoveField = null
-                    },
-                    colors = ButtonDefaults.buttonColors(containerColor = RoseDanger),
-                    modifier = Modifier.testTag("settings_confirm_remove_field_btn")
-                ) { Text("হ্যাঁ, মুছুন") }
-            },
-            dismissButton = {
-                TextButton(onClick = { pendingRemoveField = null }) { Text("বাতিল") }
-            }
+        BiometricDeleteConfirmDialog(
+            title = "কাস্টম ফিল্ড মুছবেন?",
+            description = "\"${field.label}\" কাস্টম ফিল্ডটি তালিকা থেকে মুছে ফেলা হবে।",
+            warningDescription = "\"${field.label}\" কাস্টম ফিল্ডটি মুছে ফেলতে আপনার ফিঙ্গারপ্রিন্ট অনুমতি দিন।",
+            confirmActionLabel = "ফিঙ্গারপ্রিন্ট অনুমতি দিয়ে মুছুন",
+            confirmButtonTestTag = "settings_confirm_remove_field_btn",
+            onDismiss = { pendingRemoveField = null },
+            onConfirmedDelete = { onRemoveCustomField(field.key) }
         )
     }
 
     pendingRemoveMember?.let { member ->
-        AlertDialog(
-            onDismissRequest = { pendingRemoveMember = null },
-            title = { Text("সদস্য অপসারণ করবেন?") },
-            text = { Text("\"${member.name.ifBlank { member.email }}\"-কে এই বিদ্যালয় থেকে অপসারণ করলে তিনি আর তথ্য দেখতে বা সম্পাদনা করতে পারবেন না।") },
-            confirmButton = {
-                Button(
-                    onClick = {
-                        onRemoveMember(member.uid)
-                        pendingRemoveMember = null
-                    },
-                    colors = ButtonDefaults.buttonColors(containerColor = RoseDanger),
-                    modifier = Modifier.testTag("settings_confirm_remove_member_btn")
-                ) { Text("অপসারণ করুন") }
-            },
-            dismissButton = {
-                TextButton(onClick = { pendingRemoveMember = null }) { Text("বাতিল") }
-            }
+        val memberLabel = member.name.ifBlank { member.email }
+        BiometricDeleteConfirmDialog(
+            title = "সদস্য অপসারণ করবেন?",
+            description = "\"$memberLabel\"-কে এই বিদ্যালয় থেকে অপসারণ করলে তিনি আর তথ্য দেখতে বা সম্পাদনা করতে পারবেন না।",
+            warningDescription = "\"$memberLabel\"-কে বিদ্যালয় থেকে অপসারণ করতে আপনার ফিঙ্গারপ্রিন্ট অনুমতি দিন।",
+            confirmActionLabel = "ফিঙ্গারপ্রিন্ট অনুমতি দিয়ে অপসারণ করুন",
+            confirmButtonTestTag = "settings_confirm_remove_member_btn",
+            onDismiss = { pendingRemoveMember = null },
+            onConfirmedDelete = { onRemoveMember(member.uid) }
         )
     }
 
@@ -2079,31 +2063,19 @@ fun SettingsScreen(
 
     pendingRemoveCustomClass?.let { cc ->
         val stuCount = students.count { it.cls == cc.id }
-        AlertDialog(
-            onDismissRequest = { pendingRemoveCustomClass = null },
-            title = { Text("\"${cc.nameBn}\" শ্রেণি মুছবেন?") },
-            text = {
-                Text(
-                    if (stuCount > 0) {
-                        "এই শ্রেণির নামের তালিকা সরানো হবে। বর্তমানে থাকা ${bn(stuCount.toString())} জন শিক্ষার্থীর ডাটা মুছে যাবে না।"
-                    } else {
-                        "\"${cc.nameBn}\" শ্রেণিটি শ্রেণির তালিকা থেকে সরানো হবে।"
-                    }
-                )
-            },
-            confirmButton = {
-                Button(
-                    onClick = {
-                        onRemoveCustomClass(cc.id)
-                        pendingRemoveCustomClass = null
-                    },
-                    colors = ButtonDefaults.buttonColors(containerColor = RoseDanger),
-                    modifier = Modifier.testTag("settings_confirm_remove_class_btn")
-                ) { Text("হ্যাঁ, সরান") }
-            },
-            dismissButton = {
-                TextButton(onClick = { pendingRemoveCustomClass = null }) { Text("বাতিল") }
-            }
+        val desc = if (stuCount > 0) {
+            "এই শ্রেণির নামের তালিকা সরানো হবে। বর্তমানে থাকা ${bn(stuCount.toString())} জন শিক্ষার্থীর ডাটা মুছে যাবে না।"
+        } else {
+            "\"${cc.nameBn}\" শ্রেণিটি শ্রেণির তালিকা থেকে সরানো হবে।"
+        }
+        BiometricDeleteConfirmDialog(
+            title = "\"${cc.nameBn}\" শ্রেণি মুছবেন?",
+            description = desc,
+            warningDescription = "\"${cc.nameBn}\" শ্রেণিটি মুছে ফেলতে আপনার ফিঙ্গারপ্রিন্ট অনুমতি দিন।",
+            confirmActionLabel = "ফিঙ্গারপ্রিন্ট অনুমতি দিয়ে মুছুন",
+            confirmButtonTestTag = "settings_confirm_remove_class_btn",
+            onDismiss = { pendingRemoveCustomClass = null },
+            onConfirmedDelete = { onRemoveCustomClass(cc.id) }
         )
     }
 }

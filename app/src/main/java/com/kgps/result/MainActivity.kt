@@ -786,7 +786,9 @@ fun ResultMakerWorkspace(
                                     onNewStudentInClass = { targetCls ->
                                         vm.selectClass(targetCls)
                                         vm.openNewStudentEditor(NavSection.ROSTER)
-                                    }
+                                    },
+                                    onDeleteStudent = vm::deleteStudent,
+                                    onPreviewStudent = { vm.openStudio(it.id) }
                                 )
 
                                 NavSection.SHEET -> BulkSheetScreen(

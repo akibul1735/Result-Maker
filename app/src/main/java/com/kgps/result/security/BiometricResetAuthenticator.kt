@@ -78,6 +78,21 @@ object BiometricResetAuthenticator {
             "এই ডিভাইসে বায়োমেট্রিক যাচাই সমর্থিত নয়।"
     }
 
+    fun deleteAvailabilityHintBn(availability: BiometricAvailability): String = when (availability) {
+        BiometricAvailability.READY ->
+            "মুছে ফেলার অনুমতি দিতে আপনার ডিভাইসের ফিঙ্গারপ্রিন্ট সেন্সরে আঙুল স্পর্শ করুন।"
+        BiometricAvailability.NONE_ENROLLED ->
+            "এই ডিভাইসে এখনো কোনো ফিঙ্গারপ্রিন্ট নিবন্ধিত নেই। নিরাপত্তা সেটিংস থেকে ফিঙ্গারপ্রিন্ট যোগ করুন অথবা নিচের বিকল্প যাচাই ব্যবহার করুন।"
+        BiometricAvailability.NO_HARDWARE ->
+            "এই ডিভাইসে ফিঙ্গারপ্রিন্ট সেন্সর পাওয়া যায়নি। নিচের নিরাপত্তা যাচাই পদ্ধতি ব্যবহার করুন।"
+        BiometricAvailability.HARDWARE_UNAVAILABLE ->
+            "ফিঙ্গারপ্রিন্ট সেন্সর বর্তমানে ব্যস্ত বা অস্থায়ীভাবে অনুপলব্ধ। কিছুক্ষণ পর আবার চেষ্টা করুন।"
+        BiometricAvailability.SECURITY_UPDATE_REQUIRED ->
+            "ডিভাইসের বায়োমেট্রিক নিরাপত্তা আপডেট প্রয়োজন।"
+        BiometricAvailability.UNSUPPORTED ->
+            "এই ডিভাইসে বায়োমেট্রিক যাচাই সমর্থিত নয়।"
+    }
+
     fun openBiometricEnrollSettings(context: Context) {
         val intent = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
             Intent(AndroidSettings.ACTION_BIOMETRIC_ENROLL).apply {

@@ -93,6 +93,7 @@ import com.kgps.result.classShortBn
 import com.kgps.result.cloud.SchoolWorkspace
 import com.kgps.result.cloud.TeacherPermissions
 import java.util.Calendar
+import com.kgps.result.ui.components.BiometricDeleteConfirmDialog
 import com.kgps.result.ui.components.TreeBranchItem
 import com.kgps.result.ui.theme.AmberBg
 import com.kgps.result.ui.theme.AmberBorder
@@ -1258,6 +1259,8 @@ internal fun SettingsGeminiAiContent(
     onClearGeminiApiKey: () -> Unit
 ) {
     var editingApiKey by remember(geminiApiKey) { mutableStateOf(geminiApiKey.isBlank()) }
+    var askClearApiKey by remember { mutableStateOf(false) }
+    var pendingRemoveCustomModel by remember { mutableStateOf<String?>(null) }
     val suggestedIds = remember { GeminiApiConfig.SUGGESTED_MODEL_IDS }
     val normalizedTypedModel = remember(modelInput) {
         modelInput.trim().removePrefix("models/").trim()
@@ -1370,7 +1373,7 @@ internal fun SettingsGeminiAiContent(
                             Text("বাতিল", fontSize = 11.sp, color = SlateMuted)
                         }
                         TextButton(
-                            onClick = onClearGeminiApiKey,
+                            onClick = { askClearApiKey = true },
                             contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
                             modifier = Modifier.testTag("settings_gemini_clear_btn")
                         ) {
@@ -1684,7 +1687,7 @@ internal fun SettingsGeminiAiContent(
                                     tint = SlateMuted,
                                     modifier = Modifier
                                         .size(12.dp)
-                                        .clickable { onRemoveCustomGeminiModel(customId) }
+                                        .clickable { pendingRemoveCustomModel = customId }
                                 )
                             }
                         }
@@ -1794,5 +1797,29 @@ internal fun SettingsGeminiAiContent(
                 }
             }
         }
+    }
+
+    if (askClearApiKey) {
+        BiometricDeleteConfirmDialog(
+            title = "Gemini API Key মুছবেন?",
+            description = "এই ডিভাইসে সংরক্ষিত Gemini API Key মুছে ফেলা হবে।",
+            warningDescription = "সংরক্ষিত Gemini API Key মুছতে আপনার ফিঙ্গারপ্রিন্ট অনুমতি দিন।",
+            confirmActionLabel = "ফিঙ্গারপ্রিন্ট অনুমতি দিয়ে মুছুন",
+            confirmButtonTestTag = "settings_confirm_clear_api_key_btn",
+            onDismiss = { askClearApiKey = false },
+            onConfirmedDelete = onClearGeminiApiKey
+        )
+    }
+
+    pendingRemoveCustomModel?.let { customModelId ->
+        BiometricDeleteConfirmDialog(
+            title = "কাস্টম মডেল মুছবেন?",
+            description = "\"$customModelId\" মডেল আইডিটি সংরক্ষিত তালিকা থেকে মুছে ফেলা হবে।",
+            warningDescription = "\"$customModelId\" মডেলটি মুছতে আপনার ফিঙ্গারপ্রিন্ট অনুমতি দিন।",
+            confirmActionLabel = "ফিঙ্গারপ্রিন্ট অনুমতি দিয়ে মুছুন",
+            confirmButtonTestTag = "settings_confirm_remove_custom_model_btn",
+            onDismiss = { pendingRemoveCustomModel = null },
+            onConfirmedDelete = { onRemoveCustomGeminiModel(customModelId) }
+        )
     }
 }
