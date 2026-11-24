@@ -548,10 +548,18 @@ internal fun stripJsonFences(raw: String): String {
     return trimmed
 }
 
-internal fun extractBalancedJsonObject(raw: String): String {
+internal fun extractBalancedJsonPayload(raw: String): String {
     val cleaned = stripJsonFences(raw)
-    val start = cleaned.indexOf('{')
-    if (start < 0) return cleaned
+    val objStart = cleaned.indexOf('{')
+    val arrStart = cleaned.indexOf('[')
+    val start = when {
+        objStart < 0 && arrStart < 0 -> return cleaned
+        objStart < 0 -> arrStart
+        arrStart < 0 -> objStart
+        else -> minOf(objStart, arrStart)
+    }
+    val openChar = cleaned[start]
+    val closeChar = if (openChar == '[') ']' else '}'
     var depth = 0
     var inString = false
     var escaped = false
@@ -570,8 +578,8 @@ internal fun extractBalancedJsonObject(raw: String): String {
             continue
         }
         if (!inString) {
-            if (c == '{') depth++
-            else if (c == '}') {
+            if (c == openChar) depth++
+            else if (c == closeChar) {
                 depth--
                 if (depth == 0) {
                     return cleaned.substring(start, i + 1)
@@ -582,63 +590,143 @@ internal fun extractBalancedJsonObject(raw: String): String {
     return cleaned.substring(start)
 }
 
+internal fun extractBalancedJsonObject(raw: String): String {
+    val payload = extractBalancedJsonPayload(raw)
+    if (payload.startsWith("[")) {
+        val unwrapped = runCatching {
+            val arr = JSONArray(payload)
+            if (arr.length() == 1) arr.optJSONObject(0)?.toString() else null
+        }.getOrNull()
+        if (!unwrapped.isNullOrBlank()) return unwrapped
+    }
+    return payload
+}
+
+private val ROW_ARRAY_KEYS = listOf("rows", "students", "records", "items", "entries", "list", "table")
+private val WRAPPER_OBJECT_KEYS = listOf("data", "result", "response", "output", "sheet", "marksheet")
+
+internal fun findRowArray(json: JSONObject): JSONArray? {
+    for (key in ROW_ARRAY_KEYS) {
+        json.optJSONArray(key)?.let { return it }
+    }
+    json.optJSONArray("data")?.let { return it }
+    return null
+}
+
+internal fun unwrapRowContainer(json: JSONObject): JSONObject {
+    if (findRowArray(json) != null ||
+        json.optJSONObject("student") != null ||
+        json.optJSONArray("marks") != null ||
+        json.has("scanMode")
+    ) {
+        return json
+    }
+    for (key in WRAPPER_OBJECT_KEYS) {
+        val childObj = json.optJSONObject(key)
+        if (childObj != null && (
+                findRowArray(childObj) != null ||
+                    childObj.optJSONObject("student") != null ||
+                    childObj.optJSONArray("marks") != null
+                )
+        ) {
+            return childObj
+        }
+        val childArr = json.optJSONArray(key)
+        if (childArr != null) {
+            return JSONObject().put("rows", childArr)
+        }
+    }
+    return json
+}
+
+private fun salvageCompleteJsonObjectsFromSlice(slice: String, startOffset: Int): JSONArray {
+    val salvagedRows = JSONArray()
+    var i = startOffset
+    var inString = false
+    var escaped = false
+    var depth = 0
+    var objStart = -1
+    while (i < slice.length) {
+        val c = slice[i]
+        if (escaped) {
+            escaped = false
+            i++
+            continue
+        }
+        if (c == '\\' && inString) {
+            escaped = true
+            i++
+            continue
+        }
+        if (c == '"') {
+            inString = !inString
+            i++
+            continue
+        }
+        if (!inString) {
+            when (c) {
+                '{' -> {
+                    if (depth == 0) objStart = i
+                    depth++
+                }
+                '}' -> {
+                    if (depth > 0) {
+                        depth--
+                        if (depth == 0 && objStart >= 0) {
+                            val rowText = slice.substring(objStart, i + 1)
+                            runCatching { JSONObject(rowText) }.getOrNull()?.let { salvagedRows.put(it) }
+                            objStart = -1
+                        }
+                    }
+                }
+                ']' -> if (depth == 0) break
+            }
+        }
+        i++
+    }
+    return salvagedRows
+}
+
 internal fun parseClassSheetJsonRobust(
     raw: String,
     clsHint: Int?,
     termHint: Int?,
     subKeyHint: String?
 ): JSONObject {
-    val slice = extractBalancedJsonObject(raw)
+    val slice = extractBalancedJsonPayload(raw)
+    if (slice.trimStart().startsWith("[")) {
+        try {
+            val arr = JSONArray(slice)
+            return JSONObject().apply {
+                clsHint?.let { put("cls", it) }
+                termHint?.let { put("term", it) }
+                subKeyHint?.let { put("subKey", it) }
+                put("rows", arr)
+            }
+        } catch (arrErr: Exception) {
+            val salvaged = salvageCompleteJsonObjectsFromSlice(slice, 1)
+            if (salvaged.length() == 0) throw arrErr
+            return JSONObject().apply {
+                put("cls", clsHint ?: 3)
+                put("term", termHint ?: 1)
+                put("subKey", subKeyHint ?: "MATH")
+                put("summary", "")
+                put("warnings", JSONArray().apply {
+                    put("মডেলের উত্তর দীর্ঘ হওয়ায় শেষ দিকের কিছু সারি অসম্পূর্ণ থাকতে পারে — প্রাপ্ত ${bn(salvaged.length().toString())}টি সারি দেখানো হয়েছে।")
+                })
+                put("rows", salvaged)
+            }
+        }
+    }
+
     try {
-        return JSONObject(slice)
+        return unwrapRowContainer(JSONObject(slice))
     } catch (primaryErr: Exception) {
         // If output was truncated mid-array (e.g. MAX_TOKENS on large class), salvage all complete row objects
-        val rowsMatch = Regex("\"rows\"\\s*:\\s*\\[").find(slice) ?: throw primaryErr
+        val rowsMatch = Regex("\"(?:rows|students|records|items|entries|list|table)\"\\s*:\\s*\\[").find(slice)
+            ?: throw primaryErr
         val rowsStart = rowsMatch.range.last + 1
-        val salvagedRows = JSONArray()
-        var i = rowsStart
-        var inString = false
-        var escaped = false
-        var depth = 0
-        var objStart = -1
-        while (i < slice.length) {
-            val c = slice[i]
-            if (escaped) {
-                escaped = false
-                i++
-                continue
-            }
-            if (c == '\\' && inString) {
-                escaped = true
-                i++
-                continue
-            }
-            if (c == '"') {
-                inString = !inString
-                i++
-                continue
-            }
-            if (!inString) {
-                when (c) {
-                    '{' -> {
-                        if (depth == 0) objStart = i
-                        depth++
-                    }
-                    '}' -> {
-                        if (depth > 0) {
-                            depth--
-                            if (depth == 0 && objStart >= 0) {
-                                val rowText = slice.substring(objStart, i + 1)
-                                runCatching { JSONObject(rowText) }.getOrNull()?.let { salvagedRows.put(it) }
-                                objStart = -1
-                            }
-                        }
-                    }
-                    ']' -> if (depth == 0) break
-                }
-            }
-            i++
-        }
+        val salvagedRows = salvageCompleteJsonObjectsFromSlice(slice, rowsStart)
         if (salvagedRows.length() == 0) throw primaryErr
 
         val headerPrefix = slice.substring(0, rowsMatch.range.first)
@@ -659,6 +747,16 @@ internal fun parseClassSheetJsonRobust(
             put("rows", salvagedRows)
         }
     }
+}
+
+internal fun parseMarksheetJsonRobust(raw: String): JSONObject {
+    val slice = extractBalancedJsonPayload(raw)
+    if (slice.trimStart().startsWith("[")) {
+        val arr = JSONArray(slice)
+        return arr.optJSONObject(0)?.let(::unwrapRowContainer)
+            ?: throw IllegalStateException("একক নম্বরপত্রের কোনো ডেটা পাওয়া যায়নি।")
+    }
+    return unwrapRowContainer(JSONObject(slice))
 }
 
 internal fun normalizeDetectedSubjectKey(
@@ -748,7 +846,7 @@ internal fun parseAutoScanJson(
 ): AutoScanResult {
     val json = parseClassSheetJsonRobust(raw, clsHint, termHint, subKeyHint)
     val rawMode = json.optString("scanMode", "").trim().uppercase()
-    val rowsArr = json.optJSONArray("rows")
+    val rowsArr = findRowArray(json)
     val marksArr = json.optJSONArray("marks")
     val hasStudentObj = json.optJSONObject("student")?.let { st ->
         st.optString("name", "").isNotBlank() || st.optInt("roll", 0) > 0
@@ -758,7 +856,10 @@ internal fun parseAutoScanJson(
         rawMode.contains("SINGLE") -> true
         rawMode.contains("CLASS") -> false
         (rowsArr == null || rowsArr.length() == 0) && ((marksArr?.length() ?: 0) > 0 || hasStudentObj) -> true
-        else -> false
+        rowsArr != null -> false
+        else -> throw IllegalStateException(
+            "মডেলের উত্তরে কোনো নম্বরপত্র বা শিক্ষার্থীর তালিকা পাওয়া যায়নি। ছবি স্পষ্ট করে আবার চেষ্টা করুন।"
+        )
     }
 
     return if (isSingle) {
@@ -950,11 +1051,17 @@ internal fun parseExtractedClassSheetJson(
         return "${mappedBase}_$termNum"
     }
 
-    val rowsArr = json.optJSONArray("rows") ?: json.optJSONArray("students") ?: JSONArray()
+    val rowsArr = findRowArray(json) ?: JSONArray()
     val rawParsed = (0 until rowsArr.length()).mapNotNull { idx ->
         val obj = rowsArr.optJSONObject(idx) ?: return@mapNotNull null
-        val rollStr = fromBn(obj.optCleanString("roll"))
+        val rollStr = fromBn(
+            obj.optCleanString("roll")
+                .ifBlank { obj.optCleanString("rollNo") }
+                .ifBlank { obj.optCleanString("roll_no") }
+        )
         val nameStr = obj.optCleanString("name")
+            .ifBlank { obj.optCleanString("studentName") }
+            .ifBlank { obj.optCleanString("student_name") }
         val marksObj = obj.optJSONObject("marks") ?: JSONObject()
         val marksMap = mutableMapOf<String, String>()
         val traitsMap = mutableMapOf<String, String>()
@@ -1122,6 +1229,10 @@ internal fun parseExtractedClassSheetJson(
         )
     }
 
+    if (parsedRows.isEmpty() && warnings.none { it.contains("কোনো শিক্ষার্থীর সারি") }) {
+        warnings.add("ছবিটি থেকে কোনো শিক্ষার্থীর সারি শনাক্ত হয়নি — কাগজটি সোজা ও স্পষ্ট আলোতে রেখে পুনরায় চেষ্টা করুন।")
+    }
+
     return ExtractedClassSheet(
         cls = detectedCls,
         term = detectedTerm,
@@ -1217,14 +1328,16 @@ class DirectGeminiAiRepository(
         return ceil(diff / 1000.0).toInt().coerceAtLeast(1)
     }
 
-    private fun recordRateLimitCooldown(modelId: String, retryAfterSec: Int?) {
+    private fun recordRateLimitCooldown(modelId: String, retryAfterSec: Int?, isZeroQuota: Boolean = false) {
         val clean = GeminiApiConfig.normalizeModelId(modelId)
         if (clean.isBlank()) return
-        val waitSec = (retryAfterSec ?: DEFAULT_RATE_LIMIT_COOLDOWN_SEC).coerceIn(5, 180)
+        val defaultWait = if (isZeroQuota) ZERO_QUOTA_COOLDOWN_SEC else DEFAULT_RATE_LIMIT_COOLDOWN_SEC
+        val waitSec = maxOf(retryAfterSec ?: defaultWait, if (isZeroQuota) ZERO_QUOTA_COOLDOWN_SEC else 0)
+            .coerceIn(5, ZERO_QUOTA_COOLDOWN_SEC)
         modelCooldownUntilMs[clean] = System.currentTimeMillis() + waitSec * 1000L
     }
 
-    private fun recordServerBusyCooldown(modelId: String, waitSec: Int = 15) {
+    private fun recordServerBusyCooldown(modelId: String, waitSec: Int = 20) {
         val clean = GeminiApiConfig.normalizeModelId(modelId)
         if (clean.isBlank()) return
         modelCooldownUntilMs[clean] = System.currentTimeMillis() + waitSec.coerceIn(5, 60) * 1000L
@@ -1244,20 +1357,33 @@ class DirectGeminiAiRepository(
         }
 
         val userOrdered = requireOrderedModels()
-        val healthy = userOrdered.filter { remainingCooldownSeconds(it) == 0 }
-        val cooling = userOrdered.filter { remainingCooldownSeconds(it) > 0 }
-            .sortedBy { remainingCooldownSeconds(it) }
-        val executionQueue = healthy + cooling
+        val plan = buildModelQueuePlan(userOrdered, modelCooldownUntilMs, System.currentTimeMillis())
+        plan.expiredKeysToPrune.forEach { modelCooldownUntilMs.remove(it) }
+
+        if (plan.healthyModels.isEmpty()) {
+            val waitText = bn(plan.shortestCooldownSec.toString())
+            throw GeminiHttpException(
+                httpCode = 429,
+                modelId = userOrdered.first(),
+                userMessage = "সব নির্বাচিত মডেলে রেট-লিমিট কুলডাউন চলছে (${plan.coolingSummary}) — অযথা কল এড়াতে ${waitText} সেকেন্ড অপেক্ষা করে আবার চেষ্টা করুন।",
+                retryAfterSeconds = plan.shortestCooldownSec
+            )
+        }
 
         val serializedBody = body.toString().toByteArray(Charsets.UTF_8)
-        val isVisionOrHeavy = serializedBody.size > 80_000
+        val isVisionOrHeavy = serializedBody.size > 80_000 || bodyHasInlineImage(body)
+        val maxAttemptsPerModel = if (isVisionOrHeavy) 1 else 2
         var lastError: Exception? = null
         val attemptedModels = mutableListOf<String>()
+        var consecutiveTransientRateLimits = 0
 
-        for ((idx, candidateModel) in executionQueue.withIndex()) {
+        for ((idx, candidateModel) in plan.healthyModels.withIndex()) {
             if (!hasNetworkTransport(appContext)) break
+            if (idx > 0) {
+                delay(450L)
+            }
             attemptedModels.add(candidateModel)
-            for (attempt in 0..1) {
+            for (attempt in 0 until maxAttemptsPerModel) {
                 try {
                     val text = callGenerateContent(apiKey, candidateModel, body, serializedBody)
                     modelCooldownUntilMs.remove(candidateModel)
@@ -1266,9 +1392,17 @@ class DirectGeminiAiRepository(
                     lastError = e
                     if (e.httpCode == 401 || e.httpCode == 403) throw e
                     if (e.httpCode == 429) {
-                        recordRateLimitCooldown(e.modelId, e.retryAfterSeconds)
+                        recordRateLimitCooldown(e.modelId, e.retryAfterSeconds, e.isZeroQuota)
+                        if (!e.isZeroQuota) {
+                            consecutiveTransientRateLimits++
+                            if (consecutiveTransientRateLimits >= 2) {
+                                // Stop immediately on consecutive per-minute/TPM 429s so we don't keep tripping project rate limits
+                                break
+                            }
+                        }
                         break
                     }
+                    consecutiveTransientRateLimits = 0
                     if (e.httpCode == 503) {
                         recordServerBusyCooldown(e.modelId)
                         break
@@ -1277,27 +1411,28 @@ class DirectGeminiAiRepository(
                         break
                     }
                     val isTransient = e.httpCode in setOf(500, 502, 504)
-                    if (isTransient && attempt == 0 && idx == executionQueue.lastIndex) {
+                    if (isTransient && attempt == 0 && maxAttemptsPerModel > 1 && idx == plan.healthyModels.lastIndex) {
                         delay(700L)
                         continue
                     }
                     break
                 } catch (e: GeminiNetworkException) {
                     lastError = e
-                    if (e.isTimeout && isVisionOrHeavy) {
+                    if (e.isTimeout || maxAttemptsPerModel == 1) {
                         break
                     }
-                    if (attempt == 0 && idx == executionQueue.lastIndex && (e.isTimeout || e.isConnectionError)) {
+                    if (attempt == 0 && idx == plan.healthyModels.lastIndex && e.isConnectionError) {
                         delay(700L)
                         continue
                     }
                     break
                 } catch (e: Exception) {
                     lastError = e
-                    if (idx == executionQueue.lastIndex) throw e
+                    if (idx == plan.healthyModels.lastIndex) throw e
                     break
                 }
             }
+            if (consecutiveTransientRateLimits >= 2) break
         }
 
         val baseErr = lastError ?: IllegalStateException("Gemini API সংযোগ ব্যর্থ হয়েছে।")
@@ -1424,7 +1559,7 @@ class DirectGeminiAiRepository(
         val payload = buildVisionJsonPayload(encoded.base64, prompt, maxOutputTokens = 4096)
         val (raw, usedModel) = callGenerateContentResilient(apiKey, modelId, payload)
         return try {
-            val parsed = parseExtractedMarksheetJson(JSONObject(extractBalancedJsonObject(raw)))
+            val parsed = parseExtractedMarksheetJson(parseMarksheetJsonRobust(raw))
             val withFallbackNote = if (usedModel != modelId) {
                 parsed.copy(
                     uncertainNotes = parsed.uncertainNotes +
@@ -1543,7 +1678,7 @@ class DirectGeminiAiRepository(
             appendLine("2. CT ঘরে \"০৬+০৭=১৩/২=০৭\" থাকলে \"=\" পরের গড় মান (\"7\") ও `rawNotes`-এ সংক্ষেপে লিখুন।")
             appendLine("3. `A`/`অনু` থাকলে \"0\" ও `rawNotes`-এ \"অনুপস্থিত (A)\"; ফাঁকা ঘর \"\"। গ্রেড/জিপি/স্বাক্ষর কলাম বাদ দিন।")
             appendLine(scopeRule)
-            appendLine("5. অনুপস্থিত বা ফাঁকা কীগুলো বাদ দিন। `refCode`-এ ফুটারে `REF:...` পেলে সেটি দিন, নাহলে \"${resolvedQr?.refCode.orEmpty()}\"।")
+            appendLine("5. টেবিলে মুদ্রিত প্রতিটি শিক্ষার্থীর সারি (`roll` ও থাকলে `name`) অবশ্যই `rows`-এ রাখুন, এমনকি তাদের নম্বর ঘরগুলো ফাঁকা থাকলেও (`marks:{}`)। যে ঘরগুলোতে কোনো নম্বর বা লেখা নেই, সেগুলোর ফাঁকা কী (`\"\"`) বাদ দিয়ে JSON সংক্ষিপ্ত রাখুন। `refCode`-এ ফুটারে `REF:...` পেলে সেটি দিন, নাহলে \"${resolvedQr?.refCode.orEmpty()}\"।")
             appendLine("6. ছবিতে আসলে কোনো লেখা/সংখ্যা অস্পষ্ট হলে তবেই `uncertainFields`-এ কারণ দিন। `metaFound`-এ শ্রেণি/প্রান্তিক/বিষয় পেলে true দিন।")
             append("JSON: $dynamicSchemaJson")
         }
@@ -1636,6 +1771,7 @@ class DirectGeminiAiRepository(
             appendLine("   - \"SINGLE_TERM_MARKS\": ১ প্রান্তিক নম্বর (রোল, নাম, `TB,ACT,LANG,CT,CONT,WR,TOTAL`)।")
             appendLine("   - \"THREE_TERM_MARKS\": ৩ প্রান্তিক নম্বর (`T1_CONT,T1_WR,T1_TOTAL .. T3_TOTAL`)।")
             appendLine("   - \"ATTENDANCE_TRAITS\": উপস্থিতি ও গুণাবলি শিট (যেমন: রোল, নাম, উপস্থিত/উপস্থিতি, সক্রিয়তা/সহপাঠ, শৃঙ্খলা, আচরণ — ১ প্রান্তিক বা ৩ প্রান্তিক)। উপরের মোট কার্যদিবস থাকলে `sharedWorkingDays` ও প্রতি সারির `traits`-এ `DAYS_t, PRES_t, ACT_t, DISC_t, COND_t, REM_t` দিন (গুণাবলি `ক`/`খ`/`গ`, `marks` `{}` রাখুন)।")
+            appendLine("3. টেবিলে মুদ্রিত প্রতিটি শিক্ষার্থীর সারি (`roll` ও থাকলে `name`) অবশ্যই `rows`-এ রাখুন, এমনকি তাদের নম্বর ঘরগুলো ফাঁকা থাকলেও (`marks:{}`)। ফাঁকা ঘরগুলোর অপ্রয়োজনীয় `\"\"` কী বাদ দিয়ে JSON সংক্ষিপ্ত রাখুন।")
             append("JSON স্কিমা: {\"scanMode\":\"CLASS_SHEET\",\"sheetKind\":\"SINGLE_TERM_MARKS\",\"refCode\":\"\",\"cls\":3,\"term\":1,\"subKey\":\"MATH\",\"metaFound\":{\"cls\":true,\"term\":true,\"sub\":true},\"sharedWorkingDays\":{\"1\":\"\",\"2\":\"\",\"3\":\"\"},\"summary\":\"\",\"warnings\":[],\"rows\":[{\"roll\":\"1\",\"name\":\"\",\"marks\":{\"TB\":\"\",\"ACT\":\"\",\"LANG\":\"\",\"CT\":\"\",\"WR\":\"\",\"T1_CONT\":\"\",\"T1_WR\":\"\"},\"sheetContinuousTotal\":\"\",\"sheetGrandTotal\":\"\",\"remark\":\"\",\"traits\":{\"PRES_1\":\"\",\"ACT_1\":\"\",\"DISC_1\":\"\",\"COND_1\":\"\",\"REM_1\":\"\"},\"rawNotes\":\"\",\"uncertainFields\":{}}],\"student\":{\"name\":\"\",\"cls\":3,\"roll\":1,\"guardian\":\"\",\"religion\":\"ইসলাম\"},\"marks\":[],\"attendanceAndTraits\":{\"days\":\"\",\"present\":\"\",\"act\":\"\",\"disc\":\"\",\"cond\":\"\",\"remark\":\"\"},\"uncertainNotes\":[]}")
         }
 
@@ -1705,13 +1841,29 @@ class DirectGeminiAiRepository(
 
     companion object {
         private const val BASE_URL = "https://generativelanguage.googleapis.com/v1beta"
-        private const val DEFAULT_RATE_LIMIT_COOLDOWN_SEC = 15
+        internal const val DEFAULT_RATE_LIMIT_COOLDOWN_SEC = 30
+        internal const val ZERO_QUOTA_COOLDOWN_SEC = 180
+
+        internal enum class Config400Kind {
+            THINKING_CONFIG,
+            RESPONSE_MIME_TYPE,
+            OTHER
+        }
+
+        internal data class ModelQueuePlan(
+            val healthyModels: List<String>,
+            val shortestCooldownSec: Int,
+            val coolingSummary: String,
+            val expiredKeysToPrune: List<String>
+        )
 
         internal class GeminiHttpException(
             val httpCode: Int,
             val modelId: String,
             userMessage: String,
-            val retryAfterSeconds: Int? = null
+            val retryAfterSeconds: Int? = null,
+            val rawErrorBody: String = "",
+            val isZeroQuota: Boolean = false
         ) : IllegalStateException(userMessage)
 
         internal class GeminiNetworkException(
@@ -1731,6 +1883,85 @@ class DirectGeminiAiRepository(
             }.getOrDefault(true)
         }
 
+        internal fun buildModelQueuePlan(
+            userOrdered: List<String>,
+            cooldownUntilMs: Map<String, Long>,
+            nowMs: Long
+        ): ModelQueuePlan {
+            val healthy = mutableListOf<String>()
+            val cooling = mutableListOf<Pair<String, Int>>()
+            val expired = mutableListOf<String>()
+
+            for (raw in userOrdered) {
+                val clean = GeminiApiConfig.normalizeModelId(raw)
+                if (clean.isBlank()) continue
+                val until = cooldownUntilMs[clean]
+                if (until == null || until <= nowMs) {
+                    if (until != null) expired.add(clean)
+                    healthy.add(clean)
+                } else {
+                    val waitSec = ceil((until - nowMs) / 1000.0).toInt().coerceAtLeast(1)
+                    cooling.add(clean to waitSec)
+                }
+            }
+            val sortedCooling = cooling.sortedBy { it.second }
+            val shortest = sortedCooling.firstOrNull()?.second ?: DEFAULT_RATE_LIMIT_COOLDOWN_SEC
+            val summary = sortedCooling.joinToString(", ") { "${it.first} (${bn(it.second.toString())}সে.)" }
+            return ModelQueuePlan(
+                healthyModels = healthy,
+                shortestCooldownSec = shortest,
+                coolingSummary = summary,
+                expiredKeysToPrune = expired
+            )
+        }
+
+        internal fun bodyHasInlineImage(body: JSONObject): Boolean {
+            val contents = body.optJSONArray("contents") ?: return false
+            for (i in 0 until contents.length()) {
+                val parts = contents.optJSONObject(i)?.optJSONArray("parts") ?: continue
+                for (j in 0 until parts.length()) {
+                    val part = parts.optJSONObject(j) ?: continue
+                    if (part.has("inline_data") || part.has("inlineData")) return true
+                }
+            }
+            return false
+        }
+
+        internal fun isKnownTextOnlyModel(modelId: String): Boolean {
+            val lower = GeminiApiConfig.normalizeModelId(modelId).lowercase()
+            return lower.startsWith("gemma-1") ||
+                lower.startsWith("gemma-2") ||
+                lower.startsWith("gemma-3-1b") ||
+                lower.startsWith("gemma-3n-e2b")
+        }
+
+        internal fun classify400Error(rawBody: String): Config400Kind {
+            val lower = rawBody.lowercase()
+            return when {
+                lower.contains("thinkingconfig") ||
+                    lower.contains("thinking_config") ||
+                    lower.contains("thinking_budget") ||
+                    lower.contains("thinkingbudget") ||
+                    lower.contains("thinking_level") ||
+                    lower.contains("thinkinglevel") ||
+                    lower.contains("thinking mode") ||
+                    lower.contains("thinking is not supported") -> Config400Kind.THINKING_CONFIG
+                lower.contains("responsemimetype") ||
+                    lower.contains("response_mime_type") ||
+                    lower.contains("json mode") ||
+                    lower.contains("application/json") -> Config400Kind.RESPONSE_MIME_TYPE
+                else -> Config400Kind.OTHER
+            }
+        }
+
+        internal fun isZeroQuotaError(respText: String): Boolean {
+            val lower = respText.lowercase()
+            return Regex("limit\\s*[:=]\\s*0\\b").containsMatchIn(lower) ||
+                lower.contains("per_day") ||
+                lower.contains("perday") ||
+                lower.contains("generaterequestsperday")
+        }
+
         private fun thinkingStepsForModel(cleanModel: String, body: JSONObject): List<JSONObject?> {
             val genCfg = body.optJSONObject("generationConfig")
             val isJsonExtraction = genCfg?.optString("responseMimeType") == "application/json"
@@ -1739,20 +1970,16 @@ class DirectGeminiAiRepository(
             return when {
                 lower.contains("2.5") -> {
                     val budget = if (lower.contains("pro")) 128 else 0
-                    listOf(JSONObject().put("thinkingBudget", budget), null)
+                    listOf(JSONObject().put("thinkingBudget", budget))
                 }
                 Regex("gemini-(?:3|4)(?:\\.|-)").containsMatchIn(lower) -> {
                     if (lower.contains("flash")) {
                         listOf(
                             JSONObject().put("thinkingLevel", "MINIMAL"),
-                            JSONObject().put("thinkingLevel", "LOW"),
-                            null
+                            JSONObject().put("thinkingLevel", "LOW")
                         )
                     } else {
-                        listOf(
-                            JSONObject().put("thinkingLevel", "LOW"),
-                            null
-                        )
+                        listOf(JSONObject().put("thinkingLevel", "LOW"))
                     }
                 }
                 else -> listOf(null)
@@ -1787,35 +2014,65 @@ class DirectGeminiAiRepository(
             preSerializedBody: ByteArray? = null
         ): String = withContext(Dispatchers.IO) {
             val cleanModel = GeminiApiConfig.normalizeModelId(modelId)
+            val hasImage = bodyHasInlineImage(body)
+            if (hasImage && isKnownTextOnlyModel(cleanModel)) {
+                throw GeminiHttpException(
+                    httpCode = 400,
+                    modelId = cleanModel,
+                    userMessage = "নির্বাচিত মডেল ($cleanModel) ছবি স্ক্যান সমর্থন করে না। সেটিংস থেকে একটি Gemini Flash মডেল নির্বাচন করুন।"
+                )
+            }
+
             val hasJsonMime = body.optJSONObject("generationConfig")?.optString("responseMimeType") == "application/json"
             val thinkingSteps = thinkingStepsForModel(cleanModel, body)
             val isGemmaModel = cleanModel.startsWith("gemma-", ignoreCase = true)
 
-            val candidateConfigs: List<Pair<JSONObject?, Boolean>> = buildList {
-                if (isGemmaModel && hasJsonMime) {
-                    add(null to true)
-                } else {
-                    thinkingSteps.forEach { tc -> add(tc to false) }
-                    if (hasJsonMime) add(null to true)
-                }
-            }
+            var activeThinkingIdx = 0
+            var stripJson = isGemmaModel && hasJsonMime
+            var clearedThinkingFallback = false
+            var attempts = 0
 
-            for (idx in candidateConfigs.indices) {
-                val (thinkingCfg, stripJson) = candidateConfigs[idx]
-                val effectiveBytes = if (thinkingCfg == null && !stripJson && preSerializedBody != null) {
+            while (attempts < 3) {
+                attempts++
+                val currentThinking = if (clearedThinkingFallback || isGemmaModel) {
+                    null
+                } else {
+                    thinkingSteps.getOrNull(activeThinkingIdx)
+                }
+
+                val effectiveBytes = if (currentThinking == null && !stripJson && preSerializedBody != null) {
                     preSerializedBody
                 } else {
-                    cloneBodyWithGenerationTweaks(body, thinkingCfg, stripJson)
+                    cloneBodyWithGenerationTweaks(body, currentThinking, stripJson)
                         .toString()
                         .toByteArray(Charsets.UTF_8)
                 }
                 try {
                     return@withContext executeSingleGenerateCall(apiKey, cleanModel, effectiveBytes)
                 } catch (e: GeminiHttpException) {
-                    if (e.httpCode == 400 && idx < candidateConfigs.lastIndex) {
-                        continue
+                    if (e.httpCode != 400) throw e
+                    when (classify400Error(e.rawErrorBody)) {
+                        Config400Kind.THINKING_CONFIG -> {
+                            if (!clearedThinkingFallback) {
+                                if (activeThinkingIdx + 1 < thinkingSteps.size) {
+                                    activeThinkingIdx++
+                                    continue
+                                } else if (currentThinking != null) {
+                                    clearedThinkingFallback = true
+                                    continue
+                                }
+                            }
+                            throw e
+                        }
+                        Config400Kind.RESPONSE_MIME_TYPE -> {
+                            if (hasJsonMime && !stripJson) {
+                                stripJson = true
+                                continue
+                            }
+                            throw e
+                        }
+                        Config400Kind.OTHER -> throw e
                     }
-                    throw e
                 }
             }
             throw IllegalStateException("Gemini API অনুরোধ সম্পন্ন করা যায়নি।")
@@ -1832,7 +2089,7 @@ class DirectGeminiAiRepository(
             val conn = (URL(endpoint).openConnection() as HttpURLConnection).apply {
                 requestMethod = "POST"
                 connectTimeout = 30_000
-                readTimeout = if (isVisionOrLarge) 80_000 else 55_000
+                readTimeout = if (isVisionOrLarge) 90_000 else 55_000
                 doOutput = true
                 setFixedLengthStreamingMode(bodyBytes.size)
                 setRequestProperty("x-goog-api-key", apiKey)
@@ -1850,14 +2107,23 @@ class DirectGeminiAiRepository(
                 if (code !in 200..299) {
                     val headerRetry = conn.getHeaderField("Retry-After")?.trim()?.toIntOrNull()
                     val retrySec = if (code == 429) parseRetryAfterSeconds(headerRetry, respText) else null
+                    val zeroQuota = code == 429 && isZeroQuotaError(respText)
                     throw GeminiHttpException(
                         httpCode = code,
                         modelId = cleanModel,
                         userMessage = friendlyHttpError(code, respText, cleanModel, retrySec),
-                        retryAfterSeconds = retrySec
+                        retryAfterSeconds = retrySec,
+                        rawErrorBody = respText,
+                        isZeroQuota = zeroQuota
                     )
                 }
-                return extractCandidateText(JSONObject(respText))
+                val json = runCatching { JSONObject(respText) }.getOrElse { parseErr ->
+                    throw IllegalStateException(
+                        "সার্ভার থেকে অপ্রত্যাশিত প্রতিক্রিয়া এসেছে ($cleanModel)। আবার চেষ্টা করুন।",
+                        parseErr
+                    )
+                }
+                return extractCandidateText(json)
             } catch (e: GeminiHttpException) {
                 throw e
             } catch (e: GeminiNetworkException) {
@@ -1871,19 +2137,37 @@ class DirectGeminiAiRepository(
             }
         }
 
-        private fun extractCandidateText(json: JSONObject): String {
-            val candidates = json.optJSONArray("candidates") ?: return ""
-            if (candidates.length() == 0) return ""
-            val first = candidates.optJSONObject(0) ?: return ""
-            val finishReason = first.optString("finishReason", "").uppercase()
+        internal fun extractCandidateText(json: JSONObject): String {
+            val apiErrorMsg = json.optJSONObject("error")?.optString("message")?.trim().orEmpty()
+            if (apiErrorMsg.isNotEmpty()) {
+                throw IllegalStateException("Gemini API ত্রুটি: $apiErrorMsg")
+            }
+
+            val blockReason = json.optJSONObject("promptFeedback")?.optString("blockReason", "")?.trim().orEmpty()
+            val candidates = json.optJSONArray("candidates")
+            if (candidates == null || candidates.length() == 0) {
+                if (blockReason.isNotEmpty()) {
+                    throw IllegalStateException(
+                        "সার্ভার ফিল্টারের কারণে ছবিটি গ্রহণ করা হয়নি ($blockReason)। পরিষ্কার ছবি দিয়ে আবার চেষ্টা করুন।"
+                    )
+                }
+                throw IllegalStateException("AI মডেল থেকে কোনো উত্তর পাওয়া যায়নি। আবার চেষ্টা করুন।")
+            }
+
+            val first = candidates.optJSONObject(0)
+                ?: throw IllegalStateException("AI মডেল থেকে কোনো উত্তর পাওয়া যায়নি। আবার চেষ্টা করুন।")
+            val finishReason = first.optString("finishReason", "").trim().uppercase()
             val content = first.optJSONObject("content")
             val parts = content?.optJSONArray("parts")
+            var hasThoughtParts = false
             val text = if (parts != null) {
                 buildString {
                     for (i in 0 until parts.length()) {
                         val p = parts.optJSONObject(i) ?: continue
-                        // Skip internal thought summary parts from reasoning models
-                        if (p.optBoolean("thought", false)) continue
+                        if (p.optBoolean("thought", false)) {
+                            hasThoughtParts = true
+                            continue
+                        }
                         val t = p.optString("text", "")
                         if (t.isNotEmpty()) append(t)
                     }
@@ -1895,9 +2179,19 @@ class DirectGeminiAiRepository(
                     "MAX_TOKENS" -> throw IllegalStateException(
                         "মডেলের আউটপুট টোকেন সীমায় আটকে গেছে। ছবিটি ছোট করে ক্রপ করুন অথবা ২ ভাগে স্ক্যান করুন।"
                     )
-                    "SAFETY", "RECITATION", "PROHIBITED_CONTENT" -> throw IllegalStateException(
+                    "SAFETY", "IMAGE_SAFETY", "RECITATION", "PROHIBITED_CONTENT", "SPII", "BLOCKLIST" -> throw IllegalStateException(
                         "সার্ভার ফিল্টারের কারণে ছবিটি প্রসেস করা যায়নি ($finishReason)। পরিষ্কার ছবি দিয়ে আবার চেষ্টা করুন।"
                     )
+                    else -> {
+                        val reasonTag = when {
+                            finishReason.isNotBlank() -> finishReason
+                            hasThoughtParts -> "THOUGHT_ONLY"
+                            else -> "EMPTY_RESPONSE"
+                        }
+                        throw IllegalStateException(
+                            "AI মডেল থেকে কোনো টেক্সট পাওয়া যায়নি ($reasonTag)। আবার চেষ্টা করুন বা অন্য Flash মডেল নির্বাচন করুন।"
+                        )
+                    }
                 }
             }
             return text
@@ -2078,9 +2372,12 @@ class DirectGeminiAiRepository(
             return parsed?.coerceIn(5, 180)
         }
 
-        private fun formatRateLimitMessage(modelId: String, retryAfterSec: Int?): String {
+        private fun formatRateLimitMessage(modelId: String, retryAfterSec: Int?, isZeroQuota: Boolean = false): String {
+            if (isZeroQuota) {
+                return "এই মডেলে ($modelId) ফ্রি কোটা নেই বা দৈনিক সীমা পূর্ণ — সেটিংস থেকে Flash বা Flash-Lite মডেল নির্বাচন করুন।"
+            }
             val waitText = retryAfterSec?.let { "${bn(it.toString())} সেকেন্ড পর আবার চেষ্টা করুন" }
-                ?: "কিছুক্ষণ পর আবার চেষ্টা করুন"
+                ?: "৩০ সেকেন্ড পর আবার চেষ্টা করুন"
             return "ফ্রি-টিয়ার রেট-লিমিট পূর্ণ ($modelId) — $waitText অথবা সেটিংস থেকে Flash-Lite/অন্য মডেল বেছে নিন।"
         }
 
@@ -2102,7 +2399,7 @@ class DirectGeminiAiRepository(
                 code == 404 || lower.contains("not found") || lower.contains("not supported for generatecontent") ->
                     "নির্বাচিত মডেল ($modelId) এই API Key-এর জন্য উপলব্ধ নয়। সেটিংস থেকে প্রস্তাবিত বা লোড করা অন্য একটি মডেল বেছে নিন।"
                 code == 429 || lower.contains("quota") || lower.contains("resource_exhausted") ->
-                    formatRateLimitMessage(modelId, retryAfterSec)
+                    formatRateLimitMessage(modelId, retryAfterSec, isZeroQuota = isZeroQuotaError(respText))
                 code == 503 || lower.contains("high demand") || lower.contains("overloaded") || lower.contains("unavailable") ->
                     "নির্বাচিত মডেলটিতে ($modelId) এই মুহূর্তে অতিরিক্ত চাপ (HTTP 503) চলছে। কিছুক্ষণ পর আবার চেষ্টা করুন অথবা সেটিংস থেকে অন্য একটি মডেল নির্বাচন করুন।"
                 code in listOf(500, 502, 504) ->

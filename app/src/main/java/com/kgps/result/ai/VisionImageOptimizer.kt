@@ -30,11 +30,11 @@ data class PreparedVisionImage(
 
 object VisionImageOptimizer {
 
-    private const val TARGET_MAX_LONGEST_PX = 2200
-    private const val FALLBACK_MAX_LONGEST_PX = 1850
-    private const val SOFT_MAX_BYTES = 820_000
-    private const val HARD_MAX_BYTES = 1_050_000
-    private const val RESCALE_TRIGGER_BYTES = 1_200_000
+    private const val TARGET_MAX_LONGEST_PX = 1800
+    private const val FALLBACK_MAX_LONGEST_PX = 1440
+    private const val SOFT_MAX_BYTES = 480_000
+    private const val HARD_MAX_BYTES = 640_000
+    private const val RESCALE_TRIGGER_BYTES = 750_000
 
     fun rotate90Clockwise(src: Bitmap): Bitmap {
         val matrix = Matrix().apply { postRotate(90f) }
