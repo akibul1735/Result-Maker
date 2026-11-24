@@ -30,11 +30,11 @@ data class PreparedVisionImage(
 
 object VisionImageOptimizer {
 
-    private const val TARGET_MAX_LONGEST_PX = 1800
-    private const val FALLBACK_MAX_LONGEST_PX = 1550
-    private const val SOFT_MAX_BYTES = 680_000
-    private const val HARD_MAX_BYTES = 860_000
-    private const val RESCALE_TRIGGER_BYTES = 960_000
+    private const val TARGET_MAX_LONGEST_PX = 2200
+    private const val FALLBACK_MAX_LONGEST_PX = 1850
+    private const val SOFT_MAX_BYTES = 820_000
+    private const val HARD_MAX_BYTES = 1_050_000
+    private const val RESCALE_TRIGGER_BYTES = 1_200_000
 
     fun rotate90Clockwise(src: Bitmap): Bitmap {
         val matrix = Matrix().apply { postRotate(90f) }
@@ -79,9 +79,9 @@ object VisionImageOptimizer {
         val canvas = Canvas(out)
 
         val grayMatrix = ColorMatrix().apply { setSaturation(0f) }
-        // Gentle contrast boost + slight paper lift without blowing out light handwriting
-        val contrast = 1.20f
-        val translate = -18f
+        // Gentle contrast boost + slight paper lift without blowing out light pen/pencil digits
+        val contrast = 1.16f
+        val translate = -12f
         val contrastMatrix = ColorMatrix(
             floatArrayOf(
                 contrast, 0f, 0f, 0f, translate,

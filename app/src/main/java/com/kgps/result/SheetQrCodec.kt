@@ -718,11 +718,14 @@ object SheetQrCodec {
     }
 
     fun buildAiPromptInstructions(meta: BlankSheetQrMeta): String {
-        val subName = meta.subjectKey?.let { BlankSheetCatalog.subjectTitleFor(it, "") }.orEmpty()
-        val subStr = if (!meta.subjectKey.isNullOrBlank()) {
-            "$subName (${meta.subjectKey})"
-        } else {
-            "উপস্থিতি/সাধারণ"
+        val cleanSubKey = meta.subjectKey?.trim()?.takeIf {
+            it.isNotBlank() && !it.equals(BlankSheetCatalog.ALL_SUBJECTS_KEY, ignoreCase = true)
+        }
+        val subName = cleanSubKey?.let { BlankSheetCatalog.subjectTitleFor(it, "") }.orEmpty()
+        val subStr = when {
+            meta.sheetKind == ClassSheetKind.ATTENDANCE_TRAITS -> "উপস্থিতি ও গুণাবলি"
+            cleanSubKey != null -> "$subName ($cleanSubKey)"
+            else -> "ছবির উপরের শিরোনাম বা REF থেকে শনাক্ত করুন (BAN/ENG/MATH/SOC/SCI/BGW/REL/PE/ART)"
         }
         val isMultiTermTraits = meta.sheetKind == ClassSheetKind.ATTENDANCE_TRAITS &&
             (meta.columnIds.any { it.startsWith("T2_") || it.startsWith("T3_") } || meta.term !in 1..3)
@@ -739,9 +742,9 @@ object SheetQrCodec {
         val hasTotal = meta.columnIds.any { it == "TOTAL" }
 
         return buildString {
-            appendLine("[নিশ্চিত শিট কাঠামো — QR/বারকোড ও টেমপ্লেট থেকে প্রাপ্ত]:")
-            appendLine("- নিশ্চিত তথ্য: cls=${meta.cls}, subKey=${meta.subjectKey ?: ""}, term=${meta.term.coerceIn(1, 3)}, sheetKind=${meta.sheetKind.name}, বিষয়=$subStr, প্রান্তিক=$termLabel, পৃষ্ঠা=${meta.pageIndex}/${meta.totalPages}।")
-            appendLine("- টেবিলের বাম থেকে ডান কলাম ক্রম: $colListStr।")
+            appendLine("[নিশ্চিত শিট কাঠামো — ৩টি QR/বারকোড ও টেমপ্লেট থেকে প্রাপ্ত]:")
+            appendLine("- নিশ্চিত তথ্য: cls=${meta.cls}, subKey=${cleanSubKey ?: "ছবি_থেকে_শনাক্ত"}, term=${if (meta.term in 1..3) meta.term else "ছবি_অনুযায়ী"}, sheetKind=${meta.sheetKind.name}, বিষয়=$subStr, প্রান্তিক=$termLabel, পৃষ্ঠা=${meta.pageIndex}/${meta.totalPages}।")
+            appendLine("- টেবিলের বাম থেকে ডান কলাম ক্রম (হুবহু এই কলামগুলোই টেবিলে আছে): $colListStr।")
             appendLine("- মুদ্রিত সংখ্যা ধরন: ${meta.numeralStyle.labelBn}; তবে আউটপুট JSON-এ সব সংখ্যা ইংরেজি অঙ্কে (0-9) দিন।")
             if (meta.workingDaysByTerm.isNotEmpty()) {
                 val wdStr = meta.workingDaysByTerm.entries.joinToString(", ") { (t, d) -> "${termNameBn(t)}=$d দিন" }
@@ -755,15 +758,147 @@ object SheetQrCodec {
                 if (!hasBreakdown && !hasCont && !hasWr && hasTotal) {
                     appendLine("- এটি 'সহজ মোট' ফর্ম: কেবল `sheetGrandTotal` (ও থাকলে `remark`) দিন; `TB/ACT/LANG/CT/WR/sheetContinuousTotal` অনুমান করবেন না।")
                 } else if (!hasBreakdown && hasCont && hasWr) {
-                    appendLine("- এটি সংক্ষিপ্ত ফর্ম: আলাদা `TB/ACT/LANG/CT` নেই — কেবল `sheetContinuousTotal`, `WR`, ও `sheetGrandTotal` দিন।")
+                    appendLine("- এটি সংক্ষিপ্ত ফর্ম: আলাদা `TB/ACT/LANG/CT` নেই — কেবল `sheetContinuousTotal`, `marks.WR`, ও থাকলে `sheetGrandTotal` দিন।")
                 } else if (hasCont && !hasWr && !hasTotal) {
-                    appendLine("- এটি শুধু ধারাবাহিক নম্বর ফর্ম: `WR` বা `sheetGrandTotal` অনুমান করবেন না।")
+                    appendLine("- এটি শুধু ধারাবাহিক নম্বর ফর্ম: কেবল `sheetContinuousTotal` দিন; `WR` বা `sheetGrandTotal` অনুমান করবেন না।")
+                } else if (!hasBreakdown && !hasCont && hasWr && !hasTotal) {
+                    appendLine("- এটি শুধু সামষ্টিক/লিখিত নম্বর ফর্ম: কেবল `marks.WR` দিন; ধারাবাহিক বা `sheetGrandTotal` অনুমান করবেন না।")
                 }
             }
             if (meta.customColumnTitles.isNotEmpty()) {
                 append("- কাস্টম কলাম (${meta.customColumnTitles.joinToString(", ")}) ডাটা থাকলেও `marks` নষ্ট করবেন না, প্রয়োজনে `rawNotes`-এ উল্লেখ করুন।")
             }
         }.trim()
+    }
+
+    /**
+     * QR/টেমপ্লেট কলাম অনুযায়ী হুবহু সামঞ্জস্যপূর্ণ JSON স্কিমা উদাহরণ তৈরি করে,
+     * যাতে অপ্রাসঙ্গিক কলাম (যেমন সংক্ষিপ্ত শিটে TB/CT বা নম্বর শিটে traits) জেমিনিকে বিভ্রান্ত না করে।
+     */
+    fun buildDynamicRowJsonSchema(
+        meta: BlankSheetQrMeta?,
+        kind: ClassSheetKind?,
+        effCls: Int?,
+        effTerm: Int?,
+        effSub: String?,
+        effScope: ClassSheetImportScope
+    ): String {
+        val resolvedKind = kind ?: meta?.sheetKind ?: ClassSheetKind.SINGLE_TERM_MARKS
+        val cleanMetaSub = meta?.subjectKey?.trim()?.takeIf {
+            it.isNotBlank() && !it.equals(BlankSheetCatalog.ALL_SUBJECTS_KEY, ignoreCase = true)
+        }
+        val cleanSub = effSub?.trim()?.takeIf {
+            it.isNotBlank() && !it.equals(BlankSheetCatalog.ALL_SUBJECTS_KEY, ignoreCase = true)
+        } ?: cleanMetaSub
+        val safeCls = effCls ?: meta?.cls ?: 3
+        val safeTerm = effTerm ?: meta?.term?.takeIf { it in 1..3 } ?: 1
+        val cols = meta?.columnIds?.takeIf { it.isNotEmpty() }
+
+        val rowExample = when (resolvedKind) {
+            ClassSheetKind.ATTENDANCE_TRAITS -> {
+                val traitKeys = if (cols != null) {
+                    buildList {
+                        val t = safeTerm.coerceIn(1, 3)
+                        cols.forEach { c ->
+                            when (c) {
+                                "ATT" -> add("PRES_$t")
+                                "TRAIT_ACT" -> add("ACT_$t")
+                                "TRAIT_DISC" -> add("DISC_$t")
+                                "TRAIT_COND" -> add("COND_$t")
+                                "T1_DAYS" -> add("DAYS_1")
+                                "T2_DAYS" -> add("DAYS_2")
+                                "T3_DAYS" -> add("DAYS_3")
+                                "T1_PRES" -> add("PRES_1")
+                                "T2_PRES" -> add("PRES_2")
+                                "T3_PRES" -> add("PRES_3")
+                                "T1_ACT" -> add("ACT_1")
+                                "T2_ACT" -> add("ACT_2")
+                                "T3_ACT" -> add("ACT_3")
+                                "T1_DISC" -> add("DISC_1")
+                                "T2_DISC" -> add("DISC_2")
+                                "T3_DISC" -> add("DISC_3")
+                                "T1_COND" -> add("COND_1")
+                                "T2_COND" -> add("COND_2")
+                                "T3_COND" -> add("COND_3")
+                            }
+                        }
+                    }.distinct().ifEmpty { listOf("PRES_$safeTerm", "ACT_$safeTerm", "DISC_$safeTerm", "COND_$safeTerm") }
+                } else {
+                    listOf("PRES_$safeTerm", "ACT_$safeTerm", "DISC_$safeTerm", "COND_$safeTerm", "REM_$safeTerm")
+                }
+                val hasName = cols == null || "NAME" in cols
+                val hasRem = cols == null || "REMARK" in cols
+                val traitsJson = traitKeys.joinToString(",") { "\"$it\":\"\"" }
+                buildString {
+                    append("{\"roll\":\"1\"")
+                    if (hasName) append(",\"name\":\"\"")
+                    append(",\"traits\":{$traitsJson}")
+                    if (hasRem) append(",\"remark\":\"\"")
+                    append(",\"rawNotes\":\"\",\"uncertainFields\":{}}")
+                }
+            }
+
+            ClassSheetKind.THREE_TERM_MARKS -> {
+                val threeTermKeys = if (cols != null) {
+                    cols.filter {
+                        it.startsWith("T1_") || it.startsWith("T2_") || it.startsWith("T3_")
+                    }.ifEmpty {
+                        listOf("T1_CONT", "T1_WR", "T1_TOTAL", "T2_CONT", "T2_WR", "T2_TOTAL", "T3_CONT", "T3_WR", "T3_TOTAL")
+                    }
+                } else {
+                    listOf("T1_CONT", "T1_WR", "T1_TOTAL", "T2_CONT", "T2_WR", "T2_TOTAL", "T3_CONT", "T3_WR", "T3_TOTAL")
+                }
+                val hasName = cols == null || "NAME" in cols
+                val hasRem = cols == null || "REMARK" in cols
+                val marksJson = threeTermKeys.joinToString(",") { "\"$it\":\"\"" }
+                buildString {
+                    append("{\"roll\":\"1\"")
+                    if (hasName) append(",\"name\":\"\"")
+                    append(",\"marks\":{$marksJson}")
+                    if (hasRem) append(",\"remark\":\"\"")
+                    append(",\"rawNotes\":\"\",\"uncertainFields\":{}}")
+                }
+            }
+
+            ClassSheetKind.SINGLE_TERM_MARKS -> {
+                val hasName = cols == null || "NAME" in cols
+                val hasRem = cols == null || "REMARK" in cols
+                val markKeys = if (cols != null) {
+                    cols.filter { it in setOf("TB", "ACT", "LANG", "CT", "WR") }
+                } else {
+                    when (effScope) {
+                        ClassSheetImportScope.CONT_ONLY -> listOf("TB", "ACT", "LANG", "CT")
+                        ClassSheetImportScope.WR_ONLY -> listOf("WR")
+                        else -> listOf("TB", "ACT", "LANG", "CT", "WR")
+                    }
+                }
+                val includeCont = if (cols != null) "CONT" in cols else effScope != ClassSheetImportScope.WR_ONLY
+                val includeGrand = if (cols != null) "TOTAL" in cols else effScope == ClassSheetImportScope.BOTH
+                buildString {
+                    append("{\"roll\":\"1\"")
+                    if (hasName) append(",\"name\":\"\"")
+                    if (markKeys.isNotEmpty()) {
+                        append(",\"marks\":{${markKeys.joinToString(",") { "\"$it\":\"\"" }}}")
+                    }
+                    if (includeCont) append(",\"sheetContinuousTotal\":\"\"")
+                    if (includeGrand) append(",\"sheetGrandTotal\":\"\"")
+                    if (hasRem) append(",\"remark\":\"\"")
+                    append(",\"rawNotes\":\"\",\"uncertainFields\":{}}")
+                }
+            }
+        }
+
+        val workingDaysExample = if (resolvedKind == ClassSheetKind.ATTENDANCE_TRAITS) {
+            val terms = meta?.workingDaysByTerm?.keys?.sorted()?.takeIf { it.isNotEmpty() }
+                ?: if (meta != null && meta.columnIds.any { it.startsWith("T2_") || it.startsWith("T3_") }) listOf(1, 2, 3)
+                else listOf(safeTerm.coerceIn(1, 3))
+            "\"sharedWorkingDays\":{${terms.joinToString(",") { "\"$it\":\"${meta?.workingDaysByTerm?.get(it).orEmpty()}\"" }}},"
+        } else {
+            ""
+        }
+
+        val subExample = if (resolvedKind == ClassSheetKind.ATTENDANCE_TRAITS) "" else (cleanSub ?: "BAN")
+        return "{\"sheetKind\":\"${resolvedKind.name}\",\"refCode\":\"${meta?.refCode.orEmpty()}\",\"cls\":$safeCls,\"term\":$safeTerm,\"subKey\":\"$subExample\",\"metaFound\":{\"cls\":${effCls != null || meta != null},\"term\":${effTerm != null || (meta?.term in 1..3)},\"sub\":${cleanSub != null}},${workingDaysExample}\"summary\":\"\",\"warnings\":[],\"rows\":[$rowExample]}"
     }
 
     /**

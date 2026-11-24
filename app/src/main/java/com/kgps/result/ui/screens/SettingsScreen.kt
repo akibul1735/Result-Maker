@@ -167,8 +167,7 @@ fun SettingsScreen(
     driveFiles: List<DriveBackupFile>,
     driveFilesLoading: Boolean,
     geminiApiKey: String,
-    geminiModel: String,
-    geminiFallbackModels: List<String> = emptyList(),
+    geminiOrderedModels: List<String> = emptyList(),
     geminiAvailableModels: List<DiscoveredGeminiModel>,
     geminiCustomModels: List<String>,
     geminiNewModelIds: Set<String>,
@@ -219,12 +218,13 @@ fun SettingsScreen(
     onRestoreLocalSnapshot: (String) -> Unit,
     onLoadDriveBackups: () -> Unit,
     onRestoreFromDriveFile: (String) -> Unit,
-    onSaveGeminiConfig: (String, String) -> Unit,
-    onTestGeminiConnection: (String, String) -> Unit,
+    onSaveGeminiConfig: (String) -> Unit,
+    onTestGeminiConnection: (String) -> Unit,
     onRefreshGeminiModels: (String) -> Unit,
-    onSetGeminiFallbackSlot: (Int, String?) -> Unit = { _, _ -> },
-    onMoveGeminiFallbackModel: (Int, Int) -> Unit = { _, _ -> },
-    onResetGeminiFallbackDefaults: () -> Unit = {},
+    onToggleOrderedGeminiModel: (String) -> Unit = {},
+    onSetOrderedGeminiModelSlot: (Int, String?) -> Unit = { _, _ -> },
+    onMoveOrderedGeminiModel: (Int, Int) -> Unit = { _, _ -> },
+    onAddCustomGeminiModel: (String) -> Unit = {},
     onRemoveCustomGeminiModel: (String) -> Unit,
     onClearGeminiApiKey: () -> Unit,
     onSignOut: () -> Unit,
@@ -245,15 +245,8 @@ fun SettingsScreen(
     var newFieldLabel by remember { mutableStateOf("") }
     var apiKeyInput by remember(geminiApiKey) { mutableStateOf(geminiApiKey) }
     var showApiKey by remember { mutableStateOf(false) }
-    var modelInput by remember(geminiModel) { mutableStateOf(geminiModel) }
     var modelSearchQuery by remember { mutableStateOf("") }
     var showAllLiveModels by remember { mutableStateOf(false) }
-
-    LaunchedEffect(expandedGroup, geminiApiKey) {
-        if (expandedGroup == "aiproxy" && geminiApiKey.isNotBlank()) {
-            onRefreshGeminiModels(geminiApiKey)
-        }
-    }
 
     var showDataResetWizard by remember { mutableStateOf(false) }
     var dataResetInitialCategory by remember { mutableStateOf<DataResetCategory?>(null) }
@@ -442,8 +435,8 @@ fun SettingsScreen(
                 studentCount = students.size,
                 activeSchool = activeSchool,
                 currentUserId = currentUserId,
-                isGeminiConfigured = geminiApiKey.isNotBlank(),
-                geminiModel = geminiModel
+                isGeminiConfigured = geminiApiKey.isNotBlank() && geminiOrderedModels.isNotEmpty(),
+                geminiModel = geminiOrderedModels.firstOrNull().orEmpty().ifBlank { "নির্বাচিত নয়" }
             )
 
             if (!isAdmin) {
@@ -1516,14 +1509,18 @@ fun SettingsScreen(
 
             TreeGroupCard(
                 title = "Gemini AI ও মডেল",
-                subtitle = if (geminiApiKey.isNotBlank()) {
-                    "সক্রিয়: $geminiModel · বিকল্প ${bn(geminiFallbackModels.size.toString())}টি"
-                } else {
-                    "Google AI Studio থেকে নিজস্ব API Key যুক্ত করুন"
+                subtitle = when {
+                    geminiApiKey.isBlank() -> "Google AI Studio থেকে নিজস্ব API Key যুক্ত করুন"
+                    geminiOrderedModels.isEmpty() -> "API Key সংরক্ষিত · লাইভ মডেল আনুন ও ৩টি বাছুন"
+                    else -> "১ম: ${geminiOrderedModels.first()} · মোট ${bn(geminiOrderedModels.size.toString())}/৩টি"
                 },
-                badgeText = if (geminiApiKey.isNotBlank()) "সংযুক্ত" else "সেটআপ বাকি",
-                badgeColor = if (geminiApiKey.isNotBlank()) EmeraldGrade else AmberNotice,
-                badgeContainerColor = if (geminiApiKey.isNotBlank()) TealSoft else AmberBg,
+                badgeText = when {
+                    geminiApiKey.isBlank() -> "সেটআপ বাকি"
+                    geminiOrderedModels.isEmpty() -> "মডেল বাকি"
+                    else -> "প্রস্তুত (${bn(geminiOrderedModels.size.toString())})"
+                },
+                badgeColor = if (geminiApiKey.isNotBlank() && geminiOrderedModels.isNotEmpty()) EmeraldGrade else AmberNotice,
+                badgeContainerColor = if (geminiApiKey.isNotBlank() && geminiOrderedModels.isNotEmpty()) TealSoft else AmberBg,
                 icon = Icons.Rounded.AutoAwesome,
                 expanded = expandedGroup == "aiproxy",
                 headerTestTag = "settings_group_aiproxy",
@@ -1534,15 +1531,12 @@ fun SettingsScreen(
                     onApiKeyChange = { apiKeyInput = it },
                     showApiKey = showApiKey,
                     onToggleShowApiKey = { showApiKey = !showApiKey },
-                    modelInput = modelInput,
-                    onModelInputChange = { modelInput = it },
                     modelSearchQuery = modelSearchQuery,
                     onModelSearchChange = { modelSearchQuery = it },
                     showAllLiveModels = showAllLiveModels,
                     onToggleShowAllLiveModels = { showAllLiveModels = !showAllLiveModels },
                     geminiApiKey = geminiApiKey,
-                    geminiModel = geminiModel,
-                    geminiFallbackModels = geminiFallbackModels,
+                    geminiOrderedModels = geminiOrderedModels,
                     geminiAvailableModels = geminiAvailableModels,
                     geminiCustomModels = geminiCustomModels,
                     geminiNewModelIds = geminiNewModelIds,
@@ -1554,9 +1548,10 @@ fun SettingsScreen(
                     onSaveGeminiConfig = onSaveGeminiConfig,
                     onTestGeminiConnection = onTestGeminiConnection,
                     onRefreshGeminiModels = onRefreshGeminiModels,
-                    onSetFallbackSlot = onSetGeminiFallbackSlot,
-                    onMoveFallbackSlot = onMoveGeminiFallbackModel,
-                    onResetFallbackDefaults = onResetGeminiFallbackDefaults,
+                    onToggleOrderedModel = onToggleOrderedGeminiModel,
+                    onSetOrderedModelSlot = onSetOrderedGeminiModelSlot,
+                    onMoveOrderedModelSlot = onMoveOrderedGeminiModel,
+                    onAddCustomGeminiModel = onAddCustomGeminiModel,
                     onRemoveCustomGeminiModel = onRemoveCustomGeminiModel,
                     onClearGeminiApiKey = {
                         apiKeyInput = ""

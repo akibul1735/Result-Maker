@@ -425,13 +425,16 @@ class ResultMakerViewModel(
     private val _geminiApiKey = MutableStateFlow(GeminiApiConfig.getApiKey(appContext))
     val geminiApiKey: StateFlow<String> = _geminiApiKey.asStateFlow()
 
-    private val _geminiModel = MutableStateFlow(GeminiApiConfig.getSelectedModel(appContext))
-    val geminiModel: StateFlow<String> = _geminiModel.asStateFlow()
+    private val _geminiOrderedModels = MutableStateFlow(GeminiApiConfig.getOrderedModels(appContext))
+    val geminiOrderedModels: StateFlow<List<String>> = _geminiOrderedModels.asStateFlow()
 
-    private val _geminiFallbackModels = MutableStateFlow(
-        GeminiApiConfig.getFallbackModels(appContext, _geminiModel.value)
-    )
-    val geminiFallbackModels: StateFlow<List<String>> = _geminiFallbackModels.asStateFlow()
+    val geminiModel: StateFlow<String> = _geminiOrderedModels
+        .map { it.firstOrNull().orEmpty() }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, _geminiOrderedModels.value.firstOrNull().orEmpty())
+
+    val geminiFallbackModels: StateFlow<List<String>> = _geminiOrderedModels
+        .map { it.drop(1) }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, _geminiOrderedModels.value.drop(1))
 
     private val _geminiAvailableModels = MutableStateFlow(GeminiApiConfig.getCachedModels(appContext))
     val geminiAvailableModels: StateFlow<List<DiscoveredGeminiModel>> = _geminiAvailableModels.asStateFlow()
@@ -2628,6 +2631,51 @@ class ResultMakerViewModel(
         }
     }
 
+    private suspend fun resolveEffectiveSheetQrMeta(targetBmp: Bitmap): BlankSheetQrMeta? {
+        val st = _aiState.value
+        val existingResolved = st.resolvedTemplateMeta
+        if (existingResolved != null && existingResolved.columnIds.isNotEmpty()) {
+            val pIdx = st.sheetDetection?.offlineQrMeta?.pageIndex ?: existingResolved.pageIndex
+            val pTot = st.sheetDetection?.offlineQrMeta?.totalPages ?: existingResolved.totalPages
+            return existingResolved.copy(pageIndex = pIdx, totalPages = pTot)
+        }
+
+        val tid = st.sheetDetection?.templateId?.trim()?.uppercase()?.takeIf { it.length >= 6 }
+        if (tid != null) {
+            val resolved = kotlinx.coroutines.withTimeoutOrNull(3_500L) {
+                val cached = withContext(Dispatchers.IO) { sheetTemplateCache.get(tid) }
+                if (cached != null) {
+                    cached to "অফলাইন ক্যাশ"
+                } else if (st.resolvingSheetTemplate || activeSchool.value != null) {
+                    val fetched = resolveSheetTemplateRemote(tid)
+                    if (fetched != null) fetched to "Firestore ক্লাউড" else null
+                } else {
+                    null
+                }
+            }
+            if (resolved != null) {
+                val (meta, source) = resolved
+                val offline = st.sheetDetection?.offlineQrMeta
+                val merged = meta.copy(
+                    pageIndex = offline?.pageIndex ?: meta.pageIndex,
+                    totalPages = offline?.totalPages ?: meta.totalPages
+                )
+                _aiState.update { cur ->
+                    if (cur.selectedImageBitmap !== targetBmp) cur
+                    else cur.copy(
+                        detectedSheetQr = merged,
+                        sheetDetectionSource = "$source টেমপ্লেট",
+                        resolvedTemplateMeta = merged,
+                        resolvedTemplateSource = source,
+                        resolvingSheetTemplate = false
+                    )
+                }
+                return merged
+            }
+        }
+        return _aiState.value.detectedSheetQr
+    }
+
     fun analyzeClassSheet(
         clsHint: Int?,
         termHint: Int?,
@@ -2639,7 +2687,6 @@ class ResultMakerViewModel(
         val bmp = _aiState.value.selectedImageBitmap ?: return
         if (_aiState.value.analyzingImage) return
         val enhance = _aiState.value.documentEnhance
-        val qrMeta = _aiState.value.detectedSheetQr
 
         _aiState.update {
             it.copy(
@@ -2650,6 +2697,7 @@ class ResultMakerViewModel(
         }
         viewModelScope.launch {
             try {
+                val qrMeta = resolveEffectiveSheetQrMeta(bmp)
                 val result = aiRepository.analyzeClassSheetImage(
                     bmp, clsHint, termHint, subKeyHint, teacherNote, importScope, enhance, sheetKindHint, qrMeta
                 )
@@ -2678,7 +2726,6 @@ class ResultMakerViewModel(
         val bmp = _aiState.value.selectedImageBitmap ?: return
         if (_aiState.value.analyzingImage) return
         val enhance = _aiState.value.documentEnhance
-        val qrMeta = _aiState.value.detectedSheetQr
 
         _aiState.update {
             it.copy(
@@ -2690,6 +2737,7 @@ class ResultMakerViewModel(
         }
         viewModelScope.launch {
             try {
+                val qrMeta = resolveEffectiveSheetQrMeta(bmp)
                 when (
                     val res = aiRepository.analyzeAutoSheetImage(
                         bitmap = bmp,
@@ -3345,7 +3393,7 @@ class ResultMakerViewModel(
         if (fetched.isEmpty()) return
         val prevIds = _geminiAvailableModels.value.map { it.id }.toSet()
         val newlyDetected = if (prevIds.isNotEmpty()) {
-            fetched.map { it.id }.filter { it !in prevIds && it !in GeminiApiConfig.SUGGESTED_MODEL_IDS }.toSet()
+            fetched.map { it.id }.filter { it !in prevIds }.toSet()
         } else {
             emptySet()
         }
@@ -3361,7 +3409,7 @@ class ResultMakerViewModel(
         val keyToUse = GeminiApiConfig.normalizeApiKey(rawApiKey ?: _geminiApiKey.value)
         if (keyToUse.isBlank()) {
             if (!silent) {
-                _geminiModelsError.value = "নতুন মডেল লোড করতে আগে Gemini API Key লিখুন।"
+                _geminiModelsError.value = "লাইভ মডেল লোড করতে আগে Gemini API Key লিখুন।"
             }
             return
         }
@@ -3372,6 +3420,9 @@ class ResultMakerViewModel(
                 .onSuccess { fetched ->
                     _geminiModelsError.value = null
                     applyDiscoveredModels(fetched)
+                    if (!silent) {
+                        showMessage("${bn(fetched.size.toString())}টি লাইভ মডেল লোড হয়েছে — তালিকা থেকে পছন্দের ৩টি মডেল বাছুন")
+                    }
                 }
                 .onFailure { e ->
                     if (!silent) {
@@ -3383,72 +3434,106 @@ class ResultMakerViewModel(
     }
 
     fun removeCustomGeminiModel(modelId: String) {
-        _geminiCustomModels.value = GeminiApiConfig.removeCustomModel(appContext, modelId)
-    }
-
-    fun setGeminiFallbackSlot(slotIndex: Int, rawModelId: String?) {
-        val primary = _geminiModel.value
-        val cachedIds = _geminiAvailableModels.value.map { it.id }.toSet()
-        val updated = GeminiApiConfig.assignFallbackSlot(
-            current = _geminiFallbackModels.value,
-            slotIndex = slotIndex,
-            rawModelId = rawModelId,
-            primaryModel = primary,
-            cachedIds = cachedIds
-        )
-        val saved = GeminiApiConfig.saveFallbackModels(appContext, updated, primary)
-        directAiRepository.clearCooldowns()
-        _geminiFallbackModels.value = saved
-        _geminiCustomModels.value = GeminiApiConfig.getCustomModels(appContext)
-    }
-
-    fun moveGeminiFallbackModel(index: Int, delta: Int) {
-        val primary = _geminiModel.value
-        val reordered = GeminiApiConfig.moveFallbackSlot(_geminiFallbackModels.value, index, delta)
-        if (reordered != _geminiFallbackModels.value) {
-            val saved = GeminiApiConfig.saveFallbackModels(appContext, reordered, primary)
+        val clean = modelId.trim().removePrefix("models/").trim()
+        _geminiCustomModels.value = GeminiApiConfig.removeCustomModel(appContext, clean)
+        val remaining = _geminiOrderedModels.value.filter { it != clean }
+        if (remaining != _geminiOrderedModels.value) {
+            _geminiOrderedModels.value = GeminiApiConfig.saveOrderedModels(appContext, remaining)
             directAiRepository.clearCooldowns()
-            _geminiFallbackModels.value = saved
         }
     }
 
-    fun resetGeminiFallbackDefaults() {
-        val primary = _geminiModel.value
-        val saved = GeminiApiConfig.resetDefaultFallbacks(appContext, primary)
-        directAiRepository.clearCooldowns()
-        _geminiFallbackModels.value = saved
-        showMessage("বিকল্প ৩টি মডেল ডিফল্ট ক্রমে সেট হয়েছে")
-    }
-
-    fun selectGeminiModel(rawModel: String) {
+    fun toggleOrderedGeminiModel(rawModelId: String) {
         val cachedIds = _geminiAvailableModels.value.map { it.id }.toSet()
-        val cleanModel = GeminiApiConfig.normalizeModelId(rawModel, cachedIds)
-        GeminiApiConfig.saveConfig(appContext, _geminiApiKey.value, cleanModel)
-        val savedModel = GeminiApiConfig.getSelectedModel(appContext)
+        val clean = rawModelId.trim().removePrefix("models/").trim()
+        val (next, changed) = GeminiApiConfig.toggleOrderedModel(
+            current = _geminiOrderedModels.value,
+            rawModelId = clean,
+            cachedIds = cachedIds + clean
+        )
+        if (!changed) {
+            if (_geminiOrderedModels.value.size >= GeminiApiConfig.MAX_ORDERED_MODELS) {
+                showMessage("সর্বোচ্চ ৩টি মডেল নির্বাচন করা যায় — আগে একটি সরান বা ক্রমের স্লটে পরিবর্তন করুন")
+            }
+            return
+        }
+        _geminiOrderedModels.value = GeminiApiConfig.saveOrderedModels(appContext, next)
         directAiRepository.clearCooldowns()
-        _geminiModel.value = savedModel
-        _geminiFallbackModels.value = GeminiApiConfig.getFallbackModels(appContext, savedModel)
-        _geminiCustomModels.value = GeminiApiConfig.getCustomModels(appContext)
-        showMessage("Gemini মডেল পরিবর্তন হয়েছে: $savedModel")
     }
 
-    fun saveGeminiConfig(rawApiKey: String, rawModel: String) {
-        GeminiApiConfig.saveConfig(appContext, rawApiKey, rawModel)
-        val savedKey = GeminiApiConfig.getApiKey(appContext)
-        val savedModel = GeminiApiConfig.getSelectedModel(appContext)
+    fun setOrderedGeminiModelSlot(slotIndex: Int, rawModelId: String?) {
+        val cachedIds = _geminiAvailableModels.value.map { it.id }.toSet()
+        val cleanNew = rawModelId?.trim()?.removePrefix("models/")?.trim().orEmpty()
+        if (cleanNew.isNotBlank() && cleanNew !in cachedIds) {
+            GeminiApiConfig.rememberCustomModel(appContext, cleanNew)
+        }
+        val updated = GeminiApiConfig.assignOrderedModelSlot(
+            current = _geminiOrderedModels.value,
+            slotIndex = slotIndex,
+            rawModelId = cleanNew.ifBlank { null },
+            cachedIds = if (cleanNew.isNotBlank()) cachedIds + cleanNew else cachedIds
+        )
+        _geminiOrderedModels.value = GeminiApiConfig.saveOrderedModels(appContext, updated)
+        _geminiCustomModels.value = GeminiApiConfig.getCustomModels(appContext)
+        directAiRepository.clearCooldowns()
+    }
+
+    fun moveOrderedGeminiModel(index: Int, delta: Int) {
+        val reordered = GeminiApiConfig.moveOrderedModelSlot(_geminiOrderedModels.value, index, delta)
+        if (reordered != _geminiOrderedModels.value) {
+            _geminiOrderedModels.value = GeminiApiConfig.saveOrderedModels(appContext, reordered)
+            directAiRepository.clearCooldowns()
+        }
+    }
+
+    fun addCustomGeminiModel(rawModelId: String) {
+        val clean = rawModelId.trim().removePrefix("models/").trim()
+        if (clean.isBlank()) return
+        if (GeminiApiConfig.isExcludedModelId(clean)) {
+            showMessage("এই মডেলটি টেক্সট/ছবি বিশ্লেষণের জন্য উপযুক্ত নয়")
+            return
+        }
+        _geminiCustomModels.value = GeminiApiConfig.rememberCustomModel(appContext, clean)
+        val cur = _geminiOrderedModels.value
+        if (clean !in cur) {
+            if (cur.size < GeminiApiConfig.MAX_ORDERED_MODELS) {
+                _geminiOrderedModels.value = GeminiApiConfig.saveOrderedModels(appContext, cur + clean)
+                directAiRepository.clearCooldowns()
+                showMessage("$clean মডেলটি ক্রম ${bn((cur.size + 1).toString())}-এ যুক্ত হয়েছে")
+            } else {
+                showMessage("$clean কাস্টম তালিকায় যুক্ত হয়েছে; ৩টি স্লট পূর্ণ থাকায় স্লটে ট্যাপ করে বসান")
+            }
+        }
+    }
+
+    fun saveGeminiApiKey(rawApiKey: String) {
+        val savedKey = GeminiApiConfig.saveApiKey(appContext, rawApiKey)
         directAiRepository.clearCooldowns()
         _geminiApiKey.value = savedKey
-        _geminiModel.value = savedModel
-        _geminiFallbackModels.value = GeminiApiConfig.getFallbackModels(appContext, savedModel)
+        _geminiTestStatus.value = null
+        _geminiTestSuccess.value = null
+        showMessage(
+            if (savedKey.isNotBlank()) "Gemini API Key সংরক্ষিত হয়েছে"
+            else "API Key খালি আছে"
+        )
+    }
+
+    fun saveGeminiConfig(rawApiKey: String, orderedModels: List<String> = _geminiOrderedModels.value) {
+        GeminiApiConfig.saveConfig(appContext, rawApiKey, orderedModels)
+        val savedKey = GeminiApiConfig.getApiKey(appContext)
+        val savedOrdered = GeminiApiConfig.getOrderedModels(appContext)
+        directAiRepository.clearCooldowns()
+        _geminiApiKey.value = savedKey
+        _geminiOrderedModels.value = savedOrdered
         _geminiCustomModels.value = GeminiApiConfig.getCustomModels(appContext)
         _geminiTestStatus.value = null
         _geminiTestSuccess.value = null
-        if (savedKey.isNotBlank()) {
-            refreshGeminiModels(savedKey, silent = true)
-        }
         showMessage(
-            if (savedKey.isNotBlank()) "Gemini API Key এবং মডেল ($savedModel) সংরক্ষিত হয়েছে"
-            else "মডেল ($savedModel) সংরক্ষিত হয়েছে; AI চালাতে API Key দিন"
+            when {
+                savedKey.isBlank() -> "API Key দিন এবং পছন্দের ৩টি মডেল নির্বাচন করুন"
+                savedOrdered.isEmpty() -> "API Key সংরক্ষিত হয়েছে; এবার লাইভ মডেল থেকে পছন্দের ৩টি মডেল বাছুন"
+                else -> "API Key ও ${bn(savedOrdered.size.toString())}টি মডেলের ক্রম সংরক্ষিত হয়েছে"
+            }
         )
     }
 
@@ -3464,37 +3549,30 @@ class ResultMakerViewModel(
         showMessage("Gemini API Key মুছে ফেলা হয়েছে")
     }
 
-    fun testGeminiConnection(rawApiKey: String, rawModel: String) {
+    fun testGeminiConnection(rawApiKey: String) {
         if (_geminiTesting.value) return
         val cleanKey = GeminiApiConfig.normalizeApiKey(rawApiKey)
-        val cachedIds = _geminiAvailableModels.value.map { it.id }.toSet()
-        val requestedModel = GeminiApiConfig.normalizeModelId(rawModel, cachedIds)
         if (cleanKey.isBlank()) {
             _geminiTestSuccess.value = false
             _geminiTestStatus.value = "পরীক্ষার জন্য আপনার Gemini API Key লিখুন।"
             return
         }
+        val firstOrdered = _geminiOrderedModels.value.firstOrNull().orEmpty()
         directAiRepository.clearCooldowns()
         _geminiTesting.value = true
         _geminiTestStatus.value = null
         _geminiTestSuccess.value = null
         _geminiModelsError.value = null
         viewModelScope.launch {
-            val result = DirectGeminiAiRepository.testConnectionAndListModels(cleanKey, requestedModel)
+            val result = DirectGeminiAiRepository.testConnectionAndListModels(cleanKey, firstOrdered)
             _geminiTestSuccess.value = result.ok
             _geminiTestStatus.value = result.message
             if (result.availableModels.isNotEmpty()) {
                 applyDiscoveredModels(result.availableModels)
             }
             if (result.ok) {
-                val liveIds = result.availableModels.map { it.id }.toSet() + cachedIds
-                val verifiedModel = GeminiApiConfig.normalizeModelId(rawModel, liveIds)
-                GeminiApiConfig.saveConfig(appContext, cleanKey, verifiedModel)
-                val savedModel = GeminiApiConfig.getSelectedModel(appContext)
+                GeminiApiConfig.saveApiKey(appContext, cleanKey)
                 _geminiApiKey.value = cleanKey
-                _geminiModel.value = savedModel
-                _geminiFallbackModels.value = GeminiApiConfig.getFallbackModels(appContext, savedModel)
-                _geminiCustomModels.value = GeminiApiConfig.getCustomModels(appContext)
             }
             _geminiTesting.value = false
         }

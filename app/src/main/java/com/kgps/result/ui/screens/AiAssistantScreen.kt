@@ -123,8 +123,12 @@ import com.kgps.result.AiAssistantState
 import com.kgps.result.BlankSheetCatalog
 import com.kgps.result.RELIGIONS
 import com.kgps.result.Student
+import androidx.compose.material.icons.rounded.CloudDownload
+import androidx.compose.material.icons.rounded.ExpandLess
+import androidx.compose.material.icons.rounded.ExpandMore
+import androidx.compose.material3.minimumInteractiveComponentSize
 import com.kgps.result.ui.components.BiometricDeleteConfirmDialog
-import com.kgps.result.ui.components.CompactFallbackModelsSection
+import com.kgps.result.ui.components.OrderedThreeModelsCard
 import com.kgps.result.ai.AiModelMode
 import com.kgps.result.ai.ClassSheetImportScope
 import com.kgps.result.ai.ClassSheetKind
@@ -178,18 +182,17 @@ fun AiAssistantScreen(
     selectedClass: Int,
     permissions: TeacherPermissions,
     isGeminiConfigured: Boolean,
-    activeModelName: String,
-    fallbackModels: List<String> = emptyList(),
+    orderedModels: List<String> = emptyList(),
     availableModels: List<DiscoveredGeminiModel> = emptyList(),
     customModels: List<String> = emptyList(),
     newModelIds: Set<String> = emptySet(),
     refreshingModels: Boolean = false,
     modelsError: String? = null,
-    onSelectModel: (String) -> Unit = {},
+    onToggleOrderedModel: (String) -> Unit = {},
     onRefreshModels: () -> Unit = {},
-    onSetFallbackSlot: (Int, String?) -> Unit = { _, _ -> },
-    onMoveFallbackSlot: (Int, Int) -> Unit = { _, _ -> },
-    onResetFallbackDefaults: () -> Unit = {},
+    onSetOrderedModelSlot: (Int, String?) -> Unit = { _, _ -> },
+    onMoveOrderedModelSlot: (Int, Int) -> Unit = { _, _ -> },
+    onAddCustomModel: (String) -> Unit = {},
     onRemoveCustomModel: (String) -> Unit = {},
     onOpenAiSettings: () -> Unit,
     onSetActiveTab: (Int) -> Unit,
@@ -350,7 +353,7 @@ fun AiAssistantScreen(
                     .padding(horizontal = 8.dp, vertical = 3.dp),
                 verticalArrangement = Arrangement.spacedBy(4.dp)
             ) {
-                if (!isGeminiConfigured) {
+                if (!isGeminiConfigured || orderedModels.isEmpty()) {
                     Surface(
                         color = AmberBg,
                         border = BorderStroke(1.dp, AmberBorder),
@@ -369,7 +372,11 @@ fun AiAssistantScreen(
                                 modifier = Modifier.size(14.dp)
                             )
                             Text(
-                                "API Key নেই · মডেল: $activeModelName",
+                                text = if (!isGeminiConfigured) {
+                                    "API Key নেই · সেটিংস থেকে কী ও লাইভ মডেল সেট করুন"
+                                } else {
+                                    "কোনো মডেল নির্বাচিত নেই · লাইভ তালিকা থেকে ৩টি বাছুন"
+                                },
                                 fontSize = 11.sp,
                                 fontWeight = FontWeight.Medium,
                                 color = AmberNotice,
@@ -386,27 +393,29 @@ fun AiAssistantScreen(
                                     .testTag("ai_change_model_btn")
                             ) {
                                 Row(
-                                    Modifier.padding(horizontal = 7.dp, vertical = 3.dp),
+                                    Modifier.padding(horizontal = 7.dp, vertical = 4.dp),
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
                                     Text("মডেল", fontSize = 10.5.sp, fontWeight = FontWeight.SemiBold, color = AmberNotice)
                                     Icon(Icons.Rounded.ArrowDropDown, contentDescription = null, tint = AmberNotice, modifier = Modifier.size(14.dp))
                                 }
                             }
-                            Surface(
-                                color = AmberNotice,
-                                shape = RoundedCornerShape(6.dp),
-                                modifier = Modifier
-                                    .clickable { onOpenAiSettings() }
-                                    .testTag("ai_open_settings_btn")
-                            ) {
-                                Text(
-                                    "কী দিন",
-                                    fontSize = 10.5.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = Color.White,
-                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
-                                )
+                            if (!isGeminiConfigured) {
+                                Surface(
+                                    color = AmberNotice,
+                                    shape = RoundedCornerShape(6.dp),
+                                    modifier = Modifier
+                                        .clickable { onOpenAiSettings() }
+                                        .testTag("ai_open_settings_btn")
+                                ) {
+                                    Text(
+                                        "কী দিন",
+                                        fontSize = 10.5.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = Color.White,
+                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                                    )
+                                }
                             }
                         }
                     }
@@ -432,11 +441,7 @@ fun AiAssistantScreen(
                                 modifier = Modifier.size(14.dp)
                             )
                             Text(
-                                text = if (fallbackModels.isNotEmpty()) {
-                                    "মডেল: $activeModelName · +${bn(fallbackModels.size.toString())} বিকল্প"
-                                } else {
-                                    "মডেল: $activeModelName"
-                                },
+                                text = "১ম: ${orderedModels.first()} · ক্রম ${bn(orderedModels.size.toString())}/৩",
                                 fontSize = 11.5.sp,
                                 fontWeight = FontWeight.SemiBold,
                                 color = TealDark,
@@ -454,7 +459,7 @@ fun AiAssistantScreen(
                                     horizontalArrangement = Arrangement.spacedBy(2.dp)
                                 ) {
                                     Text(
-                                        "পরিবর্তন",
+                                        "সাজান",
                                         fontSize = 10.5.sp,
                                         fontWeight = FontWeight.Bold,
                                         color = TealDark
@@ -1174,22 +1179,18 @@ fun AiAssistantScreen(
 
     if (showModelPicker) {
         AiModelPickerDialog(
-            activeModelName = activeModelName,
-            fallbackModels = fallbackModels,
+            orderedModels = orderedModels,
             isGeminiConfigured = isGeminiConfigured,
             availableModels = availableModels,
             customModels = customModels,
             newModelIds = newModelIds,
             refreshingModels = refreshingModels,
             modelsError = modelsError,
-            onSelectModel = { chosen ->
-                onSelectModel(chosen)
-                showModelPicker = false
-            },
+            onToggleOrderedModel = onToggleOrderedModel,
             onRefreshModels = onRefreshModels,
-            onSetFallbackSlot = onSetFallbackSlot,
-            onMoveFallbackSlot = onMoveFallbackSlot,
-            onResetFallbackDefaults = onResetFallbackDefaults,
+            onSetOrderedModelSlot = onSetOrderedModelSlot,
+            onMoveOrderedModelSlot = onMoveOrderedModelSlot,
+            onAddCustomModel = onAddCustomModel,
             onRemoveCustomModel = { modelId -> pendingRemoveModelId = modelId },
             onOpenAiSettings = {
                 showModelPicker = false
@@ -1242,41 +1243,38 @@ fun AiAssistantScreen(
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun AiModelPickerDialog(
-    activeModelName: String,
-    fallbackModels: List<String>,
+    orderedModels: List<String>,
     isGeminiConfigured: Boolean,
     availableModels: List<DiscoveredGeminiModel>,
     customModels: List<String>,
     newModelIds: Set<String>,
     refreshingModels: Boolean,
     modelsError: String?,
-    onSelectModel: (String) -> Unit,
+    onToggleOrderedModel: (String) -> Unit,
     onRefreshModels: () -> Unit,
-    onSetFallbackSlot: (Int, String?) -> Unit,
-    onMoveFallbackSlot: (Int, Int) -> Unit,
-    onResetFallbackDefaults: () -> Unit,
+    onSetOrderedModelSlot: (Int, String?) -> Unit,
+    onMoveOrderedModelSlot: (Int, Int) -> Unit,
+    onAddCustomModel: (String) -> Unit,
     onRemoveCustomModel: (String) -> Unit,
     onOpenAiSettings: () -> Unit,
     onDismiss: () -> Unit
 ) {
-    var customInput by remember(activeModelName) { mutableStateOf(activeModelName) }
+    var customInput by remember { mutableStateOf("") }
     var searchQuery by remember { mutableStateOf("") }
-    var showFallbacksSection by remember { mutableStateOf(false) }
-    val normalizedCurrent = GeminiApiConfig.normalizeModelId(
-        activeModelName,
-        availableModels.map { it.id }.toSet()
-    )
-    val suggestedIds = remember { GeminiApiConfig.SUGGESTED_MODEL_IDS }
+    var showCustomInput by remember { mutableStateOf(false) }
 
-    val extraLiveModels = remember(availableModels, newModelIds) {
-        availableModels
-            .filter { it.id !in suggestedIds }
-            .sortedWith(compareByDescending<DiscoveredGeminiModel> { it.id in newModelIds })
+    val sortedLiveModels = remember(availableModels, newModelIds, orderedModels) {
+        availableModels.sortedWith(
+            compareBy<DiscoveredGeminiModel> { m ->
+                val idx = orderedModels.indexOf(m.id)
+                if (idx >= 0) idx else Int.MAX_VALUE
+            }.thenByDescending { it.id in newModelIds }
+        )
     }
-    val filteredLiveModels = remember(extraLiveModels, searchQuery) {
+    val filteredLiveModels = remember(sortedLiveModels, searchQuery) {
         val q = searchQuery.trim().lowercase()
-        if (q.isBlank()) extraLiveModels
-        else extraLiveModels.filter {
+        if (q.isBlank()) sortedLiveModels
+        else sortedLiveModels.filter {
             it.id.lowercase().contains(q) || it.displayName.lowercase().contains(q)
         }
     }
@@ -1290,11 +1288,15 @@ private fun AiModelPickerDialog(
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
                 Column(Modifier.weight(1f)) {
-                    Text("Gemini মডেল পরিবর্তন", fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                    Text("Gemini মডেল নির্বাচন ও ক্রম", fontWeight = FontWeight.Bold, fontSize = 15.5.sp)
                     Text(
-                        "সক্রিয়: $normalizedCurrent",
+                        text = if (orderedModels.isEmpty()) {
+                            "কোনো মডেল নির্বাচিত নেই"
+                        } else {
+                            "১ম: ${orderedModels.first()} · মোট ${bn(orderedModels.size.toString())}/৩"
+                        },
                         fontSize = 11.sp,
-                        color = TealPrimary,
+                        color = if (orderedModels.isEmpty()) AmberNotice else TealPrimary,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
@@ -1303,7 +1305,9 @@ private fun AiModelPickerDialog(
                     IconButton(
                         onClick = onRefreshModels,
                         enabled = !refreshingModels,
-                        modifier = Modifier.size(40.dp).testTag("ai_picker_refresh_btn")
+                        modifier = Modifier
+                            .minimumInteractiveComponentSize()
+                            .testTag("ai_picker_refresh_btn")
                     ) {
                         if (refreshingModels) {
                             CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
@@ -1318,134 +1322,89 @@ private fun AiModelPickerDialog(
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .heightIn(max = 420.dp)
+                    .heightIn(max = 440.dp)
                     .verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
+                if (!isGeminiConfigured) {
+                    Surface(
+                        color = AmberBg,
+                        border = BorderStroke(1.dp, AmberBorder),
+                        shape = RoundedCornerShape(8.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text(
+                            text = "লাইভ মডেল আনতে আগে সেটিংস থেকে আপনার Gemini API Key দিন।",
+                            fontSize = 11.5.sp,
+                            color = AmberNotice,
+                            modifier = Modifier.padding(9.dp)
+                        )
+                    }
+                } else {
+                    Button(
+                        onClick = onRefreshModels,
+                        enabled = !refreshingModels,
+                        shape = RoundedCornerShape(9.dp),
+                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(min = 48.dp)
+                            .testTag("ai_picker_fetch_live_btn")
+                    ) {
+                        if (refreshingModels) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(15.dp),
+                                strokeWidth = 2.dp,
+                                color = MaterialTheme.colorScheme.onPrimary
+                            )
+                            Spacer(Modifier.width(8.dp))
+                            Text("লাইভ মডেল আনা হচ্ছে...", fontSize = 12.sp)
+                        } else {
+                            Icon(Icons.Rounded.CloudDownload, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(Modifier.width(6.dp))
+                            Text(
+                                text = if (availableModels.isEmpty()) "API থেকে লাইভ মডেল আনুন" else "লাইভ মডেল তালিকা রিফ্রেশ করুন",
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        }
+                    }
+                }
+
                 if (!modelsError.isNullOrBlank()) {
                     Text(modelsError, fontSize = 11.sp, color = RoseDanger)
                 }
 
-                Text("প্রস্তাবিত মডেল", fontWeight = FontWeight.SemiBold, fontSize = 12.sp, color = SlateText)
-                Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
-                    GeminiApiConfig.SUGGESTED_MODELS.forEach { preset ->
-                        val selected = normalizedCurrent == preset.id
-                        Surface(
-                            color = if (selected) TealContainer.copy(alpha = 0.7f) else SlateBg,
-                            border = BorderStroke(if (selected) 1.5.dp else 1.dp, if (selected) TealPrimary else SlateOutline),
-                            shape = RoundedCornerShape(9.dp),
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clickable { onSelectModel(preset.id) }
-                                .testTag("ai_picker_preset_${preset.id}")
-                        ) {
-                            Row(
-                                Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(6.dp)
-                            ) {
-                                RadioButton(
-                                    selected = selected,
-                                    onClick = { onSelectModel(preset.id) },
-                                    modifier = Modifier.size(20.dp)
-                                )
-                                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(1.dp)) {
-                                    Row(
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(5.dp)
-                                    ) {
-                                        Text(preset.title, fontWeight = FontWeight.SemiBold, fontSize = 12.sp, color = SlateText)
-                                        Surface(
-                                            color = if (selected) TealPrimary else MaterialTheme.colorScheme.surface,
-                                            shape = RoundedCornerShape(5.dp)
-                                        ) {
-                                            Text(
-                                                preset.badge,
-                                                fontSize = 9.5.sp,
-                                                fontWeight = FontWeight.SemiBold,
-                                                color = if (selected) Color.White else SlateMuted,
-                                                modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.dp)
-                                            )
-                                        }
-                                    }
-                                    Text(
-                                        "${preset.id} · ${preset.description}",
-                                        fontSize = 10.5.sp,
-                                        color = SlateMuted,
-                                        lineHeight = 13.5.sp
-                                    )
-                                }
-                            }
-                        }
-                    }
-                }
+                OrderedThreeModelsCard(
+                    orderedModels = orderedModels,
+                    availableModels = availableModels,
+                    customModels = customModels,
+                    onSetModelSlot = onSetOrderedModelSlot,
+                    onMoveModelSlot = onMoveOrderedModelSlot,
+                    onRequestFetchLiveModels = if (isGeminiConfigured) onRefreshModels else null
+                )
 
-                HorizontalDivider(color = SlateOutline)
-
-                Surface(
-                    color = TealSoft.copy(alpha = 0.65f),
-                    border = BorderStroke(1.dp, TealPrimary.copy(alpha = 0.25f)),
-                    shape = RoundedCornerShape(8.dp),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clickable { showFallbacksSection = !showFallbacksSection }
-                        .testTag("ai_picker_toggle_fallbacks_btn")
-                ) {
-                    Row(
-                        modifier = Modifier.padding(horizontal = 9.dp, vertical = 7.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
-                        Column(Modifier.weight(1f)) {
-                            Text(
-                                text = "বিকল্প (Fallback) মডেল সাজান (${bn(fallbackModels.size.toString())}/৩)",
-                                fontWeight = FontWeight.SemiBold,
-                                fontSize = 11.5.sp,
-                                color = TealDark
-                            )
-                            Text(
-                                text = if (fallbackModels.isNotEmpty()) fallbackModels.joinToString(" → ") else "কোনো বিকল্প মডেল সেট নেই",
-                                fontSize = 10.sp,
-                                color = SlateMuted,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                        }
-                        Icon(
-                            imageVector = Icons.Rounded.ArrowDropDown,
-                            contentDescription = "বিকল্প মডেল দেখুন",
-                            tint = TealDark,
-                            modifier = Modifier.size(18.dp)
-                        )
-                    }
-                }
-
-                if (showFallbacksSection) {
-                    CompactFallbackModelsSection(
-                        primaryModel = normalizedCurrent,
-                        fallbackModels = fallbackModels,
-                        availableModels = availableModels,
-                        customModels = customModels,
-                        onSetFallbackSlot = onSetFallbackSlot,
-                        onMoveFallbackSlot = onMoveFallbackSlot,
-                        onResetDefaults = onResetFallbackDefaults
-                    )
-                }
-
-                if (extraLiveModels.isNotEmpty()) {
+                if (availableModels.isNotEmpty()) {
                     HorizontalDivider(color = SlateOutline)
                     Text(
-                        "API থেকে পাওয়া মডেল (${bn(extraLiveModels.size.toString())}টি)",
+                        text = "API থেকে পাওয়া মডেল (${bn(availableModels.size.toString())}টি)",
                         fontWeight = FontWeight.SemiBold,
                         fontSize = 12.sp,
                         color = SlateText
                     )
-                    if (extraLiveModels.size > 5) {
+                    if (availableModels.size > 5) {
                         OutlinedTextField(
                             value = searchQuery,
                             onValueChange = { searchQuery = it },
                             placeholder = { Text("মডেল খুঁজুন...", fontSize = 11.5.sp) },
                             leadingIcon = { Icon(Icons.Rounded.Search, contentDescription = null, modifier = Modifier.size(16.dp)) },
+                            trailingIcon = {
+                                if (searchQuery.isNotEmpty()) {
+                                    IconButton(onClick = { searchQuery = "" }) {
+                                        Icon(Icons.Rounded.Close, contentDescription = "খোঁজ মুছুন", modifier = Modifier.size(15.dp))
+                                    }
+                                }
+                            },
                             singleLine = true,
                             textStyle = TextStyle(fontSize = 12.sp),
                             modifier = Modifier.fillMaxWidth()
@@ -1455,17 +1414,23 @@ private fun AiModelPickerDialog(
                         horizontalArrangement = Arrangement.spacedBy(5.dp),
                         verticalArrangement = Arrangement.spacedBy(5.dp)
                     ) {
-                        filteredLiveModels.take(18).forEach { item ->
-                            val selected = normalizedCurrent == item.id
+                        filteredLiveModels.take(24).forEach { item ->
+                            val rankIdx = orderedModels.indexOf(item.id)
+                            val selected = rankIdx >= 0
                             val isNew = item.id in newModelIds
                             FilterChip(
                                 selected = selected,
-                                onClick = { onSelectModel(item.id) },
+                                onClick = { onToggleOrderedModel(item.id) },
                                 colors = appFilterChipColors(),
                                 border = appFilterChipBorder(selected),
                                 label = {
+                                    val prefix = when {
+                                        selected -> "#${bn((rankIdx + 1).toString())} · "
+                                        isNew -> "নতুন · "
+                                        else -> ""
+                                    }
                                     Text(
-                                        text = if (isNew) "নতুন · ${item.id}" else item.id,
+                                        text = "$prefix${item.id}",
                                         fontSize = 10.5.sp,
                                         fontWeight = if (selected || isNew) FontWeight.Bold else FontWeight.Normal
                                     )
@@ -1483,19 +1448,25 @@ private fun AiModelPickerDialog(
                         verticalArrangement = Arrangement.spacedBy(5.dp)
                     ) {
                         customModels.forEach { customId ->
-                            val selected = normalizedCurrent == customId
+                            val rankIdx = orderedModels.indexOf(customId)
+                            val selected = rankIdx >= 0
                             FilterChip(
                                 selected = selected,
-                                onClick = { onSelectModel(customId) },
+                                onClick = { onToggleOrderedModel(customId) },
                                 colors = appFilterChipColors(),
                                 border = appFilterChipBorder(selected),
-                                label = { Text(customId, fontSize = 10.5.sp) },
+                                label = {
+                                    Text(
+                                        text = if (selected) "#${bn((rankIdx + 1).toString())} · $customId" else customId,
+                                        fontSize = 10.5.sp
+                                    )
+                                },
                                 trailingIcon = {
                                     Icon(
                                         Icons.Rounded.Close,
                                         contentDescription = "$customId সরান",
                                         modifier = Modifier
-                                            .size(14.dp)
+                                            .size(15.dp)
                                             .clickable { onRemoveCustomModel(customId) }
                                     )
                                 }
@@ -1504,35 +1475,60 @@ private fun AiModelPickerDialog(
                     }
                 }
 
-                HorizontalDivider(color = SlateOutline)
-                Text("অন্য কোনো মডেল আইডি লিখুন", fontWeight = FontWeight.SemiBold, fontSize = 11.5.sp, color = SlateText)
-                Row(
-                    Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                    verticalAlignment = Alignment.CenterVertically
+                Surface(
+                    color = SlateBg,
+                    border = BorderStroke(1.dp, SlateOutline.copy(alpha = 0.7f)),
+                    shape = RoundedCornerShape(8.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { showCustomInput = !showCustomInput }
                 ) {
-                    OutlinedTextField(
-                        value = customInput,
-                        onValueChange = { customInput = it },
-                        placeholder = { Text(GeminiApiConfig.DEFAULT_MODEL, fontSize = 11.5.sp) },
-                        singleLine = true,
-                        textStyle = TextStyle(fontSize = 12.sp),
-                        modifier = Modifier.weight(1f).testTag("ai_picker_custom_input")
-                    )
-                    Button(
-                        onClick = { onSelectModel(customInput) },
-                        enabled = customInput.isNotBlank(),
-                        shape = RoundedCornerShape(8.dp),
-                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 10.dp),
-                        modifier = Modifier.testTag("ai_picker_apply_custom_btn")
+                    Row(
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 7.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
                     ) {
-                        Text("চালু", fontSize = 11.5.sp)
+                        Text("ম্যানুয়াল কাস্টম মডেল আইডি (ঐচ্ছিক)", fontSize = 11.sp, color = SlateMuted)
+                        Icon(
+                            imageVector = if (showCustomInput) Icons.Rounded.ExpandLess else Icons.Rounded.ExpandMore,
+                            contentDescription = if (showCustomInput) "বন্ধ করুন" else "খুলুন",
+                            tint = SlateMuted,
+                            modifier = Modifier.size(16.dp)
+                        )
+                    }
+                }
+                if (showCustomInput) {
+                    Row(
+                        Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        OutlinedTextField(
+                            value = customInput,
+                            onValueChange = { customInput = it },
+                            placeholder = { Text("মডেল আইডি লিখুন", fontSize = 11.5.sp) },
+                            singleLine = true,
+                            textStyle = TextStyle(fontSize = 12.sp),
+                            modifier = Modifier.weight(1f).testTag("ai_picker_custom_input")
+                        )
+                        Button(
+                            onClick = {
+                                onAddCustomModel(customInput)
+                                customInput = ""
+                            },
+                            enabled = customInput.trim().removePrefix("models/").trim().isNotBlank(),
+                            shape = RoundedCornerShape(8.dp),
+                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 10.dp),
+                            modifier = Modifier.testTag("ai_picker_apply_custom_btn")
+                        ) {
+                            Text("যোগ", fontSize = 11.5.sp)
+                        }
                     }
                 }
             }
         },
         confirmButton = {
-            TextButton(onClick = onDismiss) { Text("বন্ধ করুন") }
+            TextButton(onClick = onDismiss) { Text("সম্পন্ন") }
         },
         dismissButton = {
             TextButton(onClick = onOpenAiSettings, modifier = Modifier.testTag("ai_picker_open_settings_btn")) {
@@ -1648,6 +1644,21 @@ private fun ClassSheetPreviewSection(
                         color = TealDark
                     )
                     Text(sheet.summary, fontSize = 11.5.sp, color = SlateMuted)
+                    if (sheet.templateColumnIds.isNotEmpty()) {
+                        val colLabels = sheet.templateColumnIds.mapNotNull { id ->
+                            val col = BlankSheetCatalog.byId(id) ?: return@mapNotNull null
+                            (col.pickerLabelBn ?: col.titleBn).replace("\n", " ")
+                        }
+                        if (colLabels.isNotEmpty()) {
+                            Text(
+                                text = "QR টেমপ্লেট কলাম: ${colLabels.joinToString(" · ")}",
+                                fontSize = 10.sp,
+                                color = TealDark,
+                                maxLines = 2,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                    }
                 }
                 if (hasImage) {
                     OutlinedButton(
@@ -2007,8 +2018,9 @@ private fun ClassSheetPreviewSection(
                     modifier = Modifier.padding(8.dp)
                 )
             } else {
-                val hasOtherTermTraitData = remember(sheet.rows, sheet.sharedWorkingDaysByTerm, sheet.term) {
+                val hasOtherTermTraitData = remember(sheet.rows, sheet.sharedWorkingDaysByTerm, sheet.term, sheet.templateColumnIds) {
                     sheet.term !in 1..3 ||
+                        sheet.templateColumnIds.any { it.startsWith("T2_") || it.startsWith("T3_") } ||
                         sheet.sharedWorkingDaysByTerm.any { (t, v) -> t != sheet.term && v.isNotBlank() } ||
                         sheet.rows.any { r ->
                             r.traitValues.any { (k, v) ->

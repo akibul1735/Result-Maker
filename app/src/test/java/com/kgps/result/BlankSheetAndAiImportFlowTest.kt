@@ -424,4 +424,96 @@ class BlankSheetAndAiImportFlowTest {
         assertEquals("খ", aiRow.traitValues["DISC_2"])
         assertEquals("গ", aiRow.traitValues["COND_2"])
     }
+
+    @Test
+    fun threeQrBlankSheetPromptSchemaAndJsonParserCoordinateCleanly() {
+        // 1. Compact blank sheet with ALL_SUBJECTS_KEY & term=0 should not clamp term or leak "ALL" as subject
+        val compactMeta = BlankSheetQrMeta(
+            templateId = "AB12CD34",
+            cls = 3,
+            subjectKey = BlankSheetCatalog.ALL_SUBJECTS_KEY,
+            term = 0,
+            columnIds = listOf("ROLL", "NAME", "CONT", "WR", "TOTAL"),
+            importScope = ClassSheetImportScope.BOTH,
+            sheetKind = ClassSheetKind.SINGLE_TERM_MARKS,
+            refCode = "REF:C3-ALL-T0-COMPACT"
+        )
+        val compactPrompt = SheetQrCodec.buildAiPromptInstructions(compactMeta)
+        assertFalse(compactPrompt.contains("ALL", ignoreCase = false))
+        val compactSchema = SheetQrCodec.buildDynamicRowJsonSchema(
+            meta = compactMeta,
+            kind = ClassSheetKind.SINGLE_TERM_MARKS,
+            effCls = 3,
+            effTerm = 1,
+            effSub = "BAN",
+            effScope = ClassSheetImportScope.BOTH
+        )
+        assertTrue(compactSchema.contains("\"sheetContinuousTotal\""))
+        assertTrue(compactSchema.contains("\"sheetGrandTotal\""))
+        assertFalse(compactSchema.contains("\"T1_CONT\""))
+
+        // 2. Roll+Name+Total only omits marks/traits noise
+        val totalMeta = compactMeta.copy(
+            subjectKey = "MATH",
+            term = 2,
+            columnIds = listOf("ROLL", "NAME", "TOTAL")
+        )
+        val totalSchema = SheetQrCodec.buildDynamicRowJsonSchema(
+            meta = totalMeta,
+            kind = ClassSheetKind.SINGLE_TERM_MARKS,
+            effCls = 3,
+            effTerm = 2,
+            effSub = "MATH",
+            effScope = ClassSheetImportScope.BOTH
+        )
+        assertTrue(totalSchema.contains("\"sheetGrandTotal\""))
+        assertFalse(totalSchema.contains("\"marks\""))
+
+        // 3. Parser handles misplaced CONT/TOTAL in marks, Bengali keys, "ALL" subject in QR, and "students" key
+        val compactJson = """
+            {
+              "scanMode": "CLASS",
+              "sheetKind": "SINGLE_TERM_MARKS",
+              "cls": 3,
+              "term": 2,
+              "subKey": "গণিত",
+              "students": [
+                {
+                  "roll": "৫",
+                  "name": "null",
+                  "marks": {"ধারাবাহিক": "২৬", "সামষ্টিক": "৬০", "মোট": "৮৬", "গ্রেড": "A"}
+                }
+              ]
+            }
+        """.trimIndent()
+        val parsedCompact = parseAutoScanJson(
+            raw = compactJson,
+            clsHint = null,
+            termHint = null,
+            subKeyHint = null,
+            qrMeta = compactMeta.copy(columnIds = listOf("ROLL", "CONT", "WR", "TOTAL"))
+        ) as AutoScanResult.ClassSheet
+        assertEquals("MATH", parsedCompact.sheet.subKey)
+        assertEquals(2, parsedCompact.sheet.term)
+        assertEquals(listOf("ROLL", "CONT", "WR", "TOTAL"), parsedCompact.sheet.templateColumnIds)
+        val row = parsedCompact.sheet.rows.single()
+        assertEquals("5", row.rollText)
+        assertEquals("", row.name)
+        assertEquals("26", row.sheetContinuousTotal)
+        assertEquals("60", row.marksText["WR"])
+        assertEquals("86", row.sheetGrandTotal)
+        assertFalse(row.marksText.containsKey("GRADE"))
+        // NAME column is omitted in template -> empty name must not generate missing-name hard error
+        val validation = validateScannedStudentRow(
+            row = row,
+            cls = 3,
+            subKey = "MATH",
+            duplicateRolls = emptySet(),
+            hasExistingDbName = false,
+            scope = parsedCompact.sheet.scope,
+            sheetKind = parsedCompact.sheet.sheetKind
+        )
+        assertFalse(validation.hardErrors.containsKey("name"))
+    }
 }
+

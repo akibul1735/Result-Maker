@@ -12,6 +12,7 @@ import com.google.zxing.DecodeHintType
 import com.google.zxing.RGBLuminanceSource
 import com.google.zxing.common.GlobalHistogramBinarizer
 import com.google.zxing.common.HybridBinarizer
+import com.google.zxing.multi.qrcode.QRCodeMultiReader
 import com.google.zxing.qrcode.QRCodeReader
 import com.kgps.result.BlankSheetQrMeta
 import com.kgps.result.SheetQrCodec
@@ -69,8 +70,8 @@ object SheetQrScanner {
         CropRegion(0.00f, 0.62f, 0.46f, 0.96f), // নিচে বাড়তি মার্জিনসহ নিচে-বাম অঞ্চল
         CropRegion(0.64f, 0.74f, 1.00f, 1.00f), // উল্টানো ছবির জন্য নিচে-ডান
         CropRegion(0.54f, 0.62f, 1.00f, 1.00f),
-        CropRegion(0.00f, 0.00f, 0.50f, 0.42f),
-        CropRegion(0.50f, 0.00f, 1.00f, 0.42f)
+        CropRegion(0.00f, 0.00f, 0.54f, 0.48f),
+        CropRegion(0.46f, 0.00f, 1.00f, 0.48f)
     )
 
     private val barcodePrimaryRegions = listOf(
@@ -225,13 +226,13 @@ object SheetQrScanner {
             }
         }
 
-        // ৪) শেষ চেষ্টা: পূর্ণ ছবিতে QR (না পাওয়া গেলে) ও পূর্ণ ছবিতে বারকোড (যেমন শুধু বারকোড ক্রপ করলে)
-        if (!fromThinQr && !fromOfflineQr) {
-            val fullScaled = downscaleIfTooLarge(bitmap, maxLongestSide = 1600)
+        // ৪) শেষ চেষ্টা: পূর্ণ ছবিতে বহু-QR (KT1 ও K2 উভয়ই পেতে) ও বারকোড
+        if (!fromThinQr || !fromOfflineQr) {
+            val fullScaled = downscaleIfTooLarge(bitmap, maxLongestSide = 1800)
             try {
-                val working = upscaleIfSmall(fullScaled, minSideTarget = 420)
+                val working = upscaleIfSmall(fullScaled, minSideTarget = 460)
                 try {
-                    decodeQrRaw(working)?.let(::handleDecodedQrText)
+                    decodeAllQrsRaw(working).forEach(::handleDecodedQrText)
                 } finally {
                     if (working !== fullScaled) working.recycle()
                 }
@@ -358,6 +359,35 @@ object SheetQrScanner {
                 null
             }
         }
+    }
+
+    private fun decodeAllQrsRaw(bmp: Bitmap): List<String> {
+        val w = bmp.width
+        val h = bmp.height
+        if (w <= 0 || h <= 0) return emptyList()
+        val pixels = IntArray(w * h)
+        bmp.getPixels(pixels, 0, w, 0, 0, w, h)
+        val source = RGBLuminanceSource(w, h, pixels)
+        val multiReader = QRCodeMultiReader()
+        val found = linkedSetOf<String>()
+
+        runCatching {
+            multiReader.decodeMultiple(BinaryBitmap(HybridBinarizer(source)), qrHints)
+                .mapNotNull { it.text?.takeIf(String::isNotBlank) }
+                .let { found.addAll(it) }
+        }
+        if (found.isEmpty()) {
+            multiReader.reset()
+            runCatching {
+                multiReader.decodeMultiple(BinaryBitmap(GlobalHistogramBinarizer(source)), qrHints)
+                    .mapNotNull { it.text?.takeIf(String::isNotBlank) }
+                    .let { found.addAll(it) }
+            }
+        }
+        if (found.isEmpty()) {
+            decodeQrRaw(bmp)?.let { found.add(it) }
+        }
+        return found.toList()
     }
 
     private fun decodeBarcodeRaw(bmp: Bitmap): String? {

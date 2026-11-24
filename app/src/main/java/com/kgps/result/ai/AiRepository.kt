@@ -61,14 +61,13 @@ data class GeminiConnectionCheckResult(
  * ব্যবহারকারীর নিজস্ব Google AI Studio API Key শুধুমাত্র এই ডিভাইসেই সংরক্ষিত থাকে।
  */
 object GeminiApiConfig {
-    const val DEFAULT_MODEL = "gemini-2.5-flash"
-    const val FAST_FALLBACK_MODEL = "gemini-2.5-flash-lite"
-    const val MAX_FALLBACK_MODELS = 3
+    const val MAX_ORDERED_MODELS = 3
 
     private const val PREF_NAME = "gemini_api_prefs"
     private const val KEY_API_KEY = "gemini_api_key"
     private const val KEY_MODEL = "gemini_model"
     private const val KEY_FALLBACK_MODELS = "gemini_fallback_models_json"
+    private const val KEY_ORDERED_MODELS = "gemini_ordered_models_json"
     private const val KEY_CACHED_MODELS = "gemini_cached_models_json"
     private const val KEY_CUSTOM_MODELS = "gemini_custom_models_json"
 
@@ -79,114 +78,79 @@ object GeminiApiConfig {
         "gemini-4-hydrogen"
     )
 
-    private val FALLBACK_DEFAULT_POOL: List<String> = listOf(
-        "gemini-2.5-flash-lite",
-        "gemini-2.0-flash",
-        "gemini-2.5-flash",
-        "gemini-2.5-pro",
-        "gemini-2.0-flash-lite"
-    )
-
-    val SUGGESTED_MODELS: List<GeminiModelSuggestion> = listOf(
-        GeminiModelSuggestion(
-            id = "gemini-2.5-flash",
-            title = "Gemini 2.5 Flash",
-            badge = "প্রস্তাবিত (ডিফল্ট)",
-            description = "নম্বরপত্র ছবি OCR, বাংলা চ্যাট ও দ্রুত কাজের জন্য সবচেয়ে ভারসাম্যপূর্ণ"
-        ),
-        GeminiModelSuggestion(
-            id = "gemini-2.5-flash-lite",
-            title = "Gemini 2.5 Flash-Lite",
-            badge = "অতি দ্রুত",
-            description = "কম টোকেন খরচে দ্রুত চ্যাট, মন্তব্য খসড়া ও হালকা স্ক্যানের জন্য"
-        ),
-        GeminiModelSuggestion(
-            id = "gemini-2.0-flash",
-            title = "Gemini 2.0 Flash",
-            badge = "স্থিতিশীল",
-            description = "ব্যস্ত সময়ে নির্ভরযোগ্য মাল্টিমোডাল ও উচ্চ-গতির বিকল্প মডেল"
-        ),
-        GeminiModelSuggestion(
-            id = "gemini-2.5-pro",
-            title = "Gemini 2.5 Pro",
-            badge = "উন্নত বিশ্লেষণ",
-            description = "জটিল বা অস্পষ্ট হাতের লেখার নম্বরপত্র নিখুঁতভাবে বিশ্লেষণের জন্য"
-        )
-    )
-
-    val SUGGESTED_MODEL_IDS: Set<String> = SUGGESTED_MODELS.map { it.id }.toSet()
-
     fun normalizeApiKey(raw: String): String = raw.trim()
 
     fun normalizeModelId(raw: String, cachedIds: Set<String> = emptySet()): String {
         val cleaned = raw.trim()
             .removePrefix("models/")
             .trim()
-        if (cleaned.isBlank()) return DEFAULT_MODEL
-        if (cleaned in LEGACY_INVALID_MODELS && cleaned !in cachedIds) return DEFAULT_MODEL
+        if (cleaned.isBlank()) return ""
+        if (cleaned in LEGACY_INVALID_MODELS && cleaned !in cachedIds) return ""
+        if (isExcludedModelId(cleaned) && cleaned !in cachedIds) return ""
         return cleaned
     }
 
-    fun defaultFallbacksFor(primaryModel: String): List<String> {
-        val cleanPrimary = normalizeModelId(primaryModel)
-        return FALLBACK_DEFAULT_POOL
-            .filter { it != cleanPrimary }
-            .take(MAX_FALLBACK_MODELS)
-    }
-
-    fun normalizeFallbackList(
-        rawFallbacks: List<String>,
-        primaryModel: String,
+    fun normalizeOrderedModels(
+        rawModels: List<String>,
         cachedIds: Set<String> = emptySet()
     ): List<String> {
-        val cleanPrimary = normalizeModelId(primaryModel, cachedIds)
         val out = mutableListOf<String>()
-        for (raw in rawFallbacks) {
-            val cleaned = raw.trim().removePrefix("models/").trim()
-            if (cleaned.isBlank()) continue
-            if (cleaned in LEGACY_INVALID_MODELS && cleaned !in cachedIds) continue
-            if (cleaned == cleanPrimary || cleaned in out) continue
+        for (raw in rawModels) {
+            val cleaned = normalizeModelId(raw, cachedIds)
+            if (cleaned.isBlank() || cleaned in out) continue
             out.add(cleaned)
-            if (out.size >= MAX_FALLBACK_MODELS) break
+            if (out.size >= MAX_ORDERED_MODELS) break
         }
         return out
     }
 
-    fun assignFallbackSlot(
+    fun toggleOrderedModel(
+        current: List<String>,
+        rawModelId: String,
+        cachedIds: Set<String> = emptySet()
+    ): Pair<List<String>, Boolean> {
+        val clean = normalizeModelId(rawModelId, cachedIds)
+        val normalizedCurrent = normalizeOrderedModels(current, cachedIds)
+        if (clean.isBlank()) return normalizedCurrent to false
+        return if (clean in normalizedCurrent) {
+            normalizedCurrent.filter { it != clean } to true
+        } else if (normalizedCurrent.size < MAX_ORDERED_MODELS) {
+            (normalizedCurrent + clean) to true
+        } else {
+            normalizedCurrent to false
+        }
+    }
+
+    fun assignOrderedModelSlot(
         current: List<String>,
         slotIndex: Int,
         rawModelId: String?,
-        primaryModel: String,
         cachedIds: Set<String> = emptySet()
     ): List<String> {
-        val safePrimary = normalizeModelId(primaryModel, cachedIds)
-        val normalizedCurrent = normalizeFallbackList(current, safePrimary, cachedIds).toMutableList()
-        val cleanedNew = rawModelId?.trim()?.removePrefix("models/")?.trim().orEmpty()
+        val normalized = normalizeOrderedModels(current, cachedIds).toMutableList()
+        val cleanedNew = rawModelId?.let { normalizeModelId(it, cachedIds) }.orEmpty()
         if (cleanedNew.isBlank()) {
-            if (slotIndex in normalizedCurrent.indices) {
-                normalizedCurrent.removeAt(slotIndex)
+            if (slotIndex in normalized.indices) {
+                normalized.removeAt(slotIndex)
             }
-            return normalizedCurrent
+            return normalized
         }
-        if (cleanedNew == safePrimary || (cleanedNew in LEGACY_INVALID_MODELS && cleanedNew !in cachedIds)) {
-            return normalizedCurrent
-        }
-        val existingIdx = normalizedCurrent.indexOf(cleanedNew)
-        if (slotIndex in normalizedCurrent.indices) {
+        val existingIdx = normalized.indexOf(cleanedNew)
+        if (slotIndex in normalized.indices) {
             if (existingIdx >= 0 && existingIdx != slotIndex) {
-                val displaced = normalizedCurrent[slotIndex]
-                normalizedCurrent[slotIndex] = cleanedNew
-                normalizedCurrent[existingIdx] = displaced
+                val displaced = normalized[slotIndex]
+                normalized[slotIndex] = cleanedNew
+                normalized[existingIdx] = displaced
             } else {
-                normalizedCurrent[slotIndex] = cleanedNew
+                normalized[slotIndex] = cleanedNew
             }
-        } else if (existingIdx < 0 && normalizedCurrent.size < MAX_FALLBACK_MODELS) {
-            normalizedCurrent.add(cleanedNew)
+        } else if (existingIdx < 0 && normalized.size < MAX_ORDERED_MODELS) {
+            normalized.add(cleanedNew)
         }
-        return normalizeFallbackList(normalizedCurrent, safePrimary, cachedIds)
+        return normalizeOrderedModels(normalized, cachedIds)
     }
 
-    fun moveFallbackSlot(current: List<String>, index: Int, delta: Int): List<String> {
+    fun moveOrderedModelSlot(current: List<String>, index: Int, delta: Int): List<String> {
         val target = index + delta
         if (index !in current.indices || target !in current.indices || index == target) return current
         return current.toMutableList().apply {
@@ -200,70 +164,64 @@ object GeminiApiConfig {
         return normalizeApiKey(sp.getString(KEY_API_KEY, "").orEmpty())
     }
 
-    fun getSelectedModel(context: Context): String {
+    fun getOrderedModels(context: Context): List<String> {
         val sp = context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
         val cachedIds = getCachedModels(context).map { it.id }.toSet()
-        val stored = sp.getString(KEY_MODEL, DEFAULT_MODEL).orEmpty()
-        val resolved = normalizeModelId(stored, cachedIds)
-        if (stored.isNotBlank() && stored.trim().removePrefix("models/").trim() != resolved && stored in LEGACY_INVALID_MODELS) {
-            sp.edit().putString(KEY_MODEL, resolved).apply()
-        }
-        return resolved
-    }
 
-    fun getFallbackModels(
-        context: Context,
-        primaryModel: String = getSelectedModel(context)
-    ): List<String> {
-        val sp = context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
-        val cachedIds = getCachedModels(context).map { it.id }.toSet()
-        val cleanPrimary = normalizeModelId(primaryModel, cachedIds)
-        val raw = sp.getString(KEY_FALLBACK_MODELS, null)
-            ?: return defaultFallbacksFor(cleanPrimary)
-        val parsed = runCatching {
-            val arr = JSONArray(raw)
-            buildList {
+        if (sp.contains(KEY_ORDERED_MODELS)) {
+            val raw = sp.getString(KEY_ORDERED_MODELS, null).orEmpty()
+            val parsed = runCatching {
+                val arr = JSONArray(raw)
+                buildList {
+                    for (i in 0 until arr.length()) add(arr.optString(i, ""))
+                }
+            }.getOrDefault(emptyList())
+            return normalizeOrderedModels(parsed, cachedIds)
+        }
+
+        // পূর্ববর্তী সংস্করণ থেকে আপগ্রেড হলে কেবল আগে থেকেই সংরক্ষিত মডেলগুলোই মাইগ্রেট হবে;
+        // নতুন ইনস্টলে কোনো ডিফল্ট/প্রস্তাবিত মডেল স্বয়ংক্রিয়ভাবে যুক্ত হবে না।
+        val legacyList = mutableListOf<String>()
+        val storedPrimary = sp.getString(KEY_MODEL, "").orEmpty()
+        val cleanPrimary = normalizeModelId(storedPrimary, cachedIds)
+        if (cleanPrimary.isNotBlank()) legacyList.add(cleanPrimary)
+        val rawFallbacks = sp.getString(KEY_FALLBACK_MODELS, null).orEmpty()
+        if (rawFallbacks.isNotBlank()) {
+            runCatching {
+                val arr = JSONArray(rawFallbacks)
                 for (i in 0 until arr.length()) {
-                    add(arr.optString(i, ""))
+                    legacyList.add(arr.optString(i, ""))
                 }
             }
-        }.getOrNull() ?: return defaultFallbacksFor(cleanPrimary)
-
-        val hadLegacyOnly = parsed.isNotEmpty() && parsed.all {
-            val c = it.trim().removePrefix("models/").trim()
-            c.isBlank() || (c in LEGACY_INVALID_MODELS && c !in cachedIds) || c == cleanPrimary
         }
-        if (hadLegacyOnly) {
-            val defaults = defaultFallbacksFor(cleanPrimary)
-            saveFallbackModels(context, defaults, cleanPrimary)
-            return defaults
-        }
-        return normalizeFallbackList(parsed, cleanPrimary, cachedIds)
+        return normalizeOrderedModels(legacyList, cachedIds)
     }
 
-    fun saveFallbackModels(
-        context: Context,
-        rawFallbacks: List<String>,
-        primaryModel: String = getSelectedModel(context)
-    ): List<String> {
+    fun saveOrderedModels(context: Context, rawModels: List<String>): List<String> {
         val cachedIds = getCachedModels(context).map { it.id }.toSet()
-        val clean = normalizeFallbackList(rawFallbacks, primaryModel, cachedIds)
-        val arr = JSONArray()
-        clean.forEach { arr.put(it) }
+        val clean = normalizeOrderedModels(rawModels, cachedIds)
+        val arr = JSONArray().apply { clean.forEach { put(it) } }
+        val fallbackArr = JSONArray().apply { clean.drop(1).forEach { put(it) } }
         context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
             .edit()
-            .putString(KEY_FALLBACK_MODELS, arr.toString())
+            .putString(KEY_ORDERED_MODELS, arr.toString())
+            .putString(KEY_MODEL, clean.firstOrNull().orEmpty())
+            .putString(KEY_FALLBACK_MODELS, fallbackArr.toString())
             .apply()
-        clean.forEach { rememberCustomModel(context, it) }
         return clean
     }
 
-    fun resetDefaultFallbacks(
+    fun getSelectedModel(context: Context): String =
+        getOrderedModels(context).firstOrNull().orEmpty()
+
+    fun getFallbackModels(
         context: Context,
-        primaryModel: String = getSelectedModel(context)
-    ): List<String> = saveFallbackModels(context, defaultFallbacksFor(primaryModel), primaryModel)
+        @Suppress("UNUSED_PARAMETER") primaryModel: String = ""
+    ): List<String> = getOrderedModels(context).drop(1)
 
     fun isConfigured(context: Context): Boolean = getApiKey(context).isNotBlank()
+
+    fun hasSelectedModels(context: Context): Boolean = getOrderedModels(context).isNotEmpty()
 
     fun getCachedModels(context: Context): List<DiscoveredGeminiModel> {
         val sp = context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
@@ -313,19 +271,18 @@ object GeminiApiConfig {
             val arr = JSONArray(raw)
             buildList {
                 for (i in 0 until arr.length()) {
-                    val id = arr.optString(i, "").trim().removePrefix("models/").trim()
-                    if (id.isNotBlank() && id !in SUGGESTED_MODEL_IDS && (id !in LEGACY_INVALID_MODELS || id in cachedIds)) {
-                        add(id)
-                    }
+                    val id = normalizeModelId(arr.optString(i, ""), cachedIds)
+                    if (id.isNotBlank()) add(id)
                 }
             }.distinct()
         }.getOrDefault(emptyList())
     }
 
     fun rememberCustomModel(context: Context, rawModel: String): List<String> {
-        val cleaned = rawModel.trim().removePrefix("models/").trim()
+        val cachedIds = getCachedModels(context).map { it.id }.toSet()
+        val cleaned = normalizeModelId(rawModel, cachedIds)
         val existing = getCustomModels(context)
-        if (cleaned.isBlank() || cleaned in SUGGESTED_MODEL_IDS || cleaned in LEGACY_INVALID_MODELS) return existing
+        if (cleaned.isBlank() || cleaned in cachedIds) return existing
         val updated = (listOf(cleaned) + existing.filter { it != cleaned }).take(10)
         val arr = JSONArray()
         updated.forEach { arr.put(it) }
@@ -348,23 +305,18 @@ object GeminiApiConfig {
         return updated
     }
 
-    fun saveConfig(context: Context, rawApiKey: String, rawModel: String) {
+    fun saveApiKey(context: Context, rawApiKey: String): String {
         val key = normalizeApiKey(rawApiKey)
-        val cachedIds = getCachedModels(context).map { it.id }.toSet()
-        val model = normalizeModelId(rawModel, cachedIds)
         context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
             .edit()
             .putString(KEY_API_KEY, key)
-            .putString(KEY_MODEL, model)
             .apply()
-        rememberCustomModel(context, model)
-        val sp = context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
-        if (sp.contains(KEY_FALLBACK_MODELS)) {
-            val curFallbacks = getFallbackModels(context, model)
-            if (curFallbacks.any { it == model }) {
-                saveFallbackModels(context, curFallbacks, model)
-            }
-        }
+        return key
+    }
+
+    fun saveConfig(context: Context, rawApiKey: String, orderedModels: List<String>) {
+        saveApiKey(context, rawApiKey)
+        saveOrderedModels(context, orderedModels)
     }
 
     fun clearApiKey(context: Context) {
@@ -480,7 +432,8 @@ data class ExtractedClassSheet(
     val isSample: Boolean = false,
     val scope: ClassSheetImportScope = ClassSheetImportScope.BOTH,
     val sheetKind: ClassSheetKind = ClassSheetKind.SINGLE_TERM_MARKS,
-    val sharedWorkingDaysByTerm: Map<Int, String> = emptyMap()
+    val sharedWorkingDaysByTerm: Map<Int, String> = emptyMap(),
+    val templateColumnIds: List<String> = emptyList()
 )
 
 data class RowValidationReport(
@@ -825,6 +778,52 @@ internal fun parseAutoScanJson(
     }
 }
 
+private fun JSONObject.optCleanString(key: String): String {
+    if (!has(key) || isNull(key)) return ""
+    val raw = optString(key, "").trim()
+    return if (raw.equals("null", ignoreCase = true)) "" else raw
+}
+
+private fun normalizeMarkJsonKey(rawKey: String): String? {
+    val trimmed = rawKey.trim()
+    if (trimmed.isEmpty()) return null
+    val up = trimmed.uppercase()
+    val low = trimmed.lowercase()
+
+    // ৩ প্রান্তিক কলাম কী (T1_CONT, T1_WR, T1_TOTAL বা বাংলা নাম)
+    val threeMatch = Regex("^T([1-3])_(.+)$").find(up)
+    if (threeMatch != null) {
+        val t = threeMatch.groupValues[1]
+        val suffix = threeMatch.groupValues[2]
+        val suffixLow = suffix.lowercase()
+        val mapped = when {
+            suffix in setOf("CONT", "CONTINUOUS") || suffixLow.contains("ধারাবাহিক") -> "CONT"
+            suffix in setOf("WR", "WRITTEN") || suffixLow.contains("সামষ্টিক") || suffixLow.contains("লিখিত") -> "WR"
+            suffix in setOf("TOTAL", "GRAND") || suffixLow.contains("মোট") -> "TOTAL"
+            else -> return null
+        }
+        return "T${t}_$mapped"
+    }
+
+    // স্কোর নয় এমন কলাম বাদ দিন
+    if (up in setOf("GRADE", "GP", "GPA", "MERIT", "POSITION", "SIGN", "SIGNATURE") ||
+        low.contains("গ্রেড") || low.contains("জিপি") || low.contains("মেধাক্রম") || low.contains("স্বাক্ষর")
+    ) {
+        return null
+    }
+
+    return when {
+        up in setOf("TB", "TEXTBOOK") || low.contains("পাঠ্যবই") || low == "পাঠ্য" -> "TB"
+        up in setOf("ACT", "CLASSWORK", "ACTIVITY") || low == "কাজ" || low.contains("সক্রিয়") || low.contains("সক্রিয়") -> "ACT"
+        up in setOf("LANG", "LANGUAGE", "ORAL") || low.contains("ভাষা") || low.contains("মৌখিক") -> "LANG"
+        up in setOf("CT", "CLASSTEST", "TEST") || low.contains("অভীক্ষা") || low.contains("টেস্ট") -> "CT"
+        up in setOf("WR", "WRITTEN") || low.contains("লিখিত") || low.contains("সামষ্টিক") -> "WR"
+        up in setOf("CONT", "CONTINUOUS", "SHEETCONTINUOUSTOTAL") || low.contains("ধারাবাহিক") -> "CONT"
+        up in setOf("TOTAL", "GRAND", "GRANDTOTAL", "SHEETGRANDTOTAL") || low == "মোট" || low.contains("সর্বমোট") -> "TOTAL"
+        else -> up
+    }
+}
+
 internal fun parseExtractedClassSheetJson(
     json: JSONObject,
     clsHint: Int?,
@@ -834,11 +833,17 @@ internal fun parseExtractedClassSheetJson(
     sheetKindHint: ClassSheetKind? = null,
     qrMeta: BlankSheetQrMeta? = null
 ): ExtractedClassSheet {
-    val refCode = json.optString("refCode", "").trim().uppercase()
+    val refCode = json.optCleanString("refCode").uppercase()
         .ifBlank { qrMeta?.refCode.orEmpty() }
     val refMatch = Regex("REF\\s*:\\s*C(\\d{1,2})-([A-Z]+)-([A-Z0-9]+)(?:-([A-Z0-9]+))?").find(refCode)
     val refCls = refMatch?.groupValues?.getOrNull(1)?.toIntOrNull()?.takeIf { it in 1..20 }
-    val refSub = refMatch?.groupValues?.getOrNull(2)?.takeIf { it.isNotBlank() && it != "ATT" && it != "GEN" }
+    val refSub = refMatch?.groupValues?.getOrNull(2)?.takeIf {
+        it.isNotBlank() &&
+            it != "ATT" &&
+            it != "GEN" &&
+            !it.equals("ALL", ignoreCase = true) &&
+            !it.equals(BlankSheetCatalog.ALL_SUBJECTS_KEY, ignoreCase = true)
+    }
     val refTerm = when (refMatch?.groupValues?.getOrNull(3)) {
         "T1" -> 1
         "T2" -> 2
@@ -847,29 +852,41 @@ internal fun parseExtractedClassSheetJson(
     }
     val refLayout = refMatch?.groupValues?.getOrNull(4).orEmpty()
 
+    val qrSub = qrMeta?.subjectKey?.trim()?.takeIf {
+        it.isNotBlank() &&
+            !it.equals("ALL", ignoreCase = true) &&
+            !it.equals(BlankSheetCatalog.ALL_SUBJECTS_KEY, ignoreCase = true)
+    }
+    val cleanSubHint = subKeyHint?.trim()?.takeIf {
+        it.isNotBlank() &&
+            !it.equals("ALL", ignoreCase = true) &&
+            !it.equals(BlankSheetCatalog.ALL_SUBJECTS_KEY, ignoreCase = true)
+    }
+
     val detectedCls = (clsHint ?: qrMeta?.cls ?: refCls ?: json.optInt("cls", 3)).coerceIn(1, 20)
     val detectedTerm = (termHint ?: qrMeta?.term?.takeIf { it in 1..3 } ?: refTerm ?: json.optInt("term", 1)).coerceIn(1, 3)
-    val rawSub = (qrMeta?.subjectKey?.takeIf { it.isNotBlank() } ?: refSub ?: json.optString("subKey")).trim()
+    val rawSub = (qrSub ?: refSub ?: json.optCleanString("subKey")).trim()
     val validSubs = subjectsFor(detectedCls, RELIGIONS.first()).map { it.key }.toSet()
     val normalizedSub = normalizeDetectedSubjectKey(rawSub, detectedCls, validSubs)
     val detectedSub = when {
-        !subKeyHint.isNullOrBlank() && subKeyHint in validSubs -> subKeyHint
+        cleanSubHint != null && cleanSubHint in validSubs -> cleanSubHint
         normalizedSub != null -> normalizedSub
         else -> validSubs.first()
     }
     val activeSub = subjectsFor(detectedCls, RELIGIONS.first()).find { it.key == detectedSub }
     val hasWritten = (activeSub?.written ?: 0) > 0
+    val isArtSub = activeSub?.comps?.size == 1 && activeSub.comps.first().key == "TOTAL" && activeSub.written == 0
 
     val warningsArr = json.optJSONArray("warnings") ?: JSONArray()
     val warnings = (0 until warningsArr.length()).mapNotNull { i ->
-        warningsArr.optString(i)?.trim()?.takeIf { it.isNotBlank() }
+        warningsArr.optString(i)?.trim()?.takeIf { it.isNotBlank() && !it.equals("null", ignoreCase = true) }
     }.toMutableList()
 
     val sharedWdObj = json.optJSONObject("sharedWorkingDays") ?: JSONObject()
     val sharedWorkingDays = linkedMapOf<Int, String>()
     for (t in 1..3) {
-        val rawWd = sharedWdObj.optString(t.toString(), "").ifBlank {
-            sharedWdObj.optString("T$t", "")
+        val rawWd = sharedWdObj.optCleanString(t.toString()).ifBlank {
+            sharedWdObj.optCleanString("T$t")
         }
         val cleanWd = fromBn(rawWd).filter { it.isDigit() }.toIntOrNull()?.takeIf { it in 1..365 }?.toString()
         if (!cleanWd.isNullOrBlank()) {
@@ -881,7 +898,7 @@ internal fun parseExtractedClassSheetJson(
         }
     }
 
-    val rawSheetKind = json.optString("sheetKind", "").trim().uppercase()
+    val rawSheetKind = json.optCleanString("sheetKind").uppercase()
     val looksLikeTraitsSheet =
         sheetKindHint == ClassSheetKind.ATTENDANCE_TRAITS ||
             qrMeta?.sheetKind == ClassSheetKind.ATTENDANCE_TRAITS ||
@@ -933,14 +950,16 @@ internal fun parseExtractedClassSheetJson(
         return "${mappedBase}_$termNum"
     }
 
-    val rowsArr = json.optJSONArray("rows") ?: JSONArray()
+    val rowsArr = json.optJSONArray("rows") ?: json.optJSONArray("students") ?: JSONArray()
     val rawParsed = (0 until rowsArr.length()).mapNotNull { idx ->
         val obj = rowsArr.optJSONObject(idx) ?: return@mapNotNull null
-        val rollStr = fromBn(obj.optString("roll", "").trim())
-        val nameStr = obj.optString("name", "").trim()
+        val rollStr = fromBn(obj.optCleanString("roll"))
+        val nameStr = obj.optCleanString("name")
         val marksObj = obj.optJSONObject("marks") ?: JSONObject()
         val marksMap = mutableMapOf<String, String>()
         val traitsMap = mutableMapOf<String, String>()
+        var promotedCont = ""
+        var promotedGrand = ""
 
         fun putTraitValue(normKey: String, rawVal: String) {
             val cleanVal = when {
@@ -954,32 +973,40 @@ internal fun parseExtractedClassSheetJson(
         }
 
         marksObj.keys().forEach { k ->
-            val v = marksObj.optString(k, "").trim()
-            if (v.isNotEmpty() && !v.equals("null", ignoreCase = true)) {
+            val v = marksObj.optCleanString(k)
+            if (v.isNotEmpty()) {
                 val salvagedTraitKey = if (looksLikeTraitsSheet) normalizeTraitJsonKey(k) else null
                 if (salvagedTraitKey != null) {
                     putTraitValue(salvagedTraitKey, v)
                 } else {
-                    marksMap[k.trim().uppercase()] = fromBn(v)
+                    val normMark = normalizeMarkJsonKey(k)
+                    when (normMark) {
+                        null -> Unit
+                        "CONT" -> if (promotedCont.isBlank()) promotedCont = fromBn(v)
+                        "TOTAL" -> {
+                            val numStr = fromBn(v)
+                            if (promotedGrand.isBlank()) promotedGrand = numStr
+                            if (isArtSub) marksMap["TOTAL"] = numStr
+                        }
+                        else -> marksMap[normMark] = fromBn(v)
+                    }
                 }
             }
         }
         val traitsObj = obj.optJSONObject("traits") ?: JSONObject()
         traitsObj.keys().forEach { k ->
-            val v = traitsObj.optString(k, "").trim()
-            if (v.isNotEmpty() && !v.equals("null", ignoreCase = true)) {
+            val v = traitsObj.optCleanString(k)
+            if (v.isNotEmpty()) {
                 val normKey = normalizeTraitJsonKey(k) ?: k.trim().uppercase()
                 putTraitValue(normKey, v)
             }
         }
-        val remarkStr = obj.optString("remark", "").trim()
-            .takeIf { it.isNotEmpty() && !it.equals("null", ignoreCase = true) }
-            .orEmpty()
+        val remarkStr = obj.optCleanString("remark")
 
         val uncObj = obj.optJSONObject("uncertainFields") ?: JSONObject()
         val aiIssues = mutableMapOf<String, String>()
         uncObj.keys().forEach { k ->
-            val reason = uncObj.optString(k, "").trim()
+            val reason = uncObj.optCleanString(k)
             if (reason.isNotEmpty()) {
                 val up = k.trim().uppercase()
                 val normKey = when (k.trim().lowercase()) {
@@ -991,11 +1018,13 @@ internal fun parseExtractedClassSheetJson(
                 aiIssues[normKey] = reason
             }
         }
-        val sheetCont = obj.optString("sheetContinuousTotal", "").trim()
-            .takeIf { it.isNotEmpty() && !it.equals("null", ignoreCase = true) }
+        val sheetCont = obj.optCleanString("sheetContinuousTotal")
+            .ifBlank { promotedCont }
+            .takeIf { it.isNotEmpty() }
             ?.let { fromBn(it) }
-        val sheetGrand = obj.optString("sheetGrandTotal", "").trim()
-            .takeIf { it.isNotEmpty() && !it.equals("null", ignoreCase = true) }
+        val sheetGrand = obj.optCleanString("sheetGrandTotal")
+            .ifBlank { promotedGrand }
+            .takeIf { it.isNotEmpty() }
             ?.let { fromBn(it) }
 
         ScannedStudentRow(
@@ -1008,7 +1037,7 @@ internal fun parseExtractedClassSheetJson(
             sheetGrandTotal = sheetGrand,
             remark = remarkStr,
             traitValues = traitsMap,
-            rawNotes = obj.optString("rawNotes", "").trim(),
+            rawNotes = obj.optCleanString("rawNotes"),
             aiIssues = aiIssues
         )
     }
@@ -1036,8 +1065,8 @@ internal fun parseExtractedClassSheetJson(
         if (termHint == null && qrMeta?.term !in 1..3 && refTerm == null && metaFound != null && !metaFound.optBoolean("term", true)) missingMeta.add("প্রান্তিক")
     }
     if (resolvedSheetKind != ClassSheetKind.ATTENDANCE_TRAITS) {
-        val qrHasSub = !qrMeta?.subjectKey.isNullOrBlank()
-        if (subKeyHint.isNullOrBlank() && !qrHasSub && refSub == null && (metaFound != null && !metaFound.optBoolean("sub", true) || normalizedSub == null)) {
+        val qrHasSub = qrSub != null
+        if (cleanSubHint == null && !qrHasSub && refSub == null && (metaFound != null && !metaFound.optBoolean("sub", true) || normalizedSub == null)) {
             missingMeta.add("বিষয়")
         }
     }
@@ -1074,7 +1103,7 @@ internal fun parseExtractedClassSheetJson(
     val parsedRows = rawParsed.map { row ->
         val cleanedIssues = row.aiIssues.filterKeys { key ->
             when {
-                key == "name" && !sheetHasAnyName && row.name.isBlank() -> false
+                key == "name" && ((qrMeta?.columnIds?.contains("NAME") == false) || (!sheetHasAnyName && row.name.isBlank())) -> false
                 resolvedSheetKind == ClassSheetKind.SINGLE_TERM_MARKS && key in compKeysSet && ((qrHasBreakdownCol == false) || (!sheetHasAnyBreakdown && row.marksText[key].isNullOrBlank())) -> false
                 resolvedSheetKind == ClassSheetKind.SINGLE_TERM_MARKS && key == "CONT" && qrHasContCol == false -> false
                 resolvedSheetKind == ClassSheetKind.SINGLE_TERM_MARKS && key == "WR" && qrHasWrCol == false -> false
@@ -1097,7 +1126,7 @@ internal fun parseExtractedClassSheetJson(
         cls = detectedCls,
         term = detectedTerm,
         subKey = detectedSub,
-        summary = json.optString("summary", "").ifBlank {
+        summary = json.optCleanString("summary").ifBlank {
             when (resolvedSheetKind) {
                 ClassSheetKind.THREE_TERM_MARKS ->
                     "${classNameBn(detectedCls)} শ্রেণি · ৩ প্রান্তিক নম্বর — ${bn(parsedRows.size.toString())} জন শনাক্ত।"
@@ -1118,7 +1147,8 @@ internal fun parseExtractedClassSheetJson(
         isSample = false,
         scope = resolvedScope,
         sheetKind = resolvedSheetKind,
-        sharedWorkingDaysByTerm = sharedWorkingDays
+        sharedWorkingDaysByTerm = sharedWorkingDays,
+        templateColumnIds = qrMeta?.columnIds.orEmpty()
     )
 }
 
@@ -1138,17 +1168,18 @@ class DirectGeminiAiRepository(
                 "Gemini API Key সেট করা নেই। সেটিংস → Gemini AI ও মডেল অংশে গিয়ে আপনার API Key সংরক্ষণ করুন।"
             )
 
-    private fun resolveModelId(mode: AiModelMode? = null): String {
-        val selected = GeminiApiConfig.getSelectedModel(appContext)
-        return if (mode == AiModelMode.FAST && selected == GeminiApiConfig.DEFAULT_MODEL) {
-            val fallbacks = GeminiApiConfig.getFallbackModels(appContext, selected)
-            fallbacks.firstOrNull { it.contains("lite", ignoreCase = true) }
-                ?: fallbacks.firstOrNull { it.contains("flash", ignoreCase = true) }
-                ?: GeminiApiConfig.FAST_FALLBACK_MODEL
-        } else {
-            selected
+    private fun requireOrderedModels(): List<String> {
+        val ordered = GeminiApiConfig.getOrderedModels(appContext)
+        if (ordered.isEmpty()) {
+            throw IllegalStateException(
+                "কোনো Gemini মডেল নির্বাচিত নেই। সেটিংস → Gemini AI অংশে গিয়ে প্রথমে 'লাইভ মডেল আনুন' এবং আপনার পছন্দের ১–৩টি মডেল নির্বাচন করুন।"
+            )
         }
+        return ordered
     }
+
+    private fun resolveModelId(@Suppress("UNUSED_PARAMETER") mode: AiModelMode? = null): String =
+        requireOrderedModels().first()
 
     private val modelCooldownUntilMs = ConcurrentHashMap<String, Long>()
     private val cacheLock = Any()
@@ -1170,11 +1201,13 @@ class DirectGeminiAiRepository(
     }
 
     fun clearCooldownFor(modelId: String) {
-        modelCooldownUntilMs.remove(GeminiApiConfig.normalizeModelId(modelId))
+        val clean = GeminiApiConfig.normalizeModelId(modelId)
+        if (clean.isNotBlank()) modelCooldownUntilMs.remove(clean)
     }
 
     private fun remainingCooldownSeconds(modelId: String): Int {
         val clean = GeminiApiConfig.normalizeModelId(modelId)
+        if (clean.isBlank()) return 0
         val until = modelCooldownUntilMs[clean] ?: return 0
         val diff = until - System.currentTimeMillis()
         if (diff <= 0L) {
@@ -1186,39 +1219,20 @@ class DirectGeminiAiRepository(
 
     private fun recordRateLimitCooldown(modelId: String, retryAfterSec: Int?) {
         val clean = GeminiApiConfig.normalizeModelId(modelId)
+        if (clean.isBlank()) return
         val waitSec = (retryAfterSec ?: DEFAULT_RATE_LIMIT_COOLDOWN_SEC).coerceIn(5, 180)
         modelCooldownUntilMs[clean] = System.currentTimeMillis() + waitSec * 1000L
     }
 
     private fun recordServerBusyCooldown(modelId: String, waitSec: Int = 15) {
         val clean = GeminiApiConfig.normalizeModelId(modelId)
+        if (clean.isBlank()) return
         modelCooldownUntilMs[clean] = System.currentTimeMillis() + waitSec.coerceIn(5, 60) * 1000L
-    }
-
-    private fun selectFallbackCandidates(
-        primaryModel: String,
-        configuredFallbacks: List<String>
-    ): List<String> {
-        val cleanPrimary = GeminiApiConfig.normalizeModelId(primaryModel)
-        val ordered = configuredFallbacks
-            .map { GeminiApiConfig.normalizeModelId(it) }
-            .filter { it != cleanPrimary }
-            .distinct()
-            .take(GeminiApiConfig.MAX_FALLBACK_MODELS)
-
-        val healthy = ordered.filter { remainingCooldownSeconds(it) == 0 }
-        // If all configured fallbacks happen to be in transient cooldown, still keep
-        // the one whose cooldown expires earliest as a last resort so user action succeeds if ready.
-        return if (healthy.isNotEmpty()) {
-            healthy
-        } else {
-            ordered.sortedBy { remainingCooldownSeconds(it) }
-        }
     }
 
     private suspend fun callGenerateContentResilient(
         apiKey: String,
-        primaryModelId: String,
+        @Suppress("UNUSED_PARAMETER") primaryModelId: String,
         body: JSONObject
     ): Pair<String, String> {
         if (!hasNetworkTransport(appContext)) {
@@ -1229,21 +1243,25 @@ class DirectGeminiAiRepository(
             )
         }
 
-        val cleanPrimary = GeminiApiConfig.normalizeModelId(primaryModelId)
+        val userOrdered = requireOrderedModels()
+        val healthy = userOrdered.filter { remainingCooldownSeconds(it) == 0 }
+        val cooling = userOrdered.filter { remainingCooldownSeconds(it) > 0 }
+            .sortedBy { remainingCooldownSeconds(it) }
+        val executionQueue = healthy + cooling
+
         val serializedBody = body.toString().toByteArray(Charsets.UTF_8)
         val isVisionOrHeavy = serializedBody.size > 80_000
         var lastError: Exception? = null
         val attemptedModels = mutableListOf<String>()
-        val primaryCooldown = remainingCooldownSeconds(cleanPrimary)
 
-        // 1. Try primary model first if not in cooldown
-        if (primaryCooldown == 0) {
-            attemptedModels.add(cleanPrimary)
+        for ((idx, candidateModel) in executionQueue.withIndex()) {
+            if (!hasNetworkTransport(appContext)) break
+            attemptedModels.add(candidateModel)
             for (attempt in 0..1) {
                 try {
-                    val text = callGenerateContent(apiKey, cleanPrimary, body, serializedBody)
-                    modelCooldownUntilMs.remove(cleanPrimary)
-                    return text to cleanPrimary
+                    val text = callGenerateContent(apiKey, candidateModel, body, serializedBody)
+                    modelCooldownUntilMs.remove(candidateModel)
+                    return text to candidateModel
                 } catch (e: GeminiHttpException) {
                     lastError = e
                     if (e.httpCode == 401 || e.httpCode == 403) throw e
@@ -1259,8 +1277,8 @@ class DirectGeminiAiRepository(
                         break
                     }
                     val isTransient = e.httpCode in setOf(500, 502, 504)
-                    if (isTransient && attempt == 0) {
-                        delay(800L)
+                    if (isTransient && attempt == 0 && idx == executionQueue.lastIndex) {
+                        delay(700L)
                         continue
                     }
                     break
@@ -1269,58 +1287,15 @@ class DirectGeminiAiRepository(
                     if (e.isTimeout && isVisionOrHeavy) {
                         break
                     }
-                    if (attempt == 0 && (e.isTimeout || e.isConnectionError)) {
-                        delay(800L)
+                    if (attempt == 0 && idx == executionQueue.lastIndex && (e.isTimeout || e.isConnectionError)) {
+                        delay(700L)
                         continue
                     }
                     break
                 } catch (e: Exception) {
                     lastError = e
-                    throw e
-                }
-            }
-        } else {
-            lastError = GeminiHttpException(
-                httpCode = 429,
-                modelId = cleanPrimary,
-                userMessage = formatRateLimitMessage(cleanPrimary, primaryCooldown),
-                retryAfterSeconds = primaryCooldown
-            )
-        }
-
-        // 2. Try all user-configured fallback models in priority order (up to 3)
-        val httpErr = lastError as? GeminiHttpException
-        val netErr = lastError as? GeminiNetworkException
-        val allowHttpFallback = httpErr != null && httpErr.httpCode in setOf(400, 404, 429, 500, 502, 503, 504)
-        val allowTimeoutFallback = netErr != null && (netErr.isTimeout || netErr.isConnectionError)
-        if (allowHttpFallback || allowTimeoutFallback) {
-            val selectedPrimary = GeminiApiConfig.getSelectedModel(appContext)
-            val configuredFallbacks = GeminiApiConfig.getFallbackModels(appContext, selectedPrimary)
-            val fallbackPool = if (cleanPrimary != selectedPrimary) {
-                configuredFallbacks + selectedPrimary
-            } else {
-                configuredFallbacks
-            }
-            val fallbacks = selectFallbackCandidates(cleanPrimary, fallbackPool)
-            for (fallbackModel in fallbacks) {
-                if (!hasNetworkTransport(appContext)) break
-                attemptedModels.add(fallbackModel)
-                try {
-                    val text = callGenerateContent(apiKey, fallbackModel, body, serializedBody)
-                    modelCooldownUntilMs.remove(fallbackModel)
-                    return text to fallbackModel
-                } catch (e: GeminiHttpException) {
-                    lastError = e
-                    if (e.httpCode == 401 || e.httpCode == 403) throw e
-                    if (e.httpCode == 429) {
-                        recordRateLimitCooldown(e.modelId, e.retryAfterSeconds)
-                    } else if (e.httpCode == 503) {
-                        recordServerBusyCooldown(e.modelId)
-                    }
-                } catch (e: GeminiNetworkException) {
-                    lastError = e
-                } catch (_: Exception) {
-                    // Continue to next configured fallback
+                    if (idx == executionQueue.lastIndex) throw e
+                    break
                 }
             }
         }
@@ -1486,8 +1461,10 @@ class DirectGeminiAiRepository(
 
         val effClsHint = clsHint ?: resolvedQr?.cls
         val effTermHint = termHint ?: resolvedQr?.term?.takeIf { it in 1..3 }
-        val effSubHint = subKeyHint ?: resolvedQr?.subjectKey?.takeIf {
-            it.isNotBlank() && it != BlankSheetCatalog.ALL_SUBJECTS_KEY
+        val effSubHint = subKeyHint?.takeIf {
+            it.isNotBlank() && !it.equals(BlankSheetCatalog.ALL_SUBJECTS_KEY, ignoreCase = true)
+        } ?: resolvedQr?.subjectKey?.takeIf {
+            it.isNotBlank() && !it.equals(BlankSheetCatalog.ALL_SUBJECTS_KEY, ignoreCase = true)
         }
         val effKindHint = sheetKindHint ?: resolvedQr?.sheetKind
         val effScope = if (importScope == ClassSheetImportScope.AUTO && resolvedQr != null && resolvedQr.importScope != ClassSheetImportScope.AUTO) {
@@ -1497,7 +1474,9 @@ class DirectGeminiAiRepository(
         }
 
         val cleanNote = teacherNote.trim()
-        val qrKeyPart = resolvedQr?.let { "${it.refCode}|${it.columnIds.joinToString(",")}|${it.workingDaysByTerm}" }.orEmpty()
+        val qrKeyPart = resolvedQr?.let {
+            "${it.templateId}|${it.sheetKind.name}|${it.refCode}|${it.numeralStyle.name}|${it.columnIds.joinToString(",")}|${it.customColumnTitles.joinToString(",")}|${it.workingDaysByTerm}"
+        }.orEmpty()
         val cacheKey = "$modelId|${encoded.sha256Hex}|$documentEnhance|$effClsHint|$effTermHint|$effSubHint|${effScope.name}|${effKindHint?.name}|$qrKeyPart|$cleanNote"
         synchronized(cacheLock) {
             classSheetCache[cacheKey]?.let { return it }
@@ -1518,22 +1497,22 @@ class DirectGeminiAiRepository(
 
         val scopeRule = when {
             effKindHint == ClassSheetKind.ATTENDANCE_TRAITS ->
-                "4. উপস্থিতি ও গুণাবলি শিট (`ATTENDANCE_TRAITS`): উপরের মোট কার্যদিবস স্ট্রিপ থাকলে `sharedWorkingDays` (`\"1\"`,`\"2\"`,`\"3\"`)-এ দিন, এবং প্রতি সারিতে `traits`-এ `DAYS_t`, `PRES_t`, `ACT_t` (সক্রিয়তা/সহপাঠ), `DISC_t` (শৃঙ্খলা), `COND_t` (আচরণ), `REM_t` (মন্তব্য) দিন (১ প্রান্তিকের শিট হলে সংশ্লিষ্ট প্রান্তিকের `_t`, যেমন `PRES_${effTermHint ?: 1}`, `ACT_${effTermHint ?: 1}` দিন; গুণাবলি মান `ক`, `খ` বা `গ`; `marks` ফাঁকা `{}` রাখুন)।"
+                "4. উপস্থিতি ও গুণাবলি শিট (`ATTENDANCE_TRAITS`): উপরের মোট কার্যদিবস স্ট্রিপ থাকলে `sharedWorkingDays` (`\"1\"`,`\"2\"`,`\"3\"`)-এ দিন, এবং প্রতি সারিতে `traits`-এ `DAYS_t`, `PRES_t`, `ACT_t` (সক্রিয়তা/সহপাঠ), `DISC_t` (শৃঙ্খলা), `COND_t` (আচরণ), `REM_t` (মন্তব্য) দিন (গুণাবলি মান `ক`, `খ` বা `গ`; `marks` দেবেন না)।"
             effKindHint == ClassSheetKind.THREE_TERM_MARKS ->
                 "4. ৩ প্রান্তিক নম্বর শিট (`THREE_TERM_MARKS`): পাশাপাশি ১ম, ২য়, ৩য় প্রান্তিকের ধারাবাহিক/সামষ্টিক/মোট `marks`-এ `" +
-                    "\"T1_CONT\",\"T1_WR\",\"T1_TOTAL\",\"T2_CONT\",\"T2_WR\",\"T2_TOTAL\",\"T3_CONT\",\"T3_WR\",\"T3_TOTAL\"` হিসেবে দিন এবং থাকলে `remark` দিন।"
+                    "\"T1_CONT\",\"T1_WR\",\"T1_TOTAL\",\"T2_CONT\",\"T2_WR\",\"T2_TOTAL\",\"T3_CONT\",\"T3_WR\",\"T3_TOTAL\"` হিসেবে কেবল টেবিলে থাকা কলামগুলো দিন এবং থাকলে `remark` দিন।"
             effScope == ClassSheetImportScope.CONT_ONLY ->
-                "4. একক প্রান্তিক নম্বর হলে কেবল রোল (ও থাকলে নাম) এবং ধারাবাহিক নম্বর (`sheetContinuousTotal` বা `TB`/`ACT`/`LANG`/`CT`) পড়ুন — `WR` ও `sheetGrandTotal` ফাঁকা রাখুন।"
+                "4. একক প্রান্তিক নম্বর হলে কেবল রোল (ও থাকলে নাম) এবং ধারাবাহিক নম্বর (`sheetContinuousTotal` বা `TB`/`ACT`/`LANG`/`CT`) পড়ুন — `WR` ও `sheetGrandTotal` দেবেন না।"
             effScope == ClassSheetImportScope.WR_ONLY ->
-                "4. একক প্রান্তিক নম্বর হলে কেবল রোল (ও থাকলে নাম) এবং সামষ্টিক/লিখিত (`WR`) পড়ুন — ধারাবাহিক ও `sheetGrandTotal` ফাঁকা রাখুন।"
+                "4. একক প্রান্তিক নম্বর হলে কেবল রোল (ও থাকলে নাম) এবং সামষ্টিক/লিখিত (`WR`) পড়ুন — ধারাবাহিক ও `sheetGrandTotal` দেবেন না।"
             effScope == ClassSheetImportScope.BOTH ->
-                "4. একক প্রান্তিক নম্বর হলে থাকা ধারাবাহিক, সামষ্টিক (`WR`), মোট (`sheetGrandTotal`) এবং থাকলে মন্তব্য (`remark`) পড়ুন।"
+                "4. একক প্রান্তিক নম্বর হলে টেবিলের থাকা কলাম অনুযায়ী `marks`, `sheetContinuousTotal`, `sheetGrandTotal` এবং থাকলে `remark` পড়ুন। সংক্ষিপ্ত ফর্মে (TB/ACT/LANG/CT না থাকলে) ধারাবাহিক সরাসরি `sheetContinuousTotal`-এ দিন।"
             else ->
                 """
                 4. ছবির কলাম ও শিরোনাম দেখে সঠিক `sheetKind` বেছে নিন:
                    (ক) "SINGLE_TERM_MARKS": ১ প্রান্তিক নম্বর শিট (পূর্ণাঙ্গ `TB,ACT,LANG,CT,CONT,WR,TOTAL`, সংক্ষিপ্ত `CONT,WR,TOTAL`, শুধু ধারাবাহিক, শুধু সামষ্টিক, অথবা সহজ মোট `TOTAL` + থাকলে `remark`)। কেবল `মোট` থাকলে `sheetGrandTotal` দিন, `CONT`/`WR` অনুমান করবেন না।
                    (খ) "THREE_TERM_MARKS": ৩ প্রান্তিক নম্বর শিট (পাশাপাশি ১ম, ২য়, ৩য় প্রান্তিকের ধারাবাহিক/সামষ্টিক/মোট) → `marks`-এ `"T1_CONT","T1_WR","T1_TOTAL","T2_CONT","T2_WR","T2_TOTAL","T3_CONT","T3_WR","T3_TOTAL"` দিন।
-                   (গ) "ATTENDANCE_TRAITS": উপস্থিতি ও গুণাবলি/হাজিরা শিট (যেমন: রোল, নাম, উপস্থিত/উপস্থিতি, সক্রিয়তা/সহপাঠ, শৃঙ্খলা, আচরণ) → উপরের মোট কার্যদিবস স্ট্রিপ থাকলে `sharedWorkingDays: {"1":"","2":"","3":""}`-এ দিন, এবং প্রতি সারিতে `traits`-এ `DAYS_1..3`, `PRES_1..3`, `ACT_1..3`, `DISC_1..3`, `COND_1..3`, `REM_1..3` দিন (১ প্রান্তিকের শিট হলে কেবল সংশ্লিষ্ট প্রান্তিকের কী যেমন `PRES_1`,`ACT_1`,`DISC_1`,`COND_1`,`REM_1` দিন; গুণাবলি `ক`/`খ`/`গ`)।
+                   (গ) "ATTENDANCE_TRAITS": উপস্থিতি ও গুণাবলি/হাজিরা শিট → উপরের মোট কার্যদিবস স্ট্রিপ থাকলে `sharedWorkingDays` ও প্রতি সারির `traits`-এ `DAYS_1..3`, `PRES_1..3`, `ACT_1..3`, `DISC_1..3`, `COND_1..3`, `REM_1..3` দিন (গুণাবলি `ক`/`খ`/`গ`)।
                 """.trimIndent()
         }
         val forcedKindHint = effKindHint?.let { "ফরম্যাট অবশ্যই: ${it.name}" } ?: "ফরম্যাট: ছবি অনুযায়ী স্বয়ংক্রিয়"
@@ -1543,6 +1522,14 @@ class DirectGeminiAiRepository(
         } else {
             "বিষয় কাঠামো: $subsInfo"
         }
+        val dynamicSchemaJson = SheetQrCodec.buildDynamicRowJsonSchema(
+            meta = resolvedQr,
+            kind = effKindHint,
+            effCls = effClsHint,
+            effTerm = effTermHint,
+            effSub = effSubHint,
+            effScope = effScope
+        )
 
         val prompt = buildString {
             appendLine("বাংলাদেশ প্রাথমিক শ্রেণি-ফর্ম/নম্বরপত্র OCR। নিচের ফুটারে `REF:C...` কোড বা উপরের ব্যানার ও কলাম পড়ে সব সারির তথ্য শুধু JSON-এ দিন।")
@@ -1558,7 +1545,7 @@ class DirectGeminiAiRepository(
             appendLine(scopeRule)
             appendLine("5. অনুপস্থিত বা ফাঁকা কীগুলো বাদ দিন। `refCode`-এ ফুটারে `REF:...` পেলে সেটি দিন, নাহলে \"${resolvedQr?.refCode.orEmpty()}\"।")
             appendLine("6. ছবিতে আসলে কোনো লেখা/সংখ্যা অস্পষ্ট হলে তবেই `uncertainFields`-এ কারণ দিন। `metaFound`-এ শ্রেণি/প্রান্তিক/বিষয় পেলে true দিন।")
-            append("JSON: {\"sheetKind\":\"${effKindHint?.name ?: "SINGLE_TERM_MARKS"}\",\"refCode\":\"${resolvedQr?.refCode.orEmpty()}\",\"cls\":${effClsHint ?: 3},\"term\":${effTermHint ?: 1},\"subKey\":\"${if (effKindHint == ClassSheetKind.ATTENDANCE_TRAITS) "" else effSubHint ?: "MATH"}\",\"metaFound\":{\"cls\":${effClsHint != null},\"term\":${effTermHint != null},\"sub\":${!effSubHint.isNullOrBlank()}},\"sharedWorkingDays\":{\"1\":\"\",\"2\":\"\",\"3\":\"\"},\"summary\":\"\",\"warnings\":[],\"rows\":[{\"roll\":\"1\",\"name\":\"\",\"marks\":{\"TB\":\"\",\"ACT\":\"\",\"LANG\":\"\",\"CT\":\"\",\"WR\":\"\",\"T1_CONT\":\"\",\"T1_WR\":\"\"},\"sheetContinuousTotal\":\"\",\"sheetGrandTotal\":\"\",\"remark\":\"\",\"traits\":{\"PRES_1\":\"\",\"ACT_1\":\"\",\"DISC_1\":\"\",\"COND_1\":\"\",\"REM_1\":\"\"},\"rawNotes\":\"\",\"uncertainFields\":{}}]}")
+            append("JSON: $dynamicSchemaJson")
         }
 
         val payload = buildVisionJsonPayload(encoded.base64, prompt, maxOutputTokens = 8192)
@@ -1929,7 +1916,6 @@ class DirectGeminiAiRepository(
             rawModel: String
         ): GeminiConnectionCheckResult = withContext(Dispatchers.IO) {
             val apiKey = GeminiApiConfig.normalizeApiKey(rawApiKey)
-            val modelId = GeminiApiConfig.normalizeModelId(rawModel)
             if (apiKey.isBlank()) {
                 return@withContext GeminiConnectionCheckResult(
                     ok = false,
@@ -1947,9 +1933,19 @@ class DirectGeminiAiRepository(
                 )
             }
             val fetchedIds = fetchedModels.map { it.id }.toSet()
-            val effectiveModelId = GeminiApiConfig.normalizeModelId(rawModel, fetchedIds)
+            val cleanRequested = GeminiApiConfig.normalizeModelId(rawModel, fetchedIds)
+            val effectiveModelId = cleanRequested.ifBlank {
+                fetchedModels.firstOrNull()?.id.orEmpty()
+            }
+            if (effectiveModelId.isBlank()) {
+                return@withContext GeminiConnectionCheckResult(
+                    ok = false,
+                    message = "এই API Key-তে কোনো উপযোগী লাইভ মডেল পাওয়া যায়নি।",
+                    availableModels = fetchedModels
+                )
+            }
 
-            // 2. Ping the selected model with a minimal generateContent call
+            // 2. Ping the effective model with a minimal generateContent call
             try {
                 val pingPayload = JSONObject().apply {
                     put("contents", JSONArray().apply {
@@ -1966,14 +1962,19 @@ class DirectGeminiAiRepository(
                     })
                 }
                 callGenerateContent(apiKey, effectiveModelId, pingPayload)
+                val statusText = if (cleanRequested.isBlank()) {
+                    "API Key যাচাই সফল ($effectiveModelId)! ${bn(fetchedModels.size.toString())}টি লাইভ মডেল পাওয়া গেছে — এখন তালিকা থেকে পছন্দের ৩টি মডেল নির্বাচন করুন।"
+                } else {
+                    "সংযোগ সফল! সক্রিয় মডেল: $effectiveModelId · মোট ${bn(fetchedModels.size.toString())}টি মডেল পাওয়া গেছে।"
+                }
                 GeminiConnectionCheckResult(
                     ok = true,
-                    message = "সংযোগ সফল! সক্রিয় মডেল: $effectiveModelId · মোট ${bn(fetchedModels.size.toString())}টি মডেল পাওয়া গেছে।",
+                    message = statusText,
                     availableModels = fetchedModels
                 )
             } catch (e: Exception) {
                 val hint = if (fetchedModels.isNotEmpty()) {
-                    "\nউপলব্ধ মডেল তালিকা থেকে অন্য একটি মডেল বেছে নিন অথবা কাস্টম মডেল আইডি যাচাই করুন।"
+                    "\nউপলব্ধ লাইভ তালিকা থেকে অন্য একটি মডেল বেছে নিন।"
                 } else ""
                 GeminiConnectionCheckResult(
                     ok = false,
