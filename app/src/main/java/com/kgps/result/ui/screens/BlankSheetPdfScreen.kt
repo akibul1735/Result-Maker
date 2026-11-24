@@ -1300,7 +1300,12 @@ fun BlankSheetPdfScreen(
                         Text(
                             text = if (activePage != null) {
                                 val subSuffix = if (activePage.subjectTitleBn.isNotBlank()) " · ${activePage.subjectTitleBn}" else ""
-                                "পৃষ্ঠা ${bn(activePage.globalPageNumber.toString())}/${bn(activePage.totalPages.toString())} · শ্রেণি: ${activePage.classTitleBn}$subSuffix"
+                                val pageStuSuffix = if (activePage.studentCountOnPage > 0) {
+                                    " · ${bn(activePage.studentCountOnPage.toString())} জন"
+                                } else {
+                                    " · ${bn(activePage.rows.size.toString())} সারি"
+                                }
+                                "পৃষ্ঠা ${bn(activePage.globalPageNumber.toString())}/${bn(activePage.totalPages.toString())} · শ্রেণি: ${activePage.classTitleBn}$subSuffix$pageStuSuffix"
                             } else {
                                 "কোনো পৃষ্ঠা নেই"
                             },
@@ -1658,7 +1663,12 @@ fun BlankSheetPdfScreen(
                             Text(
                                 activePage?.let {
                                     val subSuffix = if (it.subjectTitleBn.isNotBlank()) " · ${it.subjectTitleBn}" else ""
-                                    "${it.classTitleBn}$subSuffix · পৃষ্ঠা ${bn(it.globalPageNumber.toString())}/${bn(it.totalPages.toString())}"
+                                    val pageStuSuffix = if (it.studentCountOnPage > 0) {
+                                        " · ${bn(it.studentCountOnPage.toString())} জন"
+                                    } else {
+                                        " · ${bn(it.rows.size.toString())} সারি"
+                                    }
+                                    "${it.classTitleBn}$subSuffix · পৃষ্ঠা ${bn(it.globalPageNumber.toString())}/${bn(it.totalPages.toString())}$pageStuSuffix"
                                 }.orEmpty(),
                                 color = SlateText,
                                 fontWeight = FontWeight.Bold,

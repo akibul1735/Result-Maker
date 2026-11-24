@@ -470,7 +470,8 @@ data class BlankSheetConfig(
 
 data class BlankSheetRow(
     val rollText: String,
-    val nameText: String
+    val nameText: String,
+    val isStudentRow: Boolean = false
 )
 
 data class BlankSheetPageSpec(
@@ -490,6 +491,7 @@ data class BlankSheetPageSpec(
     val showSubjectMaxInHeader: Boolean,
     val subjectKey: String?,
     val numeralStyle: BlankNumeralStyle = BlankNumeralStyle.ENGLISH,
+    val studentCountOnPage: Int = rows.count { it.isStudentRow },
     val isClassLevelForm: Boolean = false,
     val sharedWorkingDaysTerms: List<Int> = emptyList(),
     val workingDaysByTerm: Map<Int, String> = emptyMap(),
@@ -578,26 +580,27 @@ object BlankSheetPlanner {
                 if (config.autoFillRollAndName) {
                     BlankSheetRow(
                         rollText = BlankSheetCatalog.formatInt(s.roll, config.numeralStyle, padTwo = true),
-                        nameText = s.name
+                        nameText = s.name,
+                        isStudentRow = true
                     )
                 } else {
-                    BlankSheetRow(rollText = "", nameText = "")
+                    BlankSheetRow(rollText = "", nameText = "", isStudentRow = true)
                 }
             }.toMutableList()
 
             repeat(extraBlank) {
-                mappedRows.add(BlankSheetRow(rollText = "", nameText = ""))
+                mappedRows.add(BlankSheetRow(rollText = "", nameText = "", isStudentRow = false))
             }
 
             if (mappedRows.isEmpty()) {
                 repeat(perPage) {
-                    mappedRows.add(BlankSheetRow(rollText = "", nameText = ""))
+                    mappedRows.add(BlankSheetRow(rollText = "", nameText = "", isStudentRow = false))
                 }
             } else if (config.fillRemainingPageRows) {
                 val remainder = mappedRows.size % perPage
                 if (remainder != 0) {
                     repeat(perPage - remainder) {
-                        mappedRows.add(BlankSheetRow(rollText = "", nameText = ""))
+                        mappedRows.add(BlankSheetRow(rollText = "", nameText = "", isStudentRow = false))
                     }
                 }
             }
@@ -649,6 +652,7 @@ object BlankSheetPlanner {
                 showSubjectMaxInHeader = if (isClassLevelTraitsOnly) false else config.showSubjectMaxInHeader,
                 subjectKey = raw.subjectKey,
                 numeralStyle = config.numeralStyle,
+                studentCountOnPage = raw.rows.count { it.isStudentRow },
                 isClassLevelForm = isClassLevelTraitsOnly,
                 sharedWorkingDaysTerms = sharedWorkingDaysTerms,
                 workingDaysByTerm = config.workingDaysByTerm,

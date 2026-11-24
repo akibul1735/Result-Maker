@@ -177,5 +177,39 @@ class BlankSheetPlannerTest {
         assertEquals(1, pages.size)
         assertEquals("01", pages.first().rows.first().rollText)
         assertEquals("৩ প্রান্তিক", pages.first().termTitleBn)
+        assertEquals(1, pages.first().studentCountOnPage)
+    }
+
+    @Test
+    fun twentyPerPageStrictlyCapsPageAtTwentyStudentsEvenWithTwentyTwoStudentsOrExtraRows() {
+        val twentyTwoStudents = (1..22).map { r ->
+            Student(id = "s-$r", cls = 3, roll = r, name = "শিক্ষার্থী $r")
+        }
+        val cfg = BlankSheetConfig(
+            selectedClass = 3,
+            subjectKey = "BAN",
+            term = 1,
+            rowsPerPage = 20,
+            extraBlankRowsPerClass = 2
+        )
+        val pages = BlankSheetPlanner.buildPages(
+            students = twentyTwoStudents,
+            settings = Settings(),
+            config = cfg,
+            allowedClassIds = listOf(3)
+        )
+
+        // 22 students + 2 extra blank = 24 rows -> Page 1: 20 students, Page 2: 2 students + 2 blank = 4 rows
+        assertEquals(2, pages.size)
+        assertEquals(20, pages[0].rows.size)
+        assertEquals(20, pages[0].studentCountOnPage)
+        assertEquals("01", pages[0].rows.first().rollText)
+        assertEquals("20", pages[0].rows.last().rollText)
+
+        assertEquals(4, pages[1].rows.size)
+        assertEquals(2, pages[1].studentCountOnPage)
+        assertEquals("21", pages[1].rows[0].rollText)
+        assertEquals("22", pages[1].rows[1].rollText)
+        assertEquals("", pages[1].rows[2].rollText)
     }
 }
