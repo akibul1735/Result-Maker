@@ -180,6 +180,9 @@ fun SettingsScreen(
     onSelectAppFont: (String) -> Unit = {},
     onSelectAppEnglishFont: (String) -> Unit = {},
     onUpdateSettings: (Settings) -> Unit,
+    onUpdateResultRules: (com.kgps.result.ResultEvaluationRules) -> Unit = { next ->
+        onUpdateSettings(settings.copy(resultRules = next))
+    },
     onAddCustomField: (String) -> Boolean,
     onRemoveCustomField: (String) -> Unit,
     onAddCustomClass: (String, String, Int) -> Boolean = { _, _, _ -> false },
@@ -491,12 +494,11 @@ fun SettingsScreen(
 
             if (selectedSettingsTab == 1) {
                 SettingsRulesTab(
-                    rules = s.resultRules,
+                    rules = settings.resultRules,
                     isAdmin = isAdmin,
                     onUpdateRules = { nextRules ->
-                        val updated = s.copy(resultRules = nextRules)
-                        s = updated
-                        onUpdateSettings(updated)
+                        s = s.copy(resultRules = nextRules)
+                        onUpdateResultRules(nextRules)
                     },
                     onShowMessage = onShowMessage
                 )

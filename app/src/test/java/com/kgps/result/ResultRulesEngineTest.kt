@@ -307,6 +307,7 @@ class ResultRulesEngineTest {
             meritTierAllSubPassFirst = false,
             meritTierAvgPassEnabled = true,
             dynamicTermAveraging = true,
+            absentCountsAsFail = false,
             jointMeritEnabled = true,
             tieBreakAttendance = true,
             tieBreakTraits = true,
@@ -320,5 +321,52 @@ class ResultRulesEngineTest {
         val json = Repo.toJson(emptyList(), settings)
         val restored = Repo.fromBackupJson(json)
         assertEquals(rules, restored.settings.resultRules)
+    }
+
+    @Test
+    fun rule2_disablingSubjectPassRuleAlsoDisablesAnnualSubjectFailures() {
+        val student = makeClass3Student(
+            id = "s_off",
+            roll = 1,
+            term1Marks = fullTermMarks(1, 60.0).toMutableMap().apply {
+                put(mk("MATH", 1, "CONT"), 10.0)
+                put(mk("MATH", 1, "WR"), 20.0) // 30 < 40, overall avg > 40%
+            }
+        )
+        val enabledEval = ResultRulesEngine.evaluateStudent(
+            student = student,
+            rules = ResultEvaluationRules(subjectPassRuleEnabled = true),
+            classActiveTerms = listOf(1),
+            scopedTerm = 0
+        )
+        assertFalse(enabledEval.allSubjectsPassed)
+        assertTrue("MATH" in enabledEval.failedSubjectKeys)
+        assertEquals(1, enabledEval.meritTier)
+
+        val disabledEval = ResultRulesEngine.evaluateStudent(
+            student = student,
+            rules = ResultEvaluationRules(subjectPassRuleEnabled = false),
+            classActiveTerms = listOf(1),
+            scopedTerm = 0
+        )
+        assertTrue(disabledEval.allSubjectsPassed)
+        assertTrue(disabledEval.failedSubjectKeys.isEmpty())
+        assertEquals(0, disabledEval.meritTier)
+    }
+
+    @Test
+    fun rule7_absentCountsAsFailToggleControlsAbsentWithPassingOtherComponent() {
+        val mathSub = subjectsFor(1, "ইসলাম").first { it.key == "MATH" } // Class 1: 50 cont + 50 wr = 100
+        val st = Student(
+            id = "c1_abs",
+            cls = 1,
+            roll = 1,
+            name = "আরিফ",
+            m = mapOf(mk("MATH", 1, "CONT") to 45.0), // 45 >= 40, but WR is Absent ('A')
+            x = mapOf(absKey("MATH", 1, "WR") to "1")
+        )
+        assertTrue(st.isSubTermAbsent(mathSub, 1))
+        assertTrue(ResultRulesEngine.isSubjectTermFailed(st, mathSub, 1, ResultEvaluationRules(absentCountsAsFail = true)))
+        assertFalse(ResultRulesEngine.isSubjectTermFailed(st, mathSub, 1, ResultEvaluationRules(absentCountsAsFail = false)))
     }
 }

@@ -1045,6 +1045,7 @@ fun ResultMakerWorkspace(
                                     onSelectAppFont = onSelectAppFont,
                                     onSelectAppEnglishFont = onSelectAppEnglishFont,
                                     onUpdateSettings = vm::updateSettings,
+                                    onUpdateResultRules = vm::updateResultRules,
                                     onAddCustomField = vm::addCustomField,
                                     onRemoveCustomField = vm::removeCustomField,
                                     onAddCustomClass = vm::addCustomClass,

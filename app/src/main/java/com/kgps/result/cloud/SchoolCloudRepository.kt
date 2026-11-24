@@ -835,6 +835,30 @@ class SchoolCloudRepository(
         }
     }
 
+    suspend fun updateSchoolResultRules(
+        school: SchoolWorkspace,
+        nextRules: com.kgps.result.ResultEvaluationRules
+    ): Result<Unit> {
+        val path = "schools/${school.id}"
+        return try {
+            requireUserId()
+            db.collection("schools").document(school.id)
+                .update(
+                    mapOf(
+                        "resultRules" to nextRules.toFirestoreMap(),
+                        "updatedAt" to FieldValue.serverTimestamp()
+                    )
+                )
+                .await()
+            Result.success(Unit)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.UPDATE, path)
+            Result.failure(e)
+        }
+    }
+
     // ---------- School Students (Realtime + Concurrent Field-Level Sync) ----------
 
     fun observeSchoolStudents(schoolId: String): Flow<Pair<List<Student>, Map<String, StudentSyncMeta>>> = flow {

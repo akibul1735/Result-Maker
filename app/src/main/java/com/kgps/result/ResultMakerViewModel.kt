@@ -319,13 +319,15 @@ class ResultMakerViewModel(
     private val _localPdfFontOverride = MutableStateFlow(Repo.loadPdfFontOverride(appContext))
     private val _localPdfEnglishFontOverride = MutableStateFlow(Repo.loadPdfEnglishFontOverride(appContext))
     private val _localSchoolAddressOverride = MutableStateFlow(Repo.loadSchoolAddressOverride(appContext))
+    private val _optimisticResultRules = MutableStateFlow<ResultEvaluationRules?>(null)
 
     val settings: StateFlow<Settings> = combine(
         activeSchool,
         _localPdfFontOverride,
         _localPdfEnglishFontOverride,
-        _localSchoolAddressOverride
-    ) { school, localFont, localEnFont, localAddress ->
+        _localSchoolAddressOverride,
+        _optimisticResultRules
+    ) { school, localFont, localEnFont, localAddress, optimisticRules ->
         val base = school?.settings ?: DEFAULT_SETTINGS
         val decodedBase = decodePdfFontPair(base.pdfFont, base.pdfEnglishFont)
         val effectiveFont = localFont?.takeIf { id -> BENGALI_PDF_FONT_LIST.any { it.id == id } }
@@ -336,7 +338,8 @@ class ResultMakerViewModel(
         val st = base.copy(
             pdfFont = effectiveFont,
             pdfEnglishFont = effectiveEnFont,
-            schoolAddress = effectiveAddress
+            schoolAddress = effectiveAddress,
+            resultRules = optimisticRules ?: base.resultRules
         )
         SchoolClassRegistry.update(st.customClasses)
         st
@@ -1459,7 +1462,11 @@ class ResultMakerViewModel(
             return
         }
 
-        val school = activeSchool.value ?: return
+        val school = activeSchool.value
+        if (school == null) {
+            showMessage("আগে একটি বিদ্যালয় তৈরি বা নির্বাচন করুন")
+            return
+        }
         if (!school.isAdmin(currentUserId)) {
             showMessage("বিদ্যালয়ের সেটিংস পরিবর্তনের অনুমতি শুধুমাত্র অ্যাডমিনের")
             return
@@ -1482,6 +1489,33 @@ class ResultMakerViewModel(
             cloudRepo.updateSchoolSettings(school, newSettings).onFailure { e ->
                 showMessage(friendlyFirestoreErrorMessage(e))
             }
+        }
+    }
+
+    fun updateResultRules(nextRules: ResultEvaluationRules) {
+        val school = activeSchool.value
+        if (school == null) {
+            showMessage("আগে একটি বিদ্যালয় তৈরি বা নির্বাচন করুন")
+            return
+        }
+        if (!school.isAdmin(currentUserId)) {
+            showMessage("শর্তাবলী পরিবর্তনের অনুমতি শুধুমাত্র অ্যাডমিনের")
+            return
+        }
+        _optimisticResultRules.value = nextRules
+        viewModelScope.launch {
+            cloudRepo.updateSchoolResultRules(school, nextRules)
+                .onSuccess {
+                    if (_optimisticResultRules.value == nextRules) {
+                        _optimisticResultRules.value = null
+                    }
+                }
+                .onFailure { e ->
+                    if (_optimisticResultRules.value == nextRules) {
+                        _optimisticResultRules.value = null
+                    }
+                    showMessage(friendlyFirestoreErrorMessage(e))
+                }
         }
     }
 

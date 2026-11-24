@@ -565,16 +565,30 @@ test("Admin can configure resultRules on school and subject-restricted teacher c
     await adminDb.collection("schoolCodes").doc("RUL700").set(makeCodePayload("school_rules", ALICE_UID));
   });
 
-  // Admin can update valid resultRules, while non-map or non-admin fails
+  // Admin can update full 20-key resultRules payload, while non-map or non-admin fails
   await assertSucceeds(
     aliceDb.collection("schools").doc("school_rules").update({
       resultRules: {
         attendanceRuleEnabled: true,
         minAttendancePct: 85.0,
+        subjectPassRuleEnabled: true,
+        regularPassPct: 40.0,
         showFailIndicator: true,
         failIndicatorStyle: "CROSS",
         specialNeedsRuleEnabled: true,
+        specialNeedsPassPct: 33.0,
+        promotionCheckAvgPass: true,
+        promotionCheckAttendance: true,
+        promotionCheckAllSubjects: false,
+        meritTierAllSubPassFirst: true,
+        meritTierAvgPassEnabled: true,
+        dynamicTermAveraging: true,
+        absentCountsAsFail: true,
         jointMeritEnabled: true,
+        tieBreakAttendance: false,
+        tieBreakTraits: false,
+        tieBreakPrevRoll: true,
+        ignoredGuidelineIds: ["GOVT_2_1_PERCENT"],
       },
       updatedAt: pastDate(300),
     })
@@ -589,6 +603,29 @@ test("Admin can configure resultRules on school and subject-restricted teacher c
     bobDb.collection("schools").doc("school_rules").update({
       resultRules: { attendanceRuleEnabled: false },
       updatedAt: pastDate(240),
+    })
+  );
+
+  // Legacy school missing optional newer fields or owner not duplicated in adminUids can still toggle resultRules
+  await testEnv.withSecurityRulesDisabled(async (ctx) => {
+    const adminDb = ctx.firestore();
+    await adminDb.collection("schools").doc("school_legacy").set({
+      ownerUid: ALICE_UID,
+      joinCode: "",
+      approvalRequired: true,
+      memberUids: [ALICE_UID],
+      adminUids: ["other_admin"],
+      memberProfiles: { [ALICE_UID]: { uid: ALICE_UID, role: "ADMIN" } },
+      school: "পুরাতন বিদ্যালয়",
+      year: "২০২৫",
+      createdAt: pastDate(5000),
+      updatedAt: pastDate(5000),
+    });
+  });
+  await assertSucceeds(
+    aliceDb.collection("schools").doc("school_legacy").update({
+      resultRules: { attendanceRuleEnabled: true, minAttendancePct: 85.0 },
+      updatedAt: pastDate(220),
     })
   );
 

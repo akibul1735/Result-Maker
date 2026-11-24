@@ -89,7 +89,7 @@ val OFFICIAL_EVAL_GUIDELINES: List<OfficialGuidelineItem> = listOf(
         shortTitleBn = "সামষ্টিক পরীক্ষায় উপস্থিতি ও অনুপস্থিত 'A'",
         summaryBn = "অনিবার্য কারণে অনুপস্থিত থাকলে ১০ কর্মদিবসের মধ্যে বিকল্প পরীক্ষার বিধান",
         fullDetailsBn = "প্রতি প্রান্তিকের সামষ্টিক পরীক্ষায় শিক্ষার্থীকে উপস্থিত থাকতে হবে। অসুস্থতাজনিত বা অনিবার্য কারণে কোনো পরীক্ষায় অংশগ্রহণ করতে না পারলে শিক্ষার্থীর আবেদনের পরিপ্রেক্ষিতে বিদ্যালয় কর্তৃপক্ষ পরবর্তী ১০ কর্মদিবসের মধ্যে নতুন প্রশ্নপত্রে বিকল্প পরীক্ষা গ্রহণ করবেন। বিকল্প পরীক্ষার আগে পর্যন্ত অনুপস্থিত ঘরে 'A' ব্যবহার করা যাবে।",
-        linkedRuleHintBn = "শর্ত ৭ অনুযায়ী অনুপস্থিত ঘরে 'A' এবং প্রাপ্ত ০ নম্বরের জন্য '0' আলাদাভাবে সংরক্ষিত হয়।"
+        linkedRuleHintBn = "শর্ত ৭ অনুযায়ী অনুপস্থিত 'A' এবং প্রাপ্ত '0' আলাদাভাবে সংরক্ষিত হয়; শর্ত ৭ থেকে অনুপস্থিতিকে অকৃতকার্য ধরা অন/অফ করা যাবে।"
     ),
     OfficialGuidelineItem(
         id = "GOVT_4_2_PROGRESS",
@@ -131,6 +131,9 @@ data class ResultEvaluationRules(
     // Rule 6: প্রান্তিকভিত্তিক গড় (১/২/৩ প্রান্তিক অনুযায়ী গড়)
     val dynamicTermAveraging: Boolean = true,
 
+    // Rule 7: অনুপস্থিত 'A' থাকলে সেই বিষয় অকৃতকার্য গণ্য হবে কি না
+    val absentCountsAsFail: Boolean = true,
+
     // Rule 8: মেধাক্রম যৌথ ও টাই-ব্রেকার
     val jointMeritEnabled: Boolean = false,
     val tieBreakAttendance: Boolean = false,
@@ -157,6 +160,7 @@ data class ResultEvaluationRules(
         "meritTierAllSubPassFirst" to meritTierAllSubPassFirst,
         "meritTierAvgPassEnabled" to meritTierAvgPassEnabled,
         "dynamicTermAveraging" to dynamicTermAveraging,
+        "absentCountsAsFail" to absentCountsAsFail,
         "jointMeritEnabled" to jointMeritEnabled,
         "tieBreakAttendance" to tieBreakAttendance,
         "tieBreakTraits" to tieBreakTraits,
@@ -179,6 +183,7 @@ data class ResultEvaluationRules(
         put("meritTierAllSubPassFirst", meritTierAllSubPassFirst)
         put("meritTierAvgPassEnabled", meritTierAvgPassEnabled)
         put("dynamicTermAveraging", dynamicTermAveraging)
+        put("absentCountsAsFail", absentCountsAsFail)
         put("jointMeritEnabled", jointMeritEnabled)
         put("tieBreakAttendance", tieBreakAttendance)
         put("tieBreakTraits", tieBreakTraits)
@@ -213,6 +218,7 @@ data class ResultEvaluationRules(
                 meritTierAllSubPassFirst = bool("meritTierAllSubPassFirst", true),
                 meritTierAvgPassEnabled = bool("meritTierAvgPassEnabled", true),
                 dynamicTermAveraging = bool("dynamicTermAveraging", true),
+                absentCountsAsFail = bool("absentCountsAsFail", true),
                 jointMeritEnabled = bool("jointMeritEnabled", false),
                 tieBreakAttendance = bool("tieBreakAttendance", false),
                 tieBreakTraits = bool("tieBreakTraits", false),
@@ -246,6 +252,7 @@ data class ResultEvaluationRules(
                 meritTierAllSubPassFirst = obj.optBoolean("meritTierAllSubPassFirst", true),
                 meritTierAvgPassEnabled = obj.optBoolean("meritTierAvgPassEnabled", true),
                 dynamicTermAveraging = obj.optBoolean("dynamicTermAveraging", true),
+                absentCountsAsFail = obj.optBoolean("absentCountsAsFail", true),
                 jointMeritEnabled = obj.optBoolean("jointMeritEnabled", false),
                 tieBreakAttendance = obj.optBoolean("tieBreakAttendance", false),
                 tieBreakTraits = obj.optBoolean("tieBreakTraits", false),
@@ -413,7 +420,7 @@ object ResultRulesEngine {
     ): Boolean {
         if (!rules.subjectPassRuleEnabled) return false
         if (!student.hasSub(sub, term)) return false
-        if (student.isSubTermAbsent(sub, term)) return true
+        if (rules.absentCountsAsFail && student.isSubTermAbsent(sub, term)) return true
         val passPct = effectivePassPct(student, rules)
         val threshold = sub.max * (passPct / 100.0)
         return student.total(sub, term) + 1e-6 < threshold
@@ -428,7 +435,7 @@ object ResultRulesEngine {
         if (!rules.subjectPassRuleEnabled || activeTerms.isEmpty()) return false
         val enteredTerms = activeTerms.filter { student.hasSub(sub, it) }
         if (enteredTerms.isEmpty()) return false
-        if (enteredTerms.any { student.isSubTermAbsent(sub, it) }) return true
+        if (rules.absentCountsAsFail && enteredTerms.any { student.isSubTermAbsent(sub, it) }) return true
         val avgVal = subjectAvg(student, sub, activeTerms)
         val passPct = effectivePassPct(student, rules)
         val threshold = sub.max * (passPct / 100.0)
@@ -522,23 +529,20 @@ object ResultRulesEngine {
                 val enteredTerms = terms.filter { student.hasSub(sub, it) }
                 if (enteredTerms.any { student.isSubTermAbsent(sub, it) }) {
                     absentSubKeys.add(sub.key)
-                    failedSubKeys.add(sub.key)
-                } else if (scopedTerm in 1..3) {
-                    if (isSubjectTermFailed(student, sub, scopedTerm, rules)) {
-                        failedSubKeys.add(sub.key)
-                    }
+                }
+                val failed = if (scopedTerm in 1..3) {
+                    isSubjectTermFailed(student, sub, scopedTerm, rules)
                 } else {
-                    val threshold = sub.max * (passPct / 100.0)
-                    if (enteredTerms.isNotEmpty()) {
-                        val avgVal = subjectAvg(student, sub, terms)
-                        if (avgVal + 1e-6 < threshold) {
-                            failedSubKeys.add(sub.key)
-                        }
-                    }
+                    isSubjectAnnualFailed(student, sub, terms, rules)
+                }
+                if (failed) {
+                    failedSubKeys.add(sub.key)
                 }
             }
         }
-        val allSubjectsPassed = hasAnyData && failedSubKeys.isEmpty() && absentSubKeys.isEmpty()
+        val allSubjectsPassed = hasAnyData &&
+            failedSubKeys.isEmpty() &&
+            (!rules.subjectPassRuleEnabled || !rules.absentCountsAsFail || absentSubKeys.isEmpty())
 
         val attPct = attendancePctFor(student, terms)
         val checkAttendanceNow = rules.attendanceRuleEnabled && rules.promotionCheckAttendance

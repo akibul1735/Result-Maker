@@ -126,6 +126,23 @@ fun SettingsRulesTab(
         modifier = Modifier.fillMaxWidth(),
         verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
+        if (!isAdmin) {
+            Surface(
+                color = AmberBg,
+                border = BorderStroke(1.dp, AmberBorder),
+                shape = RoundedCornerShape(12.dp),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text(
+                    text = "আপনি 'শিক্ষক' ভূমিকায় আছেন — শর্তাবলী দেখতে পারবেন, তবে অন/অফ বা পরিবর্তন শুধুমাত্র বিদ্যালয়ের অ্যাডমিন করতে পারবেন।",
+                    fontSize = 11.5.sp,
+                    color = AmberNotice,
+                    lineHeight = 16.sp,
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 9.dp)
+                )
+            }
+        }
+
         // 1. সরকারি নির্দেশনা (সংক্ষিপ্ত শিরোনাম + ট্যাপে বিস্তারিত + এপ্লাই হবে না টিক)
         Card(
             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
@@ -178,7 +195,40 @@ fun SettingsRulesTab(
                                 "GOVT_3_1_ATTENDANCE" -> item.id in rules.ignoredGuidelineIds || !rules.attendanceRuleEnabled
                                 "GOVT_3_2_PASS" -> item.id in rules.ignoredGuidelineIds ||
                                     (!rules.subjectPassRuleEnabled && !rules.promotionCheckAvgPass)
+                                "GOVT_3_4_ABSENT" -> item.id in rules.ignoredGuidelineIds || !rules.absentCountsAsFail
+                                "GOVT_4_2_PROGRESS" -> item.id in rules.ignoredGuidelineIds || !rules.dynamicTermAveraging
                                 else -> item.id in rules.ignoredGuidelineIds
+                            }
+
+                            fun toggleGuidelineIgnored(checked: Boolean) {
+                                val nextIgnored = if (checked) {
+                                    rules.ignoredGuidelineIds + item.id
+                                } else {
+                                    rules.ignoredGuidelineIds - item.id
+                                }
+                                val nextRules = when (item.id) {
+                                    "GOVT_3_1_ATTENDANCE" -> rules.copy(
+                                        ignoredGuidelineIds = nextIgnored,
+                                        attendanceRuleEnabled = !checked,
+                                        promotionCheckAttendance = !checked
+                                    )
+                                    "GOVT_3_2_PASS" -> rules.copy(
+                                        ignoredGuidelineIds = nextIgnored,
+                                        subjectPassRuleEnabled = !checked,
+                                        promotionCheckAvgPass = !checked,
+                                        specialNeedsRuleEnabled = !checked
+                                    )
+                                    "GOVT_3_4_ABSENT" -> rules.copy(
+                                        ignoredGuidelineIds = nextIgnored,
+                                        absentCountsAsFail = !checked
+                                    )
+                                    "GOVT_4_2_PROGRESS" -> rules.copy(
+                                        ignoredGuidelineIds = nextIgnored,
+                                        dynamicTermAveraging = !checked
+                                    )
+                                    else -> rules.copy(ignoredGuidelineIds = nextIgnored)
+                                }
+                                applyRulesUpdate(nextRules)
                             }
 
                             Surface(
@@ -269,61 +319,13 @@ fun SettingsRulesTab(
                                         modifier = Modifier
                                             .fillMaxWidth()
                                             .padding(top = 4.dp)
-                                            .clickable(enabled = isAdmin) {
-                                                val nextIgnored = if (isIgnored) {
-                                                    rules.ignoredGuidelineIds - item.id
-                                                } else {
-                                                    rules.ignoredGuidelineIds + item.id
-                                                }
-                                                val nextRules = when (item.id) {
-                                                    "GOVT_3_1_ATTENDANCE" -> {
-                                                        val enable = isIgnored // toggling ignore OFF enables it
-                                                        rules.copy(
-                                                            ignoredGuidelineIds = nextIgnored,
-                                                            attendanceRuleEnabled = enable,
-                                                            promotionCheckAttendance = if (!enable) false else rules.promotionCheckAttendance
-                                                        )
-                                                    }
-                                                    "GOVT_3_2_PASS" -> {
-                                                        val enable = isIgnored
-                                                        rules.copy(
-                                                            ignoredGuidelineIds = nextIgnored,
-                                                            subjectPassRuleEnabled = enable,
-                                                            promotionCheckAvgPass = enable,
-                                                            specialNeedsRuleEnabled = enable
-                                                        )
-                                                    }
-                                                    else -> rules.copy(ignoredGuidelineIds = nextIgnored)
-                                                }
-                                                applyRulesUpdate(nextRules)
-                                            },
+                                            .clickable(enabled = isAdmin) { toggleGuidelineIgnored(!isIgnored) },
                                         verticalAlignment = Alignment.CenterVertically
                                     ) {
                                         Checkbox(
                                             checked = isIgnored,
                                             enabled = isAdmin,
-                                            onCheckedChange = { checked ->
-                                                val nextIgnored = if (checked) {
-                                                    rules.ignoredGuidelineIds + item.id
-                                                } else {
-                                                    rules.ignoredGuidelineIds - item.id
-                                                }
-                                                val nextRules = when (item.id) {
-                                                    "GOVT_3_1_ATTENDANCE" -> rules.copy(
-                                                        ignoredGuidelineIds = nextIgnored,
-                                                        attendanceRuleEnabled = !checked,
-                                                        promotionCheckAttendance = if (checked) false else rules.promotionCheckAttendance
-                                                    )
-                                                    "GOVT_3_2_PASS" -> rules.copy(
-                                                        ignoredGuidelineIds = nextIgnored,
-                                                        subjectPassRuleEnabled = !checked,
-                                                        promotionCheckAvgPass = !checked,
-                                                        specialNeedsRuleEnabled = !checked
-                                                    )
-                                                    else -> rules.copy(ignoredGuidelineIds = nextIgnored)
-                                                }
-                                                applyRulesUpdate(nextRules)
-                                            },
+                                            onCheckedChange = { checked -> toggleGuidelineIgnored(checked) },
                                             modifier = Modifier.testTag("guideline_ignore_${item.id}")
                                         )
                                         Text(
@@ -338,7 +340,7 @@ fun SettingsRulesTab(
                                             shape = RoundedCornerShape(999.dp)
                                         ) {
                                             Text(
-                                                if (isIgnored) "বন্ধ আছে" else "সক্রিয়",
+                                                if (isIgnored) "অফ" else "অন",
                                                 fontSize = 10.sp,
                                                 fontWeight = FontWeight.Bold,
                                                 color = if (isIgnored) RoseDanger else EmeraldGrade,
@@ -358,13 +360,13 @@ fun SettingsRulesTab(
         RuleSectionCard(
             numberBn = "১",
             title = "ন্যূনতম উপস্থিতির শর্ত (${fmt(rules.minAttendancePct)}%)",
-            subtitle = "ডিফল্ট অফ থাকে; অন করলে ফলাফল ও উত্তীর্ণ যাচাইয়ে ব্যবহার হবে",
+            subtitle = "ডিফল্ট অফ থাকে; অন করলে পরবর্তী শ্রেণিতে উত্তীর্ণ যাচাইয়ে ব্যবহার হবে",
             icon = Icons.Rounded.EventBusy,
-            badgeText = if (rules.attendanceRuleEnabled) "চালু · ${fmt(rules.minAttendancePct)}%" else "অফ",
+            badgeText = if (rules.attendanceRuleEnabled) "অন · ${fmt(rules.minAttendancePct)}%" else "অফ",
             badgeActive = rules.attendanceRuleEnabled
         ) {
             RuleSwitchRow(
-                label = "ন্যূনতম উপস্থিতির হার যাচাই চালু রাখুন",
+                label = "ন্যূনতম উপস্থিতির হার যাচাই (অন / অফ)",
                 checked = rules.attendanceRuleEnabled,
                 enabled = isAdmin,
                 testTag = "rule_1_attendance_switch",
@@ -377,7 +379,7 @@ fun SettingsRulesTab(
                     applyRulesUpdate(
                         rules.copy(
                             attendanceRuleEnabled = checked,
-                            promotionCheckAttendance = if (!checked) false else rules.promotionCheckAttendance,
+                            promotionCheckAttendance = checked,
                             ignoredGuidelineIds = nextIgnored
                         )
                     )
@@ -446,8 +448,8 @@ fun SettingsRulesTab(
         // শর্ত ২: বিষয়ভিত্তিক ৪০% পাশ নম্বর ও ফেইল নির্দেশক
         RuleSectionCard(
             numberBn = "২",
-            title = "বিষয়ভিত্তিক ৪০% পাশ ও ফেইল নির্দেশক",
-            subtitle = "কোনো বিষয়ের মোট নম্বরে ৪০%-এর নিচে পেলে সেই প্রান্তিকের মোট সেলে নির্দেশক দেখাবে",
+            title = "বিষয়ভিত্তিক ${fmt(rules.regularPassPct)}% পাশ ও ফেইল নির্দেশক",
+            subtitle = "কোনো বিষয়ের মোট নম্বরে ${fmt(rules.regularPassPct)}%-এর নিচে পেলে সেই প্রান্তিকের মোট সেলে নির্দেশক দেখাবে",
             icon = Icons.Rounded.Warning,
             badgeText = if (rules.subjectPassRuleEnabled && rules.showFailIndicator) {
                 rules.failIndicatorStyle.sampleBn
@@ -543,11 +545,11 @@ fun SettingsRulesTab(
             title = "বিশেষ চাহিদাসম্পন্ন শিক্ষার্থীর ৩৩% সুবিধা",
             subtitle = "অন থাকলে ৩৩%-এ উত্তীর্ণ হয়ে স্বাভাবিকের আগেও রোল/মেধাক্রমে আসতে পারবে",
             icon = Icons.Rounded.AccessibilityNew,
-            badgeText = if (rules.specialNeedsRuleEnabled) "চালু · ৩৩%" else "অফ",
+            badgeText = if (rules.specialNeedsRuleEnabled) "অন · ৩৩%" else "অফ",
             badgeActive = rules.specialNeedsRuleEnabled
         ) {
             RuleSwitchRow(
-                label = "বিশেষ চাহিদাসম্পন্ন শিক্ষার্থীর ৩৩% পাশ নীতি চালু",
+                label = "বিশেষ চাহিদাসম্পন্ন শিক্ষার্থীর ৩৩% পাশ নীতি",
                 checked = rules.specialNeedsRuleEnabled,
                 enabled = isAdmin,
                 testTag = "rule_3_special_needs_switch",
@@ -567,7 +569,7 @@ fun SettingsRulesTab(
         RuleSectionCard(
             numberBn = "৪",
             title = "পরবর্তী শ্রেণিতে উত্তীর্ণ হওয়ার শর্ত",
-            subtitle = "ডিফল্টভাবে গড়ে ৪০% (বিশেষ ৩৩%) না পেলে অনুত্তীর্ণ; চাইলে উপস্থিতি বা সব বিষয়ও যুক্ত করুন",
+            subtitle = "ডিফল্টভাবে গড়ে ৪০% (বিশেষ ৩৩%) পাস; চাইলে উপস্থিতি বা সব বিষয়ও যুক্ত করুন",
             icon = Icons.Rounded.School,
             badgeText = buildString {
                 val parts = mutableListOf<String>()
@@ -590,19 +592,23 @@ fun SettingsRulesTab(
             )
             RuleCheckboxRow(
                 label = "উপস্থিতি বিবেচনা (ন্যূনতম ${fmt(rules.minAttendancePct)}%)",
-                sub = if (rules.attendanceRuleEnabled) {
+                sub = if (rules.attendanceRuleEnabled && rules.promotionCheckAttendance) {
                     "শর্ত ১ অনুযায়ী ${fmt(rules.minAttendancePct)}% উপস্থিতি না থাকলে অনুত্তীর্ণ"
                 } else {
-                    "চালু করলে স্বয়ংক্রিয়ভাবে শর্ত ১ (ন্যূনতম উপস্থিতি)-ও সক্রিয় হবে"
+                    "অন করলে শর্ত ১-এর ন্যূনতম উপস্থিতির শর্ত স্বয়ংক্রিয়ভাবে সক্রিয় হবে"
                 },
                 checked = rules.attendanceRuleEnabled && rules.promotionCheckAttendance,
                 enabled = isAdmin,
                 testTag = "rule_4_attendance_check",
                 onCheckedChange = { checked ->
-                    val nextIgnored = if (checked) rules.ignoredGuidelineIds - "GOVT_3_1_ATTENDANCE" else rules.ignoredGuidelineIds
+                    val nextIgnored = if (checked) {
+                        rules.ignoredGuidelineIds - "GOVT_3_1_ATTENDANCE"
+                    } else {
+                        rules.ignoredGuidelineIds + "GOVT_3_1_ATTENDANCE"
+                    }
                     applyRulesUpdate(
                         rules.copy(
-                            attendanceRuleEnabled = if (checked) true else rules.attendanceRuleEnabled,
+                            attendanceRuleEnabled = checked,
                             promotionCheckAttendance = checked,
                             ignoredGuidelineIds = nextIgnored
                         )
@@ -702,18 +708,36 @@ fun SettingsRulesTab(
         RuleSectionCard(
             numberBn = "৭",
             title = "অনুপস্থিত (A) এবং ০ নম্বরের পার্থক্য",
-            subtitle = "নম্বর ঘরে 'A' বা অনুপস্থিত নির্বাচন করলে ০ ধরা হলেও তা অনুপস্থিত হিসেবে চিহ্নিত থাকবে",
+            subtitle = "নম্বর ঘরে 'A' নির্বাচন করলে ০ ধরা হলেও তা অনুপস্থিত হিসেবে আলাদা থাকবে",
             icon = Icons.Rounded.FactCheck,
-            badgeText = "A বনাম 0 সক্রিয়",
-            badgeActive = true
+            badgeText = if (rules.absentCountsAsFail) "অন · A=অকৃতকার্য" else "অফ · শুধু নম্বর",
+            badgeActive = rules.absentCountsAsFail
         ) {
+            RuleSwitchRow(
+                label = "অনুপস্থিত (A) থাকলে সেই বিষয় অকৃতকার্য ধরুন",
+                checked = rules.absentCountsAsFail,
+                enabled = isAdmin,
+                testTag = "rule_7_absent_fail_switch",
+                onCheckedChange = { checked ->
+                    val nextIgnored = if (checked) {
+                        rules.ignoredGuidelineIds - "GOVT_3_4_ABSENT"
+                    } else {
+                        rules.ignoredGuidelineIds + "GOVT_3_4_ABSENT"
+                    }
+                    applyRulesUpdate(
+                        rules.copy(
+                            absentCountsAsFail = checked,
+                            ignoredGuidelineIds = nextIgnored
+                        )
+                    )
+                }
+            )
             Text(
-                "• শিক্ষার্থী এডিটর ও বাল্ক শিটে লিখিত/ধারাবাহিক সেলে 'A' (বা অনুপস্থিত বাটন) চাপলে 'A' হিসেবে সংরক্ষিত হয়।\n" +
-                    "• প্রাপ্ত ০ নম্বরের জন্য '0' লিখলে তা উপস্থিত কিন্তু ০ নম্বর হিসেবে গণ্য হয়।\n" +
-                    "• অনুপস্থিত বিষয়ের মোট ঘরে (যদি ফেইল নির্দেশক অন থাকে) ফেইল/অনুপস্থিত চিহ্ন দেখানো হয়।",
-                fontSize = 11.5.sp,
-                color = SlateText,
-                lineHeight = 17.sp
+                "• শিক্ষার্থী এডিটর ও বাল্ক শিটে লিখিত/ধারাবাহিক সেলে 'A' চাপলে 'A' হিসেবে সংরক্ষিত হয়, আর প্রাপ্ত শূন্যের জন্য '0' থাকে।\n" +
+                    "• অন থাকলে কোনো অংশে 'A' থাকলে মোট নম্বরের হিসাব যাই হোক বিষয়টি অকৃতকার্য (বিকল্প পরীক্ষার আগে পর্যন্ত) হিসেবে চিহ্নিত হবে।",
+                fontSize = 11.sp,
+                color = SlateMuted,
+                lineHeight = 16.sp
             )
         }
 
@@ -723,7 +747,7 @@ fun SettingsRulesTab(
             title = "মেধাক্রম যৌথ ও সমান নম্বরে টাই-ব্রেকার",
             subtitle = "নম্বর সমান হলে উপস্থিতি, গুণাবলি ও পূর্বের রোল বিবেচনা করা যায়",
             icon = Icons.Rounded.EmojiEvents,
-            badgeText = if (rules.jointMeritEnabled) "যৌথ চালু" else "স্বতন্ত্র ক্রম",
+            badgeText = if (rules.jointMeritEnabled) "যৌথ অন" else "স্বতন্ত্র ক্রম",
             badgeActive = rules.jointMeritEnabled
         ) {
             RuleSwitchRow(
@@ -957,12 +981,30 @@ private fun RuleSwitchRow(
             color = if (enabled) SlateText else SlateMuted,
             modifier = Modifier.weight(1f).padding(end = 8.dp)
         )
-        Switch(
-            checked = checked,
-            onCheckedChange = onCheckedChange,
-            enabled = enabled,
-            modifier = Modifier.testTag(testTag)
-        )
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            Surface(
+                color = if (checked) TealSoft else SlateBg,
+                border = BorderStroke(1.dp, if (checked) TealPrimary.copy(alpha = 0.45f) else SlateOutline.copy(alpha = 0.5f)),
+                shape = RoundedCornerShape(999.dp)
+            ) {
+                Text(
+                    text = if (checked) "অন" else "অফ",
+                    fontSize = 10.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = if (checked) TealDark else SlateMuted,
+                    modifier = Modifier.padding(horizontal = 7.dp, vertical = 2.dp)
+                )
+            }
+            Switch(
+                checked = checked,
+                onCheckedChange = onCheckedChange,
+                enabled = enabled,
+                modifier = Modifier.testTag(testTag)
+            )
+        }
     }
 }
 

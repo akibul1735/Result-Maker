@@ -40,7 +40,10 @@ service cloud.firestore {
     }
 
     function isSchoolAdmin(schoolId) {
-      return isSignedIn() && request.auth.uid in schoolData(schoolId).adminUids;
+      return isSignedIn() && (
+        request.auth.uid == schoolData(schoolId).ownerUid ||
+        request.auth.uid in schoolData(schoolId).adminUids
+      );
     }
 
     function hasNoSchool(uid) {
@@ -175,7 +178,7 @@ service cloud.firestore {
       return isSignedIn() &&
              (request.auth.uid in s.memberUids) &&
              (
-               (request.auth.uid in s.adminUids) ||
+               (request.auth.uid == s.ownerUid || request.auth.uid in s.adminUids) ||
                !(request.auth.uid in s.memberProfiles) ||
                canTeacherCreateWithProfile(s.memberProfiles[request.auth.uid], newDoc)
              );
@@ -220,7 +223,7 @@ service cloud.firestore {
       return isSignedIn() &&
              (request.auth.uid in s.memberUids) &&
              (
-               (request.auth.uid in s.adminUids) ||
+               (request.auth.uid == s.ownerUid || request.auth.uid in s.adminUids) ||
                !(request.auth.uid in s.memberProfiles) ||
                canTeacherUpdateWithProfile(s.memberProfiles[request.auth.uid], newDoc, oldDoc)
              );
@@ -230,7 +233,7 @@ service cloud.firestore {
       return isSignedIn() &&
              (request.auth.uid in s.memberUids) &&
              (
-               (request.auth.uid in s.adminUids) ||
+               (request.auth.uid == s.ownerUid || request.auth.uid in s.adminUids) ||
                !(request.auth.uid in s.memberProfiles) ||
                (
                  canManageInProfile(s.memberProfiles[request.auth.uid]) &&
@@ -383,7 +386,7 @@ service cloud.firestore {
       allow update: if isSignedIn() &&
                        isValidCode(code) &&
                        isValidSchoolCode(incoming()) &&
-                       request.auth.uid in existing().adminUids &&
+                       (request.auth.uid == existing().ownerUid || request.auth.uid in existing().adminUids) &&
                        incoming().schoolId == existing().schoolId &&
                        incoming().ownerUid == existing().ownerUid &&
                        incoming().createdAt == existing().createdAt &&
@@ -419,32 +422,44 @@ service cloud.firestore {
 
       allow update: if isSignedIn() &&
                        isValidId(schoolId) &&
-                       isValidSchool(incoming()) &&
                        incoming().ownerUid == existing().ownerUid &&
                        incoming().createdAt == existing().createdAt && (
-                         // Action 1: Admin updates school settings, code, member list, approvals, or teacher permissions
+                         // Action 1a: Admin/Owner updates resultRules (validated independently of legacy optional fields)
                          (
-                           request.auth.uid in existing().adminUids &&
-                           existing().ownerUid in incoming().adminUids &&
-                           existing().ownerUid in incoming().memberUids &&
-                           incoming().diff(existing()).affectedKeys().hasOnly([
-                             'joinCode', 'approvalRequired', 'memberUids', 'adminUids', 'memberProfiles',
-                             'school', 'schoolAddress', 'year', 'teachers', 'teacherMobiles',
-                             'pdfFont', 'dpeLogo', 'customFields', 'customClasses', 'resultRules', 'updatedAt'
-                           ])
+                           (request.auth.uid == existing().ownerUid || request.auth.uid in existing().adminUids) &&
+                           incoming().diff(existing()).affectedKeys().hasOnly(['resultRules', 'updatedAt']) &&
+                           incoming().resultRules is map &&
+                           incoming().resultRules.size() <= 30 &&
+                           incoming().updatedAt is timestamp &&
+                           incoming().updatedAt <= request.time
                          ) ||
-                         // Action 2: Non-owner member leaves school
                          (
-                           request.auth.uid in existing().memberUids &&
-                           request.auth.uid != existing().ownerUid &&
-                           incoming().diff(existing()).affectedKeys().hasOnly(['memberUids', 'adminUids', 'memberProfiles', 'updatedAt']) &&
-                           !(request.auth.uid in incoming().memberUids) &&
-                           !(request.auth.uid in incoming().adminUids) &&
-                           !(request.auth.uid in incoming().memberProfiles) &&
-                           existing().memberUids.hasAll(incoming().memberUids) &&
-                           existing().adminUids.hasAll(incoming().adminUids) &&
-                           existing().memberProfiles.diff(incoming().memberProfiles).affectedKeys().hasOnly([request.auth.uid]) &&
-                           incoming().memberUids.size() == existing().memberUids.size() - 1
+                           isValidSchool(incoming()) && (
+                             // Action 1b: Admin/Owner updates school settings, code, member list, approvals, or teacher permissions
+                             (
+                               (request.auth.uid == existing().ownerUid || request.auth.uid in existing().adminUids) &&
+                               existing().ownerUid in incoming().adminUids &&
+                               existing().ownerUid in incoming().memberUids &&
+                               incoming().diff(existing()).affectedKeys().hasOnly([
+                                 'joinCode', 'approvalRequired', 'memberUids', 'adminUids', 'memberProfiles',
+                                 'school', 'schoolAddress', 'year', 'teachers', 'teacherMobiles',
+                                 'pdfFont', 'dpeLogo', 'customFields', 'customClasses', 'resultRules', 'updatedAt'
+                               ])
+                             ) ||
+                             // Action 2: Non-owner member leaves school
+                             (
+                               request.auth.uid in existing().memberUids &&
+                               request.auth.uid != existing().ownerUid &&
+                               incoming().diff(existing()).affectedKeys().hasOnly(['memberUids', 'adminUids', 'memberProfiles', 'updatedAt']) &&
+                               !(request.auth.uid in incoming().memberUids) &&
+                               !(request.auth.uid in incoming().adminUids) &&
+                               !(request.auth.uid in incoming().memberProfiles) &&
+                               existing().memberUids.hasAll(incoming().memberUids) &&
+                               existing().adminUids.hasAll(incoming().adminUids) &&
+                               existing().memberProfiles.diff(incoming().memberProfiles).affectedKeys().hasOnly([request.auth.uid]) &&
+                               incoming().memberUids.size() == existing().memberUids.size() - 1
+                             )
+                           )
                          )
                        );
 
