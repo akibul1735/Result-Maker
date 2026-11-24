@@ -176,7 +176,7 @@ fun CsvStepOptions(
                     )
                     Surface(color = TealPrimary, shape = RoundedCornerShape(6.dp)) {
                         Text(
-                            "QR / বারকোড",
+                            "৩-QR স্ক্যান",
                             fontSize = 9.5.sp,
                             fontWeight = FontWeight.Bold,
                             color = Color.White,
@@ -225,7 +225,7 @@ fun CsvStepOptions(
                             color = TealPrimary
                         )
                         Text(
-                            "ছবির QR ও বারকোড স্ক্যান হচ্ছে...",
+                            "ডান, বাম ও নিচের QR স্ক্যান হচ্ছে...",
                             fontSize = 11.5.sp,
                             fontWeight = FontWeight.SemiBold,
                             color = TealDark
@@ -1205,19 +1205,19 @@ fun CsvStepPrompt(
                         horizontalArrangement = Arrangement.spacedBy(5.dp),
                         verticalArrangement = Arrangement.spacedBy(4.dp)
                     ) {
-                        if (det.detectedFromThinQr) {
-                            Surface(color = Color.White, shape = RoundedCornerShape(6.dp), border = BorderStroke(1.dp, TealContainer)) {
-                                Text("QR 1 ✓", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = TealDark, modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp))
-                            }
-                        }
                         if (det.detectedFromOfflineQr) {
                             Surface(color = Color.White, shape = RoundedCornerShape(6.dp), border = BorderStroke(1.dp, TealContainer)) {
-                                Text("QR 2 ✓", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = TealDark, modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp))
+                                Text("ডান QR ✓", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = TealDark, modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp))
                             }
                         }
-                        if (det.detectedFromBarcode) {
+                        if (det.detectedFromThinQr) {
                             Surface(color = Color.White, shape = RoundedCornerShape(6.dp), border = BorderStroke(1.dp, TealContainer)) {
-                                Text("Bar 1 ✓", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = TealDark, modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp))
+                                Text("বাম QR ✓", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = TealDark, modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp))
+                            }
+                        }
+                        if (det.detectedFromBottomQr) {
+                            Surface(color = Color.White, shape = RoundedCornerShape(6.dp), border = BorderStroke(1.dp, TealContainer)) {
+                                Text("নিচের QR ✓", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = TealDark, modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp))
                             }
                         }
                     }

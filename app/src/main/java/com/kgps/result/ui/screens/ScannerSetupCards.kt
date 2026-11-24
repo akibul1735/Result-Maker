@@ -10,7 +10,6 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -68,8 +67,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -629,9 +626,9 @@ internal fun ScannerPhotoAndActionCard(
             // Photo Preview & Edit Tools
             selectedImageBitmap?.let { bmp ->
                 var expandedCodeChannel by remember(bmp) { mutableStateOf<SheetCodeChannel?>(null) }
-                val qr1Detected = sheetDetection?.detectedFromThinQr == true
-                val qr2Detected = sheetDetection?.detectedFromOfflineQr == true
-                val bar1Detected = sheetDetection?.detectedFromBarcode == true
+                val rightQrDetected = sheetDetection?.detectedFromOfflineQr == true
+                val leftQrDetected = sheetDetection?.detectedFromThinQr == true
+                val bottomQrDetected = sheetDetection?.detectedFromBottomQr == true
 
                 Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
                     Box(
@@ -735,35 +732,35 @@ internal fun ScannerPhotoAndActionCard(
                             }
                         }
 
-                        // তিনটি কোডের (QR 1, QR 2, Bar 1) কমপ্যাক্ট শনাক্ত আইকন (এমনিতে শুধু আইকন, ট্যাপ করলে বিস্তারিত)
+                        // অগ্রাধিকার ক্রমে ৩টি QR কোড (ডান অফলাইন -> বাম স্মার্ট ID -> নিচের ব্যাকআপ QR)
                         SheetCodeIconPill(
-                            channel = SheetCodeChannel.QR_1,
-                            detected = qr1Detected,
-                            selected = expandedCodeChannel == SheetCodeChannel.QR_1,
-                            loading = resolvingSheetTemplate,
-                            testTag = "ai_detected_icon_qr1",
-                            onClick = {
-                                expandedCodeChannel = if (expandedCodeChannel == SheetCodeChannel.QR_1) null else SheetCodeChannel.QR_1
-                            }
-                        )
-                        SheetCodeIconPill(
-                            channel = SheetCodeChannel.QR_2,
-                            detected = qr2Detected,
-                            selected = expandedCodeChannel == SheetCodeChannel.QR_2,
+                            channel = SheetCodeChannel.RIGHT_OFFLINE_QR,
+                            detected = rightQrDetected,
+                            selected = expandedCodeChannel == SheetCodeChannel.RIGHT_OFFLINE_QR,
                             loading = false,
                             testTag = "ai_detected_icon_qr2",
                             onClick = {
-                                expandedCodeChannel = if (expandedCodeChannel == SheetCodeChannel.QR_2) null else SheetCodeChannel.QR_2
+                                expandedCodeChannel = if (expandedCodeChannel == SheetCodeChannel.RIGHT_OFFLINE_QR) null else SheetCodeChannel.RIGHT_OFFLINE_QR
                             }
                         )
                         SheetCodeIconPill(
-                            channel = SheetCodeChannel.BAR_1,
-                            detected = bar1Detected,
-                            selected = expandedCodeChannel == SheetCodeChannel.BAR_1,
-                            loading = false,
-                            testTag = "ai_detected_icon_bar1",
+                            channel = SheetCodeChannel.LEFT_THIN_QR,
+                            detected = leftQrDetected,
+                            selected = expandedCodeChannel == SheetCodeChannel.LEFT_THIN_QR,
+                            loading = leftQrDetected && resolvingSheetTemplate,
+                            testTag = "ai_detected_icon_qr1",
                             onClick = {
-                                expandedCodeChannel = if (expandedCodeChannel == SheetCodeChannel.BAR_1) null else SheetCodeChannel.BAR_1
+                                expandedCodeChannel = if (expandedCodeChannel == SheetCodeChannel.LEFT_THIN_QR) null else SheetCodeChannel.LEFT_THIN_QR
+                            }
+                        )
+                        SheetCodeIconPill(
+                            channel = SheetCodeChannel.BOTTOM_THIN_QR,
+                            detected = bottomQrDetected,
+                            selected = expandedCodeChannel == SheetCodeChannel.BOTTOM_THIN_QR,
+                            loading = bottomQrDetected && resolvingSheetTemplate,
+                            testTag = "ai_detected_icon_bottom_qr",
+                            onClick = {
+                                expandedCodeChannel = if (expandedCodeChannel == SheetCodeChannel.BOTTOM_THIN_QR) null else SheetCodeChannel.BOTTOM_THIN_QR
                             }
                         )
                     }
@@ -1062,9 +1059,9 @@ private enum class SheetCodeChannel(
     val shortTag: String,
     val titleBn: String
 ) {
-    QR_1(shortTag = "১", titleBn = "QR 1 · স্মার্ট ID (উপরে/নিচে-বাম)"),
-    QR_2(shortTag = "২", titleBn = "QR 2 · অফলাইন কাঠামো (ডান কোণা)"),
-    BAR_1(shortTag = "বার", titleBn = "Bar 1 · নিচের বারকোড (Code-128)")
+    RIGHT_OFFLINE_QR(shortTag = "ডা", titleBn = "১. ডান QR · পূর্ণাঙ্গ অফলাইন কাঠামো"),
+    LEFT_THIN_QR(shortTag = "বা", titleBn = "২. বাম QR · স্মার্ট ID (ক্যাশ/ক্লাউড)"),
+    BOTTOM_THIN_QR(shortTag = "নি", titleBn = "৩. নিচের QR · ব্যাকআপ স্মার্ট ID")
 }
 
 @Composable
@@ -1111,42 +1108,18 @@ private fun SheetCodeIconPill(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(2.dp)
             ) {
-                when (channel) {
-                    SheetCodeChannel.QR_1 -> {
-                        Icon(
-                            imageVector = Icons.Rounded.QrCode,
-                            contentDescription = null,
-                            tint = contentColor,
-                            modifier = Modifier.size(14.dp)
-                        )
-                        Text(
-                            text = channel.shortTag,
-                            fontSize = 8.5.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = contentColor
-                        )
-                    }
-                    SheetCodeChannel.QR_2 -> {
-                        Icon(
-                            imageVector = Icons.Rounded.QrCode2,
-                            contentDescription = null,
-                            tint = contentColor,
-                            modifier = Modifier.size(14.dp)
-                        )
-                        Text(
-                            text = channel.shortTag,
-                            fontSize = 8.5.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = contentColor
-                        )
-                    }
-                    SheetCodeChannel.BAR_1 -> {
-                        BarcodeMiniGlyph(
-                            color = contentColor,
-                            modifier = Modifier.size(width = 16.dp, height = 14.dp)
-                        )
-                    }
-                }
+                Icon(
+                    imageVector = if (channel == SheetCodeChannel.RIGHT_OFFLINE_QR) Icons.Rounded.QrCode2 else Icons.Rounded.QrCode,
+                    contentDescription = null,
+                    tint = contentColor,
+                    modifier = Modifier.size(14.dp)
+                )
+                Text(
+                    text = channel.shortTag,
+                    fontSize = 8.5.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = contentColor
+                )
             }
 
             if (loading) {
@@ -1173,32 +1146,6 @@ private fun SheetCodeIconPill(
 }
 
 @Composable
-private fun BarcodeMiniGlyph(
-    color: Color,
-    modifier: Modifier = Modifier
-) {
-    Canvas(modifier = modifier) {
-        val barSpecs = listOf(
-            0.04f to 0.11f,
-            0.20f to 0.06f,
-            0.32f to 0.13f,
-            0.52f to 0.07f,
-            0.66f to 0.12f,
-            0.84f to 0.10f
-        )
-        val topPad = size.height * 0.12f
-        val barH = size.height * 0.76f
-        barSpecs.forEach { (startFrac, widthFrac) ->
-            drawRect(
-                color = color,
-                topLeft = Offset(size.width * startFrac, topPad),
-                size = Size(size.width * widthFrac, barH)
-            )
-        }
-    }
-}
-
-@Composable
 private fun SheetDetectedChannelDetailCard(
     channel: SheetCodeChannel,
     detection: SheetScanDetection?,
@@ -1210,14 +1157,20 @@ private fun SheetDetectedChannelDetailCard(
     onDismiss: () -> Unit
 ) {
     val isDetected = when (channel) {
-        SheetCodeChannel.QR_1 -> detection?.detectedFromThinQr == true
-        SheetCodeChannel.QR_2 -> detection?.detectedFromOfflineQr == true
-        SheetCodeChannel.BAR_1 -> detection?.detectedFromBarcode == true
+        SheetCodeChannel.RIGHT_OFFLINE_QR -> detection?.detectedFromOfflineQr == true
+        SheetCodeChannel.LEFT_THIN_QR -> detection?.detectedFromThinQr == true
+        SheetCodeChannel.BOTTOM_THIN_QR -> detection?.detectedFromBottomQr == true
+    }
+    val skippedByHigherPriority = !isDetected && when (channel) {
+        SheetCodeChannel.RIGHT_OFFLINE_QR -> false
+        SheetCodeChannel.LEFT_THIN_QR -> detection?.detectedFromOfflineQr == true
+        SheetCodeChannel.BOTTOM_THIN_QR -> detection?.detectedFromOfflineQr == true || detection?.detectedFromThinQr == true
     }
 
     val statusText = when {
-        channel == SheetCodeChannel.QR_1 && resolvingSheetTemplate -> "লোড হচ্ছে..."
+        (channel == SheetCodeChannel.LEFT_THIN_QR || channel == SheetCodeChannel.BOTTOM_THIN_QR) && isDetected && resolvingSheetTemplate -> "লোড হচ্ছে..."
         isDetected -> "শনাক্ত"
+        skippedByHigherPriority -> "প্রয়োজন হয়নি"
         else -> "পাওয়া যায়নি"
     }
 
@@ -1274,72 +1227,7 @@ private fun SheetDetectedChannelDetailCard(
             }
 
             when (channel) {
-                SheetCodeChannel.QR_1 -> {
-                    if (isDetected) {
-                        val tid = detection?.templateId ?: fallbackQrMeta?.templateId.orEmpty()
-                        val raw = detection?.thinQrRawText ?: tid.takeIf { it.isNotBlank() }?.let { "KT1:$it" }.orEmpty()
-                        if (raw.isNotBlank()) {
-                            Text(
-                                text = "কোড: $raw",
-                                fontSize = 9.5.sp,
-                                fontWeight = FontWeight.Medium,
-                                color = TealPrimary
-                            )
-                        }
-                        when {
-                            resolvingSheetTemplate -> {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                                ) {
-                                    CircularProgressIndicator(
-                                        modifier = Modifier.size(11.dp),
-                                        strokeWidth = 1.6.dp,
-                                        color = TealPrimary
-                                    )
-                                    Text(
-                                        text = "Firestore থেকে ফর্মের পূর্ণ কাঠামো মিলিয়ে নেওয়া হচ্ছে...",
-                                        fontSize = 9.5.sp,
-                                        color = TealDark
-                                    )
-                                }
-                            }
-                            resolvedTemplateMeta != null -> {
-                                val src = resolvedTemplateSource ?: "ক্যাশ/Firestore"
-                                Text(
-                                    text = "উৎস: $src · ${SheetQrCodec.buildSummaryLabelBn(resolvedTemplateMeta)}",
-                                    fontSize = 10.sp,
-                                    fontWeight = FontWeight.SemiBold,
-                                    color = TealDark
-                                )
-                                val cols = SheetQrCodec.shortColumnsPreviewBn(resolvedTemplateMeta, maxItems = 12)
-                                if (cols.isNotBlank()) {
-                                    Text(
-                                        text = "কলাম: $cols",
-                                        fontSize = 9.5.sp,
-                                        color = SlateText
-                                    )
-                                }
-                            }
-                            else -> {
-                                Text(
-                                    text = "পাতলা ID পাওয়া গেছে, তবে এই ডিভাইসের ক্যাশ বা অনলাইনে মিল পাওয়া যায়নি।",
-                                    fontSize = 9.5.sp,
-                                    color = SlateMuted
-                                )
-                            }
-                        }
-                    } else {
-                        val otherHint = buildOtherDetectedFallbackHint(detection, fallbackSource)
-                        Text(
-                            text = "ছবির উপরের বাম বা নিচের বাম কোণায় স্মার্ট ID (KT1) QR পড়া যায়নি।$otherHint",
-                            fontSize = 9.5.sp,
-                            color = SlateMuted
-                        )
-                    }
-                }
-
-                SheetCodeChannel.QR_2 -> {
+                SheetCodeChannel.RIGHT_OFFLINE_QR -> {
                     val offlineMeta = detection?.offlineQrMeta
                     if (isDetected && offlineMeta != null) {
                         Text(
@@ -1381,45 +1269,92 @@ private fun SheetDetectedChannelDetailCard(
                     } else {
                         val otherHint = buildOtherDetectedFallbackHint(detection, fallbackSource)
                         Text(
-                            text = "ছবির উপরের ডান কোণায় অফলাইন QR 2 পড়া যায়নি।$otherHint",
+                            text = "ছবির উপরের ডান কোণায় অফলাইন QR পড়া যায়নি।$otherHint",
                             fontSize = 9.5.sp,
                             color = SlateMuted
                         )
                     }
                 }
 
-                SheetCodeChannel.BAR_1 -> {
-                    val barMeta = detection?.barcodeMeta
+                SheetCodeChannel.LEFT_THIN_QR, SheetCodeChannel.BOTTOM_THIN_QR -> {
                     if (isDetected) {
-                        detection?.barcodeRawText?.takeIf { it.isNotBlank() }?.let { raw ->
+                        val tid = detection?.templateId ?: fallbackQrMeta?.templateId.orEmpty()
+                        val raw = if (channel == SheetCodeChannel.BOTTOM_THIN_QR) {
+                            detection?.bottomQrRawText
+                        } else {
+                            detection?.thinQrRawText
+                        } ?: tid.takeIf { it.isNotBlank() }?.let { "KT1:$it" }.orEmpty()
+                        if (raw.isNotBlank()) {
                             Text(
-                                text = "বারকোড: $raw",
+                                text = "কোড: $raw",
                                 fontSize = 9.5.sp,
                                 fontWeight = FontWeight.Medium,
                                 color = TealPrimary
                             )
                         }
-                        val effectiveMeta = resolvedTemplateMeta ?: barMeta
-                        if (effectiveMeta != null) {
-                            Text(
-                                text = SheetQrCodec.buildSummaryLabelBn(effectiveMeta),
-                                fontSize = 10.sp,
-                                fontWeight = FontWeight.SemiBold,
-                                color = TealDark
-                            )
-                            val cols = SheetQrCodec.shortColumnsPreviewBn(effectiveMeta, maxItems = 12)
-                            if (cols.isNotBlank()) {
+                        when {
+                            resolvingSheetTemplate -> {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
+                                    CircularProgressIndicator(
+                                        modifier = Modifier.size(11.dp),
+                                        strokeWidth = 1.6.dp,
+                                        color = TealPrimary
+                                    )
+                                    Text(
+                                        text = "Firestore/ক্যাশ থেকে ফর্মের পূর্ণ কাঠামো মিলিয়ে নেওয়া হচ্ছে...",
+                                        fontSize = 9.5.sp,
+                                        color = TealDark
+                                    )
+                                }
+                            }
+                            resolvedTemplateMeta != null -> {
+                                val src = resolvedTemplateSource ?: "ক্যাশ/Firestore"
                                 Text(
-                                    text = "কলাম: $cols",
+                                    text = "উৎস: $src · ${SheetQrCodec.buildSummaryLabelBn(resolvedTemplateMeta)}",
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = TealDark
+                                )
+                                val cols = SheetQrCodec.shortColumnsPreviewBn(resolvedTemplateMeta, maxItems = 12)
+                                if (cols.isNotBlank()) {
+                                    Text(
+                                        text = "কলাম: $cols",
+                                        fontSize = 9.5.sp,
+                                        color = SlateText
+                                    )
+                                }
+                            }
+                            else -> {
+                                Text(
+                                    text = "স্মার্ট ID পাওয়া গেছে, তবে এই ডিভাইসের ক্যাশ বা অনলাইনে মিল পাওয়া যায়নি।",
                                     fontSize = 9.5.sp,
-                                    color = SlateText
+                                    color = SlateMuted
                                 )
                             }
                         }
+                    } else if (skippedByHigherPriority) {
+                        val higherName = if (detection?.detectedFromOfflineQr == true) {
+                            "ডান পাশের অফলাইন QR"
+                        } else {
+                            "বাম পাশের QR"
+                        }
+                        Text(
+                            text = "$higherName থেকে কাঠামো শনাক্ত হয়ে যাওয়ায় এই ব্যাকআপ QR আর স্ক্যান করতে হয়নি।",
+                            fontSize = 9.5.sp,
+                            color = SlateMuted
+                        )
                     } else {
+                        val posText = if (channel == SheetCodeChannel.BOTTOM_THIN_QR) {
+                            "ছবির নিচের অংশে ব্যাকআপ QR পড়া যায়নি।"
+                        } else {
+                            "ছবির উপরের বাম কোণায় স্মার্ট ID QR পড়া যায়নি।"
+                        }
                         val otherHint = buildOtherDetectedFallbackHint(detection, fallbackSource)
                         Text(
-                            text = "ছবির নিচের অংশে Code-128 বারকোড পড়া যায়নি।$otherHint",
+                            text = "$posText$otherHint",
                             fontSize = 9.5.sp,
                             color = SlateMuted
                         )
@@ -1435,7 +1370,7 @@ private fun buildOtherDetectedFallbackHint(
     fallbackSource: String?
 ): String {
     if (detection == null || detection.detectedCount == 0) {
-        return " পুরো পাতার কোণা বা নিচের অংশ স্পষ্টভাবে ফ্রেমে রেখে চেষ্টা করুন।"
+        return " ডান, বাম বা নিচের QR কোড স্পষ্টভাবে ফ্রেমে রেখে চেষ্টা করুন।"
     }
     val activeSource = fallbackSource?.takeIf { it.isNotBlank() } ?: detection.sourceLabelBn
     return if (activeSource.isNotBlank()) {

@@ -208,8 +208,11 @@ fun SmartCsvImportDialog(
                     } else {
                         try {
                             val det = SheetQrScanner.decodeAllFromBitmap(bmp)
+                            val offline = det.offlineQrMeta
                             val tid = det.templateId?.trim()?.uppercase()?.takeIf { it.length >= 6 }
-                            val cached = tid?.let { SheetTemplateCache(ctx).get(it) }
+                            val cached = if (offline == null && tid != null) {
+                                SheetTemplateCache(ctx).get(tid)
+                            } else null
                             Triple(true, det, cached)
                         } finally {
                             bmp.recycle()
@@ -220,12 +223,13 @@ fun SmartCsvImportDialog(
                     onError("ছবিটি পড়া যায়নি")
                     return@launch
                 }
+                val offlineMeta = detection.offlineQrMeta
                 val tid = detection.templateId?.trim()?.uppercase()?.takeIf { it.length >= 6 }
-                val remoteMeta = if (cachedMeta == null && tid != null) {
+                val remoteMeta = if (offlineMeta == null && cachedMeta == null && tid != null) {
                     runCatching { onResolveRemoteTemplate(tid) }.getOrNull()
                 } else null
 
-                val resolvedMeta = cachedMeta ?: remoteMeta ?: detection.bestLocalMeta
+                val resolvedMeta = offlineMeta ?: cachedMeta ?: remoteMeta ?: detection.bestLocalMeta
                 if (resolvedMeta != null) {
                     val nextConfig = CsvImportAssistant.configFromScannedSheetMeta(resolvedMeta, settings, promptConfig)
                     promptConfig = nextConfig
@@ -238,10 +242,11 @@ fun SmartCsvImportDialog(
                     sharedWorkingDaysByTerm = scannedWorkingDaysByTerm + parsedSheet.detectedWorkingDaysByTerm
 
                     val srcLabel = when {
-                        cachedMeta != null && !detection.detectedFromOfflineQr -> "ক্যাশ টেমপ্লেট"
-                        remoteMeta != null -> "ক্লাউড টেমপ্লেট"
+                        offlineMeta != null -> detection.sourceLabelBn.ifBlank { "ডান পাশের অফলাইন QR" }
+                        cachedMeta != null -> "${detection.sourceLabelBn.ifBlank { "বাম/নিচের QR" }} · ক্যাশ"
+                        remoteMeta != null -> "${detection.sourceLabelBn.ifBlank { "বাম/নিচের QR" }} · ক্লাউড"
                         detection.sourceLabelBn.isNotBlank() -> detection.sourceLabelBn
-                        else -> "শীট কোড"
+                        else -> "শীট QR"
                     }
                     scannedBanner = CsvScannedSheetBannerInfo(
                         summaryBn = CsvImportAssistant.buildScannedSheetSummaryBn(resolvedMeta, settings),
@@ -250,13 +255,14 @@ fun SmartCsvImportDialog(
                     )
                     promptCopiedRecently = false
                     currentStep = CsvWizardStep.PROMPT
-                    Toast.makeText(ctx, "শীট শনাক্ত হয়েছে — AI প্রম্পট প্রস্তুত!", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(ctx, "শীট শনাক্ত হয়েছে ($srcLabel) — AI প্রম্পট প্রস্তুত!", Toast.LENGTH_SHORT).show()
                 } else {
-                    Toast.makeText(
-                        ctx,
-                        "ছবিতে QR বা বারকোড শনাক্ত করা যায়নি — কোণার QR ও নিচের বারকোড স্পষ্ট রেখে আবার তুলুন",
-                        Toast.LENGTH_LONG
-                    ).show()
+                    val msg = if (tid != null) {
+                        "${detection.sourceLabelBn.ifBlank { "বাম/নিচের QR" }} থেকে আইডি ($tid) পাওয়া গেছে, কিন্তু ক্যাশ/ক্লাউডে টেমপ্লেট মেলেনি — ডান পাশের অফলাইন QR স্পষ্ট রেখে তুলুন"
+                    } else {
+                        "ছবিতে ডান, বাম বা নিচের কোনো QR কোড শনাক্ত করা যায়নি — কোড স্পষ্ট রেখে আবার তুলুন"
+                    }
+                    Toast.makeText(ctx, msg, Toast.LENGTH_LONG).show()
                 }
             } finally {
                 isScanningSheet = false

@@ -200,36 +200,43 @@ object BlankSheetPdfGen {
         // 1. Far-Left Thin Firestore/Cache QR + Centered [DPE Logo + School Title & Subtitle] + Far-Right Compact Offline QR
         val leftQrMatrix = if (page.thinQrPayload.isNotBlank()) SheetQrCodec.encodeQrMatrix(page.thinQrPayload) else null
         val rightQrMatrix = if (page.qrPayload.isNotBlank()) SheetQrCodec.encodeQrMatrix(page.qrPayload) else null
-        val qrBoxSize = 42f
-        val qrTop = marginTop - 3f
+        val leftQrBoxSize = 42f
+        val rightQrBoxSize = when {
+            rightQrMatrix == null -> 42f
+            rightQrMatrix.width >= 33 -> 50f
+            rightQrMatrix.width >= 29 -> 47f
+            else -> 44f
+        }
+        val maxTopQrBox = max(
+            if (leftQrMatrix != null) leftQrBoxSize else 0f,
+            if (rightQrMatrix != null) rightQrBoxSize else 0f
+        )
+        val qrTop = marginTop - 6f
 
         fun drawQrBox(
             matrix: com.google.zxing.common.BitMatrix,
             qrLeft: Float,
             topY: Float = qrTop,
-            boxSize: Float = qrBoxSize,
-            quietPad: Float = 2.8f
+            boxSize: Float = leftQrBoxSize,
+            minQuietPad: Float = 3.2f
         ) {
             val qrBox = RectF(qrLeft, topY, qrLeft + boxSize, topY + boxSize)
             val whitePaint = Paint().apply {
                 color = Color.WHITE
                 style = Paint.Style.FILL
             }
-            val qrFramePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                color = Color.BLACK
-                style = Paint.Style.STROKE
-                strokeWidth = 0.55f
-            }
             val qrModulePaint = Paint().apply {
                 color = Color.BLACK
                 style = Paint.Style.FILL
+                isAntiAlias = false
             }
-            c.drawRoundRect(qrBox, 2f, 2f, whitePaint)
-            c.drawRoundRect(qrBox, 2f, 2f, qrFramePaint)
+            // Borderless white background ensures ISO >= 4-module quiet zone without dark border interference
+            c.drawRect(qrBox, whitePaint)
 
             val matrixW = matrix.width.coerceAtLeast(1)
             val matrixH = matrix.height.coerceAtLeast(1)
-            val drawArea = boxSize - quietPad * 2f
+            val quietPad = max(minQuietPad, (boxSize / (matrixW + 8f)) * 4f)
+            val drawArea = max(8f, boxSize - quietPad * 2f)
             val modW = drawArea / matrixW.toFloat()
             val modH = drawArea / matrixH.toFloat()
             val originX = qrLeft + quietPad
@@ -237,25 +244,31 @@ object BlankSheetPdfGen {
             for (my in 0 until matrixH) {
                 val cellTopY = originY + my * modH
                 val cellBottomY = originY + (my + 1) * modH
-                for (mx in 0 until matrixW) {
+                var mx = 0
+                while (mx < matrixW) {
                     if (matrix.get(mx, my)) {
+                        var runEnd = mx + 1
+                        while (runEnd < matrixW && matrix.get(runEnd, my)) runEnd++
                         val leftX = originX + mx * modW
-                        val rightX = originX + (mx + 1) * modW
+                        val rightX = originX + runEnd * modW
                         c.drawRect(leftX, cellTopY, rightX, cellBottomY, qrModulePaint)
+                        mx = runEnd
+                    } else {
+                        mx++
                     }
                 }
             }
         }
 
         if (leftQrMatrix != null) {
-            drawQrBox(leftQrMatrix, marginX)
+            drawQrBox(leftQrMatrix, marginX, boxSize = leftQrBoxSize, minQuietPad = 3.2f)
         }
         if (rightQrMatrix != null) {
-            drawQrBox(rightQrMatrix, marginX + contentW - qrBoxSize)
+            drawQrBox(rightQrMatrix, marginX + contentW - rightQrBoxSize, boxSize = rightQrBoxSize, minQuietPad = 3.6f)
         }
 
         val hasAnyQr = leftQrMatrix != null || rightQrMatrix != null
-        val qrSideClearance = if (hasAnyQr) qrBoxSize + 10f else 0f
+        val qrSideClearance = if (hasAnyQr) maxTopQrBox + 10f else 0f
         val centerAvailW = max(130f, contentW - qrSideClearance * 2f)
 
         val logoSize = 25f
@@ -305,7 +318,7 @@ object BlankSheetPdfGen {
         PdfGen.drawMixedText(c, addressAndYear, textCenterX, marginTop + 27.5f, subPaint, Paint.Align.CENTER)
 
         // 2. Concise Bengali Class + Subject + Term Title Banner (White + Very Light Gray Shade + Black Border)
-        val metaTop = if (hasAnyQr) marginTop + 42f else marginTop + 34f
+        val metaTop = if (hasAnyQr) max(marginTop + 42f, qrTop + maxTopQrBox + 4f) else marginTop + 34f
         val metaH = 24f
         val metaRect = RectF(marginX, metaTop, marginX + contentW, metaTop + metaH)
         c.drawRoundRect(metaRect, 3f, 3f, metaFillPaint)
@@ -641,7 +654,7 @@ object BlankSheetPdfGen {
                 qrLeft = marginX,
                 topY = bottomQrTop,
                 boxSize = bottomQrSize,
-                quietPad = 2.2f
+                minQuietPad = 2.6f
             )
             val infoX = marginX + bottomQrSize + 7f
             val refLine = page.sheetRefCode.ifBlank { "REF:${page.barcodeText.substringBeforeLast('-')}" }

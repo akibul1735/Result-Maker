@@ -235,11 +235,7 @@ object SheetQrCodec {
             if (tid.length >= 6) return tid.uppercase()
         }
         if (trimmed.startsWith("K2/")) {
-            val parts = trimmed.split('/')
-            val tid = parts.getOrNull(11)?.trim().orEmpty()
-            if (tid.length >= 6 && tid != "." && tid.all { it in 'A'..'Z' || it in '0'..'9' }) {
-                return tid
-            }
+            decodeCompactK2(trimmed)?.templateId?.takeIf { it.length >= 6 }?.let { return it }
         }
         return null
     }
@@ -595,11 +591,13 @@ object SheetQrCodec {
     ): BitMatrix? {
         if (payload.isBlank()) return null
         return runCatching {
-            val hints = mapOf(
-                EncodeHintType.ERROR_CORRECTION to ecLevel,
-                EncodeHintType.CHARACTER_SET to "UTF-8",
-                EncodeHintType.MARGIN to 0
-            )
+            val hints = buildMap {
+                put(EncodeHintType.ERROR_CORRECTION, ecLevel)
+                if (payload.any { it.code > 127 }) {
+                    put(EncodeHintType.CHARACTER_SET, "UTF-8")
+                }
+                put(EncodeHintType.MARGIN, 0)
+            }
             QRCodeWriter().encode(payload, BarcodeFormat.QR_CODE, 0, 0, hints)
         }.getOrNull()
     }
@@ -742,7 +740,7 @@ object SheetQrCodec {
         val hasTotal = meta.columnIds.any { it == "TOTAL" }
 
         return buildString {
-            appendLine("[নিশ্চিত শিট কাঠামো — ৩টি QR/বারকোড ও টেমপ্লেট থেকে প্রাপ্ত]:")
+            appendLine("[নিশ্চিত শিট কাঠামো — QR কোড ও টেমপ্লেট থেকে প্রাপ্ত]:")
             appendLine("- নিশ্চিত তথ্য: cls=${meta.cls}, subKey=${cleanSubKey ?: "ছবি_থেকে_শনাক্ত"}, term=${if (meta.term in 1..3) meta.term else "ছবি_অনুযায়ী"}, sheetKind=${meta.sheetKind.name}, বিষয়=$subStr, প্রান্তিক=$termLabel, পৃষ্ঠা=${meta.pageIndex}/${meta.totalPages}।")
             appendLine("- টেবিলের বাম থেকে ডান কলাম ক্রম (হুবহু এই কলামগুলোই টেবিলে আছে): $colListStr।")
             appendLine("- মুদ্রিত সংখ্যা ধরন: ${meta.numeralStyle.labelBn}; তবে আউটপুট JSON-এ সব সংখ্যা ইংরেজি অঙ্কে (0-9) দিন।")

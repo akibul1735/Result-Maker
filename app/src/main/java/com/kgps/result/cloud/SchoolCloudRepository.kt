@@ -30,7 +30,7 @@ import java.util.UUID
 class SchoolCloudRepository(
     private val db: FirebaseFirestore,
     private val auth: FirebaseAuth = Firebase.auth
-) {
+) : SchoolDataGateway {
     private val random = SecureRandom()
 
     private fun requireUserId(): String =
@@ -65,7 +65,7 @@ class SchoolCloudRepository(
 
     // ---------- User Profile ----------
 
-    suspend fun ensureUserProfile(): Result<UserCloudProfile> {
+    override suspend fun ensureUserProfile(): Result<UserCloudProfile> {
         val uid = auth.currentUser?.uid ?: return Result.failure(IllegalStateException("Not signed in"))
         val path = "users/$uid"
         return try {
@@ -114,7 +114,7 @@ class SchoolCloudRepository(
         }
     }
 
-    fun observeUserProfile(): Flow<UserCloudProfile?> = flow {
+    override fun observeUserProfile(): Flow<UserCloudProfile?> = flow {
         val uid = requireUserId()
         val path = "users/$uid"
         emitAll(
@@ -143,7 +143,7 @@ class SchoolCloudRepository(
         )
     }
 
-    suspend fun setActiveSchoolId(schoolId: String): Result<Unit> {
+    override suspend fun setActiveSchoolId(schoolId: String): Result<Unit> {
         val uid = auth.currentUser?.uid ?: return Result.failure(IllegalStateException("Not signed in"))
         val path = "users/$uid"
         return try {
@@ -165,7 +165,7 @@ class SchoolCloudRepository(
         }
     }
 
-    suspend fun cancelPendingJoinRequest(schoolId: String): Result<Unit> {
+    override suspend fun cancelPendingJoinRequest(schoolId: String): Result<Unit> {
         val uid = auth.currentUser?.uid ?: return Result.failure(IllegalStateException("Not signed in"))
         val path = "users/$uid"
         return try {
@@ -196,7 +196,7 @@ class SchoolCloudRepository(
 
     // ---------- Schools & Membership ----------
 
-    fun observeMySchools(): Flow<List<SchoolWorkspace>> = flow {
+    override fun observeMySchools(): Flow<List<SchoolWorkspace>> = flow {
         val uid = requireUserId()
         val path = "schools"
         emitAll(
@@ -215,7 +215,7 @@ class SchoolCloudRepository(
         )
     }
 
-    fun observeJoinRequests(schoolId: String, adminUid: String): Flow<List<JoinRequestItem>> = flow {
+    override fun observeJoinRequests(schoolId: String, adminUid: String): Flow<List<JoinRequestItem>> = flow {
         val uid = requireUserId()
         require(schoolId.isNotBlank()) { "School ID required" }
         val path = "schools/$schoolId/joinRequests"
@@ -249,7 +249,7 @@ class SchoolCloudRepository(
         )
     }
 
-    suspend fun createSchool(
+    override suspend fun createSchool(
         schoolName: String,
         schoolAddress: String,
         year: String,
@@ -392,7 +392,7 @@ class SchoolCloudRepository(
         }
     }
 
-    suspend fun lookupSchoolCode(rawCode: String): Result<SchoolCodePreview?> {
+    override suspend fun lookupSchoolCode(rawCode: String): Result<SchoolCodePreview?> {
         val code = rawCode.trim().uppercase().replace(Regex("[^A-Z0-9]"), "")
         if (code.length < 6 || code.length > 12) {
             return Result.failure(IllegalArgumentException("৬ থেকে ১২ অক্ষরের সঠিক স্কুল কোড লিখুন"))
@@ -424,7 +424,7 @@ class SchoolCloudRepository(
         }
     }
 
-    suspend fun joinSchoolWithCode(preview: SchoolCodePreview): Result<Boolean> {
+    override suspend fun joinSchoolWithCode(preview: SchoolCodePreview): Result<Boolean> {
         // Always requires Admin approval; returns false indicating pending request sent.
         var path = "schools/${preview.schoolId}/joinRequests"
         return try {
@@ -499,10 +499,10 @@ class SchoolCloudRepository(
         }
     }
 
-    suspend fun approveJoinRequest(
+    override suspend fun approveJoinRequest(
         schoolId: String,
         req: JoinRequestItem,
-        permissions: TeacherPermissions = TeacherPermissions.fullAccess()
+        permissions: TeacherPermissions
     ): Result<Unit> {
         val path = "schools/$schoolId"
         return try {
@@ -537,7 +537,7 @@ class SchoolCloudRepository(
         }
     }
 
-    suspend fun rejectJoinRequest(schoolId: String, requestUid: String): Result<Unit> {
+    override suspend fun rejectJoinRequest(schoolId: String, requestUid: String): Result<Unit> {
         val path = "schools/$schoolId/joinRequests/$requestUid"
         return try {
             requireUserId()
@@ -554,7 +554,7 @@ class SchoolCloudRepository(
         }
     }
 
-    suspend fun regenerateJoinCode(school: SchoolWorkspace): Result<String> {
+    override suspend fun regenerateJoinCode(school: SchoolWorkspace): Result<String> {
         val path = "schools/${school.id}"
         return try {
             requireUserId()
@@ -593,7 +593,7 @@ class SchoolCloudRepository(
         }
     }
 
-    suspend fun setApprovalRequired(school: SchoolWorkspace, required: Boolean): Result<Unit> {
+    override suspend fun setApprovalRequired(school: SchoolWorkspace, required: Boolean): Result<Unit> {
         val path = "schools/${school.id}"
         return try {
             requireUserId()
@@ -618,7 +618,7 @@ class SchoolCloudRepository(
         }
     }
 
-    suspend fun updateMemberPermissions(
+    override suspend fun updateMemberPermissions(
         school: SchoolWorkspace,
         targetUid: String,
         permissions: TeacherPermissions
@@ -651,7 +651,7 @@ class SchoolCloudRepository(
         }
     }
 
-    suspend fun updateMemberRole(school: SchoolWorkspace, targetUid: String, role: MemberRole): Result<Unit> {
+    override suspend fun updateMemberRole(school: SchoolWorkspace, targetUid: String, role: MemberRole): Result<Unit> {
         val path = "schools/${school.id}"
         return try {
             requireUserId()
@@ -695,7 +695,7 @@ class SchoolCloudRepository(
         }
     }
 
-    suspend fun removeMember(school: SchoolWorkspace, targetUid: String): Result<Unit> {
+    override suspend fun removeMember(school: SchoolWorkspace, targetUid: String): Result<Unit> {
         val path = "schools/${school.id}"
         return try {
             requireUserId()
@@ -727,7 +727,7 @@ class SchoolCloudRepository(
         }
     }
 
-    suspend fun leaveSchool(school: SchoolWorkspace): Result<Unit> {
+    override suspend fun leaveSchool(school: SchoolWorkspace): Result<Unit> {
         val path = "schools/${school.id}"
         return try {
             val uid = requireUserId()
@@ -761,7 +761,7 @@ class SchoolCloudRepository(
         }
     }
 
-    suspend fun updateSchoolSettings(school: SchoolWorkspace, nextSettings: Settings): Result<Unit> {
+    override suspend fun updateSchoolSettings(school: SchoolWorkspace, nextSettings: Settings): Result<Unit> {
         val path = "schools/${school.id}"
         return try {
             requireUserId()
@@ -835,7 +835,7 @@ class SchoolCloudRepository(
         }
     }
 
-    suspend fun updateSchoolResultRules(
+    override suspend fun updateSchoolResultRules(
         school: SchoolWorkspace,
         nextRules: com.kgps.result.ResultEvaluationRules
     ): Result<Unit> {
@@ -861,7 +861,7 @@ class SchoolCloudRepository(
 
     // ---------- School Students (Realtime + Concurrent Field-Level Sync) ----------
 
-    fun observeSchoolStudents(schoolId: String): Flow<Pair<List<Student>, Map<String, StudentSyncMeta>>> = flow {
+    override fun observeSchoolStudents(schoolId: String): Flow<Pair<List<Student>, Map<String, StudentSyncMeta>>> = flow {
         val uid = requireUserId()
         require(schoolId.isNotBlank()) { "School ID required" }
         val path = "schools/$schoolId/students"
@@ -889,7 +889,7 @@ class SchoolCloudRepository(
         )
     }
 
-    suspend fun upsertStudent(
+    override suspend fun upsertStudent(
         schoolId: String,
         student: Student,
         existing: Student?
@@ -925,7 +925,7 @@ class SchoolCloudRepository(
         }
     }
 
-    suspend fun patchStudentField(
+    override suspend fun patchStudentField(
         schoolId: String,
         studentId: String,
         fieldPath: String,
@@ -966,7 +966,7 @@ class SchoolCloudRepository(
         }
     }
 
-    suspend fun patchBatchXFields(
+    override suspend fun patchBatchXFields(
         schoolId: String,
         studentIds: Collection<String>,
         xUpdates: Map<String, String?>
@@ -1008,7 +1008,7 @@ class SchoolCloudRepository(
         }
     }
 
-    suspend fun patchBatchPerStudentXField(
+    override suspend fun patchBatchPerStudentXField(
         schoolId: String,
         xKey: String,
         valuesByStudentId: Map<String, String?>
@@ -1048,7 +1048,7 @@ class SchoolCloudRepository(
         }
     }
 
-    suspend fun deleteStudent(schoolId: String, studentId: String): Result<Unit> {
+    override suspend fun deleteStudent(schoolId: String, studentId: String): Result<Unit> {
         val docId = sanitizeDocId(studentId)
         val path = "schools/$schoolId/students/$docId"
         return try {
@@ -1066,7 +1066,7 @@ class SchoolCloudRepository(
         }
     }
 
-    suspend fun deleteAllSchoolStudents(schoolId: String, studentIds: List<String>): Result<Unit> {
+    override suspend fun deleteAllSchoolStudents(schoolId: String, studentIds: List<String>): Result<Unit> {
         val path = "schools/$schoolId/students"
         return try {
             requireUserId()
@@ -1085,11 +1085,11 @@ class SchoolCloudRepository(
         }
     }
 
-    suspend fun syncBatchStudents(
+    override suspend fun syncBatchStudents(
         schoolId: String,
         previousList: List<Student>,
         nextList: List<Student>,
-        deleteRemoved: Boolean = false
+        deleteRemoved: Boolean
     ): Result<Unit> {
         val path = "schools/$schoolId/students"
         return try {
@@ -1310,7 +1310,7 @@ class SchoolCloudRepository(
 
     // ---------- Smart Blank Sheet Templates ----------
 
-    suspend fun saveSheetTemplate(
+    override suspend fun saveSheetTemplate(
         schoolId: String,
         meta: BlankSheetQrMeta
     ): Result<String> {
@@ -1361,7 +1361,7 @@ class SchoolCloudRepository(
         }
     }
 
-    suspend fun fetchSheetTemplate(
+    override suspend fun fetchSheetTemplate(
         schoolId: String,
         templateId: String
     ): Result<BlankSheetQrMeta?> {
@@ -1387,9 +1387,9 @@ class SchoolCloudRepository(
         }
     }
 
-    suspend fun fetchAllSheetTemplates(
+    override suspend fun fetchAllSheetTemplates(
         schoolId: String,
-        limitCount: Long = 200L
+        limitCount: Long
     ): Result<List<BlankSheetQrMeta>> {
         if (auth.currentUser == null) return Result.success(emptyList())
         val cleanSchoolId = schoolId.trim()

@@ -44,8 +44,8 @@ import com.kgps.result.backup.GoogleDriveBackupClient
 import com.kgps.result.cloud.CloudSessionState
 import com.kgps.result.cloud.JoinRequestItem
 import com.kgps.result.cloud.MemberRole
-import com.kgps.result.cloud.SchoolCloudRepository
 import com.kgps.result.cloud.SchoolCodePreview
+import com.kgps.result.cloud.SchoolDataGateway
 import com.kgps.result.cloud.SchoolWorkspace
 import com.kgps.result.cloud.SheetTemplateCache
 import com.kgps.result.cloud.StudentSyncMeta
@@ -127,13 +127,14 @@ data class AiAssistantState(
 @OptIn(ExperimentalCoroutinesApi::class, kotlinx.coroutines.FlowPreview::class)
 class ResultMakerViewModel(
     private val appContext: Context,
-    private val cloudRepo: SchoolCloudRepository,
+    private val cloudRepo: SchoolDataGateway,
     private val autoBackupManager: AutoBackupManager,
     private val contentResolver: ContentResolver,
     val currentUserId: String,
     val currentUserDisplayName: String,
     val currentUserEmail: String,
-    private val initialLocalSnapshot: Pair<List<Student>, Settings>? = null
+    private val initialLocalSnapshot: Pair<List<Student>, Settings>? = null,
+    val isLocalPreviewMode: Boolean = false
 ) : ViewModel() {
 
     private val directAiRepository = DirectGeminiAiRepository(appContext)
@@ -2519,28 +2520,23 @@ class ResultMakerViewModel(
         switchToScannerTab: Boolean,
         keepExistingOnMiss: Boolean
     ) {
+        val offlineMeta = detection.offlineQrMeta
         val tid = detection.templateId?.trim()?.uppercase()?.takeIf { it.length >= 6 }
-        val cachedMeta = if (tid != null) {
+        val cachedMeta = if (offlineMeta == null && tid != null) {
             withContext(Dispatchers.IO) { sheetTemplateCache.get(tid) }
         } else null
 
         val immediateMeta = when {
-            cachedMeta != null -> {
-                val pIdx = detection.offlineQrMeta?.pageIndex ?: cachedMeta.pageIndex
-                val pTot = detection.offlineQrMeta?.totalPages ?: cachedMeta.totalPages
-                cachedMeta.copy(pageIndex = pIdx, totalPages = pTot)
-            }
+            offlineMeta != null -> offlineMeta
+            cachedMeta != null -> cachedMeta
             detection.bestLocalMeta != null -> detection.bestLocalMeta
             keepExistingOnMiss -> _aiState.value.detectedSheetQr
             else -> null
         }
 
         val immediateSource = when {
-            cachedMeta != null -> if (detection.detectedFromBarcode && !detection.detectedFromThinQr && !detection.detectedFromOfflineQr) {
-                "বারকোড + অফলাইন ক্যাশ"
-            } else {
-                "ক্যাশ টেমপ্লেট QR"
-            }
+            offlineMeta != null -> detection.sourceLabelBn.ifBlank { "ডান পাশের অফলাইন QR" }
+            cachedMeta != null -> "${detection.sourceLabelBn.ifBlank { "বাম/নিচের QR" }} · অফলাইন ক্যাশ"
             detection.bestLocalMeta != null -> detection.sourceLabelBn
             keepExistingOnMiss && immediateMeta != null -> _aiState.value.sheetDetectionSource
             else -> null
@@ -2549,18 +2545,20 @@ class ResultMakerViewModel(
         val preservePreviousDetection = keepExistingOnMiss && detection.detectedCount == 0
         val nextDetection = if (preservePreviousDetection) _aiState.value.sheetDetection else detection
         val nextResolvedMeta = when {
+            offlineMeta != null -> offlineMeta
             cachedMeta != null -> cachedMeta
             preservePreviousDetection -> _aiState.value.resolvedTemplateMeta
             else -> null
         }
         val nextResolvedSource = when {
+            offlineMeta != null -> "ডান পাশের অফলাইন QR"
             cachedMeta != null -> "অফলাইন ক্যাশ"
             preservePreviousDetection -> _aiState.value.resolvedTemplateSource
             else -> null
         }
 
         val schoolId = activeSchool.value?.id?.trim().orEmpty()
-        val needsOnlineFetch = tid != null && cachedMeta == null && schoolId.isNotEmpty()
+        val needsOnlineFetch = offlineMeta == null && tid != null && cachedMeta == null && schoolId.isNotEmpty()
 
         _aiState.update {
             it.copy(
@@ -2633,11 +2631,11 @@ class ResultMakerViewModel(
 
     private suspend fun resolveEffectiveSheetQrMeta(targetBmp: Bitmap): BlankSheetQrMeta? {
         val st = _aiState.value
+        st.sheetDetection?.offlineQrMeta?.let { return it }
+
         val existingResolved = st.resolvedTemplateMeta
         if (existingResolved != null && existingResolved.columnIds.isNotEmpty()) {
-            val pIdx = st.sheetDetection?.offlineQrMeta?.pageIndex ?: existingResolved.pageIndex
-            val pTot = st.sheetDetection?.offlineQrMeta?.totalPages ?: existingResolved.totalPages
-            return existingResolved.copy(pageIndex = pIdx, totalPages = pTot)
+            return existingResolved
         }
 
         val tid = st.sheetDetection?.templateId?.trim()?.uppercase()?.takeIf { it.length >= 6 }

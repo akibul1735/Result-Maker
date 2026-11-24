@@ -10,6 +10,7 @@ import com.google.zxing.qrcode.QRCodeReader
 import com.kgps.result.ai.BarcodeLuminanceDecoder
 import com.kgps.result.ai.ClassSheetImportScope
 import com.kgps.result.ai.ClassSheetKind
+import com.kgps.result.ai.QrLuminanceDecoder
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNotNull
@@ -63,6 +64,7 @@ class SheetQrCodecTest {
         assertEquals(listOf("মৌখিক পরীক্ষা"), decoded.customColumnTitles)
         assertTrue(decoded.columnIds.contains("CUS:0"))
         assertEquals(meta.templateId, decoded.templateId)
+        assertEquals(meta.templateId, SheetQrCodec.decodeTemplateId(encoded))
 
         val aiPrompt = SheetQrCodec.buildAiPromptInstructions(decoded)
         assertTrue(aiPrompt.contains("cls=4"))
@@ -122,7 +124,7 @@ class SheetQrCodecTest {
 
         val matrix = SheetQrCodec.encodeQrMatrix(payload)
         assertNotNull(matrix)
-        assertTrue("Compact QR should stay <= 29x29 modules, was ${matrix!!.width}", matrix.width <= 29)
+        assertTrue("Compact QR without UTF-8 ECI should stay <= 25x25 modules, was ${matrix!!.width}", matrix.width <= 25)
     }
 
     @Test
@@ -288,6 +290,85 @@ class SheetQrCodecTest {
     }
 
     @Test
+    fun qrLuminanceDecoderRecoversDenseK2QrWithTightBlackFrameShadowBlurAndLowPxPerModule() {
+        val customCols = BlankSheetCatalog.presetColumns(BlankSheetPreset.THREE_TERM_MARKS) +
+            BlankSheetColumn(id = "CUSTOM_99", titleBn = "মৌখিক", isCustom = true)
+        val meta = BlankSheetQrMeta(
+            cls = 4,
+            subjectKey = "MATH",
+            term = 2,
+            sheetKind = ClassSheetKind.THREE_TERM_MARKS,
+            importScope = ClassSheetImportScope.BOTH,
+            columnIds = customCols.mapIndexed { idx, col ->
+                if (col.isCustom) "CUS:0" else col.id
+            },
+            customColumnTitles = listOf("মৌখিক"),
+            workingDaysByTerm = mapOf(1 to "62", 2 to "65"),
+            pageIndex = 2,
+            totalPages = 3
+        )
+        val payload = SheetQrCodec.encodePayload(meta)
+        val matrix = SheetQrCodec.encodeQrMatrix(payload)!!
+        val mW = matrix.width
+
+        // 1) Simulate LEGACY printed sheet geometry: 2.2-module quiet zone + dark frame border
+        // + diagonal camera shadow + small fractional 2.3 px/module scale + blur
+        val pxPerMod = 2.3f
+        val quietPx = 5 // ~2.17 modules (below QR spec 4 modules, matching old 2.8pt padding!)
+        val qrSizePx = (mW * pxPerMod).toInt() + quietPx * 2
+        val cropW = qrSizePx + 20
+        val cropH = qrSizePx + 20
+        val frameL = 10
+        val frameT = 10
+        val frameR = frameL + qrSizePx - 1
+        val frameB = frameT + qrSizePx - 1
+
+        fun sampleLegacyQr(x: Float, y: Float): Boolean {
+            val ix = kotlin.math.round(x).toInt()
+            val iy = kotlin.math.round(y).toInt()
+            // Legacy 1-2px black border around box
+            if ((ix == frameL || ix == frameR) && iy in frameT..frameB) return true
+            if ((iy == frameT || iy == frameB) && ix in frameL..frameR) return true
+            val mx = kotlin.math.floor(((x - (frameL + quietPx)) / pxPerMod).toDouble()).toInt()
+            val my = kotlin.math.floor(((y - (frameT + quietPx)) / pxPerMod).toDouble()).toInt()
+            return mx in 0 until mW && my in 0 until mW && matrix.get(mx, my)
+        }
+
+        val luma = ByteArray(cropW * cropH)
+        for (y in 0 until cropH) {
+            for (x in 0 until cropW) {
+                var darkWeight = 0f
+                // 3x3 subpixel box-blur simulating camera softness & anti-aliasing
+                val offsets = floatArrayOf(-0.35f, 0f, 0.35f)
+                for (oy in offsets) {
+                    for (ox in offsets) {
+                        if (sampleLegacyQr(x + ox, y + oy)) darkWeight += 1f / 9f
+                    }
+                }
+                val diag = (x + y).toFloat() / (cropW + cropH - 2).coerceAtLeast(1)
+                val blackLum = 38f + 92f * diag // shadowy left/top -> brighter right/bottom
+                val whiteLum = 128f + 106f * diag
+                val lum = (whiteLum - (whiteLum - blackLum) * darkWeight).toInt().coerceIn(0, 255)
+                luma[y * cropW + x] = lum.toByte()
+            }
+        }
+
+        val decodedTexts = QrLuminanceDecoder.decodeAllQrs(
+            width = cropW,
+            height = cropH,
+            luma = luma,
+            addQuietZone = true
+        )
+        assertTrue("Expected QrLuminanceDecoder to recover legacy framed blurry K2 QR, got $decodedTexts", decodedTexts.isNotEmpty())
+        val recovered = decodedTexts.firstNotNullOfOrNull { SheetQrCodec.decodePayload(it) }
+        assertNotNull(recovered)
+        assertEquals(4, recovered!!.cls)
+        assertEquals("MATH", recovered.subjectKey)
+        assertEquals(2, recovered.pageIndex)
+        assertEquals(listOf("মৌখিক"), recovered.customColumnTitles)
+    }
+
+    @Test
     fun barcodeLuminanceDecoderRecoversShadowedLowContrastBlurAndZeroQuietZone() {
         val barcodeText = "C3-BAN-T1-FULL-ABCDEF1234"
         val matrix = SheetQrCodec.encodeBarcodeMatrix(barcodeText)
@@ -347,6 +428,45 @@ class SheetQrCodecTest {
         assertEquals(5, ch.meta!!.cls)
         assertEquals("SOC_1", ch.meta.subjectKey)
         assertEquals(2, ch.meta.term)
+    }
+
+    @Test
+    fun sheetScanDetectionPriorityAndLabelsReflectThreeQrChannels() {
+        val meta = BlankSheetQrMeta(
+            cls = 3,
+            subjectKey = "BAN",
+            term = 1,
+            sheetKind = ClassSheetKind.SINGLE_TERM_MARKS,
+            importScope = ClassSheetImportScope.BOTH,
+            columnIds = listOf("ROLL", "NAME", "CONT", "WR", "TOTAL")
+        )
+        val rightOffline = com.kgps.result.ai.SheetScanDetection(
+            templateId = meta.templateId,
+            offlineQrRawText = SheetQrCodec.encodePayload(meta),
+            offlineQrMeta = meta,
+            detectedFromOfflineQr = true
+        )
+        assertEquals("ডান পাশের অফলাইন QR", rightOffline.sourceLabelBn)
+        assertEquals(1, rightOffline.detectedCount)
+        assertEquals(meta, rightOffline.bestLocalMeta)
+
+        val leftThin = com.kgps.result.ai.SheetScanDetection(
+            templateId = meta.templateId,
+            thinQrRawText = SheetQrCodec.encodeThinTemplateQr(meta.templateId),
+            detectedFromThinQr = true
+        )
+        assertEquals("বাম পাশের QR", leftThin.sourceLabelBn)
+        assertEquals(1, leftThin.detectedCount)
+        assertEquals(null, leftThin.bestLocalMeta)
+
+        val bottomThin = com.kgps.result.ai.SheetScanDetection(
+            templateId = meta.templateId,
+            bottomQrRawText = SheetQrCodec.encodeThinTemplateQr(meta.templateId),
+            detectedFromBottomQr = true
+        )
+        assertEquals("নিচের QR", bottomThin.sourceLabelBn)
+        assertEquals(1, bottomThin.detectedCount)
+        assertEquals(null, bottomThin.bestLocalMeta)
     }
 
     private fun decodeQrMatrixWithZxing(matrix: com.google.zxing.common.BitMatrix): String {

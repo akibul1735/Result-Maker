@@ -3,6 +3,7 @@
 package com.kgps.result
 
 import android.graphics.Color as AndroidColor
+import android.os.Build
 import android.os.Bundle
 import androidx.activity.SystemBarStyle
 import androidx.fragment.app.FragmentActivity
@@ -95,6 +96,7 @@ import com.google.firebase.auth.auth
 import com.google.firebase.firestore.FirebaseFirestore
 import com.kgps.result.backup.AutoBackupManager
 import com.kgps.result.cloud.CloudSessionState
+import com.kgps.result.cloud.LocalPreviewSchoolGateway
 import com.kgps.result.cloud.SchoolCloudRepository
 import com.kgps.result.cloud.SchoolWorkspace
 import com.kgps.result.cloud.TeacherPermissions
@@ -182,6 +184,34 @@ private val PRIMARY_NAV_ITEMS = listOf(
     NavItem(NavSection.ASSISTANT, "AI সহায়ক", Icons.Rounded.AutoAwesome)
 )
 
+private fun isPreviewEmulator(): Boolean {
+    val fingerprint = Build.FINGERPRINT.lowercase()
+    val model = Build.MODEL.lowercase()
+    val manufacturer = Build.MANUFACTURER.lowercase()
+    val brand = Build.BRAND.lowercase()
+    val device = Build.DEVICE.lowercase()
+    val product = Build.PRODUCT.lowercase()
+    val hardware = Build.HARDWARE.lowercase()
+    return fingerprint.startsWith("generic") ||
+        fingerprint.startsWith("unknown") ||
+        fingerprint.contains("emulator") ||
+        model.contains("google_sdk") ||
+        model.contains("emulator") ||
+        model.contains("android sdk built for") ||
+        model.contains("cuttlefish") ||
+        manufacturer.contains("genymotion") ||
+        (brand.startsWith("generic") && device.startsWith("generic")) ||
+        product.contains("sdk") ||
+        product.contains("emulator") ||
+        product.contains("simulator") ||
+        product.contains("cf_") ||
+        device.contains("emu") ||
+        device.contains("vsoc") ||
+        hardware.contains("goldfish") ||
+        hardware.contains("ranchu") ||
+        hardware.contains("cutf")
+}
+
 @Composable
 private fun AppRoot(
     appFontId: String,
@@ -190,6 +220,44 @@ private fun AppRoot(
     onSelectAppEnglishFont: (String) -> Unit
 ) {
     val context = LocalContext.current
+    val previewEmulator = remember { isPreviewEmulator() }
+
+    if (previewEmulator) {
+        val appContext = context.applicationContext
+        val vm: ResultMakerViewModel = viewModel(
+            key = LocalPreviewSchoolGateway.PREVIEW_UID,
+            factory = viewModelFactory {
+                initializer {
+                    val localGateway = LocalPreviewSchoolGateway(appContext)
+                    val autoBackupManager = AutoBackupManager(appContext, LocalPreviewSchoolGateway.PREVIEW_UID)
+                    val localSeed = Repo.load(appContext)
+                    ResultMakerViewModel(
+                        appContext = appContext,
+                        cloudRepo = localGateway,
+                        autoBackupManager = autoBackupManager,
+                        contentResolver = appContext.contentResolver,
+                        currentUserId = LocalPreviewSchoolGateway.PREVIEW_UID,
+                        currentUserDisplayName = LocalPreviewSchoolGateway.PREVIEW_NAME,
+                        currentUserEmail = LocalPreviewSchoolGateway.PREVIEW_EMAIL,
+                        initialLocalSnapshot = localSeed,
+                        isLocalPreviewMode = true
+                    )
+                }
+            }
+        )
+        AuthenticatedWorkspaceHost(
+            vm = vm,
+            appFontId = appFontId,
+            appEnglishFontId = appEnglishFontId,
+            onSelectAppFont = onSelectAppFont,
+            onSelectAppEnglishFont = onSelectAppEnglishFont,
+            onSignOut = {
+                vm.showMessage("প্রিভিউ এমুলেটর অফলাইন লোকাল মোডে চলছে (Firebase বন্ধ)।")
+            }
+        )
+        return
+    }
+
     val scope = rememberCoroutineScope()
     val credentialManager = remember(context) { CredentialManager.create(context) }
 
@@ -282,42 +350,12 @@ private fun AppRoot(
                         currentUserId = user.uid,
                         currentUserDisplayName = user.displayName.orEmpty(),
                         currentUserEmail = user.email.orEmpty(),
-                        initialLocalSnapshot = localSeed
+                        initialLocalSnapshot = localSeed,
+                        isLocalPreviewMode = false
                     )
                 }
             }
         )
-
-        val snackbarMessage by vm.snackbarMessage.collectAsStateWithLifecycle()
-        val snackbarHostState = remember { SnackbarHostState() }
-        LaunchedEffect(snackbarMessage) {
-            val msg = snackbarMessage
-            if (!msg.isNullOrBlank()) {
-                snackbarHostState.showSnackbar(msg)
-                vm.clearMessage()
-            }
-        }
-
-        val sessionState by vm.sessionState.collectAsStateWithLifecycle()
-        val inSchoolHub by vm.inSchoolHub.collectAsStateWithLifecycle()
-        val schools by vm.mySchools.collectAsStateWithLifecycle()
-        val activeSchool by vm.activeSchool.collectAsStateWithLifecycle()
-        val hubBusy by vm.hubBusy.collectAsStateWithLifecycle()
-        val lookupBusy by vm.lookupBusy.collectAsStateWithLifecycle()
-        val codePreview by vm.codePreview.collectAsStateWithLifecycle()
-        val lookupError by vm.lookupError.collectAsStateWithLifecycle()
-        val pendingJoinSchoolName by vm.pendingJoinSchoolName.collectAsStateWithLifecycle()
-
-        val pendingDriveConsent by vm.pendingDriveConsent.collectAsStateWithLifecycle()
-        val driveConsentLauncher = rememberLauncherForActivityResult(
-            ActivityResultContracts.StartIntentSenderForResult()
-        ) { result ->
-            vm.handleDriveConsentIntentResult(result.resultCode, result.data)
-        }
-        LaunchedEffect(pendingDriveConsent) {
-            val sender = pendingDriveConsent ?: return@LaunchedEffect
-            driveConsentLauncher.launch(IntentSenderRequest.Builder(sender).build())
-        }
 
         val performSignOut: () -> Unit = {
             signOutFromGoogle(
@@ -327,29 +365,109 @@ private fun AppRoot(
             )
         }
 
-        Box(Modifier.fillMaxSize()) {
-            when (val state = sessionState) {
-                is CloudSessionState.Loading -> {
-                    Surface(Modifier.fillMaxSize(), color = SlateBg) {
-                        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                            Column(
-                                horizontalAlignment = Alignment.CenterHorizontally,
-                                verticalArrangement = Arrangement.spacedBy(12.dp)
-                            ) {
-                                CircularProgressIndicator(color = TealPrimary)
-                                Text("বিদ্যালয়ের তথ্য লোড হচ্ছে...", color = SlateMuted, fontSize = 13.sp)
-                            }
+        AuthenticatedWorkspaceHost(
+            vm = vm,
+            appFontId = appFontId,
+            appEnglishFontId = appEnglishFontId,
+            onSelectAppFont = onSelectAppFont,
+            onSelectAppEnglishFont = onSelectAppEnglishFont,
+            onSignOut = performSignOut
+        )
+    }
+}
+
+@Composable
+private fun AuthenticatedWorkspaceHost(
+    vm: ResultMakerViewModel,
+    appFontId: String,
+    appEnglishFontId: String,
+    onSelectAppFont: (String) -> Unit,
+    onSelectAppEnglishFont: (String) -> Unit,
+    onSignOut: () -> Unit
+) {
+    val snackbarMessage by vm.snackbarMessage.collectAsStateWithLifecycle()
+    val snackbarHostState = remember { SnackbarHostState() }
+    LaunchedEffect(snackbarMessage) {
+        val msg = snackbarMessage
+        if (!msg.isNullOrBlank()) {
+            snackbarHostState.showSnackbar(msg)
+            vm.clearMessage()
+        }
+    }
+
+    val sessionState by vm.sessionState.collectAsStateWithLifecycle()
+    val inSchoolHub by vm.inSchoolHub.collectAsStateWithLifecycle()
+    val schools by vm.mySchools.collectAsStateWithLifecycle()
+    val activeSchool by vm.activeSchool.collectAsStateWithLifecycle()
+    val hubBusy by vm.hubBusy.collectAsStateWithLifecycle()
+    val lookupBusy by vm.lookupBusy.collectAsStateWithLifecycle()
+    val codePreview by vm.codePreview.collectAsStateWithLifecycle()
+    val lookupError by vm.lookupError.collectAsStateWithLifecycle()
+    val pendingJoinSchoolName by vm.pendingJoinSchoolName.collectAsStateWithLifecycle()
+
+    val pendingDriveConsent by vm.pendingDriveConsent.collectAsStateWithLifecycle()
+    val driveConsentLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartIntentSenderForResult()
+    ) { result ->
+        vm.handleDriveConsentIntentResult(result.resultCode, result.data)
+    }
+    LaunchedEffect(pendingDriveConsent) {
+        val sender = pendingDriveConsent ?: return@LaunchedEffect
+        driveConsentLauncher.launch(IntentSenderRequest.Builder(sender).build())
+    }
+
+    Box(Modifier.fillMaxSize()) {
+        when (val state = sessionState) {
+            is CloudSessionState.Loading -> {
+                Surface(Modifier.fillMaxSize(), color = SlateBg) {
+                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            CircularProgressIndicator(color = TealPrimary)
+                            Text("বিদ্যালয়ের তথ্য লোড হচ্ছে...", color = SlateMuted, fontSize = 13.sp)
                         }
                     }
                 }
+            }
 
-                is CloudSessionState.Error -> {
+            is CloudSessionState.Error -> {
+                SchoolHubScreen(
+                    userDisplayName = vm.currentUserDisplayName,
+                    userEmail = vm.currentUserEmail,
+                    currentUserId = vm.currentUserId,
+                    schools = schools,
+                    activeSchoolId = activeSchool?.id.orEmpty(),
+                    pendingJoinSchoolName = pendingJoinSchoolName,
+                    localSeedCount = vm.localSeedCount,
+                    localSeedSettings = vm.localSeedSettings,
+                    isBusy = hubBusy,
+                    lookupBusy = lookupBusy,
+                    codePreview = codePreview,
+                    lookupError = lookupError,
+                    cloudError = state.message,
+                    onRetryCloud = vm::retryCloudConnection,
+                    onSelectSchool = vm::selectSchool,
+                    onCreateSchool = vm::createSchool,
+                    onLookupCode = vm::lookupSchoolCode,
+                    onClearCodePreview = vm::clearCodePreview,
+                    onJoinWithPreview = vm::joinWithCodePreview,
+                    onCancelPendingRequest = vm::cancelPendingJoinRequest,
+                    onBackToApp = null,
+                    onSignOut = onSignOut
+                )
+            }
+
+            is CloudSessionState.Ready -> {
+                val currentActive = activeSchool
+                if (inSchoolHub || currentActive == null) {
                     SchoolHubScreen(
                         userDisplayName = vm.currentUserDisplayName,
                         userEmail = vm.currentUserEmail,
                         currentUserId = vm.currentUserId,
                         schools = schools,
-                        activeSchoolId = activeSchool?.id.orEmpty(),
+                        activeSchoolId = currentActive?.id.orEmpty(),
                         pendingJoinSchoolName = pendingJoinSchoolName,
                         localSeedCount = vm.localSeedCount,
                         localSeedSettings = vm.localSeedSettings,
@@ -357,71 +475,41 @@ private fun AppRoot(
                         lookupBusy = lookupBusy,
                         codePreview = codePreview,
                         lookupError = lookupError,
-                        cloudError = state.message,
-                        onRetryCloud = vm::retryCloudConnection,
                         onSelectSchool = vm::selectSchool,
                         onCreateSchool = vm::createSchool,
                         onLookupCode = vm::lookupSchoolCode,
                         onClearCodePreview = vm::clearCodePreview,
                         onJoinWithPreview = vm::joinWithCodePreview,
                         onCancelPendingRequest = vm::cancelPendingJoinRequest,
-                        onBackToApp = null,
-                        onSignOut = performSignOut
+                        onBackToApp = if (currentActive != null) ({ vm.closeSchoolHub() }) else null,
+                        onSignOut = onSignOut
+                    )
+                } else {
+                    ResultMakerWorkspace(
+                        vm = vm,
+                        activeSchool = currentActive,
+                        appFontId = appFontId,
+                        appEnglishFontId = appEnglishFontId,
+                        onSelectAppFont = onSelectAppFont,
+                        onSelectAppEnglishFont = onSelectAppEnglishFont,
+                        snackbarHostState = snackbarHostState,
+                        onOpenSchoolHub = vm::openSchoolHub,
+                        onSignOut = onSignOut
                     )
                 }
-
-                is CloudSessionState.Ready -> {
-                    val currentActive = activeSchool
-                    if (inSchoolHub || currentActive == null) {
-                        SchoolHubScreen(
-                            userDisplayName = vm.currentUserDisplayName,
-                            userEmail = vm.currentUserEmail,
-                            currentUserId = vm.currentUserId,
-                            schools = schools,
-                            activeSchoolId = currentActive?.id.orEmpty(),
-                            pendingJoinSchoolName = pendingJoinSchoolName,
-                            localSeedCount = vm.localSeedCount,
-                            localSeedSettings = vm.localSeedSettings,
-                            isBusy = hubBusy,
-                            lookupBusy = lookupBusy,
-                            codePreview = codePreview,
-                            lookupError = lookupError,
-                            onSelectSchool = vm::selectSchool,
-                            onCreateSchool = vm::createSchool,
-                            onLookupCode = vm::lookupSchoolCode,
-                            onClearCodePreview = vm::clearCodePreview,
-                            onJoinWithPreview = vm::joinWithCodePreview,
-                            onCancelPendingRequest = vm::cancelPendingJoinRequest,
-                            onBackToApp = if (currentActive != null) ({ vm.closeSchoolHub() }) else null,
-                            onSignOut = performSignOut
-                        )
-                    } else {
-                        ResultMakerWorkspace(
-                            vm = vm,
-                            activeSchool = currentActive,
-                            appFontId = appFontId,
-                            appEnglishFontId = appEnglishFontId,
-                            onSelectAppFont = onSelectAppFont,
-                            onSelectAppEnglishFont = onSelectAppEnglishFont,
-                            snackbarHostState = snackbarHostState,
-                            onOpenSchoolHub = vm::openSchoolHub,
-                            onSignOut = performSignOut
-                        )
-                    }
-                }
             }
+        }
 
-            // Global snackbar overlay for Auth/SchoolHub when workspace Scaffold isn't mounted
-            if (inSchoolHub || activeSchool == null) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .navigationBarsPadding()
-                        .padding(bottom = 12.dp),
-                    contentAlignment = Alignment.BottomCenter
-                ) {
-                    ResultMakerSnackbarHost(snackbarHostState)
-                }
+        // Global snackbar overlay for Auth/SchoolHub when workspace Scaffold isn't mounted
+        if (inSchoolHub || activeSchool == null) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .navigationBarsPadding()
+                    .padding(bottom = 12.dp),
+                contentAlignment = Alignment.BottomCenter
+            ) {
+                ResultMakerSnackbarHost(snackbarHostState)
             }
         }
     }
@@ -609,6 +697,7 @@ fun ResultMakerWorkspace(
                         settings = settings,
                         activeSchool = activeSchool,
                         currentUserId = vm.currentUserId,
+                        isLocalPreviewMode = vm.isLocalPreviewMode,
                         permissions = permissions,
                         pendingRequestCount = joinRequests.size,
                         secondaryTitle = secondaryTitle,
@@ -627,7 +716,9 @@ fun ResultMakerWorkspace(
                         },
                         onOpenBlankSheetPdf = vm::openBlankSheetPdf,
                         onOpenSchoolHub = onOpenSchoolHub,
-                        onRequestSignOut = { askSignOut = true }
+                        onRequestSignOut = {
+                            if (vm.isLocalPreviewMode) onSignOut() else askSignOut = true
+                        }
                     )
                 }
             },
@@ -1275,6 +1366,7 @@ private fun ResultMakerTopBar(
     settings: Settings,
     activeSchool: SchoolWorkspace,
     currentUserId: String,
+    isLocalPreviewMode: Boolean,
     permissions: TeacherPermissions,
     pendingRequestCount: Int,
     secondaryTitle: String?,
@@ -1329,7 +1421,11 @@ private fun ResultMakerTopBar(
                             shape = RoundedCornerShape(6.dp)
                         ) {
                             Text(
-                                text = "● লাইভ · ${bn(activeSchool.memberUids.size.toString())} জন",
+                                text = if (isLocalPreviewMode) {
+                                    "● প্রিভিউ (অফলাইন)"
+                                } else {
+                                    "● লাইভ · ${bn(activeSchool.memberUids.size.toString())} জন"
+                                },
                                 fontSize = 9.5.sp,
                                 fontWeight = FontWeight.SemiBold,
                                 color = EmeraldGrade,
