@@ -244,10 +244,10 @@ jobs:
       - name: Prepare Release Signing Keystore
         id: ks_prep
         env:
-          RELEASE_KEYSTORE_BASE64: ${{ secrets.RELEASE_KEYSTORE_BASE64 }}
-          RELEASE_KEYSTORE_PASSWORD: ${{ secrets.RELEASE_KEYSTORE_PASSWORD }}
-          RELEASE_KEY_ALIAS: ${{ secrets.RELEASE_KEY_ALIAS }}
-          RELEASE_KEY_PASSWORD: ${{ secrets.RELEASE_KEY_PASSWORD }}
+          RELEASE_KEYSTORE_BASE64: ${{ secrets.RELEASE_KEYSTORE_BASE64 || secrets.KEYSTORE_BASE64 }}
+          RELEASE_KEYSTORE_PASSWORD: ${{ secrets.RELEASE_KEYSTORE_PASSWORD || secrets.KEYSTORE_PASSWORD }}
+          RELEASE_KEY_ALIAS: ${{ secrets.RELEASE_KEY_ALIAS || secrets.KEY_ALIAS }}
+          RELEASE_KEY_PASSWORD: ${{ secrets.RELEASE_KEY_PASSWORD || secrets.KEY_PASSWORD }}
         run: |
           if [ -n "$RELEASE_KEYSTORE_BASE64" ]; then
             printf '%s' "$RELEASE_KEYSTORE_BASE64" | tr -d '[:space:]' | base64 -d > app/release.keystore
@@ -257,7 +257,7 @@ jobs:
             fi
             STORE_PWD="$RELEASE_KEYSTORE_PASSWORD"
             if [ -z "$STORE_PWD" ]; then
-              echo "::error::RELEASE_KEYSTORE_PASSWORD secret is required when RELEASE_KEYSTORE_BASE64 is set."
+              echo "::error::RELEASE_KEYSTORE_PASSWORD (or KEYSTORE_PASSWORD) secret is required when RELEASE_KEYSTORE_BASE64 (or KEYSTORE_BASE64) is set."
               exit 1
             fi
             KEY_ALIAS="${RELEASE_KEY_ALIAS:-release}"
@@ -272,7 +272,7 @@ jobs:
             echo "generated_fallback=false" >> "$GITHUB_OUTPUT"
             echo "keystore_mode=cached_fallback" >> "$GITHUB_OUTPUT"
           else
-            echo "::warning::RELEASE_KEYSTORE_BASE64 secret not set. Generating fallback keystore and caching it (configure RELEASE_KEYSTORE_BASE64 for permanent upgrade continuity across >7-day gaps)."
+            echo "::warning::Neither RELEASE_KEYSTORE_BASE64 nor KEYSTORE_BASE64 secret is set. Generating fallback keystore and caching it (configure RELEASE_KEYSTORE_BASE64 or KEYSTORE_BASE64 for permanent upgrade continuity across >7-day gaps)."
             rm -f app/release.keystore
             keytool -genkeypair -v \
               -keystore app/release.keystore \
@@ -377,6 +377,84 @@ jobs:
           fail_on_unmatched_files: true
           files: release-output/result_maker_release.apk
 
+      - name: Prune Old GitHub Releases (Keep Latest 5)
+        id: prune_releases
+        if: github.event_name != 'pull_request' && steps.gh_release.outcome == 'success'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CURRENT_TAG: ${{ steps.meta.outputs.release_tag }}
+        run: |
+          python3 - <<'PYEOF'
+          import json
+          import os
+          import urllib.error
+          import urllib.parse
+          import urllib.request
+
+          token = os.environ["GH_TOKEN"]
+          repo = os.environ["GITHUB_REPOSITORY"]
+          current_tag = os.environ.get("CURRENT_TAG", "")
+          keep_count = 5
+
+          headers = {
+              "Accept": "application/vnd.github+json",
+              "Authorization": f"Bearer {token}",
+              "X-GitHub-Api-Version": "2022-11-28",
+              "User-Agent": "result-maker-ci",
+          }
+
+          def api_request(method: str, path: str):
+              url = f"https://api.github.com{path}"
+              req = urllib.request.Request(url, method=method, headers=headers)
+              with urllib.request.urlopen(req, timeout=30) as resp:
+                  body = resp.read().decode("utf-8")
+                  return resp.status, (json.loads(body) if body else None)
+
+          releases = []
+          page = 1
+          while True:
+              _, batch = api_request("GET", f"/repos/{repo}/releases?per_page=100&page={page}")
+              if not batch:
+                  break
+              releases.extend(r for r in batch if not r.get("draft", False))
+              if len(batch) < 100:
+                  break
+              page += 1
+
+          releases.sort(
+              key=lambda r: (
+                  r.get("tag_name") == current_tag,
+                  r.get("created_at") or "",
+                  r.get("id") or 0,
+              ),
+              reverse=True,
+          )
+
+          to_delete = releases[keep_count:]
+          if not to_delete:
+              print(f"Found {len(releases)} published release(s); nothing to prune (max {keep_count}).")
+              raise SystemExit(0)
+
+          print(f"Found {len(releases)} published release(s); keeping latest {keep_count}, pruning {len(to_delete)}.")
+          for rel in to_delete:
+              rel_id = rel["id"]
+              tag = rel.get("tag_name", "")
+              if tag == current_tag:
+                  continue
+              api_request("DELETE", f"/repos/{repo}/releases/{rel_id}")
+              print(f"Deleted release id={rel_id} (tag={tag}).")
+              if tag:
+                  encoded_tag = urllib.parse.quote(tag, safe="")
+                  try:
+                      api_request("DELETE", f"/repos/{repo}/git/refs/tags/{encoded_tag}")
+                      print(f"Deleted tag ref {tag}.")
+                  except urllib.error.HTTPError as e:
+                      if e.code in (404, 422):
+                          print(f"Tag ref {tag} already absent (HTTP {e.code}).")
+                      else:
+                          raise
+          PYEOF
+
       - name: Prepare Inspection Log Report Files
         id: inspect_files
         if: always()
@@ -404,6 +482,7 @@ jobs:
             echo "| Verify APK Signature | \`${{ steps.apk_verify.outcome }}\` |"
             echo "| Upload APK Artifact | \`${{ steps.upload_apk.outcome }}\` |"
             echo "| Publish GitHub Release | \`${{ steps.gh_release.outcome }}\` |"
+            echo "| Prune Old Releases (Keep 5) | \`${{ steps.prune_releases.outcome }}\` |"
             echo ""
 
             if [ -n "${{ steps.stage_apk.outputs.apk_size }}" ]; then
