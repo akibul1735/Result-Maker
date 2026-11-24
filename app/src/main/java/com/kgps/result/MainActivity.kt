@@ -481,6 +481,7 @@ fun ResultMakerWorkspace(
     val draftingTerm by vm.draftingRemarkTerm.collectAsStateWithLifecycle()
     val geminiApiKey by vm.geminiApiKey.collectAsStateWithLifecycle()
     val geminiModel by vm.geminiModel.collectAsStateWithLifecycle()
+    val geminiFallbackModels by vm.geminiFallbackModels.collectAsStateWithLifecycle()
     val geminiAvailableModels by vm.geminiAvailableModels.collectAsStateWithLifecycle()
     val geminiCustomModels by vm.geminiCustomModels.collectAsStateWithLifecycle()
     val geminiNewModelIds by vm.geminiNewModelIds.collectAsStateWithLifecycle()
@@ -976,6 +977,7 @@ fun ResultMakerWorkspace(
                                     permissions = permissions,
                                     isGeminiConfigured = isGeminiConfigured,
                                     activeModelName = geminiModel,
+                                    fallbackModels = geminiFallbackModels,
                                     availableModels = geminiAvailableModels,
                                     customModels = geminiCustomModels,
                                     newModelIds = geminiNewModelIds,
@@ -983,6 +985,9 @@ fun ResultMakerWorkspace(
                                     modelsError = geminiModelsError,
                                     onSelectModel = vm::selectGeminiModel,
                                     onRefreshModels = { vm.refreshGeminiModels(silent = false) },
+                                    onSetFallbackSlot = vm::setGeminiFallbackSlot,
+                                    onMoveFallbackSlot = vm::moveGeminiFallbackModel,
+                                    onResetFallbackDefaults = vm::resetGeminiFallbackDefaults,
                                     onRemoveCustomModel = vm::removeCustomGeminiModel,
                                     onOpenAiSettings = { vm.navigate(NavSection.SETTINGS) },
                                     onSetActiveTab = vm::setAiAssistantTab,
@@ -1034,6 +1039,7 @@ fun ResultMakerWorkspace(
                                     driveFilesLoading = driveFilesLoading,
                                     geminiApiKey = geminiApiKey,
                                     geminiModel = geminiModel,
+                                    geminiFallbackModels = geminiFallbackModels,
                                     geminiAvailableModels = geminiAvailableModels,
                                     geminiCustomModels = geminiCustomModels,
                                     geminiNewModelIds = geminiNewModelIds,
@@ -1091,6 +1097,9 @@ fun ResultMakerWorkspace(
                                     onSaveGeminiConfig = vm::saveGeminiConfig,
                                     onTestGeminiConnection = vm::testGeminiConnection,
                                     onRefreshGeminiModels = { rawKey -> vm.refreshGeminiModels(rawKey, silent = false) },
+                                    onSetGeminiFallbackSlot = vm::setGeminiFallbackSlot,
+                                    onMoveGeminiFallbackModel = vm::moveGeminiFallbackModel,
+                                    onResetGeminiFallbackDefaults = vm::resetGeminiFallbackDefaults,
                                     onRemoveCustomGeminiModel = vm::removeCustomGeminiModel,
                                     onClearGeminiApiKey = vm::clearGeminiApiKey,
                                     onSignOut = onSignOut,

@@ -61,39 +61,56 @@ data class GeminiConnectionCheckResult(
  * ব্যবহারকারীর নিজস্ব Google AI Studio API Key শুধুমাত্র এই ডিভাইসেই সংরক্ষিত থাকে।
  */
 object GeminiApiConfig {
-    const val DEFAULT_MODEL = "gemini-3.8-flash"
-    const val FAST_FALLBACK_MODEL = "gemini-3.5-flash-lite"
+    const val DEFAULT_MODEL = "gemini-2.5-flash"
+    const val FAST_FALLBACK_MODEL = "gemini-2.5-flash-lite"
+    const val MAX_FALLBACK_MODELS = 3
 
     private const val PREF_NAME = "gemini_api_prefs"
     private const val KEY_API_KEY = "gemini_api_key"
     private const val KEY_MODEL = "gemini_model"
+    private const val KEY_FALLBACK_MODELS = "gemini_fallback_models_json"
     private const val KEY_CACHED_MODELS = "gemini_cached_models_json"
     private const val KEY_CUSTOM_MODELS = "gemini_custom_models_json"
 
+    internal val LEGACY_INVALID_MODELS: Set<String> = setOf(
+        "gemini-3.8-flash",
+        "gemini-3.5-flash-lite",
+        "gemini-4-argon",
+        "gemini-4-hydrogen"
+    )
+
+    private val FALLBACK_DEFAULT_POOL: List<String> = listOf(
+        "gemini-2.5-flash-lite",
+        "gemini-2.0-flash",
+        "gemini-2.5-flash",
+        "gemini-2.5-pro",
+        "gemini-2.0-flash-lite"
+    )
+
     val SUGGESTED_MODELS: List<GeminiModelSuggestion> = listOf(
         GeminiModelSuggestion(
-            id = "gemini-3.8-flash",
-            title = "Gemini 3.8 Flash",
+            id = "gemini-2.5-flash",
+            title = "Gemini 2.5 Flash",
             badge = "প্রস্তাবিত (ডিফল্ট)",
             description = "নম্বরপত্র ছবি OCR, বাংলা চ্যাট ও দ্রুত কাজের জন্য সবচেয়ে ভারসাম্যপূর্ণ"
         ),
         GeminiModelSuggestion(
-            id = "gemini-3.5-flash-lite",
-            title = "Gemini 3.5 Flash-Lite",
+            id = "gemini-2.5-flash-lite",
+            title = "Gemini 2.5 Flash-Lite",
             badge = "অতি দ্রুত",
             description = "কম টোকেন খরচে দ্রুত চ্যাট, মন্তব্য খসড়া ও হালকা স্ক্যানের জন্য"
         ),
         GeminiModelSuggestion(
-            id = "gemini-4-argon",
-            title = "Gemini 4 Argon",
-            badge = "উন্নত বিশ্লেষণ",
-            description = "জটিল বা অস্পষ্ট হাতের লেখার নম্বরপত্র নিখুঁতভাবে বিশ্লেষণের জন্য"
+            id = "gemini-2.0-flash",
+            title = "Gemini 2.0 Flash",
+            badge = "স্থিতিশীল",
+            description = "ব্যস্ত সময়ে নির্ভরযোগ্য মাল্টিমোডাল ও উচ্চ-গতির বিকল্প মডেল"
         ),
         GeminiModelSuggestion(
-            id = "gemini-4-hydrogen",
-            title = "Gemini 4 Hydrogen",
-            badge = "সর্বশেষ",
-            description = "সর্বশেষ প্রজন্মের উচ্চক্ষমতাসম্পন্ন মাল্টিমোডাল মডেল"
+            id = "gemini-2.5-pro",
+            title = "Gemini 2.5 Pro",
+            badge = "উন্নত বিশ্লেষণ",
+            description = "জটিল বা অস্পষ্ট হাতের লেখার নম্বরপত্র নিখুঁতভাবে বিশ্লেষণের জন্য"
         )
     )
 
@@ -101,11 +118,81 @@ object GeminiApiConfig {
 
     fun normalizeApiKey(raw: String): String = raw.trim()
 
-    fun normalizeModelId(raw: String): String {
+    fun normalizeModelId(raw: String, cachedIds: Set<String> = emptySet()): String {
         val cleaned = raw.trim()
             .removePrefix("models/")
             .trim()
-        return cleaned.ifBlank { DEFAULT_MODEL }
+        if (cleaned.isBlank()) return DEFAULT_MODEL
+        if (cleaned in LEGACY_INVALID_MODELS && cleaned !in cachedIds) return DEFAULT_MODEL
+        return cleaned
+    }
+
+    fun defaultFallbacksFor(primaryModel: String): List<String> {
+        val cleanPrimary = normalizeModelId(primaryModel)
+        return FALLBACK_DEFAULT_POOL
+            .filter { it != cleanPrimary }
+            .take(MAX_FALLBACK_MODELS)
+    }
+
+    fun normalizeFallbackList(
+        rawFallbacks: List<String>,
+        primaryModel: String,
+        cachedIds: Set<String> = emptySet()
+    ): List<String> {
+        val cleanPrimary = normalizeModelId(primaryModel, cachedIds)
+        val out = mutableListOf<String>()
+        for (raw in rawFallbacks) {
+            val cleaned = raw.trim().removePrefix("models/").trim()
+            if (cleaned.isBlank()) continue
+            if (cleaned in LEGACY_INVALID_MODELS && cleaned !in cachedIds) continue
+            if (cleaned == cleanPrimary || cleaned in out) continue
+            out.add(cleaned)
+            if (out.size >= MAX_FALLBACK_MODELS) break
+        }
+        return out
+    }
+
+    fun assignFallbackSlot(
+        current: List<String>,
+        slotIndex: Int,
+        rawModelId: String?,
+        primaryModel: String,
+        cachedIds: Set<String> = emptySet()
+    ): List<String> {
+        val safePrimary = normalizeModelId(primaryModel, cachedIds)
+        val normalizedCurrent = normalizeFallbackList(current, safePrimary, cachedIds).toMutableList()
+        val cleanedNew = rawModelId?.trim()?.removePrefix("models/")?.trim().orEmpty()
+        if (cleanedNew.isBlank()) {
+            if (slotIndex in normalizedCurrent.indices) {
+                normalizedCurrent.removeAt(slotIndex)
+            }
+            return normalizedCurrent
+        }
+        if (cleanedNew == safePrimary || (cleanedNew in LEGACY_INVALID_MODELS && cleanedNew !in cachedIds)) {
+            return normalizedCurrent
+        }
+        val existingIdx = normalizedCurrent.indexOf(cleanedNew)
+        if (slotIndex in normalizedCurrent.indices) {
+            if (existingIdx >= 0 && existingIdx != slotIndex) {
+                val displaced = normalizedCurrent[slotIndex]
+                normalizedCurrent[slotIndex] = cleanedNew
+                normalizedCurrent[existingIdx] = displaced
+            } else {
+                normalizedCurrent[slotIndex] = cleanedNew
+            }
+        } else if (existingIdx < 0 && normalizedCurrent.size < MAX_FALLBACK_MODELS) {
+            normalizedCurrent.add(cleanedNew)
+        }
+        return normalizeFallbackList(normalizedCurrent, safePrimary, cachedIds)
+    }
+
+    fun moveFallbackSlot(current: List<String>, index: Int, delta: Int): List<String> {
+        val target = index + delta
+        if (index !in current.indices || target !in current.indices || index == target) return current
+        return current.toMutableList().apply {
+            val item = removeAt(index)
+            add(target, item)
+        }
     }
 
     fun getApiKey(context: Context): String {
@@ -115,8 +202,66 @@ object GeminiApiConfig {
 
     fun getSelectedModel(context: Context): String {
         val sp = context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
-        return normalizeModelId(sp.getString(KEY_MODEL, DEFAULT_MODEL).orEmpty())
+        val cachedIds = getCachedModels(context).map { it.id }.toSet()
+        val stored = sp.getString(KEY_MODEL, DEFAULT_MODEL).orEmpty()
+        val resolved = normalizeModelId(stored, cachedIds)
+        if (stored.isNotBlank() && stored.trim().removePrefix("models/").trim() != resolved && stored in LEGACY_INVALID_MODELS) {
+            sp.edit().putString(KEY_MODEL, resolved).apply()
+        }
+        return resolved
     }
+
+    fun getFallbackModels(
+        context: Context,
+        primaryModel: String = getSelectedModel(context)
+    ): List<String> {
+        val sp = context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
+        val cachedIds = getCachedModels(context).map { it.id }.toSet()
+        val cleanPrimary = normalizeModelId(primaryModel, cachedIds)
+        val raw = sp.getString(KEY_FALLBACK_MODELS, null)
+            ?: return defaultFallbacksFor(cleanPrimary)
+        val parsed = runCatching {
+            val arr = JSONArray(raw)
+            buildList {
+                for (i in 0 until arr.length()) {
+                    add(arr.optString(i, ""))
+                }
+            }
+        }.getOrNull() ?: return defaultFallbacksFor(cleanPrimary)
+
+        val hadLegacyOnly = parsed.isNotEmpty() && parsed.all {
+            val c = it.trim().removePrefix("models/").trim()
+            c.isBlank() || (c in LEGACY_INVALID_MODELS && c !in cachedIds) || c == cleanPrimary
+        }
+        if (hadLegacyOnly) {
+            val defaults = defaultFallbacksFor(cleanPrimary)
+            saveFallbackModels(context, defaults, cleanPrimary)
+            return defaults
+        }
+        return normalizeFallbackList(parsed, cleanPrimary, cachedIds)
+    }
+
+    fun saveFallbackModels(
+        context: Context,
+        rawFallbacks: List<String>,
+        primaryModel: String = getSelectedModel(context)
+    ): List<String> {
+        val cachedIds = getCachedModels(context).map { it.id }.toSet()
+        val clean = normalizeFallbackList(rawFallbacks, primaryModel, cachedIds)
+        val arr = JSONArray()
+        clean.forEach { arr.put(it) }
+        context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
+            .edit()
+            .putString(KEY_FALLBACK_MODELS, arr.toString())
+            .apply()
+        clean.forEach { rememberCustomModel(context, it) }
+        return clean
+    }
+
+    fun resetDefaultFallbacks(
+        context: Context,
+        primaryModel: String = getSelectedModel(context)
+    ): List<String> = saveFallbackModels(context, defaultFallbacksFor(primaryModel), primaryModel)
 
     fun isConfigured(context: Context): Boolean = getApiKey(context).isNotBlank()
 
@@ -129,11 +274,11 @@ object GeminiApiConfig {
             buildList {
                 for (i in 0 until arr.length()) {
                     val obj = arr.optJSONObject(i) ?: continue
-                    val id = normalizeModelId(obj.optString("id", ""))
-                    if (id.isNotBlank()) {
+                    val rawId = obj.optString("id", "").trim().removePrefix("models/").trim()
+                    if (rawId.isNotBlank() && !isExcludedModelId(rawId)) {
                         add(
                             DiscoveredGeminiModel(
-                                id = id,
+                                id = rawId,
                                 displayName = obj.optString("displayName", ""),
                                 description = obj.optString("description", "")
                             )
@@ -161,6 +306,7 @@ object GeminiApiConfig {
 
     fun getCustomModels(context: Context): List<String> {
         val sp = context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
+        val cachedIds = getCachedModels(context).map { it.id }.toSet()
         val raw = sp.getString(KEY_CUSTOM_MODELS, null).orEmpty()
         if (raw.isBlank()) return emptyList()
         return runCatching {
@@ -168,7 +314,9 @@ object GeminiApiConfig {
             buildList {
                 for (i in 0 until arr.length()) {
                     val id = arr.optString(i, "").trim().removePrefix("models/").trim()
-                    if (id.isNotBlank() && id !in SUGGESTED_MODEL_IDS) add(id)
+                    if (id.isNotBlank() && id !in SUGGESTED_MODEL_IDS && (id !in LEGACY_INVALID_MODELS || id in cachedIds)) {
+                        add(id)
+                    }
                 }
             }.distinct()
         }.getOrDefault(emptyList())
@@ -177,7 +325,7 @@ object GeminiApiConfig {
     fun rememberCustomModel(context: Context, rawModel: String): List<String> {
         val cleaned = rawModel.trim().removePrefix("models/").trim()
         val existing = getCustomModels(context)
-        if (cleaned.isBlank() || cleaned in SUGGESTED_MODEL_IDS) return existing
+        if (cleaned.isBlank() || cleaned in SUGGESTED_MODEL_IDS || cleaned in LEGACY_INVALID_MODELS) return existing
         val updated = (listOf(cleaned) + existing.filter { it != cleaned }).take(10)
         val arr = JSONArray()
         updated.forEach { arr.put(it) }
@@ -202,13 +350,21 @@ object GeminiApiConfig {
 
     fun saveConfig(context: Context, rawApiKey: String, rawModel: String) {
         val key = normalizeApiKey(rawApiKey)
-        val model = normalizeModelId(rawModel)
+        val cachedIds = getCachedModels(context).map { it.id }.toSet()
+        val model = normalizeModelId(rawModel, cachedIds)
         context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
             .edit()
             .putString(KEY_API_KEY, key)
             .putString(KEY_MODEL, model)
             .apply()
         rememberCustomModel(context, model)
+        val sp = context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
+        if (sp.contains(KEY_FALLBACK_MODELS)) {
+            val curFallbacks = getFallbackModels(context, model)
+            if (curFallbacks.any { it == model }) {
+                saveFallbackModels(context, curFallbacks, model)
+            }
+        }
     }
 
     fun clearApiKey(context: Context) {
@@ -217,6 +373,16 @@ object GeminiApiConfig {
             .remove(KEY_API_KEY)
             .remove(KEY_CACHED_MODELS)
             .apply()
+    }
+
+    internal fun isExcludedModelId(id: String): Boolean {
+        val lower = id.lowercase()
+        val excludedTokens = listOf(
+            "embedding", "aqa", "attribution", "tts", "imagen",
+            "veo", "robotics", "computer-use", "deep-research",
+            "native-audio", "-audio", "live-", "-image"
+        )
+        return excludedTokens.any { lower.contains(it) }
     }
 }
 
@@ -975,7 +1141,10 @@ class DirectGeminiAiRepository(
     private fun resolveModelId(mode: AiModelMode? = null): String {
         val selected = GeminiApiConfig.getSelectedModel(appContext)
         return if (mode == AiModelMode.FAST && selected == GeminiApiConfig.DEFAULT_MODEL) {
-            GeminiApiConfig.FAST_FALLBACK_MODEL
+            val fallbacks = GeminiApiConfig.getFallbackModels(appContext, selected)
+            fallbacks.firstOrNull { it.contains("lite", ignoreCase = true) }
+                ?: fallbacks.firstOrNull { it.contains("flash", ignoreCase = true) }
+                ?: GeminiApiConfig.FAST_FALLBACK_MODEL
         } else {
             selected
         }
@@ -996,6 +1165,14 @@ class DirectGeminiAiRepository(
         override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, AiDraftRemarkResult>?): Boolean = size > 16
     }
 
+    fun clearCooldowns() {
+        modelCooldownUntilMs.clear()
+    }
+
+    fun clearCooldownFor(modelId: String) {
+        modelCooldownUntilMs.remove(GeminiApiConfig.normalizeModelId(modelId))
+    }
+
     private fun remainingCooldownSeconds(modelId: String): Int {
         val clean = GeminiApiConfig.normalizeModelId(modelId)
         val until = modelCooldownUntilMs[clean] ?: return 0
@@ -1013,40 +1190,30 @@ class DirectGeminiAiRepository(
         modelCooldownUntilMs[clean] = System.currentTimeMillis() + waitSec * 1000L
     }
 
+    private fun recordServerBusyCooldown(modelId: String, waitSec: Int = 15) {
+        val clean = GeminiApiConfig.normalizeModelId(modelId)
+        modelCooldownUntilMs[clean] = System.currentTimeMillis() + waitSec.coerceIn(5, 60) * 1000L
+    }
+
     private fun selectFallbackCandidates(
         primaryModel: String,
-        cachedModels: List<DiscoveredGeminiModel>,
-        maxCount: Int
+        configuredFallbacks: List<String>
     ): List<String> {
-        val excludedTokens = listOf(
-            "embedding", "aqa", "attribution", "tts", "image", "imagen",
-            "veo", "robotics", "computer-use", "deep-research", "audio", "live"
-        )
-        // Prefer standard capable Flash models before Lite models to keep OCR accuracy high
-        val discoveredFlashFirst = cachedModels
-            .map { it.id }
-            .filter { id ->
-                id != primaryModel &&
-                    id.startsWith("gemini-", ignoreCase = true) &&
-                    excludedTokens.none { tok -> id.contains(tok, ignoreCase = true) }
-            }
-            .sortedWith(
-                compareBy<String> { it.contains("lite", ignoreCase = true) }
-                    .thenByDescending { it.contains("flash", ignoreCase = true) }
-            )
-
-        val builtinSafetyFallbacks = listOf(
-            GeminiApiConfig.DEFAULT_MODEL,
-            "gemini-2.5-flash",
-            "gemini-2.0-flash",
-            GeminiApiConfig.FAST_FALLBACK_MODEL,
-            "gemini-2.5-flash-lite"
-        ).filter { it != primaryModel }
-
-        return (discoveredFlashFirst + builtinSafetyFallbacks)
+        val cleanPrimary = GeminiApiConfig.normalizeModelId(primaryModel)
+        val ordered = configuredFallbacks
+            .map { GeminiApiConfig.normalizeModelId(it) }
+            .filter { it != cleanPrimary }
             .distinct()
-            .filter { remainingCooldownSeconds(it) == 0 }
-            .take(maxCount)
+            .take(GeminiApiConfig.MAX_FALLBACK_MODELS)
+
+        val healthy = ordered.filter { remainingCooldownSeconds(it) == 0 }
+        // If all configured fallbacks happen to be in transient cooldown, still keep
+        // the one whose cooldown expires earliest as a last resort so user action succeeds if ready.
+        return if (healthy.isNotEmpty()) {
+            healthy
+        } else {
+            ordered.sortedBy { remainingCooldownSeconds(it) }
+        }
     }
 
     private suspend fun callGenerateContentResilient(
@@ -1062,39 +1229,48 @@ class DirectGeminiAiRepository(
             )
         }
 
+        val cleanPrimary = GeminiApiConfig.normalizeModelId(primaryModelId)
         val serializedBody = body.toString().toByteArray(Charsets.UTF_8)
         val isVisionOrHeavy = serializedBody.size > 80_000
         var lastError: Exception? = null
-        val primaryCooldown = remainingCooldownSeconds(primaryModelId)
+        val attemptedModels = mutableListOf<String>()
+        val primaryCooldown = remainingCooldownSeconds(cleanPrimary)
 
-        // 1. Only hit primary model if not currently in 429 cooldown
+        // 1. Try primary model first if not in cooldown
         if (primaryCooldown == 0) {
+            attemptedModels.add(cleanPrimary)
             for (attempt in 0..1) {
                 try {
-                    val text = callGenerateContent(apiKey, primaryModelId, body, serializedBody)
-                    modelCooldownUntilMs.remove(GeminiApiConfig.normalizeModelId(primaryModelId))
-                    return text to primaryModelId
+                    val text = callGenerateContent(apiKey, cleanPrimary, body, serializedBody)
+                    modelCooldownUntilMs.remove(cleanPrimary)
+                    return text to cleanPrimary
                 } catch (e: GeminiHttpException) {
                     lastError = e
-                    if (e.httpCode == 401 || e.httpCode == 403 || e.httpCode == 400) throw e
+                    if (e.httpCode == 401 || e.httpCode == 403) throw e
                     if (e.httpCode == 429) {
                         recordRateLimitCooldown(e.modelId, e.retryAfterSeconds)
-                        break // Never burst-retry same model on 429
+                        break
                     }
-                    val isTransient = e.httpCode in setOf(500, 502, 503, 504)
+                    if (e.httpCode == 503) {
+                        recordServerBusyCooldown(e.modelId)
+                        break
+                    }
+                    if (e.httpCode == 400 || e.httpCode == 404) {
+                        break
+                    }
+                    val isTransient = e.httpCode in setOf(500, 502, 504)
                     if (isTransient && attempt == 0) {
-                        delay(1_200L)
+                        delay(800L)
                         continue
                     }
                     break
                 } catch (e: GeminiNetworkException) {
                     lastError = e
-                    // For vision scans that already timed out, switch directly to a faster healthy model
                     if (e.isTimeout && isVisionOrHeavy) {
                         break
                     }
                     if (attempt == 0 && (e.isTimeout || e.isConnectionError)) {
-                        delay(1_000L)
+                        delay(800L)
                         continue
                     }
                     break
@@ -1106,46 +1282,55 @@ class DirectGeminiAiRepository(
         } else {
             lastError = GeminiHttpException(
                 httpCode = 429,
-                modelId = primaryModelId,
-                userMessage = formatRateLimitMessage(primaryModelId, primaryCooldown),
+                modelId = cleanPrimary,
+                userMessage = formatRateLimitMessage(cleanPrimary, primaryCooldown),
                 retryAfterSeconds = primaryCooldown
             )
         }
 
-        // 2. Bounded fallback: on HTTP 429 or timeout try at most 1 healthy lite/flash model;
-        //    on HTTP 503/404/5xx try up to 2 healthy fallback models.
+        // 2. Try all user-configured fallback models in priority order (up to 3)
         val httpErr = lastError as? GeminiHttpException
         val netErr = lastError as? GeminiNetworkException
-        val allowHttpFallback = httpErr != null && httpErr.httpCode in setOf(404, 429, 500, 502, 503, 504)
-        val allowTimeoutFallback = netErr != null && netErr.isTimeout
+        val allowHttpFallback = httpErr != null && httpErr.httpCode in setOf(400, 404, 429, 500, 502, 503, 504)
+        val allowTimeoutFallback = netErr != null && (netErr.isTimeout || netErr.isConnectionError)
         if (allowHttpFallback || allowTimeoutFallback) {
-            val cached = GeminiApiConfig.getCachedModels(appContext)
-            val maxFallbacks = if (httpErr?.httpCode == 429 || allowTimeoutFallback) 1 else 2
-            val fallbacks = selectFallbackCandidates(primaryModelId, cached, maxFallbacks)
+            val selectedPrimary = GeminiApiConfig.getSelectedModel(appContext)
+            val configuredFallbacks = GeminiApiConfig.getFallbackModels(appContext, selectedPrimary)
+            val fallbackPool = if (cleanPrimary != selectedPrimary) {
+                configuredFallbacks + selectedPrimary
+            } else {
+                configuredFallbacks
+            }
+            val fallbacks = selectFallbackCandidates(cleanPrimary, fallbackPool)
             for (fallbackModel in fallbacks) {
+                if (!hasNetworkTransport(appContext)) break
+                attemptedModels.add(fallbackModel)
                 try {
                     val text = callGenerateContent(apiKey, fallbackModel, body, serializedBody)
-                    modelCooldownUntilMs.remove(GeminiApiConfig.normalizeModelId(fallbackModel))
+                    modelCooldownUntilMs.remove(fallbackModel)
                     return text to fallbackModel
                 } catch (e: GeminiHttpException) {
+                    lastError = e
                     if (e.httpCode == 401 || e.httpCode == 403) throw e
                     if (e.httpCode == 429) {
                         recordRateLimitCooldown(e.modelId, e.retryAfterSeconds)
-                        if (httpErr?.httpCode == 429) {
-                            lastError = e
-                            break
-                        }
+                    } else if (e.httpCode == 503) {
+                        recordServerBusyCooldown(e.modelId)
                     }
                 } catch (e: GeminiNetworkException) {
                     lastError = e
-                    break
                 } catch (_: Exception) {
-                    // Preserve primary lastError
+                    // Continue to next configured fallback
                 }
             }
         }
 
-        throw (lastError ?: IllegalStateException("Gemini API সংযোগ ব্যর্থ হয়েছে।"))
+        val baseErr = lastError ?: IllegalStateException("Gemini API সংযোগ ব্যর্থ হয়েছে।")
+        if (attemptedModels.size > 1) {
+            val msg = "${baseErr.message ?: "Gemini API ত্রুটি"}\n(চেষ্টা করা হয়েছে: ${attemptedModels.distinct().joinToString(" → ")})"
+            throw IllegalStateException(msg, baseErr)
+        }
+        throw baseErr
     }
 
     override suspend fun chat(
@@ -1587,11 +1772,16 @@ class DirectGeminiAiRepository(
             }
         }
 
-        private fun cloneBodyWithThinkingConfig(baseBody: JSONObject, thinkingCfg: JSONObject?): JSONObject {
-            if (thinkingCfg == null) return baseBody
+        private fun cloneBodyWithGenerationTweaks(
+            baseBody: JSONObject,
+            thinkingCfg: JSONObject?,
+            stripJsonMimeType: Boolean
+        ): JSONObject {
+            if (thinkingCfg == null && !stripJsonMimeType) return baseBody
             val oldGen = baseBody.optJSONObject("generationConfig") ?: JSONObject()
             val newGen = JSONObject(oldGen.toString()).apply {
-                put("thinkingConfig", thinkingCfg)
+                if (thinkingCfg != null) put("thinkingConfig", thinkingCfg)
+                if (stripJsonMimeType) remove("responseMimeType")
             }
             return JSONObject().apply {
                 val keys = baseBody.keys()
@@ -1610,21 +1800,32 @@ class DirectGeminiAiRepository(
             preSerializedBody: ByteArray? = null
         ): String = withContext(Dispatchers.IO) {
             val cleanModel = GeminiApiConfig.normalizeModelId(modelId)
+            val hasJsonMime = body.optJSONObject("generationConfig")?.optString("responseMimeType") == "application/json"
             val thinkingSteps = thinkingStepsForModel(cleanModel, body)
-            for (idx in thinkingSteps.indices) {
-                val thinkingCfg = thinkingSteps[idx]
-                val effectiveBytes = if (thinkingCfg == null && preSerializedBody != null) {
+            val isGemmaModel = cleanModel.startsWith("gemma-", ignoreCase = true)
+
+            val candidateConfigs: List<Pair<JSONObject?, Boolean>> = buildList {
+                if (isGemmaModel && hasJsonMime) {
+                    add(null to true)
+                } else {
+                    thinkingSteps.forEach { tc -> add(tc to false) }
+                    if (hasJsonMime) add(null to true)
+                }
+            }
+
+            for (idx in candidateConfigs.indices) {
+                val (thinkingCfg, stripJson) = candidateConfigs[idx]
+                val effectiveBytes = if (thinkingCfg == null && !stripJson && preSerializedBody != null) {
                     preSerializedBody
                 } else {
-                    cloneBodyWithThinkingConfig(body, thinkingCfg).toString().toByteArray(Charsets.UTF_8)
+                    cloneBodyWithGenerationTweaks(body, thinkingCfg, stripJson)
+                        .toString()
+                        .toByteArray(Charsets.UTF_8)
                 }
                 try {
                     return@withContext executeSingleGenerateCall(apiKey, cleanModel, effectiveBytes)
                 } catch (e: GeminiHttpException) {
-                    val canStepDownThinking = e.httpCode == 400 &&
-                        thinkingCfg != null &&
-                        idx < thinkingSteps.lastIndex
-                    if (canStepDownThinking) {
+                    if (e.httpCode == 400 && idx < candidateConfigs.lastIndex) {
                         continue
                     }
                     throw e
@@ -1745,6 +1946,8 @@ class DirectGeminiAiRepository(
                     message = e.message ?: "API Key যাচাই করা যায়নি।"
                 )
             }
+            val fetchedIds = fetchedModels.map { it.id }.toSet()
+            val effectiveModelId = GeminiApiConfig.normalizeModelId(rawModel, fetchedIds)
 
             // 2. Ping the selected model with a minimal generateContent call
             try {
@@ -1762,10 +1965,10 @@ class DirectGeminiAiRepository(
                         put("temperature", 0.0)
                     })
                 }
-                callGenerateContent(apiKey, modelId, pingPayload)
+                callGenerateContent(apiKey, effectiveModelId, pingPayload)
                 GeminiConnectionCheckResult(
                     ok = true,
-                    message = "সংযোগ সফল! সক্রিয় মডেল: $modelId · মোট ${bn(fetchedModels.size.toString())}টি মডেল পাওয়া গেছে।",
+                    message = "সংযোগ সফল! সক্রিয় মডেল: $effectiveModelId · মোট ${bn(fetchedModels.size.toString())}টি মডেল পাওয়া গেছে।",
                     availableModels = fetchedModels
                 )
             } catch (e: Exception) {
@@ -1824,7 +2027,7 @@ class DirectGeminiAiRepository(
                         val id = m.optString("name", "").removePrefix("models/").trim()
                         if (id.isBlank()) continue
                         val lower = id.lowercase()
-                        if (lower.contains("embedding") || lower.contains("aqa") || lower.contains("attribution")) {
+                        if (GeminiApiConfig.isExcludedModelId(id)) {
                             continue
                         }
                         if (lower.startsWith("gemini-") || lower.startsWith("gemma-")) {

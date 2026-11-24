@@ -94,6 +94,7 @@ import com.kgps.result.cloud.SchoolWorkspace
 import com.kgps.result.cloud.TeacherPermissions
 import java.util.Calendar
 import com.kgps.result.ui.components.BiometricDeleteConfirmDialog
+import com.kgps.result.ui.components.CompactFallbackModelsSection
 import com.kgps.result.ui.components.TreeBranchItem
 import com.kgps.result.ui.theme.AmberBg
 import com.kgps.result.ui.theme.AmberBorder
@@ -1244,6 +1245,7 @@ internal fun SettingsGeminiAiContent(
     onToggleShowAllLiveModels: () -> Unit,
     geminiApiKey: String,
     geminiModel: String,
+    geminiFallbackModels: List<String>,
     geminiAvailableModels: List<DiscoveredGeminiModel>,
     geminiCustomModels: List<String>,
     geminiNewModelIds: Set<String>,
@@ -1255,6 +1257,9 @@ internal fun SettingsGeminiAiContent(
     onSaveGeminiConfig: (String, String) -> Unit,
     onTestGeminiConnection: (String, String) -> Unit,
     onRefreshGeminiModels: (String) -> Unit,
+    onSetFallbackSlot: (Int, String?) -> Unit,
+    onMoveFallbackSlot: (Int, Int) -> Unit,
+    onResetFallbackDefaults: () -> Unit,
     onRemoveCustomGeminiModel: (String) -> Unit,
     onClearGeminiApiKey: () -> Unit
 ) {
@@ -1422,6 +1427,7 @@ internal fun SettingsGeminiAiContent(
                             val shortBadge = when {
                                 preset.badge.contains("ডিফল্ট") -> "ডিফল্ট"
                                 preset.badge.contains("দ্রুত") -> "দ্রুত"
+                                preset.badge.contains("স্থিতিশীল") -> "স্থিতিশীল"
                                 preset.badge.contains("উন্নত") -> "উন্নত"
                                 else -> "নতুন"
                             }
@@ -1720,6 +1726,18 @@ internal fun SettingsGeminiAiContent(
                 modifier = Modifier
                     .fillMaxWidth()
                     .testTag("settings_gemini_model_input")
+            )
+
+            HorizontalDivider(color = SlateOutline.copy(alpha = 0.7f))
+
+            CompactFallbackModelsSection(
+                primaryModel = modelInput.ifBlank { geminiModel },
+                fallbackModels = geminiFallbackModels,
+                availableModels = geminiAvailableModels,
+                customModels = geminiCustomModels,
+                onSetFallbackSlot = onSetFallbackSlot,
+                onMoveFallbackSlot = onMoveFallbackSlot,
+                onResetDefaults = onResetFallbackDefaults
             )
         }
     }

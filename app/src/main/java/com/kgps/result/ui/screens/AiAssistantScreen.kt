@@ -124,6 +124,7 @@ import com.kgps.result.BlankSheetCatalog
 import com.kgps.result.RELIGIONS
 import com.kgps.result.Student
 import com.kgps.result.ui.components.BiometricDeleteConfirmDialog
+import com.kgps.result.ui.components.CompactFallbackModelsSection
 import com.kgps.result.ai.AiModelMode
 import com.kgps.result.ai.ClassSheetImportScope
 import com.kgps.result.ai.ClassSheetKind
@@ -178,6 +179,7 @@ fun AiAssistantScreen(
     permissions: TeacherPermissions,
     isGeminiConfigured: Boolean,
     activeModelName: String,
+    fallbackModels: List<String> = emptyList(),
     availableModels: List<DiscoveredGeminiModel> = emptyList(),
     customModels: List<String> = emptyList(),
     newModelIds: Set<String> = emptySet(),
@@ -185,6 +187,9 @@ fun AiAssistantScreen(
     modelsError: String? = null,
     onSelectModel: (String) -> Unit = {},
     onRefreshModels: () -> Unit = {},
+    onSetFallbackSlot: (Int, String?) -> Unit = { _, _ -> },
+    onMoveFallbackSlot: (Int, Int) -> Unit = { _, _ -> },
+    onResetFallbackDefaults: () -> Unit = {},
     onRemoveCustomModel: (String) -> Unit = {},
     onOpenAiSettings: () -> Unit,
     onSetActiveTab: (Int) -> Unit,
@@ -427,7 +432,11 @@ fun AiAssistantScreen(
                                 modifier = Modifier.size(14.dp)
                             )
                             Text(
-                                "মডেল: $activeModelName",
+                                text = if (fallbackModels.isNotEmpty()) {
+                                    "মডেল: $activeModelName · +${bn(fallbackModels.size.toString())} বিকল্প"
+                                } else {
+                                    "মডেল: $activeModelName"
+                                },
                                 fontSize = 11.5.sp,
                                 fontWeight = FontWeight.SemiBold,
                                 color = TealDark,
@@ -1166,6 +1175,7 @@ fun AiAssistantScreen(
     if (showModelPicker) {
         AiModelPickerDialog(
             activeModelName = activeModelName,
+            fallbackModels = fallbackModels,
             isGeminiConfigured = isGeminiConfigured,
             availableModels = availableModels,
             customModels = customModels,
@@ -1177,6 +1187,9 @@ fun AiAssistantScreen(
                 showModelPicker = false
             },
             onRefreshModels = onRefreshModels,
+            onSetFallbackSlot = onSetFallbackSlot,
+            onMoveFallbackSlot = onMoveFallbackSlot,
+            onResetFallbackDefaults = onResetFallbackDefaults,
             onRemoveCustomModel = { modelId -> pendingRemoveModelId = modelId },
             onOpenAiSettings = {
                 showModelPicker = false
@@ -1230,6 +1243,7 @@ fun AiAssistantScreen(
 @Composable
 private fun AiModelPickerDialog(
     activeModelName: String,
+    fallbackModels: List<String>,
     isGeminiConfigured: Boolean,
     availableModels: List<DiscoveredGeminiModel>,
     customModels: List<String>,
@@ -1238,13 +1252,20 @@ private fun AiModelPickerDialog(
     modelsError: String?,
     onSelectModel: (String) -> Unit,
     onRefreshModels: () -> Unit,
+    onSetFallbackSlot: (Int, String?) -> Unit,
+    onMoveFallbackSlot: (Int, Int) -> Unit,
+    onResetFallbackDefaults: () -> Unit,
     onRemoveCustomModel: (String) -> Unit,
     onOpenAiSettings: () -> Unit,
     onDismiss: () -> Unit
 ) {
     var customInput by remember(activeModelName) { mutableStateOf(activeModelName) }
     var searchQuery by remember { mutableStateOf("") }
-    val normalizedCurrent = GeminiApiConfig.normalizeModelId(activeModelName)
+    var showFallbacksSection by remember { mutableStateOf(false) }
+    val normalizedCurrent = GeminiApiConfig.normalizeModelId(
+        activeModelName,
+        availableModels.map { it.id }.toSet()
+    )
     val suggestedIds = remember { GeminiApiConfig.SUGGESTED_MODEL_IDS }
 
     val extraLiveModels = remember(availableModels, newModelIds) {
@@ -1357,6 +1378,58 @@ private fun AiModelPickerDialog(
                             }
                         }
                     }
+                }
+
+                HorizontalDivider(color = SlateOutline)
+
+                Surface(
+                    color = TealSoft.copy(alpha = 0.65f),
+                    border = BorderStroke(1.dp, TealPrimary.copy(alpha = 0.25f)),
+                    shape = RoundedCornerShape(8.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { showFallbacksSection = !showFallbacksSection }
+                        .testTag("ai_picker_toggle_fallbacks_btn")
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 9.dp, vertical = 7.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Column(Modifier.weight(1f)) {
+                            Text(
+                                text = "বিকল্প (Fallback) মডেল সাজান (${bn(fallbackModels.size.toString())}/৩)",
+                                fontWeight = FontWeight.SemiBold,
+                                fontSize = 11.5.sp,
+                                color = TealDark
+                            )
+                            Text(
+                                text = if (fallbackModels.isNotEmpty()) fallbackModels.joinToString(" → ") else "কোনো বিকল্প মডেল সেট নেই",
+                                fontSize = 10.sp,
+                                color = SlateMuted,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                        Icon(
+                            imageVector = Icons.Rounded.ArrowDropDown,
+                            contentDescription = "বিকল্প মডেল দেখুন",
+                            tint = TealDark,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+                }
+
+                if (showFallbacksSection) {
+                    CompactFallbackModelsSection(
+                        primaryModel = normalizedCurrent,
+                        fallbackModels = fallbackModels,
+                        availableModels = availableModels,
+                        customModels = customModels,
+                        onSetFallbackSlot = onSetFallbackSlot,
+                        onMoveFallbackSlot = onMoveFallbackSlot,
+                        onResetDefaults = onResetFallbackDefaults
+                    )
                 }
 
                 if (extraLiveModels.isNotEmpty()) {

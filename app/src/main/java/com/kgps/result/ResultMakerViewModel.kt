@@ -428,6 +428,11 @@ class ResultMakerViewModel(
     private val _geminiModel = MutableStateFlow(GeminiApiConfig.getSelectedModel(appContext))
     val geminiModel: StateFlow<String> = _geminiModel.asStateFlow()
 
+    private val _geminiFallbackModels = MutableStateFlow(
+        GeminiApiConfig.getFallbackModels(appContext, _geminiModel.value)
+    )
+    val geminiFallbackModels: StateFlow<List<String>> = _geminiFallbackModels.asStateFlow()
+
     private val _geminiAvailableModels = MutableStateFlow(GeminiApiConfig.getCachedModels(appContext))
     val geminiAvailableModels: StateFlow<List<DiscoveredGeminiModel>> = _geminiAvailableModels.asStateFlow()
 
@@ -3381,11 +3386,48 @@ class ResultMakerViewModel(
         _geminiCustomModels.value = GeminiApiConfig.removeCustomModel(appContext, modelId)
     }
 
+    fun setGeminiFallbackSlot(slotIndex: Int, rawModelId: String?) {
+        val primary = _geminiModel.value
+        val cachedIds = _geminiAvailableModels.value.map { it.id }.toSet()
+        val updated = GeminiApiConfig.assignFallbackSlot(
+            current = _geminiFallbackModels.value,
+            slotIndex = slotIndex,
+            rawModelId = rawModelId,
+            primaryModel = primary,
+            cachedIds = cachedIds
+        )
+        val saved = GeminiApiConfig.saveFallbackModels(appContext, updated, primary)
+        directAiRepository.clearCooldowns()
+        _geminiFallbackModels.value = saved
+        _geminiCustomModels.value = GeminiApiConfig.getCustomModels(appContext)
+    }
+
+    fun moveGeminiFallbackModel(index: Int, delta: Int) {
+        val primary = _geminiModel.value
+        val reordered = GeminiApiConfig.moveFallbackSlot(_geminiFallbackModels.value, index, delta)
+        if (reordered != _geminiFallbackModels.value) {
+            val saved = GeminiApiConfig.saveFallbackModels(appContext, reordered, primary)
+            directAiRepository.clearCooldowns()
+            _geminiFallbackModels.value = saved
+        }
+    }
+
+    fun resetGeminiFallbackDefaults() {
+        val primary = _geminiModel.value
+        val saved = GeminiApiConfig.resetDefaultFallbacks(appContext, primary)
+        directAiRepository.clearCooldowns()
+        _geminiFallbackModels.value = saved
+        showMessage("বিকল্প ৩টি মডেল ডিফল্ট ক্রমে সেট হয়েছে")
+    }
+
     fun selectGeminiModel(rawModel: String) {
-        val cleanModel = GeminiApiConfig.normalizeModelId(rawModel)
+        val cachedIds = _geminiAvailableModels.value.map { it.id }.toSet()
+        val cleanModel = GeminiApiConfig.normalizeModelId(rawModel, cachedIds)
         GeminiApiConfig.saveConfig(appContext, _geminiApiKey.value, cleanModel)
         val savedModel = GeminiApiConfig.getSelectedModel(appContext)
+        directAiRepository.clearCooldowns()
         _geminiModel.value = savedModel
+        _geminiFallbackModels.value = GeminiApiConfig.getFallbackModels(appContext, savedModel)
         _geminiCustomModels.value = GeminiApiConfig.getCustomModels(appContext)
         showMessage("Gemini মডেল পরিবর্তন হয়েছে: $savedModel")
     }
@@ -3394,8 +3436,10 @@ class ResultMakerViewModel(
         GeminiApiConfig.saveConfig(appContext, rawApiKey, rawModel)
         val savedKey = GeminiApiConfig.getApiKey(appContext)
         val savedModel = GeminiApiConfig.getSelectedModel(appContext)
+        directAiRepository.clearCooldowns()
         _geminiApiKey.value = savedKey
         _geminiModel.value = savedModel
+        _geminiFallbackModels.value = GeminiApiConfig.getFallbackModels(appContext, savedModel)
         _geminiCustomModels.value = GeminiApiConfig.getCustomModels(appContext)
         _geminiTestStatus.value = null
         _geminiTestSuccess.value = null
@@ -3410,6 +3454,7 @@ class ResultMakerViewModel(
 
     fun clearGeminiApiKey() {
         GeminiApiConfig.clearApiKey(appContext)
+        directAiRepository.clearCooldowns()
         _geminiApiKey.value = ""
         _geminiAvailableModels.value = emptyList()
         _geminiNewModelIds.value = emptySet()
@@ -3422,27 +3467,33 @@ class ResultMakerViewModel(
     fun testGeminiConnection(rawApiKey: String, rawModel: String) {
         if (_geminiTesting.value) return
         val cleanKey = GeminiApiConfig.normalizeApiKey(rawApiKey)
-        val cleanModel = GeminiApiConfig.normalizeModelId(rawModel)
+        val cachedIds = _geminiAvailableModels.value.map { it.id }.toSet()
+        val requestedModel = GeminiApiConfig.normalizeModelId(rawModel, cachedIds)
         if (cleanKey.isBlank()) {
             _geminiTestSuccess.value = false
             _geminiTestStatus.value = "পরীক্ষার জন্য আপনার Gemini API Key লিখুন।"
             return
         }
+        directAiRepository.clearCooldowns()
         _geminiTesting.value = true
         _geminiTestStatus.value = null
         _geminiTestSuccess.value = null
         _geminiModelsError.value = null
         viewModelScope.launch {
-            val result = DirectGeminiAiRepository.testConnectionAndListModels(cleanKey, cleanModel)
+            val result = DirectGeminiAiRepository.testConnectionAndListModels(cleanKey, requestedModel)
             _geminiTestSuccess.value = result.ok
             _geminiTestStatus.value = result.message
             if (result.availableModels.isNotEmpty()) {
                 applyDiscoveredModels(result.availableModels)
             }
             if (result.ok) {
-                GeminiApiConfig.saveConfig(appContext, cleanKey, cleanModel)
+                val liveIds = result.availableModels.map { it.id }.toSet() + cachedIds
+                val verifiedModel = GeminiApiConfig.normalizeModelId(rawModel, liveIds)
+                GeminiApiConfig.saveConfig(appContext, cleanKey, verifiedModel)
+                val savedModel = GeminiApiConfig.getSelectedModel(appContext)
                 _geminiApiKey.value = cleanKey
-                _geminiModel.value = cleanModel
+                _geminiModel.value = savedModel
+                _geminiFallbackModels.value = GeminiApiConfig.getFallbackModels(appContext, savedModel)
                 _geminiCustomModels.value = GeminiApiConfig.getCustomModels(appContext)
             }
             _geminiTesting.value = false

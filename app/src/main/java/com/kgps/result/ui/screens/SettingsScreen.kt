@@ -168,6 +168,7 @@ fun SettingsScreen(
     driveFilesLoading: Boolean,
     geminiApiKey: String,
     geminiModel: String,
+    geminiFallbackModels: List<String> = emptyList(),
     geminiAvailableModels: List<DiscoveredGeminiModel>,
     geminiCustomModels: List<String>,
     geminiNewModelIds: Set<String>,
@@ -221,6 +222,9 @@ fun SettingsScreen(
     onSaveGeminiConfig: (String, String) -> Unit,
     onTestGeminiConnection: (String, String) -> Unit,
     onRefreshGeminiModels: (String) -> Unit,
+    onSetGeminiFallbackSlot: (Int, String?) -> Unit = { _, _ -> },
+    onMoveGeminiFallbackModel: (Int, Int) -> Unit = { _, _ -> },
+    onResetGeminiFallbackDefaults: () -> Unit = {},
     onRemoveCustomGeminiModel: (String) -> Unit,
     onClearGeminiApiKey: () -> Unit,
     onSignOut: () -> Unit,
@@ -1513,7 +1517,7 @@ fun SettingsScreen(
             TreeGroupCard(
                 title = "Gemini AI ও মডেল",
                 subtitle = if (geminiApiKey.isNotBlank()) {
-                    "সক্রিয়: $geminiModel · API Key সংরক্ষিত"
+                    "সক্রিয়: $geminiModel · বিকল্প ${bn(geminiFallbackModels.size.toString())}টি"
                 } else {
                     "Google AI Studio থেকে নিজস্ব API Key যুক্ত করুন"
                 },
@@ -1538,6 +1542,7 @@ fun SettingsScreen(
                     onToggleShowAllLiveModels = { showAllLiveModels = !showAllLiveModels },
                     geminiApiKey = geminiApiKey,
                     geminiModel = geminiModel,
+                    geminiFallbackModels = geminiFallbackModels,
                     geminiAvailableModels = geminiAvailableModels,
                     geminiCustomModels = geminiCustomModels,
                     geminiNewModelIds = geminiNewModelIds,
@@ -1549,6 +1554,9 @@ fun SettingsScreen(
                     onSaveGeminiConfig = onSaveGeminiConfig,
                     onTestGeminiConnection = onTestGeminiConnection,
                     onRefreshGeminiModels = onRefreshGeminiModels,
+                    onSetFallbackSlot = onSetGeminiFallbackSlot,
+                    onMoveFallbackSlot = onMoveGeminiFallbackModel,
+                    onResetFallbackDefaults = onResetGeminiFallbackDefaults,
                     onRemoveCustomGeminiModel = onRemoveCustomGeminiModel,
                     onClearGeminiApiKey = {
                         apiKeyInput = ""
