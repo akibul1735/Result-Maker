@@ -135,6 +135,7 @@ import com.kgps.result.ui.screens.SeatPlanPdfScreen
 import com.kgps.result.ui.screens.SettingsScreen
 import com.kgps.result.ui.screens.SmartCsvImportDialog
 import com.kgps.result.ui.screens.StudentEditorScreen
+import com.kgps.result.ui.screens.TabulationPdfScreen
 import androidx.compose.foundation.layout.widthIn
 import com.kgps.result.ui.theme.AmberNotice
 import com.kgps.result.ui.theme.EmeraldGrade
@@ -662,6 +663,31 @@ fun ResultMakerWorkspace(
             }
         }
     }
+    var pendingTabulationPdfPages by remember { mutableStateOf<List<TabulationPageSpec>>(emptyList()) }
+    val tabulationPdfLauncher = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/pdf")) { uri ->
+        val pagesToWrite = pendingTabulationPdfPages
+        if (uri != null && pagesToWrite.isNotEmpty()) {
+            workspaceScope.launch {
+                val result = runCatching {
+                    withContext(Dispatchers.IO) {
+                        ctx.contentResolver.openOutputStream(uri)?.use { out ->
+                            TabulationPdfGen.write(
+                                ctx = ctx,
+                                pages = pagesToWrite,
+                                settings = settings,
+                                out = out
+                            )
+                        }
+                    }
+                }
+                result.onSuccess {
+                    vm.showMessage("ফলাফল টেবিল PDF সংরক্ষিত হয়েছে (${bn(pagesToWrite.size.toString())} পৃষ্ঠা)")
+                }.onFailure { e ->
+                    vm.showMessage("PDF তৈরি করা যায়নি: ${e.message ?: "ত্রুটি"}")
+                }
+            }
+        }
+    }
     val pdfLauncher = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/pdf")) { uri ->
         val listToWrite = pendingPdfStudents
         if (uri != null && listToWrite.isNotEmpty()) {
@@ -720,10 +746,12 @@ fun ResultMakerWorkspace(
     val isSettings = section == NavSection.SETTINGS
     val isBlankSheet = section == NavSection.BLANK_SHEET
     val isSeatPlan = section == NavSection.SEAT_PLAN
+    val isTabulation = section == NavSection.TABULATION
     val secondaryTitle = when {
         isSettings -> "সেটিংস, সদস্য ও ব্যাকআপ"
         isBlankSheet -> "ফাঁকা ফর্ম / শিট PDF"
         isSeatPlan -> "আসন বিন্যাস (সিট প্ল্যান)"
+        isTabulation -> "ফলাফল টেবিল (ট্যাবুলেশন)"
         else -> null
     }
     val showPrimaryChrome = !isEditing && secondaryTitle == null
@@ -736,7 +764,7 @@ fun ResultMakerWorkspace(
         }
     }
 
-    BackHandler(enabled = !isEditing && (section == NavSection.ROSTER || section == NavSection.SHEET || section == NavSection.ASSISTANT || section == NavSection.BLANK_SHEET || section == NavSection.SEAT_PLAN)) {
+    BackHandler(enabled = !isEditing && (section == NavSection.ROSTER || section == NavSection.SHEET || section == NavSection.ASSISTANT || section == NavSection.BLANK_SHEET || section == NavSection.SEAT_PLAN || section == NavSection.TABULATION)) {
         vm.navigate(NavSection.DASHBOARD)
     }
 
@@ -763,6 +791,7 @@ fun ResultMakerWorkspace(
                         secondaryBackTag = when {
                             isBlankSheet -> "blank_sheet_back_btn"
                             isSeatPlan -> "seat_plan_back_btn"
+                            isTabulation -> "tabulation_back_btn"
                             else -> "settings_back_btn"
                         },
                         onBackFromSecondary = { vm.navigate(NavSection.DASHBOARD) },
@@ -779,6 +808,7 @@ fun ResultMakerWorkspace(
                         },
                         onOpenBlankSheetPdf = vm::openBlankSheetPdf,
                         onOpenSeatPlanPdf = vm::openSeatPlanPdf,
+                        onOpenTabulationPdf = vm::openTabulationPdf,
                         onOpenSchoolHub = onOpenSchoolHub,
                         onRequestSignOut = {
                             if (vm.isLocalPreviewMode) onSignOut() else askSignOut = true
@@ -963,6 +993,7 @@ fun ResultMakerWorkspace(
                                     },
                                     onOpenBlankSheetPdf = vm::openBlankSheetPdf,
                                     onOpenSeatPlanPdf = vm::openSeatPlanPdf,
+                                    onOpenTabulationPdf = vm::openTabulationPdf,
                                     onPrintBatch = { batchList, jobName ->
                                         if (!permissions.canExportPdf) {
                                             vm.showMessage("প্রিন্ট করার অনুমতি আপনার নেই")
@@ -1240,6 +1271,76 @@ fun ResultMakerWorkspace(
                                                         vm.showMessage("প্রিন্ট করার জন্য কোনো পৃষ্ঠা নেই")
                                                     } else {
                                                         SeatPlanPdfGen.print(
+                                                            ctx = ctx,
+                                                            pages = pages,
+                                                            settings = settings,
+                                                            jobName = jobName
+                                                        )
+                                                    }
+                                                },
+                                                onBack = { vm.navigate(NavSection.DASHBOARD) },
+                                                modifier = Modifier.fillMaxSize()
+                                            )
+                                        }
+                                    }
+                                }
+
+                                NavSection.TABULATION -> if (!permissions.canExportPdf) {
+                                    Column(
+                                        Modifier.fillMaxSize().padding(24.dp),
+                                        verticalArrangement = Arrangement.Center,
+                                        horizontalAlignment = Alignment.CenterHorizontally
+                                    ) {
+                                        Icon(Icons.Rounded.Lock, contentDescription = null, tint = AmberNotice, modifier = Modifier.size(36.dp))
+                                        Text(
+                                            "ফলাফল টেবিল PDF তৈরির অনুমতি আপনার নেই",
+                                            fontWeight = FontWeight.Bold,
+                                            fontSize = 15.sp,
+                                            color = SlateText,
+                                            modifier = Modifier.padding(top = 10.dp)
+                                        )
+                                        Text(
+                                            "অ্যাডমিন আপনার জন্য PDF অনুমতি চালু করলে এখান থেকে ট্যাবুলেশন শিট তৈরি ও প্রিন্ট করতে পারবেন।",
+                                            fontSize = 12.sp,
+                                            color = SlateMuted,
+                                            modifier = Modifier.padding(top = 4.dp, bottom = 12.dp)
+                                        )
+                                        Button(onClick = { vm.navigate(NavSection.DASHBOARD) }) {
+                                            Text("ড্যাশবোর্ডে ফিরুন")
+                                        }
+                                    }
+                                } else {
+                                    val allowedCls = permissions.effectiveClasses().toSet()
+                                    val allowedStudents = students
+                                        .filter { it.cls in allowedCls }
+                                        .sortedWith(compareBy({ it.cls }, { it.roll }))
+                                    Column(
+                                        modifier = Modifier.fillMaxSize().padding(horizontal = 8.dp, vertical = 4.dp),
+                                        horizontalAlignment = Alignment.CenterHorizontally
+                                    ) {
+                                        Box(Modifier.widthIn(max = 980.dp).fillMaxSize()) {
+                                            TabulationPdfScreen(
+                                                students = allowedStudents,
+                                                settings = settings,
+                                                permissions = permissions,
+                                                initialClass = cls,
+                                                onExportPdf = { pages, fileName ->
+                                                    if (!permissions.canExportPdf) {
+                                                        vm.showMessage("PDF তৈরি করার অনুমতি আপনার নেই")
+                                                    } else if (pages.isEmpty()) {
+                                                        vm.showMessage("PDF তৈরির জন্য কোনো পৃষ্ঠা নেই")
+                                                    } else {
+                                                        pendingTabulationPdfPages = pages
+                                                        tabulationPdfLauncher.launch(fileName)
+                                                    }
+                                                },
+                                                onPrint = { pages, jobName ->
+                                                    if (!permissions.canExportPdf) {
+                                                        vm.showMessage("প্রিন্ট করার অনুমতি আপনার নেই")
+                                                    } else if (pages.isEmpty()) {
+                                                        vm.showMessage("প্রিন্ট করার জন্য কোনো পৃষ্ঠা নেই")
+                                                    } else {
+                                                        TabulationPdfGen.print(
                                                             ctx = ctx,
                                                             pages = pages,
                                                             settings = settings,
@@ -1595,6 +1696,7 @@ private fun ResultMakerTopBar(
     onAllPdf: () -> Unit,
     onOpenBlankSheetPdf: () -> Unit,
     onOpenSeatPlanPdf: () -> Unit = {},
+    onOpenTabulationPdf: () -> Unit = {},
     onOpenSchoolHub: () -> Unit,
     onRequestSignOut: () -> Unit
 ) {
@@ -1708,6 +1810,11 @@ private fun ResultMakerTopBar(
                                 text = { Text("আসন বিন্যাস (সিট প্ল্যান)") },
                                 onClick = { menuOpen = false; onOpenSeatPlanPdf() },
                                 modifier = Modifier.testTag("menu_seat_plan_pdf")
+                            )
+                            DropdownMenuItem(
+                                text = { Text("ফলাফল টেবিল (ট্যাবুলেশন)") },
+                                onClick = { menuOpen = false; onOpenTabulationPdf() },
+                                modifier = Modifier.testTag("menu_tabulation_pdf")
                             )
                             DropdownMenuItem(
                                 text = { Text("সব শ্রেণির সব শিক্ষার্থীর PDF") },

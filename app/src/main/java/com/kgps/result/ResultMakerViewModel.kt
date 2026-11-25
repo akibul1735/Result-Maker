@@ -81,6 +81,7 @@ enum class NavSection(val route: String, val labelBn: String) {
     STUDIO("studio", "রিপোর্ট স্টুডিও"),
     BLANK_SHEET("blank_sheet", "ফাঁকা ফর্ম / শিট PDF"),
     SEAT_PLAN("seat_plan", "আসন বিন্যাস (সিট প্ল্যান)"),
+    TABULATION("tabulation", "ফলাফল টেবিল PDF"),
     ASSISTANT("assistant", "AI সহায়ক"),
     SETTINGS("settings", "সেটিংস")
 }
@@ -985,6 +986,15 @@ class ResultMakerViewModel(
         }
         _editingStudent.value = null
         _currentSection.value = NavSection.SEAT_PLAN
+    }
+
+    fun openTabulationPdf() {
+        if (!activePermissions.value.canExportPdf) {
+            showMessage("PDF তৈরি করার অনুমতি আপনার নেই")
+            return
+        }
+        _editingStudent.value = null
+        _currentSection.value = NavSection.TABULATION
     }
 
     fun cacheBlankSheetTemplatesLocally(pages: List<BlankSheetPageSpec>) {

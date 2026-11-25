@@ -36,6 +36,7 @@ import androidx.compose.material.icons.rounded.Lock
 import androidx.compose.material.icons.rounded.School
 import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.material.icons.rounded.TableChart
+import androidx.compose.material.icons.rounded.TableView
 import androidx.compose.material.icons.rounded.UploadFile
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -112,6 +113,7 @@ fun DashboardScreen(
     onAllPdf: () -> Unit,
     onOpenBlankSheetPdf: () -> Unit = {},
     onOpenSeatPlanPdf: () -> Unit = {},
+    onOpenTabulationPdf: () -> Unit = {},
     onPrintBatch: (List<Student>, String) -> Unit,
     onExportBatchPdf: (List<Student>, String) -> Unit,
     onBackupNowAll: () -> Unit,
@@ -460,6 +462,16 @@ fun DashboardScreen(
                                 tint = TealPrimary,
                                 testTag = "dash_seat_plan_pdf_btn",
                                 onClick = onOpenSeatPlanPdf
+                            )
+                        )
+                        add(
+                            QuickToolSpec(
+                                icon = Icons.Rounded.TableView,
+                                title = "ফলাফল টেবিল",
+                                subtitle = "ট্যাবুলেশন PDF",
+                                tint = TealDark,
+                                testTag = "dash_tabulation_pdf_btn",
+                                onClick = onOpenTabulationPdf
                             )
                         )
                     }
