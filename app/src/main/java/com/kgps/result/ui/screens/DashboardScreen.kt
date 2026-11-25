@@ -29,6 +29,7 @@ import androidx.compose.material.icons.rounded.CloudDone
 import androidx.compose.material.icons.rounded.Description
 import androidx.compose.material.icons.rounded.DocumentScanner
 import androidx.compose.material.icons.rounded.EditNote
+import androidx.compose.material.icons.rounded.EventSeat
 import androidx.compose.material.icons.rounded.HourglassTop
 import androidx.compose.material.icons.rounded.LibraryBooks
 import androidx.compose.material.icons.rounded.Lock
@@ -110,6 +111,7 @@ fun DashboardScreen(
     onAiScan: () -> Unit,
     onAllPdf: () -> Unit,
     onOpenBlankSheetPdf: () -> Unit = {},
+    onOpenSeatPlanPdf: () -> Unit = {},
     onPrintBatch: (List<Student>, String) -> Unit,
     onExportBatchPdf: (List<Student>, String) -> Unit,
     onBackupNowAll: () -> Unit,
@@ -448,6 +450,16 @@ fun DashboardScreen(
                                 tint = TealDark,
                                 testTag = "dash_blank_sheet_pdf_btn",
                                 onClick = onOpenBlankSheetPdf
+                            )
+                        )
+                        add(
+                            QuickToolSpec(
+                                icon = Icons.Rounded.EventSeat,
+                                title = "আসন বিন্যাস",
+                                subtitle = "সিট প্ল্যান PDF",
+                                tint = TealPrimary,
+                                testTag = "dash_seat_plan_pdf_btn",
+                                onClick = onOpenSeatPlanPdf
                             )
                         )
                     }

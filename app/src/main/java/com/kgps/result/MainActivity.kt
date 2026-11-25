@@ -131,6 +131,7 @@ import com.kgps.result.ui.screens.DashboardScreen
 import com.kgps.result.ui.screens.ReportStudioScreen
 import com.kgps.result.ui.screens.RosterScreen
 import com.kgps.result.ui.screens.SchoolHubScreen
+import com.kgps.result.ui.screens.SeatPlanPdfScreen
 import com.kgps.result.ui.screens.SettingsScreen
 import com.kgps.result.ui.screens.SmartCsvImportDialog
 import com.kgps.result.ui.screens.StudentEditorScreen
@@ -636,6 +637,31 @@ fun ResultMakerWorkspace(
             }
         }
     }
+    var pendingSeatPlanPdfPages by remember { mutableStateOf<List<SeatPlanPageSpec>>(emptyList()) }
+    val seatPlanPdfLauncher = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/pdf")) { uri ->
+        val pagesToWrite = pendingSeatPlanPdfPages
+        if (uri != null && pagesToWrite.isNotEmpty()) {
+            workspaceScope.launch {
+                val result = runCatching {
+                    withContext(Dispatchers.IO) {
+                        ctx.contentResolver.openOutputStream(uri)?.use { out ->
+                            SeatPlanPdfGen.write(
+                                ctx = ctx,
+                                pages = pagesToWrite,
+                                settings = settings,
+                                out = out
+                            )
+                        }
+                    }
+                }
+                result.onSuccess {
+                    vm.showMessage("আসন বিন্যাস PDF সংরক্ষিত হয়েছে (${bn(pagesToWrite.size.toString())} পৃষ্ঠা)")
+                }.onFailure { e ->
+                    vm.showMessage("PDF তৈরি করা যায়নি: ${e.message ?: "ত্রুটি"}")
+                }
+            }
+        }
+    }
     val pdfLauncher = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/pdf")) { uri ->
         val listToWrite = pendingPdfStudents
         if (uri != null && listToWrite.isNotEmpty()) {
@@ -693,9 +719,11 @@ fun ResultMakerWorkspace(
     val isEditing = editingStudent != null
     val isSettings = section == NavSection.SETTINGS
     val isBlankSheet = section == NavSection.BLANK_SHEET
+    val isSeatPlan = section == NavSection.SEAT_PLAN
     val secondaryTitle = when {
         isSettings -> "সেটিংস, সদস্য ও ব্যাকআপ"
         isBlankSheet -> "ফাঁকা ফর্ম / শিট PDF"
+        isSeatPlan -> "আসন বিন্যাস (সিট প্ল্যান)"
         else -> null
     }
     val showPrimaryChrome = !isEditing && secondaryTitle == null
@@ -708,7 +736,7 @@ fun ResultMakerWorkspace(
         }
     }
 
-    BackHandler(enabled = !isEditing && (section == NavSection.ROSTER || section == NavSection.SHEET || section == NavSection.ASSISTANT || section == NavSection.BLANK_SHEET)) {
+    BackHandler(enabled = !isEditing && (section == NavSection.ROSTER || section == NavSection.SHEET || section == NavSection.ASSISTANT || section == NavSection.BLANK_SHEET || section == NavSection.SEAT_PLAN)) {
         vm.navigate(NavSection.DASHBOARD)
     }
 
@@ -732,7 +760,11 @@ fun ResultMakerWorkspace(
                         permissions = permissions,
                         pendingRequestCount = joinRequests.size,
                         secondaryTitle = secondaryTitle,
-                        secondaryBackTag = if (isBlankSheet) "blank_sheet_back_btn" else "settings_back_btn",
+                        secondaryBackTag = when {
+                            isBlankSheet -> "blank_sheet_back_btn"
+                            isSeatPlan -> "seat_plan_back_btn"
+                            else -> "settings_back_btn"
+                        },
                         onBackFromSecondary = { vm.navigate(NavSection.DASHBOARD) },
                         onOpenSettings = { vm.navigate(NavSection.SETTINGS) },
                         onCsvImport = { vm.openCsvImport("") },
@@ -746,6 +778,7 @@ fun ResultMakerWorkspace(
                             )
                         },
                         onOpenBlankSheetPdf = vm::openBlankSheetPdf,
+                        onOpenSeatPlanPdf = vm::openSeatPlanPdf,
                         onOpenSchoolHub = onOpenSchoolHub,
                         onRequestSignOut = {
                             if (vm.isLocalPreviewMode) onSignOut() else askSignOut = true
@@ -929,6 +962,7 @@ fun ResultMakerWorkspace(
                                         )
                                     },
                                     onOpenBlankSheetPdf = vm::openBlankSheetPdf,
+                                    onOpenSeatPlanPdf = vm::openSeatPlanPdf,
                                     onPrintBatch = { batchList, jobName ->
                                         if (!permissions.canExportPdf) {
                                             vm.showMessage("প্রিন্ট করার অনুমতি আপনার নেই")
@@ -1143,6 +1177,76 @@ fun ResultMakerWorkspace(
                                                     }
                                                 },
                                                 onCacheTemplates = vm::cacheBlankSheetTemplatesLocally,
+                                                onBack = { vm.navigate(NavSection.DASHBOARD) },
+                                                modifier = Modifier.fillMaxSize()
+                                            )
+                                        }
+                                    }
+                                }
+
+                                NavSection.SEAT_PLAN -> if (!permissions.canExportPdf) {
+                                    Column(
+                                        Modifier.fillMaxSize().padding(24.dp),
+                                        verticalArrangement = Arrangement.Center,
+                                        horizontalAlignment = Alignment.CenterHorizontally
+                                    ) {
+                                        Icon(Icons.Rounded.Lock, contentDescription = null, tint = AmberNotice, modifier = Modifier.size(36.dp))
+                                        Text(
+                                            "আসন বিন্যাস PDF তৈরির অনুমতি আপনার নেই",
+                                            fontWeight = FontWeight.Bold,
+                                            fontSize = 15.sp,
+                                            color = SlateText,
+                                            modifier = Modifier.padding(top = 10.dp)
+                                        )
+                                        Text(
+                                            "অ্যাডমিন আপনার জন্য PDF অনুমতি চালু করলে এখান থেকে পরীক্ষার আসন বিন্যাস তৈরি ও প্রিন্ট করতে পারবেন।",
+                                            fontSize = 12.sp,
+                                            color = SlateMuted,
+                                            modifier = Modifier.padding(top = 4.dp, bottom = 12.dp)
+                                        )
+                                        Button(onClick = { vm.navigate(NavSection.DASHBOARD) }) {
+                                            Text("ড্যাশবোর্ডে ফিরুন")
+                                        }
+                                    }
+                                } else {
+                                    val allowedCls = permissions.effectiveClasses().toSet()
+                                    val allowedStudents = students
+                                        .filter { it.cls in allowedCls }
+                                        .sortedWith(compareBy({ it.cls }, { it.roll }))
+                                    Column(
+                                        modifier = Modifier.fillMaxSize().padding(horizontal = 8.dp, vertical = 4.dp),
+                                        horizontalAlignment = Alignment.CenterHorizontally
+                                    ) {
+                                        Box(Modifier.widthIn(max = 920.dp).fillMaxSize()) {
+                                            SeatPlanPdfScreen(
+                                                students = allowedStudents,
+                                                settings = settings,
+                                                permissions = permissions,
+                                                initialClass = cls,
+                                                onExportPdf = { pages, fileName ->
+                                                    if (!permissions.canExportPdf) {
+                                                        vm.showMessage("PDF তৈরি করার অনুমতি আপনার নেই")
+                                                    } else if (pages.isEmpty()) {
+                                                        vm.showMessage("PDF তৈরির জন্য কোনো পৃষ্ঠা নেই")
+                                                    } else {
+                                                        pendingSeatPlanPdfPages = pages
+                                                        seatPlanPdfLauncher.launch(fileName)
+                                                    }
+                                                },
+                                                onPrint = { pages, jobName ->
+                                                    if (!permissions.canExportPdf) {
+                                                        vm.showMessage("প্রিন্ট করার অনুমতি আপনার নেই")
+                                                    } else if (pages.isEmpty()) {
+                                                        vm.showMessage("প্রিন্ট করার জন্য কোনো পৃষ্ঠা নেই")
+                                                    } else {
+                                                        SeatPlanPdfGen.print(
+                                                            ctx = ctx,
+                                                            pages = pages,
+                                                            settings = settings,
+                                                            jobName = jobName
+                                                        )
+                                                    }
+                                                },
                                                 onBack = { vm.navigate(NavSection.DASHBOARD) },
                                                 modifier = Modifier.fillMaxSize()
                                             )
@@ -1490,6 +1594,7 @@ private fun ResultMakerTopBar(
     onAiScan: () -> Unit,
     onAllPdf: () -> Unit,
     onOpenBlankSheetPdf: () -> Unit,
+    onOpenSeatPlanPdf: () -> Unit = {},
     onOpenSchoolHub: () -> Unit,
     onRequestSignOut: () -> Unit
 ) {
@@ -1598,6 +1703,11 @@ private fun ResultMakerTopBar(
                             DropdownMenuItem(
                                 text = { Text("ফাঁকা ফর্ম / শিট PDF") },
                                 onClick = { menuOpen = false; onOpenBlankSheetPdf() }
+                            )
+                            DropdownMenuItem(
+                                text = { Text("আসন বিন্যাস (সিট প্ল্যান)") },
+                                onClick = { menuOpen = false; onOpenSeatPlanPdf() },
+                                modifier = Modifier.testTag("menu_seat_plan_pdf")
                             )
                             DropdownMenuItem(
                                 text = { Text("সব শ্রেণির সব শিক্ষার্থীর PDF") },
