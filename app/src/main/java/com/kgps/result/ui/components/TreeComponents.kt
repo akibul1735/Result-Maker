@@ -7,6 +7,8 @@ import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -26,6 +28,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.KeyboardArrowDown
+import androidx.compose.material.icons.rounded.KeyboardArrowUp
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.HorizontalDivider
@@ -35,7 +38,12 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawBehind
@@ -43,6 +51,8 @@ import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -55,6 +65,7 @@ import com.kgps.result.ui.theme.TealContainer
 import com.kgps.result.ui.theme.TealDark
 import com.kgps.result.ui.theme.TealPrimary
 import com.kgps.result.ui.theme.TealSoft
+import kotlin.math.abs
 
 /**
  * Expandable Material 3 Tree Group Card with animated chevron, optional badge,
@@ -187,6 +198,194 @@ fun TreeGroupCard(
                 }
             }
         }
+    }
+}
+
+/**
+ * Floating sticky group header bar that appears only when an expanded group's real header
+ * scrolls above the viewport top edge.
+ */
+@Composable
+fun FloatingGroupStickyBar(
+    visible: Boolean,
+    title: String,
+    badgeText: String? = null,
+    icon: ImageVector? = null,
+    actionLabel: String = "বন্ধ করুন",
+    testTag: String? = null,
+    onAction: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    AnimatedVisibility(
+        visible = visible,
+        enter = slideInVertically(tween(180)) { -it } + fadeIn(tween(150)),
+        exit = slideOutVertically(tween(150)) { -it } + fadeOut(tween(130)),
+        modifier = modifier
+    ) {
+        Surface(
+            color = MaterialTheme.colorScheme.surface,
+            tonalElevation = 4.dp,
+            shadowElevation = 6.dp,
+            shape = RoundedCornerShape(12.dp),
+            border = BorderStroke(1.2.dp, TealPrimary.copy(alpha = 0.6f)),
+            modifier = Modifier
+                .fillMaxWidth()
+                .minimumInteractiveComponentSize()
+                .then(if (testTag != null) Modifier.testTag(testTag) else Modifier)
+                .clickable(onClick = onAction)
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(TealSoft.copy(alpha = 0.55f))
+                    .padding(horizontal = 10.dp, vertical = 7.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                if (icon != null) {
+                    Surface(
+                        color = TealContainer,
+                        shape = RoundedCornerShape(8.dp)
+                    ) {
+                        Icon(
+                            imageVector = icon,
+                            contentDescription = null,
+                            tint = TealDark,
+                            modifier = Modifier.padding(6.dp).size(16.dp)
+                        )
+                    }
+                }
+                Text(
+                    text = title,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 13.sp,
+                    color = SlateText,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f)
+                )
+                if (!badgeText.isNullOrBlank()) {
+                    Surface(
+                        color = Color.White,
+                        border = BorderStroke(0.8.dp, TealPrimary.copy(alpha = 0.35f)),
+                        shape = RoundedCornerShape(7.dp)
+                    ) {
+                        Text(
+                            text = badgeText,
+                            fontSize = 10.5.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = TealDark,
+                            maxLines = 1,
+                            modifier = Modifier.padding(horizontal = 7.dp, vertical = 3.dp)
+                        )
+                    }
+                }
+                Surface(
+                    color = TealPrimary,
+                    shape = RoundedCornerShape(8.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(2.dp)
+                    ) {
+                        Text(
+                            text = actionLabel,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = Color.White,
+                            maxLines = 1
+                        )
+                        Icon(
+                            imageVector = Icons.Rounded.KeyboardArrowUp,
+                            contentDescription = actionLabel,
+                            tint = Color.White,
+                            modifier = Modifier.size(16.dp)
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+data class TrackedGroupInfo(
+    val key: String,
+    val title: String,
+    val badgeText: String?,
+    val icon: ImageVector,
+    val expanded: Boolean,
+    val topInContent: Float,
+    val heightPx: Float,
+    val onCollapse: () -> Unit
+)
+
+@Composable
+fun TrackedGroupBox(
+    key: String,
+    title: String,
+    badgeText: String?,
+    icon: ImageVector,
+    expanded: Boolean,
+    contentRootY: () -> Float,
+    trackedGroups: MutableMap<String, TrackedGroupInfo>?,
+    onCollapse: () -> Unit,
+    content: @Composable () -> Unit
+) {
+    if (trackedGroups == null) {
+        content()
+        return
+    }
+    var lastTop by remember(key) { mutableFloatStateOf(0f) }
+    var lastHeight by remember(key) { mutableFloatStateOf(0f) }
+
+    fun syncEntry(top: Float, height: Float) {
+        val next = TrackedGroupInfo(
+            key = key,
+            title = title,
+            badgeText = badgeText,
+            icon = icon,
+            expanded = expanded,
+            topInContent = top,
+            heightPx = height,
+            onCollapse = onCollapse
+        )
+        val prev = trackedGroups[key]
+        if (prev == null ||
+            prev.expanded != next.expanded ||
+            prev.title != next.title ||
+            prev.badgeText != next.badgeText ||
+            abs(prev.topInContent - next.topInContent) > 1f ||
+            abs(prev.heightPx - next.heightPx) > 1f
+        ) {
+            trackedGroups[key] = next
+        }
+    }
+
+    SideEffect {
+        if (lastHeight > 0f) {
+            syncEntry(lastTop, lastHeight)
+        }
+    }
+
+    DisposableEffect(key) {
+        onDispose {
+            trackedGroups.remove(key)
+        }
+    }
+
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .onGloballyPositioned { coords ->
+                val top = coords.positionInRoot().y - contentRootY()
+                val height = coords.size.height.toFloat()
+                lastTop = top
+                lastHeight = height
+                syncEntry(top, height)
+            }
+    ) {
+        content()
     }
 }
 

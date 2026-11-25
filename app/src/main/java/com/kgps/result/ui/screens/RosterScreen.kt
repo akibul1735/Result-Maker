@@ -31,18 +31,19 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Add
-import androidx.compose.material.icons.rounded.AddCircleOutline
-import androidx.compose.material.icons.rounded.Badge
 import androidx.compose.material.icons.rounded.Call
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.DeleteOutline
 import androidx.compose.material.icons.rounded.Edit
 import androidx.compose.material.icons.rounded.FolderOpen
 import androidx.compose.material.icons.rounded.KeyboardArrowDown
+import androidx.compose.material.icons.rounded.KeyboardArrowUp
 import androidx.compose.material.icons.rounded.LocationOn
 import androidx.compose.material.icons.rounded.Lock
 import androidx.compose.material.icons.rounded.PersonOutline
@@ -52,6 +53,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -62,14 +64,17 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -83,6 +88,7 @@ import com.kgps.result.Student
 import com.kgps.result.activeClassIds
 import com.kgps.result.bn
 import com.kgps.result.classNameBn
+import com.kgps.result.classShortBn
 import com.kgps.result.cloud.TeacherPermissions
 import com.kgps.result.fmt
 import com.kgps.result.fromBn
@@ -92,8 +98,8 @@ import com.kgps.result.ordinalBn
 import com.kgps.result.subjectsFor
 import com.kgps.result.termNameBn
 import com.kgps.result.total
-import com.kgps.result.ui.components.AddCustomClassDialog
 import com.kgps.result.ui.components.BiometricDeleteConfirmDialog
+import com.kgps.result.ui.components.FloatingGroupStickyBar
 import com.kgps.result.ui.components.TreeBranchItem
 import com.kgps.result.ui.components.TreeGroupCard
 import com.kgps.result.ui.theme.AmberBg
@@ -110,6 +116,9 @@ import com.kgps.result.ui.theme.TealContainer
 import com.kgps.result.ui.theme.TealDark
 import com.kgps.result.ui.theme.TealPrimary
 import com.kgps.result.ui.theme.TealSoft
+import com.kgps.result.ui.theme.appFilterChipBorder
+import com.kgps.result.ui.theme.appFilterChipColors
+import kotlinx.coroutines.launch
 
 @Composable
 fun RosterScreen(
@@ -117,9 +126,6 @@ fun RosterScreen(
     settings: Settings,
     cls: Int,
     permissions: TeacherPermissions,
-    isAdmin: Boolean = false,
-    onAddCustomClass: ((nameBn: String, shortBn: String, syllabusTier: Int) -> Boolean)? = null,
-    onBasicImport: (() -> Unit)? = null,
     onSelectClass: (Int) -> Unit,
     onOpenStudent: (Student) -> Unit,
     onNewStudentInClass: (Int) -> Unit,
@@ -137,10 +143,36 @@ fun RosterScreen(
     }
     var expandedStudentIds by remember { mutableStateOf<Set<String>>(emptySet()) }
     var pendingDeleteStudent by remember { mutableStateOf<Student?>(null) }
-    var showAddClassDialog by remember { mutableStateOf(false) }
+
+    val listState = rememberLazyListState()
+    val coroutineScope = rememberCoroutineScope()
 
     val q = query.trim().lowercase()
     val qDigits = fromBn(q)
+
+    val studentsByClass = remember(students, visibleClasses) {
+        visibleClasses.associateWith { c ->
+            students.filter { it.cls == c }.sortedBy { it.roll }
+        }
+    }
+    val matchingByClass = remember(studentsByClass, q, qDigits) {
+        studentsByClass.mapValues { (_, list) ->
+            if (q.isEmpty()) list
+            else list.filter {
+                val rollStr = it.roll.toString()
+                it.name.lowercase().contains(q) ||
+                    (qDigits.isNotEmpty() && rollStr.contains(qDigits)) ||
+                    bn(rollStr).contains(q) ||
+                    it.guardian.lowercase().contains(q) ||
+                    it.mobile.lowercase().contains(q) ||
+                    it.village.lowercase().contains(q)
+            }
+        }
+    }
+    val displayedClasses = remember(visibleClasses, matchingByClass, q) {
+        if (q.isEmpty()) visibleClasses
+        else visibleClasses.filter { matchingByClass[it].orEmpty().isNotEmpty() }
+    }
 
     Column(
         modifier = Modifier
@@ -201,111 +233,118 @@ fun RosterScreen(
 
             Spacer(Modifier.height(6.dp))
 
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
+            // Option খ: One-tap class switcher chips (no scrolling back up needed)
+            LazyRow(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("roster_class_switcher_row"),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                contentPadding = PaddingValues(horizontal = 2.dp)
             ) {
-                Text(
-                    "ডেক ভিউ · কার্ডে ট্যাপ করলে বিস্তারিত (${bn(visibleClasses.size.toString())}টি শ্রেণি)",
-                    fontSize = 11.5.sp,
-                    color = SlateMuted,
-                    fontWeight = FontWeight.Medium,
-                    modifier = Modifier.weight(1f)
-                )
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    if (permissions.canManageStudents && onBasicImport != null) {
-                        OutlinedButton(
-                            onClick = onBasicImport,
-                            shape = RoundedCornerShape(8.dp),
-                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
-                            border = BorderStroke(1.dp, TealPrimary.copy(alpha = 0.5f)),
-                            modifier = Modifier
-                                .heightIn(min = 48.dp)
-                                .testTag("roster_basic_import_btn")
-                        ) {
-                            Icon(
-                                Icons.Rounded.Badge,
-                                contentDescription = null,
-                                tint = TealPrimary,
-                                modifier = Modifier.size(15.dp)
+                items(visibleClasses, key = { "chip_$it" }) { c ->
+                    val cnt = studentsByClass[c]?.size ?: 0
+                    val isSelected = q.isEmpty() && expandedClass == c
+                    FilterChip(
+                        selected = isSelected,
+                        onClick = {
+                            if (q.isNotEmpty()) {
+                                query = ""
+                                expandedClass = c
+                                onSelectClass(c)
+                                val idx = visibleClasses.indexOf(c)
+                                if (idx >= 0) {
+                                    coroutineScope.launch { listState.animateScrollToItem(idx) }
+                                }
+                            } else if (expandedClass == c) {
+                                expandedClass = null
+                            } else {
+                                expandedClass = c
+                                onSelectClass(c)
+                                val idx = visibleClasses.indexOf(c)
+                                if (idx >= 0) {
+                                    coroutineScope.launch { listState.animateScrollToItem(idx) }
+                                }
+                            }
+                        },
+                        label = {
+                            Text(
+                                text = "${classShortBn(c, settings)} (${bn(cnt.toString())})",
+                                fontSize = 11.5.sp,
+                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                                maxLines = 1
                             )
-                            Spacer(Modifier.size(4.dp))
-                            Text("বেসিক ইমপোর্ট", fontSize = 11.5.sp, fontWeight = FontWeight.SemiBold, color = TealPrimary)
-                        }
-                    }
-                    if (isAdmin && onAddCustomClass != null) {
-                        OutlinedButton(
-                            onClick = { showAddClassDialog = true },
-                            shape = RoundedCornerShape(8.dp),
-                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
-                            border = BorderStroke(1.dp, TealPrimary.copy(alpha = 0.5f)),
-                            modifier = Modifier
-                                .heightIn(min = 48.dp)
-                                .testTag("roster_add_custom_class_btn")
-                        ) {
-                            Icon(
-                                Icons.Rounded.AddCircleOutline,
-                                contentDescription = null,
-                                tint = TealPrimary,
-                                modifier = Modifier.size(15.dp)
-                            )
-                            Spacer(Modifier.size(4.dp))
-                            Text("নতুন শ্রেণি", fontSize = 11.5.sp, fontWeight = FontWeight.SemiBold, color = TealPrimary)
-                        }
-                    }
+                        },
+                        trailingIcon = if (isSelected) {
+                            {
+                                Icon(
+                                    imageVector = Icons.Rounded.KeyboardArrowUp,
+                                    contentDescription = "গুটিয়ে নিন",
+                                    modifier = Modifier.size(15.dp)
+                                )
+                            }
+                        } else null,
+                        colors = appFilterChipColors(),
+                        border = appFilterChipBorder(isSelected),
+                        modifier = Modifier
+                            .heightIn(min = 40.dp)
+                            .testTag("roster_chip_cls_$c")
+                    )
                 }
             }
 
             Spacer(Modifier.height(6.dp))
 
-            LazyColumn(
-                modifier = Modifier.weight(1f),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
-                contentPadding = PaddingValues(bottom = 76.dp)
+            val density = LocalDensity.current
+            val headerHideThresholdPx = with(density) { 48.dp.roundToPx() }
+            val minRemainingPx = with(density) { 64.dp.roundToPx() }
+            val floatingStickyClass by remember(q, expandedClass, headerHideThresholdPx, minRemainingPx) {
+                derivedStateOf {
+                    val visible = listState.layoutInfo.visibleItemsInfo
+                    visible.firstOrNull { info ->
+                        val clsId = info.key as? Int ?: return@firstOrNull false
+                        val isOpen = if (q.isNotEmpty()) true else (expandedClass == clsId)
+                        isOpen &&
+                            info.offset < -headerHideThresholdPx &&
+                            (info.offset + info.size) > minRemainingPx
+                    }?.key as? Int
+                }
+            }
+
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxWidth()
             ) {
-                items(visibleClasses, key = { it }) { c ->
-                    val allInClass = remember(students, c) {
-                        students.filter { it.cls == c }.sortedBy { it.roll }
-                    }
-                    val rankMap = remember(allInClass, settings.resultRules) {
-                        ResultRulesEngine.rankMapForClass(allInClass, settings.resultRules)
-                    }
-                    val matching = remember(allInClass, q, qDigits) {
-                        if (q.isEmpty()) allInClass
-                        else allInClass.filter {
-                            val rollStr = it.roll.toString()
-                            it.name.lowercase().contains(q) ||
-                                (qDigits.isNotEmpty() && rollStr.contains(qDigits)) ||
-                                bn(rollStr).contains(q) ||
-                                it.guardian.lowercase().contains(q) ||
-                                it.mobile.lowercase().contains(q) ||
-                                it.village.lowercase().contains(q)
+                LazyColumn(
+                    state = listState,
+                    modifier = Modifier.fillMaxSize(),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                    contentPadding = PaddingValues(bottom = 84.dp)
+                ) {
+                    items(displayedClasses, key = { it }) { c ->
+                        val allInClass = studentsByClass[c].orEmpty()
+                        val matching = matchingByClass[c].orEmpty()
+                        val rankMap = remember(allInClass, settings.resultRules) {
+                            ResultRulesEngine.rankMapForClass(allInClass, settings.resultRules)
                         }
-                    }
 
-                    if (q.isNotEmpty() && matching.isEmpty()) return@items
+                        val teacherName = settings.teachers[c].orEmpty().ifBlank { "অনির্ধারিত" }
+                        val isExpanded = if (q.isNotEmpty()) matching.isNotEmpty() else (expandedClass == c)
 
-                    val teacherName = settings.teachers[c].orEmpty().ifBlank { "অনির্ধারিত" }
-                    val isExpanded = if (q.isNotEmpty()) matching.isNotEmpty() else (expandedClass == c)
-
-                    TreeGroupCard(
-                        title = "${classNameBn(c, settings)} শ্রেণি",
-                        subtitle = "শ্রেণি শিক্ষক: $teacherName",
-                        badgeText = "${bn(allInClass.size.toString())} জন",
-                        badgeColor = TealPrimary,
-                        badgeContainerColor = TealSoft,
-                        icon = Icons.Rounded.FolderOpen,
-                        expanded = isExpanded,
-                        headerTestTag = "roster_class_node_$c",
-                        onToggle = {
-                            onSelectClass(c)
-                            expandedClass = if (expandedClass == c) null else c
-                        }
-                    ) {
+                        TreeGroupCard(
+                            title = "${classNameBn(c, settings)} শ্রেণি",
+                            subtitle = "শ্রেণি শিক্ষক: $teacherName",
+                            badgeText = "${bn(allInClass.size.toString())} জন",
+                            badgeColor = TealPrimary,
+                            badgeContainerColor = TealSoft,
+                            icon = Icons.Rounded.FolderOpen,
+                            expanded = isExpanded,
+                            headerTestTag = "roster_class_node_$c",
+                            onToggle = {
+                                onSelectClass(c)
+                                expandedClass = if (expandedClass == c) null else c
+                            }
+                        ) {
                         if (permissions.canManageStudents) {
                             OutlinedButton(
                                 onClick = { onNewStudentInClass(c) },
@@ -396,6 +435,34 @@ fun RosterScreen(
                         }
                     }
                 }
+                }
+
+                // Option ক: Smart floating header only when expanded group's real header scrolls off top
+                val stickyCls = floatingStickyClass
+                val stickyCount = stickyCls?.let { studentsByClass[it]?.size ?: 0 } ?: 0
+                FloatingGroupStickyBar(
+                    visible = stickyCls != null,
+                    title = if (stickyCls != null) "${classNameBn(stickyCls, settings)} শ্রেণি" else "",
+                    badgeText = if (stickyCls != null) "${bn(stickyCount.toString())} জন" else null,
+                    icon = Icons.Rounded.FolderOpen,
+                    actionLabel = if (q.isNotEmpty()) "শ্রেণির শুরুতে" else "বন্ধ করুন",
+                    testTag = "roster_floating_group_bar",
+                    onAction = {
+                        val target = stickyCls ?: return@FloatingGroupStickyBar
+                        val targetIdx = displayedClasses.indexOf(target)
+                        if (q.isEmpty()) {
+                            expandedClass = null
+                        }
+                        if (targetIdx >= 0) {
+                            coroutineScope.launch {
+                                listState.animateScrollToItem(targetIdx)
+                            }
+                        }
+                    },
+                    modifier = Modifier
+                        .align(Alignment.TopCenter)
+                        .padding(top = 2.dp)
+                )
             }
         }
     }
@@ -413,16 +480,6 @@ fun RosterScreen(
             onConfirmedDelete = {
                 onDeleteStudent?.invoke(target.id)
                 expandedStudentIds = expandedStudentIds - target.id
-            }
-        )
-    }
-
-    if (showAddClassDialog && onAddCustomClass != null) {
-        AddCustomClassDialog(
-            settings = settings,
-            onDismiss = { showAddClassDialog = false },
-            onConfirm = { nameBn, shortBn, tier ->
-                onAddCustomClass(nameBn, shortBn, tier)
             }
         )
     }

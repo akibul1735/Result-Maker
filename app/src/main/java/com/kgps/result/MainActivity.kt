@@ -13,9 +13,18 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.IntentSenderRequest
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -35,13 +44,16 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.Add
+import androidx.compose.material.icons.rounded.AddCircleOutline
 import androidx.compose.material.icons.rounded.AutoAwesome
+import androidx.compose.material.icons.rounded.Badge
 import androidx.compose.material.icons.rounded.Dashboard
 import androidx.compose.material.icons.rounded.Description
 import androidx.compose.material.icons.rounded.GridOn
 import androidx.compose.material.icons.rounded.Lock
 import androidx.compose.material.icons.rounded.MoreVert
 import androidx.compose.material.icons.rounded.People
+import androidx.compose.material.icons.rounded.PersonAdd
 import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -51,7 +63,7 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.ExtendedFloatingActionButton
+import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -61,6 +73,7 @@ import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.NavigationRail
 import androidx.compose.material3.NavigationRailItem
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SmallFloatingActionButton
 import androidx.compose.material3.Snackbar
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
@@ -79,6 +92,8 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
@@ -104,6 +119,7 @@ import com.kgps.result.cloud.attemptAutoSignIn
 import com.kgps.result.cloud.authStateFlow
 import com.kgps.result.cloud.onGoogleSignInClicked
 import com.kgps.result.cloud.signOutFromGoogle
+import com.kgps.result.ui.components.AddCustomClassDialog
 import com.kgps.result.ui.components.SummaryTableConfigCard
 import com.kgps.result.ui.screens.AiAssistantScreen
 import com.kgps.result.ui.screens.AuthScreen
@@ -125,7 +141,10 @@ import com.kgps.result.ui.theme.ResultMakerTheme
 import com.kgps.result.ui.theme.RoseDanger
 import com.kgps.result.ui.theme.SlateBg
 import com.kgps.result.ui.theme.SlateMuted
+import com.kgps.result.ui.theme.SlateOutline
 import com.kgps.result.ui.theme.SlateText
+import com.kgps.result.ui.theme.TealContainer
+import com.kgps.result.ui.theme.TealDark
 import com.kgps.result.ui.theme.TealPrimary
 import com.kgps.result.ui.theme.TealSoft
 import kotlinx.coroutines.Dispatchers
@@ -680,9 +699,21 @@ fun ResultMakerWorkspace(
         else -> null
     }
     val showPrimaryChrome = !isEditing && secondaryTitle == null
+    var rosterFabMenuExpanded by remember { mutableStateOf(false) }
+    var showRosterAddClassDialog by remember { mutableStateOf(false) }
+
+    LaunchedEffect(section, isEditing) {
+        if (section != NavSection.ROSTER || isEditing) {
+            rosterFabMenuExpanded = false
+        }
+    }
 
     BackHandler(enabled = !isEditing && (section == NavSection.ROSTER || section == NavSection.SHEET || section == NavSection.ASSISTANT || section == NavSection.BLANK_SHEET)) {
         vm.navigate(NavSection.DASHBOARD)
+    }
+
+    BackHandler(enabled = rosterFabMenuExpanded && !isEditing && section == NavSection.ROSTER) {
+        rosterFabMenuExpanded = false
     }
 
     BoxWithConstraints(Modifier.fillMaxSize()) {
@@ -723,15 +754,77 @@ fun ResultMakerWorkspace(
                 }
             },
             floatingActionButton = {
-                if (!isEditing && section == NavSection.ROSTER && permissions.canManageStudents && permissions.effectiveClasses().isNotEmpty()) {
-                    ExtendedFloatingActionButton(
-                        onClick = { vm.openNewStudentEditor(NavSection.ROSTER) },
-                        containerColor = TealPrimary,
-                        contentColor = MaterialTheme.colorScheme.onPrimary,
-                        icon = { Icon(Icons.Rounded.Add, contentDescription = null) },
-                        text = { Text("নতুন শিক্ষার্থী", fontWeight = FontWeight.SemiBold) },
-                        modifier = Modifier.testTag("roster_fab_add_student")
+                val canAddStudent = permissions.canManageStudents && permissions.effectiveClasses().isNotEmpty()
+                val canBasicImport = permissions.canManageStudents
+                val canAddClass = isAdmin
+                if (!isEditing && section == NavSection.ROSTER && (canAddStudent || canBasicImport || canAddClass)) {
+                    val fabRotation by animateFloatAsState(
+                        targetValue = if (rosterFabMenuExpanded) 45f else 0f,
+                        animationSpec = tween(200),
+                        label = "roster_fab_rotation"
                     )
+                    Column(
+                        horizontalAlignment = Alignment.End,
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        AnimatedVisibility(
+                            visible = rosterFabMenuExpanded,
+                            enter = expandVertically(tween(180)) + fadeIn(tween(150)),
+                            exit = shrinkVertically(tween(150)) + fadeOut(tween(120))
+                        ) {
+                            Column(
+                                horizontalAlignment = Alignment.End,
+                                verticalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                if (canAddClass) {
+                                    RosterFabOptionItem(
+                                        label = "নতুন শ্রেণি",
+                                        icon = Icons.Rounded.AddCircleOutline,
+                                        testTag = "roster_fab_opt_new_class",
+                                        onClick = {
+                                            rosterFabMenuExpanded = false
+                                            showRosterAddClassDialog = true
+                                        }
+                                    )
+                                }
+                                if (canBasicImport) {
+                                    RosterFabOptionItem(
+                                        label = "বেসিক ইমপোর্ট",
+                                        icon = Icons.Rounded.Badge,
+                                        testTag = "roster_fab_opt_basic_import",
+                                        onClick = {
+                                            rosterFabMenuExpanded = false
+                                            vm.openBasicStudentImport("")
+                                        }
+                                    )
+                                }
+                                if (canAddStudent) {
+                                    RosterFabOptionItem(
+                                        label = "নতুন শিক্ষার্থী",
+                                        icon = Icons.Rounded.PersonAdd,
+                                        testTag = "roster_fab_opt_new_student",
+                                        onClick = {
+                                            rosterFabMenuExpanded = false
+                                            vm.openNewStudentEditor(NavSection.ROSTER)
+                                        }
+                                    )
+                                }
+                            }
+                        }
+
+                        FloatingActionButton(
+                            onClick = { rosterFabMenuExpanded = !rosterFabMenuExpanded },
+                            containerColor = if (rosterFabMenuExpanded) TealDark else TealPrimary,
+                            contentColor = Color.White,
+                            modifier = Modifier.testTag("roster_fab_menu")
+                        ) {
+                            Icon(
+                                imageVector = Icons.Rounded.Add,
+                                contentDescription = if (rosterFabMenuExpanded) "মেনু বন্ধ করুন" else "যোগ ও ইমপোর্ট মেনু",
+                                modifier = Modifier.rotate(fabRotation)
+                            )
+                        }
+                    }
                 }
             },
             bottomBar = {
@@ -869,9 +962,6 @@ fun ResultMakerWorkspace(
                                     settings = settings,
                                     cls = cls,
                                     permissions = permissions,
-                                    isAdmin = isAdmin,
-                                    onAddCustomClass = vm::addCustomClass,
-                                    onBasicImport = { vm.openBasicStudentImport("") },
                                     onSelectClass = vm::selectClass,
                                     onOpenStudent = { vm.openEditor(it, NavSection.ROSTER) },
                                     onNewStudentInClass = { targetCls ->
@@ -1197,9 +1287,31 @@ fun ResultMakerWorkspace(
                                 )
                             }
                         }
+
+                        if (rosterFabMenuExpanded && !isEditing && section == NavSection.ROSTER) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .background(Color.Black.copy(alpha = 0.22f))
+                                    .clickable(
+                                        interactionSource = remember { MutableInteractionSource() },
+                                        indication = null
+                                    ) { rosterFabMenuExpanded = false }
+                            )
+                        }
                     }
                 }
             }
+        }
+
+        if (showRosterAddClassDialog) {
+            AddCustomClassDialog(
+                settings = settings,
+                onDismiss = { showRosterAddClassDialog = false },
+                onConfirm = { nameBn, shortBn, tier ->
+                    vm.addCustomClass(nameBn, shortBn, tier)
+                }
+            )
         }
 
         if (csvImportState.isOpen) {
@@ -1511,3 +1623,47 @@ private fun ResultMakerTopBar(
         }
     )
 }
+
+@Composable
+private fun RosterFabOptionItem(
+    label: String,
+    icon: ImageVector,
+    testTag: String,
+    onClick: () -> Unit
+) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        modifier = Modifier
+            .clickable(onClick = onClick)
+            .testTag(testTag)
+    ) {
+        Surface(
+            color = MaterialTheme.colorScheme.surface,
+            tonalElevation = 4.dp,
+            shadowElevation = 4.dp,
+            shape = RoundedCornerShape(10.dp),
+            border = BorderStroke(1.dp, SlateOutline.copy(alpha = 0.7f))
+        ) {
+            Text(
+                text = label,
+                fontSize = 12.5.sp,
+                fontWeight = FontWeight.SemiBold,
+                color = SlateText,
+                modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)
+            )
+        }
+        SmallFloatingActionButton(
+            onClick = onClick,
+            containerColor = TealContainer,
+            contentColor = TealDark
+        ) {
+            Icon(
+                imageVector = icon,
+                contentDescription = label,
+                modifier = Modifier.size(20.dp)
+            )
+        }
+    }
+}
+

@@ -79,6 +79,8 @@ import com.kgps.result.bn
 import com.kgps.result.fmt
 import com.kgps.result.fmtEn
 import com.kgps.result.fromBn
+import com.kgps.result.ui.components.TrackedGroupBox
+import com.kgps.result.ui.components.TrackedGroupInfo
 import com.kgps.result.ui.theme.AmberBg
 import com.kgps.result.ui.theme.AmberBorder
 import com.kgps.result.ui.theme.AmberNotice
@@ -108,7 +110,9 @@ fun SettingsRulesTab(
     rules: ResultEvaluationRules,
     isAdmin: Boolean,
     onUpdateRules: (ResultEvaluationRules) -> Unit,
-    onShowMessage: (String) -> Unit
+    onShowMessage: (String) -> Unit,
+    contentRootY: () -> Float = { 0f },
+    trackedGroups: MutableMap<String, TrackedGroupInfo>? = null
 ) {
     var expandedGroups by remember { mutableStateOf(setOf(GROUP_PASS)) }
     var expandedGuidelineId by remember { mutableStateOf<String?>(null) }
@@ -378,6 +382,16 @@ fun SettingsRulesTab(
         }
 
         // গ্রুপ ১: পাশ নম্বর, নির্দেশক ও অনুপস্থিতি (শর্ত ২, ৩, ৭)
+        TrackedGroupBox(
+            key = "rules_$GROUP_PASS",
+            title = "পাশ নম্বর ও অনুপস্থিতি",
+            badgeText = "${bn(passActiveCount.toString())}/৩ অন",
+            icon = Icons.Rounded.VerifiedUser,
+            expanded = GROUP_PASS in expandedGroups,
+            contentRootY = contentRootY,
+            trackedGroups = trackedGroups,
+            onCollapse = { expandedGroups = expandedGroups - GROUP_PASS }
+        ) {
         RuleGroupCard(
             title = "পাশ নম্বর ও অনুপস্থিতি",
             subtitle = "শর্ত ২ (বিষয় ${fmt(rules.regularPassPct)}%) · শর্ত ৩ (বিশেষ ৩৩%) · শর্ত ৭ (অনুপস্থিত A)",
@@ -499,8 +513,19 @@ fun SettingsRulesTab(
                 }
             )
         }
+        }
 
         // গ্রুপ ২: উত্তীর্ণ ও মেধাক্রম বিন্যাস (শর্ত ৪, ৫, ৮)
+        TrackedGroupBox(
+            key = "rules_$GROUP_MERIT",
+            title = "উত্তীর্ণ ও মেধাক্রম বিন্যাস",
+            badgeText = "$meritTierLabel${if (rules.jointMeritEnabled) " · যৌথ" else ""}",
+            icon = Icons.Rounded.Leaderboard,
+            expanded = GROUP_MERIT in expandedGroups,
+            contentRootY = contentRootY,
+            trackedGroups = trackedGroups,
+            onCollapse = { expandedGroups = expandedGroups - GROUP_MERIT }
+        ) {
         RuleGroupCard(
             title = "উত্তীর্ণ ও মেধাক্রম বিন্যাস",
             subtitle = "শর্ত ৪ (উত্তীর্ণ) · শর্ত ৫ (অনুত্তীর্ণ ক্রম: $meritTierLabel) · শর্ত ৮ (যৌথ ও টাই-ব্রেকার)",
@@ -662,8 +687,19 @@ fun SettingsRulesTab(
                 }
             }
         }
+        }
 
         // গ্রুপ ৩: উপস্থিতি ও প্রান্তিক গড় হিসাব (শর্ত ১ ও ৬)
+        TrackedGroupBox(
+            key = "rules_$GROUP_ATTENDANCE_TERM",
+            title = "উপস্থিতি ও প্রান্তিক গড়",
+            badgeText = "${bn(listOf(rules.attendanceRuleEnabled, rules.dynamicTermAveraging).count { it }.toString())}/২ অন",
+            icon = Icons.Rounded.DateRange,
+            expanded = GROUP_ATTENDANCE_TERM in expandedGroups,
+            contentRootY = contentRootY,
+            trackedGroups = trackedGroups,
+            onCollapse = { expandedGroups = expandedGroups - GROUP_ATTENDANCE_TERM }
+        ) {
         RuleGroupCard(
             title = "উপস্থিতি ও প্রান্তিক গড়",
             subtitle = "শর্ত ১ (${if (rules.attendanceRuleEnabled) "${fmt(rules.minAttendancePct)}% অন" else "অফ"}) · শর্ত ৬ (${if (rules.dynamicTermAveraging) "১/২/৩ প্রান্তিক গড়" else "স্থির ÷৩"})",
@@ -782,8 +818,19 @@ fun SettingsRulesTab(
                 }
             )
         }
+        }
 
         // গ্রুপ ৪: সরকারি মূল্যায়ন নির্দেশিকা (৭টি ধারা)
+        TrackedGroupBox(
+            key = "rules_$GROUP_GUIDELINES",
+            title = "সরকারি মূল্যায়ন নির্দেশিকা",
+            badgeText = "${bn(activeGuidelineCount.toString())}/${bn(OFFICIAL_EVAL_GUIDELINES.size.toString())} সচল",
+            icon = Icons.Rounded.Gavel,
+            expanded = GROUP_GUIDELINES in expandedGroups,
+            contentRootY = contentRootY,
+            trackedGroups = trackedGroups,
+            onCollapse = { expandedGroups = expandedGroups - GROUP_GUIDELINES }
+        ) {
         RuleGroupCard(
             title = "সরকারি মূল্যায়ন নির্দেশিকা",
             subtitle = "শিরোনামে ট্যাপে বিস্তারিত · 'এই শর্ত এপ্লাই হবে না' টিক দেওয়া যাবে",
@@ -949,6 +996,7 @@ fun SettingsRulesTab(
                     }
                 }
             }
+        }
         }
 
         if (isAdmin) {

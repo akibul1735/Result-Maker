@@ -11,7 +11,9 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
@@ -73,18 +75,26 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
@@ -129,7 +139,10 @@ import com.kgps.result.cloud.TeacherPermissions
 import com.kgps.result.ui.components.AddCustomClassDialog
 import com.kgps.result.ui.components.BiometricDeleteConfirmDialog
 import com.kgps.result.ui.components.DataResetDialog
+import com.kgps.result.ui.components.FloatingGroupStickyBar
 import com.kgps.result.ui.components.TeacherPermissionsEditorDialog
+import com.kgps.result.ui.components.TrackedGroupBox
+import com.kgps.result.ui.components.TrackedGroupInfo
 import com.kgps.result.ui.components.TreeBranchItem
 import com.kgps.result.ui.components.TreeGroupCard
 import com.kgps.result.ui.theme.AmberBg
@@ -153,6 +166,9 @@ import com.kgps.result.ui.theme.buildMixedScriptAnnotatedString
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import kotlin.math.abs
+import kotlin.math.roundToInt
+import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
@@ -415,14 +431,88 @@ fun SettingsScreen(
     val activeFontLabel = "বাংলা: $activePdfBnFontLabel · ইংরেজি: $activePdfEnFontLabel"
     val activeLogoLabel = DPE_LOGO_LIST.find { it.id == s.dpeLogo }?.labelBn?.substringBefore(" (") ?: s.dpeLogo
 
-    Column(
+    val scrollState = rememberScrollState()
+    val coroutineScope = rememberCoroutineScope()
+    var contentRootY by remember { mutableFloatStateOf(0f) }
+    val trackedGroups = remember { mutableStateMapOf<String, TrackedGroupInfo>() }
+
+    val density = LocalDensity.current
+    val headerHideThresholdPx = with(density) { 48.dp.toPx() }
+    val minBodyRemainingPx = with(density) { 64.dp.toPx() }
+    val activeStickyGroup by remember(headerHideThresholdPx, minBodyRemainingPx) {
+        derivedStateOf {
+            val scrollY = scrollState.value.toFloat()
+            trackedGroups.values
+                .filter { it.expanded && it.heightPx > headerHideThresholdPx + minBodyRemainingPx }
+                .filter { g ->
+                    val relTop = g.topInContent - scrollY
+                    val relHeaderBottom = relTop + headerHideThresholdPx
+                    val relBottom = relTop + g.heightPx
+                    relHeaderBottom < 0f && relBottom > minBodyRemainingPx
+                }
+                .maxByOrNull { it.topInContent }
+        }
+    }
+
+    @Composable
+    fun SettingsTrackedGroup(
+        groupKey: String,
+        title: String,
+        subtitle: String? = null,
+        badgeText: String? = null,
+        badgeColor: Color = TealPrimary,
+        badgeContainerColor: Color = TealSoft,
+        icon: ImageVector,
+        headerTestTag: String,
+        content: @Composable ColumnScope.() -> Unit
+    ) {
+        TrackedGroupBox(
+            key = groupKey,
+            title = title,
+            badgeText = badgeText,
+            icon = icon,
+            expanded = expandedGroup == groupKey,
+            contentRootY = { contentRootY },
+            trackedGroups = trackedGroups,
+            onCollapse = { if (expandedGroup == groupKey) expandedGroup = "" }
+        ) {
+            TreeGroupCard(
+                title = title,
+                subtitle = subtitle,
+                badgeText = badgeText,
+                badgeColor = badgeColor,
+                badgeContainerColor = badgeContainerColor,
+                icon = icon,
+                expanded = expandedGroup == groupKey,
+                headerTestTag = headerTestTag,
+                onToggle = { expandedGroup = if (expandedGroup == groupKey) "" else groupKey },
+                content = content
+            )
+        }
+    }
+
+    Box(
         modifier = Modifier
             .fillMaxSize()
             .imePadding()
-            .verticalScroll(rememberScrollState())
-            .padding(horizontal = 8.dp, vertical = 10.dp),
-        horizontalAlignment = Alignment.CenterHorizontally
     ) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .verticalScroll(scrollState)
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .onGloballyPositioned { coords ->
+                        val y = coords.positionInRoot().y
+                        if (abs(y - contentRootY) > 0.5f) {
+                            contentRootY = y
+                        }
+                    }
+                    .padding(horizontal = 8.dp, vertical = 10.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
         Column(
             Modifier
                 .widthIn(max = 820.dp)
@@ -498,21 +588,22 @@ fun SettingsScreen(
                         s = s.copy(resultRules = nextRules)
                         onUpdateResultRules(nextRules)
                     },
-                    onShowMessage = onShowMessage
+                    onShowMessage = onShowMessage,
+                    contentRootY = { contentRootY },
+                    trackedGroups = trackedGroups
                 )
             } else {
 
             // Category 1: School & Team
             SettingsCategoryHeader(title = "বিদ্যালয় ও শিক্ষক দল", icon = Icons.Rounded.School)
 
-            TreeGroupCard(
+            SettingsTrackedGroup(
+                groupKey = "school",
                 title = "বিদ্যালয় ও শিক্ষাবর্ষ",
                 subtitle = s.school.ifBlank { "বিদ্যালয়ের নাম ও ঠিকানা" },
                 badgeText = bn(s.year),
                 icon = Icons.Rounded.School,
-                expanded = expandedGroup == "school",
-                headerTestTag = "settings_group_school",
-                onToggle = { expandedGroup = if (expandedGroup == "school") "" else "school" }
+                headerTestTag = "settings_group_school"
             ) {
                 TreeBranchItem(isLast = true) {
                     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -557,7 +648,8 @@ fun SettingsScreen(
             }
 
             if (activeSchool != null) {
-                TreeGroupCard(
+                SettingsTrackedGroup(
+                    groupKey = "collab",
                     title = "আমন্ত্রণ কোড ও যোগদান অনুরোধ",
                     subtitle = if (joinRequests.isNotEmpty() && isAdmin) {
                         "কোড: ${activeSchool.joinCode} · নতুন অনুরোধ অপেক্ষমাণ"
@@ -568,9 +660,7 @@ fun SettingsScreen(
                     badgeColor = if (joinRequests.isNotEmpty() && isAdmin) AmberNotice else TealPrimary,
                     badgeContainerColor = if (joinRequests.isNotEmpty() && isAdmin) AmberBg else TealSoft,
                     icon = Icons.Rounded.QrCode2,
-                    expanded = expandedGroup == "collab",
-                    headerTestTag = "settings_group_collab",
-                    onToggle = { expandedGroup = if (expandedGroup == "collab") "" else "collab" }
+                    headerTestTag = "settings_group_collab"
                 ) {
                     TreeBranchItem(isLast = !(isAdmin && joinRequests.isNotEmpty())) {
                         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -690,14 +780,13 @@ fun SettingsScreen(
                     }
                 }
 
-                TreeGroupCard(
+                SettingsTrackedGroup(
+                    groupKey = "members",
                     title = "সদস্য তালিকা ও অনুমতি",
                     subtitle = "${bn(activeSchool.members.size.toString())} জন শিক্ষক যুক্ত আছেন",
                     badgeText = if (isOwner) "প্রতিষ্ঠাতা" else activeSchool.roleOf(currentUserId).labelBn,
                     icon = Icons.Rounded.AdminPanelSettings,
-                    expanded = expandedGroup == "members",
-                    headerTestTag = "settings_group_members",
-                    onToggle = { expandedGroup = if (expandedGroup == "members") "" else "members" }
+                    headerTestTag = "settings_group_members"
                 ) {
                     TreeBranchItem(isLast = true) {
                         Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -795,7 +884,8 @@ fun SettingsScreen(
             }
 
             val allClassesList = remember(s.customClasses) { activeSchoolClasses(s) }
-            TreeGroupCard(
+            SettingsTrackedGroup(
+                groupKey = "classes",
                 title = "শ্রেণি ব্যবস্থাপনা ও নতুন শ্রেণি",
                 subtitle = if (s.customClasses.isEmpty()) {
                     "মূল ১ম–৫ম শ্রেণি চালু আছে · নতুন শ্রেণি যোগ করুন"
@@ -804,9 +894,7 @@ fun SettingsScreen(
                 },
                 badgeText = "${bn(allClassesList.size.toString())}টি",
                 icon = Icons.Rounded.School,
-                expanded = expandedGroup == "classes",
-                headerTestTag = "settings_group_classes",
-                onToggle = { expandedGroup = if (expandedGroup == "classes") "" else "classes" }
+                headerTestTag = "settings_group_classes"
             ) {
                 TreeBranchItem(isLast = true) {
                     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -884,14 +972,13 @@ fun SettingsScreen(
                 }
             }
 
-            TreeGroupCard(
+            SettingsTrackedGroup(
+                groupKey = "teachers",
                 title = "শ্রেণি শিক্ষক ও মোবাইল",
                 subtitle = "${allClassesList.size.let { bn(it.toString()) }}টি শ্রেণির দায়িত্বপ্রাপ্ত শিক্ষক",
                 badgeText = "${bn(allClassesList.size.toString())} শ্রেণি",
                 icon = Icons.Rounded.Badge,
-                expanded = expandedGroup == "teachers",
-                headerTestTag = "settings_group_teachers",
-                onToggle = { expandedGroup = if (expandedGroup == "teachers") "" else "teachers" }
+                headerTestTag = "settings_group_teachers"
             ) {
                 TreeBranchItem(isLast = true) {
                     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -941,14 +1028,13 @@ fun SettingsScreen(
             val activeAppBnFamily = remember(appFontId) { appComposeFontFamily(appFontId) }
             val activeAppEnFamily = remember(appEnglishFontId) { appComposeFontFamily(appEnglishFontId) }
 
-            TreeGroupCard(
+            SettingsTrackedGroup(
+                groupKey = "app_font",
                 title = "ভাগ ১: অ্যাপসের নিজস্ব ফন্ট",
                 subtitle = "অ্যাপের লেখা ও মেনু · $activeAppFontLabel",
                 badgeText = "অ্যাপ UI",
                 icon = Icons.Rounded.TextFields,
-                expanded = expandedGroup == "app_font",
-                headerTestTag = "settings_group_app_font",
-                onToggle = { expandedGroup = if (expandedGroup == "app_font") "" else "app_font" }
+                headerTestTag = "settings_group_app_font"
             ) {
                 TreeBranchItem(isLast = true) {
                     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -1091,14 +1177,13 @@ fun SettingsScreen(
                 FontFamily(androidx.compose.ui.text.font.Typeface(PdfGen.resolveTypeface(ctx, s.pdfEnglishFont, false)))
             }
 
-            TreeGroupCard(
+            SettingsTrackedGroup(
+                groupKey = "font",
                 title = "ভাগ ২: রিপোর্ট ও অন্যান্য PDF ফন্ট",
                 subtitle = "প্রগতি প্রতিবেদন ও ফাঁকা শিট · $activeFontLabel",
                 badgeText = "PDF ফন্ট",
                 icon = Icons.Rounded.FontDownload,
-                expanded = expandedGroup == "font",
-                headerTestTag = "settings_group_font",
-                onToggle = { expandedGroup = if (expandedGroup == "font") "" else "font" }
+                headerTestTag = "settings_group_font"
             ) {
                 TreeBranchItem(isLast = true) {
                     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -1244,14 +1329,13 @@ fun SettingsScreen(
             // Category 3: Reports, Print & Form Structure
             SettingsCategoryHeader(title = "রিপোর্ট, প্রিন্ট ও ফর্ম", icon = Icons.Rounded.Description)
 
-            TreeGroupCard(
+            SettingsTrackedGroup(
+                groupKey = "logo",
                 title = "প্রাথমিক শিক্ষা অধিদপ্তর লোগো",
                 subtitle = "সক্রিয়: $activeLogoLabel",
                 badgeText = "কভার",
                 icon = Icons.Rounded.Image,
-                expanded = expandedGroup == "logo",
-                headerTestTag = "settings_group_logo",
-                onToggle = { expandedGroup = if (expandedGroup == "logo") "" else "logo" }
+                headerTestTag = "settings_group_logo"
             ) {
                 TreeBranchItem(isLast = true) {
                     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -1304,14 +1388,13 @@ fun SettingsScreen(
                 }
             }
 
-            TreeGroupCard(
+            SettingsTrackedGroup(
+                groupKey = "custom_fields",
                 title = "কাস্টম ডাটাবেস ফিল্ড",
                 subtitle = if (s.customFields.isEmpty()) "কোনো অতিরিক্ত ফিল্ড নেই" else "বর্তমান ${bn(s.customFields.size.toString())}টি অতিরিক্ত ফিল্ড",
                 badgeText = "${bn(s.customFields.size.toString())}টি",
                 icon = Icons.Rounded.Tune,
-                expanded = expandedGroup == "custom_fields",
-                headerTestTag = "settings_group_custom_fields",
-                onToggle = { expandedGroup = if (expandedGroup == "custom_fields") "" else "custom_fields" }
+                headerTestTag = "settings_group_custom_fields"
             ) {
                 TreeBranchItem(isLast = true) {
                     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -1365,16 +1448,15 @@ fun SettingsScreen(
 
             val autoBackupActive = backupStatus.localEnabled || backupStatus.driveEnabled || backupStatus.csvEnabled
             val thirdFmt = if (backupStatus.csvBackupFormat == CsvBackupFormat.CSV) "CSV" else "Excel"
-            TreeGroupCard(
+            SettingsTrackedGroup(
+                groupKey = "backup",
                 title = "অটো ব্যাকআপ (লোকাল · Drive · $thirdFmt)",
                 subtitle = "লোকাল: ${if (backupStatus.localEnabled) "চালু" else "বন্ধ"} · Drive: ${if (backupStatus.driveEnabled) "চালু" else "বন্ধ"} · $thirdFmt: ${if (backupStatus.csvEnabled) "চালু" else "বন্ধ"}",
                 badgeText = if (autoBackupActive) "চালু" else "বন্ধ",
                 badgeColor = if (autoBackupActive) EmeraldGrade else SlateMuted,
                 badgeContainerColor = if (autoBackupActive) TealSoft else MaterialTheme.colorScheme.surfaceVariant,
                 icon = Icons.Rounded.Backup,
-                expanded = expandedGroup == "backup",
-                headerTestTag = "settings_group_backup",
-                onToggle = { expandedGroup = if (expandedGroup == "backup") "" else "backup" }
+                headerTestTag = "settings_group_backup"
             ) {
                 SettingsAutoBackupContent(
                     backupStatus = backupStatus,
@@ -1400,14 +1482,13 @@ fun SettingsScreen(
                 )
             }
 
-            TreeGroupCard(
+            SettingsTrackedGroup(
+                groupKey = "csv_json",
                 title = "PDF, CSV ও JSON ডাটা",
                 subtitle = "মোট ${bn(students.size.toString())} জন শিক্ষার্থীর ফাইল",
                 badgeText = "ফাইল",
                 icon = Icons.Rounded.UploadFile,
-                expanded = expandedGroup == "csv_json",
-                headerTestTag = "settings_group_csv_json",
-                onToggle = { expandedGroup = if (expandedGroup == "csv_json") "" else "csv_json" }
+                headerTestTag = "settings_group_csv_json"
             ) {
                 val allClsIds = remember(s.customClasses) { activeClassIds(s) }
                 val countByClass = remember(students, allClsIds) {
@@ -1445,16 +1526,15 @@ fun SettingsScreen(
             }
 
             if (isAdmin) {
-                TreeGroupCard(
+                SettingsTrackedGroup(
+                    groupKey = "danger",
                     title = "ডাটা রিসেট ও মুছে ফেলা",
                     subtitle = "শ্রেণি, বিষয়, বেসিক তথ্য বা সম্পূর্ণ ডাটা রিসেট (ফিঙ্গারপ্রিন্ট সুরক্ষিত)",
                     badgeText = "সতর্কতা",
                     badgeColor = RoseDanger,
                     badgeContainerColor = RoseBg,
                     icon = Icons.Rounded.WarningAmber,
-                    expanded = expandedGroup == "danger",
-                    headerTestTag = "settings_group_danger",
-                    onToggle = { expandedGroup = if (expandedGroup == "danger") "" else "danger" }
+                    headerTestTag = "settings_group_danger"
                 ) {
                     TreeBranchItem(isLast = true) {
                         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -1507,7 +1587,8 @@ fun SettingsScreen(
             // Category 4: AI & Account
             SettingsCategoryHeader(title = "AI সহায়ক ও অ্যাকাউন্ট", icon = Icons.Rounded.AutoAwesome)
 
-            TreeGroupCard(
+            SettingsTrackedGroup(
+                groupKey = "aiproxy",
                 title = "Gemini AI ও মডেল",
                 subtitle = when {
                     geminiApiKey.isBlank() -> "Google AI Studio থেকে নিজস্ব API Key যুক্ত করুন"
@@ -1522,9 +1603,7 @@ fun SettingsScreen(
                 badgeColor = if (geminiApiKey.isNotBlank() && geminiOrderedModels.isNotEmpty()) EmeraldGrade else AmberNotice,
                 badgeContainerColor = if (geminiApiKey.isNotBlank() && geminiOrderedModels.isNotEmpty()) TealSoft else AmberBg,
                 icon = Icons.Rounded.AutoAwesome,
-                expanded = expandedGroup == "aiproxy",
-                headerTestTag = "settings_group_aiproxy",
-                onToggle = { expandedGroup = if (expandedGroup == "aiproxy") "" else "aiproxy" }
+                headerTestTag = "settings_group_aiproxy"
             ) {
                 SettingsGeminiAiContent(
                     apiKeyInput = apiKeyInput,
@@ -1560,14 +1639,13 @@ fun SettingsScreen(
                 )
             }
 
-            TreeGroupCard(
+            SettingsTrackedGroup(
+                groupKey = "account",
                 title = "অ্যাকাউন্ট ও অ্যাপ তথ্য",
                 subtitle = "সাইন আউট, বিদ্যালয় ত্যাগ ও সংস্করণ",
                 badgeText = "১.০.০",
                 icon = Icons.Rounded.AccountCircle,
-                expanded = expandedGroup == "account",
-                headerTestTag = "settings_group_account",
-                onToggle = { expandedGroup = if (expandedGroup == "account") "" else "account" }
+                headerTestTag = "settings_group_account"
             ) {
                 TreeBranchItem(isLast = false) {
                     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -1613,6 +1691,36 @@ fun SettingsScreen(
             }
 
             Spacer(Modifier.height(12.dp))
+        }
+            }
+        }
+
+        // Option ক: Smart floating header only when expanded group's real header scrolls off top
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(horizontal = 8.dp, vertical = 6.dp),
+            contentAlignment = Alignment.TopCenter
+        ) {
+            FloatingGroupStickyBar(
+                visible = activeStickyGroup != null,
+                title = activeStickyGroup?.title.orEmpty(),
+                badgeText = activeStickyGroup?.badgeText,
+                icon = activeStickyGroup?.icon,
+                actionLabel = "বন্ধ করুন",
+                testTag = "settings_floating_group_bar",
+                onAction = {
+                    val target = activeStickyGroup ?: return@FloatingGroupStickyBar
+                    target.onCollapse()
+                    val scrollTarget = (target.topInContent - with(density) { 10.dp.toPx() })
+                        .roundToInt()
+                        .coerceAtLeast(0)
+                    coroutineScope.launch {
+                        scrollState.animateScrollTo(scrollTarget)
+                    }
+                },
+                modifier = Modifier.widthIn(max = 820.dp)
+            )
         }
     }
 
