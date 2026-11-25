@@ -122,6 +122,7 @@ fun DashboardScreen(
     var classFilter by remember(visibleClasses) { mutableStateOf<Int?>(null) } // null = সব অনুমোদিত শ্রেণি
     var termFilter by remember { mutableIntStateOf(0) } // 0 = বার্ষিক, 1..3 = নির্দিষ্ট প্রান্তিক
     var showBatchDialog by remember { mutableStateOf(false) }
+    var showTieDialog by remember { mutableStateOf(false) }
 
     val sortedAllowedStudents = remember(students, visibleClasses) {
         val allowed = visibleClasses.toSet()
@@ -355,6 +356,17 @@ fun DashboardScreen(
                     }
                 }
                 return@LazyColumn
+            }
+
+            if (summary.tieGroups.isNotEmpty()) {
+                item(key = "tie_alert_button") {
+                    TieSummaryActionButton(
+                        tieGroups = summary.tieGroups,
+                        termLabel = termLabel,
+                        settings = settings,
+                        onClick = { showTieDialog = true }
+                    )
+                }
             }
 
             // 3. Quick Tools & Export / Backup Shortcuts Card
@@ -599,7 +611,8 @@ fun DashboardScreen(
                     canPreviewReport = permissions.canExportPdf,
                     showSubjectRestrictionNote = showSubjectRestrictionNote,
                     onOpenStudent = onOpenStudent,
-                    onPreviewStudent = onPreviewStudent
+                    onPreviewStudent = onPreviewStudent,
+                    onOpenTieDetails = { showTieDialog = true }
                 )
             }
 
@@ -613,6 +626,18 @@ fun DashboardScreen(
                 )
             }
         }
+    }
+
+    if (showTieDialog) {
+        TotalMarksTieDetailsDialog(
+            tieGroups = summary.tieGroups,
+            termLabel = termLabel,
+            settings = settings,
+            canPreviewReport = permissions.canExportPdf,
+            onOpenStudent = onOpenStudent,
+            onPreviewStudent = onPreviewStudent,
+            onDismiss = { showTieDialog = false }
+        )
     }
 
     if (showBatchDialog) {

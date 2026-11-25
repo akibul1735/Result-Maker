@@ -16,6 +16,7 @@ import com.kgps.result.total
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import kotlin.math.roundToLong
 
 enum class GapFilter(val labelBn: String) {
     ALL("সব ঘাটতি"),
@@ -52,6 +53,27 @@ data class GapStudentItem(
     val tags: List<String>
 )
 
+data class TieStudentDetail(
+    val student: Student,
+    val obtained: Double,
+    val maxMarks: Double,
+    val pct: Double,
+    val grade: String,
+    val classRank: Int?,
+    val isJointRank: Boolean,
+    val attendancePct: Double?,
+    val traitScore: Double,
+    val isPromoted: Boolean
+)
+
+data class ClassTotalTieGroup(
+    val cls: Int,
+    val obtained: Double,
+    val maxMarks: Double,
+    val pct: Double,
+    val students: List<TieStudentDetail>
+)
+
 data class DashboardSummary(
     val totalStudents: Int,
     val evaluatedInScope: Int,
@@ -65,7 +87,8 @@ data class DashboardSummary(
     val gradeCounts: Map<String, Int>,
     val meritList: List<MeritEntry>,
     val classBreakdown: List<ClassProgressItem>,
-    val gapItems: List<GapStudentItem>
+    val gapItems: List<GapStudentItem>,
+    val tieGroups: List<ClassTotalTieGroup> = emptyList()
 )
 
 private fun parseNum(raw: String?): Double? {
@@ -322,6 +345,59 @@ fun buildDashboardSummary(
         }
     }
 
+    val tieGroups = scored
+        .groupBy { it.first.cls }
+        .toSortedMap()
+        .flatMap { (cls, clsScored) ->
+            if (clsScored.size < 2) {
+                emptyList()
+            } else {
+                val rankedByStudentId = if (showAllSubjects) {
+                    ResultRulesEngine.rankClassStudents(
+                        classStudents = visibleStudents.filter { it.cls == cls },
+                        rules = rules,
+                        scopedTerm = termFilter
+                    ).associateBy { it.student.id }
+                } else {
+                    emptyMap()
+                }
+                clsScored
+                    .groupBy { (_, pair, _) -> (pair.first * 100.0).roundToLong() }
+                    .entries
+                    .filter { it.value.size >= 2 }
+                    .sortedByDescending { it.key }
+                    .map { (_, groupItems) ->
+                        val firstPair = groupItems.first().second
+                        val firstPct = groupItems.first().third
+                        val details = groupItems.map { (st, pair, pct) ->
+                            val ranked = rankedByStudentId[st.id]
+                            TieStudentDetail(
+                                student = st,
+                                obtained = pair.first,
+                                maxMarks = pair.second,
+                                pct = pct,
+                                grade = gradeOf(pct),
+                                classRank = ranked?.rank?.takeIf { it > 0 },
+                                isJointRank = ranked?.isJointRank == true,
+                                attendancePct = ranked?.eval?.attendancePct,
+                                traitScore = ranked?.eval?.traitScore ?: 0.0,
+                                isPromoted = ranked?.eval?.isPromoted ?: true
+                            )
+                        }.sortedWith(
+                            compareBy<TieStudentDetail> { it.classRank ?: Int.MAX_VALUE }
+                                .thenBy { it.student.roll }
+                        )
+                        ClassTotalTieGroup(
+                            cls = cls,
+                            obtained = firstPair.first,
+                            maxMarks = firstPair.second,
+                            pct = firstPct,
+                            students = details
+                        )
+                    }
+            }
+        }
+
     return DashboardSummary(
         totalStudents = scopedStudents.size,
         evaluatedInScope = scored.size,
@@ -335,7 +411,8 @@ fun buildDashboardSummary(
         gradeCounts = gradeCounts,
         meritList = meritList,
         classBreakdown = classBreakdown,
-        gapItems = gapItems
+        gapItems = gapItems,
+        tieGroups = tieGroups
     )
 }
 
