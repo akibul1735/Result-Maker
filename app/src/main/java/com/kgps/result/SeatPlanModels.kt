@@ -20,10 +20,17 @@ enum class SeatPlanNumeralMode(val labelBn: String) {
     ENGLISH("English (01)")
 }
 
-enum class SeatPlanFontScale(val labelBn: String, val factor: Float) {
-    SMALL("ছোট", 0.88f),
+enum class SeatPlanBorderStyle(val labelBn: String) {
+    SOLID("সলিড"),
+    DOUBLE("ডাবল"),
+    DASHED("ড্যাশড"),
+    NONE("বর্ডার নেই")
+}
+
+enum class SeatPlanBorderWeight(val labelBn: String, val strokePt: Float) {
+    THIN("চিকন", 0.65f),
     NORMAL("স্বাভাবিক", 1.0f),
-    LARGE("বড়", 1.12f)
+    BOLD("মোটা", 1.5f)
 }
 
 data class SeatPlanConfig(
@@ -44,17 +51,31 @@ data class SeatPlanConfig(
     val columns: Int = 2,
     val rows: Int = 6,
     val orientation: SeatPlanOrientation = SeatPlanOrientation.PORTRAIT,
+    val marginInches: Float = 0.40f,
+    val horizontalGapPt: Float = 12f,
+    val verticalGapPt: Float = 10f,
+    val bnFontId: String = "kalpurush",
+    val enFontId: String = "times_new_roman",
+    val fontSizePercent: Int = 100,
+    val borderStyle: SeatPlanBorderStyle = SeatPlanBorderStyle.SOLID,
+    val borderWeight: SeatPlanBorderWeight = SeatPlanBorderWeight.NORMAL,
+    val cornerRadiusPt: Float = 18f,
     val showCutLines: Boolean = true,
-    val roundedCorners: Boolean = true,
     val boldStudentName: Boolean = false,
     val padRollTwoDigits: Boolean = true,
     val numeralMode: SeatPlanNumeralMode = SeatPlanNumeralMode.BENGALI,
-    val fontScale: SeatPlanFontScale = SeatPlanFontScale.NORMAL,
     val extraBlankSlips: Int = 0
 ) {
     val safeColumns: Int get() = columns.coerceIn(1, 3)
     val safeRows: Int get() = rows.coerceIn(3, 10)
     val slipsPerPage: Int get() = safeColumns * safeRows
+    val safeMarginInches: Float get() = marginInches.coerceIn(0.10f, 1.00f)
+    val safeMarginPt: Float get() = safeMarginInches * 72f
+    val safeHorizontalGapPt: Float get() = horizontalGapPt.coerceIn(0f, 36f)
+    val safeVerticalGapPt: Float get() = verticalGapPt.coerceIn(0f, 36f)
+    val safeFontSizePercent: Int get() = fontSizePercent.coerceIn(70, 140)
+    val fontScaleFactor: Float get() = safeFontSizePercent / 100f
+    val safeCornerRadiusPt: Float get() = cornerRadiusPt.coerceIn(0f, 28f)
 }
 
 data class SeatPlanSlip(

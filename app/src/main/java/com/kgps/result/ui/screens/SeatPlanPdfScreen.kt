@@ -48,7 +48,7 @@ import androidx.compose.material.icons.rounded.ExpandMore
 import androidx.compose.material.icons.rounded.Fullscreen
 import androidx.compose.material.icons.rounded.Print
 import androidx.compose.material.icons.rounded.Remove
-import androidx.compose.material.icons.rounded.Tune
+import androidx.compose.material.icons.rounded.RestartAlt
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -87,6 +87,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
@@ -95,8 +96,12 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import com.kgps.result.BENGALI_PDF_FONT_LIST
+import com.kgps.result.ENGLISH_PDF_FONT_LIST
+import com.kgps.result.PdfGen
+import com.kgps.result.SeatPlanBorderStyle
+import com.kgps.result.SeatPlanBorderWeight
 import com.kgps.result.SeatPlanConfig
-import com.kgps.result.SeatPlanFontScale
 import com.kgps.result.SeatPlanNumeralMode
 import com.kgps.result.SeatPlanOrientation
 import com.kgps.result.SeatPlanPageSpec
@@ -126,6 +131,7 @@ import com.kgps.result.ui.theme.appFilterChipBorder
 import com.kgps.result.ui.theme.appFilterChipColors
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import java.util.Locale
 import kotlin.math.abs
 import kotlin.math.roundToInt
 
@@ -137,6 +143,69 @@ private fun clampSeatPlanPanOffset(offset: Offset, scale: Float, size: IntSize):
         x = offset.x.coerceIn(-maxX, maxX),
         y = offset.y.coerceIn(-maxY, maxY)
     )
+}
+
+private fun formatInchesBn(inches: Float): String =
+    bn(String.format(Locale.US, "%.2f", inches)) + "\""
+
+@Composable
+private fun CompactStepperBox(
+    label: String,
+    valueText: String,
+    canDecrease: Boolean,
+    canIncrease: Boolean,
+    onDecrease: () -> Unit,
+    onIncrease: () -> Unit,
+    decreaseTag: String,
+    increaseTag: String,
+    modifier: Modifier = Modifier
+) {
+    Surface(
+        color = SlateBg,
+        border = BorderStroke(1.dp, SlateOutline),
+        shape = RoundedCornerShape(10.dp),
+        modifier = modifier
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween,
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 2.dp)
+        ) {
+            IconButton(
+                onClick = onDecrease,
+                enabled = canDecrease,
+                modifier = Modifier.size(48.dp).testTag(decreaseTag)
+            ) {
+                Icon(Icons.Rounded.Remove, contentDescription = "$label কমান", modifier = Modifier.size(16.dp))
+            }
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                modifier = Modifier.weight(1f)
+            ) {
+                Text(
+                    label,
+                    fontSize = 9.5.sp,
+                    color = SlateMuted,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Text(
+                    valueText,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = SlateText,
+                    maxLines = 1
+                )
+            }
+            IconButton(
+                onClick = onIncrease,
+                enabled = canIncrease,
+                modifier = Modifier.size(48.dp).testTag(increaseTag)
+            ) {
+                Icon(Icons.Rounded.Add, contentDescription = "$label বাড়ান", modifier = Modifier.size(16.dp))
+            }
+        }
+    }
 }
 
 @Composable
@@ -159,32 +228,38 @@ fun SeatPlanPdfScreen(
         permissions.effectiveClasses(availableClassIds)
     }
 
-    var config by remember(initialClass, allowedClasses) {
+    val defaultConfig = remember(initialClass, allowedClasses) {
         val defaultCls = when {
             initialClass in allowedClasses -> initialClass
             5 in allowedClasses -> 5
             else -> allowedClasses.firstOrNull() ?: 1
         }
         val leftDefault = allowedClasses.firstOrNull { it != defaultCls } ?: defaultCls
-        mutableStateOf(
-            SeatPlanConfig(
-                selectedClasses = listOf(defaultCls),
-                leftClass = leftDefault,
-                rightClass = defaultCls,
-                term = 3,
-                columns = 2,
-                rows = 6,
-                rollOrder = SeatPlanRollOrder.DESCENDING
-            )
+        SeatPlanConfig(
+            selectedClasses = listOf(defaultCls),
+            leftClass = leftDefault,
+            rightClass = defaultCls,
+            term = 3,
+            columns = 2,
+            rows = 6,
+            marginInches = 0.40f,
+            horizontalGapPt = 12f,
+            verticalGapPt = 10f,
+            bnFontId = "kalpurush",
+            enFontId = settings.pdfEnglishFont.ifBlank { "times_new_roman" },
+            rollOrder = SeatPlanRollOrder.DESCENDING
         )
     }
 
+    var config by remember(defaultConfig) { mutableStateOf(defaultConfig) }
     var setupExpanded by remember { mutableStateOf(true) }
-    var showAdvancedHeader by remember { mutableStateOf(false) }
+    var activeSetupTab by remember { mutableIntStateOf(0) } // 0=শ্রেণি ও রোল, 1=লেআউট ও ফন্ট, 2=শিরোনাম
     var rollFromText by remember { mutableStateOf("") }
     var rollToText by remember { mutableStateOf("") }
     var leftClsMenuOpen by remember { mutableStateOf(false) }
     var rightClsMenuOpen by remember { mutableStateOf(false) }
+    var bnFontMenuOpen by remember { mutableStateOf(false) }
+    var enFontMenuOpen by remember { mutableStateOf(false) }
     var showFullscreen by remember { mutableStateOf(false) }
 
     val pages = remember(students, settings, config, allowedClasses) {
@@ -239,14 +314,20 @@ fun SeatPlanPdfScreen(
         allowedClasses.associateWith { c -> students.count { it.cls == c } }
     }
 
+    val activeBnFontName = remember(config.bnFontId) {
+        BENGALI_PDF_FONT_LIST.find { it.id == config.bnFontId }?.labelBn?.substringBefore(" (")
+            ?: "কালপুরুষ"
+    }
+    val activeEnFontName = remember(config.enFontId) {
+        ENGLISH_PDF_FONT_LIST.find { it.id == config.enFontId }?.labelBn?.substringBefore(" (")
+            ?: "Times New Roman"
+    }
+
     val summaryLine = buildString {
-        append("${bn(config.safeColumns.toString())}×${bn(config.safeRows.toString())} ")
-        append("(${bn(config.slipsPerPage.toString())}/পৃষ্ঠা)")
-        append(" · ${termNameBn(config.term)}")
-        append(" · মোট ${bn(totalSlipCount.toString())}টি কার্ড")
-        if (pages.isNotEmpty()) {
-            append(" (${bn(pages.size.toString())} পৃষ্ঠা)")
-        }
+        append("${bn(config.safeColumns.toString())}×${bn(config.safeRows.toString())}")
+        append(" · মার্জিন ${formatInchesBn(config.safeMarginInches)}")
+        append(" · $activeBnFontName")
+        append(" · ${bn(totalSlipCount.toString())} কার্ড")
     }
 
     Column(
@@ -255,14 +336,14 @@ fun SeatPlanPdfScreen(
             .verticalScroll(rememberScrollState()),
         verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
-        // 1. Setup & Customization Card
+        // 1. Compact Organized Settings Card
         Card(
             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
             border = BorderStroke(1.dp, SlateOutline),
             shape = RoundedCornerShape(12.dp),
             modifier = Modifier.fillMaxWidth()
         ) {
-            Column(Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Column(Modifier.padding(horizontal = 10.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -285,468 +366,672 @@ fun SeatPlanPdfScreen(
                     }
                     Column(Modifier.weight(1f)) {
                         Text(
-                            "আসন বিন্যাস (সিট প্ল্যান) সেটাপ",
+                            "আসন বিন্যাস সেটিংস",
                             fontWeight = FontWeight.Bold,
                             fontSize = 13.5.sp,
                             color = SlateText
                         )
                         Text(
                             summaryLine,
-                            fontSize = 11.sp,
+                            fontSize = 10.5.sp,
                             color = SlateMuted,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis
                         )
                     }
+                    IconButton(
+                        onClick = {
+                            config = defaultConfig
+                            rollFromText = ""
+                            rollToText = ""
+                        },
+                        modifier = Modifier.size(48.dp).testTag("seat_plan_reset_btn")
+                    ) {
+                        Icon(
+                            Icons.Rounded.RestartAlt,
+                            contentDescription = "ডিফল্ট সেটিংস রিসেট",
+                            tint = SlateMuted,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
                     Icon(
                         imageVector = if (setupExpanded) Icons.Rounded.ExpandLess else Icons.Rounded.ExpandMore,
-                        contentDescription = if (setupExpanded) "সেটাপ লুকান" else "সেটাপ খুলুন",
+                        contentDescription = if (setupExpanded) "সেটিংস লুকান" else "সেটিংস খুলুন",
                         tint = SlateMuted
                     )
                 }
 
                 AnimatedVisibility(visible = setupExpanded) {
-                    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                        HorizontalDivider(color = SlateOutline.copy(alpha = 0.6f))
-
-                        // A. Mode & Class Selection
-                        Text(
-                            "১. শ্রেণি ও রোল বিন্যাস",
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 12.sp,
-                            color = TealDark
-                        )
-
-                        Row(
-                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        // Compact 3-Tab Pill Bar
+                        val tabs = listOf("শ্রেণি ও রোল", "লেআউট ও ফন্ট", "শিরোনাম ও কক্ষ")
+                        Surface(
+                            color = SlateBg,
+                            border = BorderStroke(1.dp, SlateOutline),
+                            shape = RoundedCornerShape(10.dp),
                             modifier = Modifier.fillMaxWidth()
                         ) {
-                            SeatPlanPairMode.entries.forEach { mode ->
-                                val selected = config.pairMode == mode
-                                FilterChip(
-                                    selected = selected,
-                                    onClick = {
-                                        val nextCols = if (mode == SeatPlanPairMode.SIDE_BY_SIDE && config.columns < 2) 2 else config.columns
-                                        config = config.copy(pairMode = mode, columns = nextCols)
-                                    },
-                                    label = { Text(mode.labelBn, fontSize = 11.5.sp) },
-                                    colors = appFilterChipColors(),
-                                    border = appFilterChipBorder(selected),
-                                    modifier = Modifier
-                                        .weight(1f)
-                                        .testTag("seat_plan_mode_${mode.name.lowercase()}")
-                                )
+                            Row(
+                                modifier = Modifier.fillMaxWidth().padding(3.dp),
+                                horizontalArrangement = Arrangement.spacedBy(3.dp)
+                            ) {
+                                tabs.forEachIndexed { idx, title ->
+                                    val selected = activeSetupTab == idx
+                                    Surface(
+                                        onClick = { activeSetupTab = idx },
+                                        color = if (selected) TealContainer else Color.Transparent,
+                                        border = if (selected) BorderStroke(1.dp, TealPrimary.copy(alpha = 0.45f)) else null,
+                                        shape = RoundedCornerShape(8.dp),
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .heightIn(min = 42.dp)
+                                            .testTag("seat_plan_tab_$idx")
+                                    ) {
+                                        Box(contentAlignment = Alignment.Center, modifier = Modifier.padding(horizontal = 4.dp, vertical = 6.dp)) {
+                                            Text(
+                                                title,
+                                                fontSize = 11.sp,
+                                                fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
+                                                color = if (selected) TealDark else SlateMuted,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis
+                                            )
+                                        }
+                                    }
+                                }
                             }
                         }
 
-                        if (config.pairMode == SeatPlanPairMode.SEQUENTIAL) {
-                            val allSelected = allowedClasses.isNotEmpty() &&
-                                allowedClasses.all { it in config.selectedClasses }
-                            FlowRow(
-                                horizontalArrangement = Arrangement.spacedBy(6.dp),
-                                verticalArrangement = Arrangement.spacedBy(4.dp)
-                            ) {
-                                FilterChip(
-                                    selected = allSelected,
-                                    onClick = {
-                                        config = if (allSelected) {
-                                            config.copy(selectedClasses = listOfNotNull(allowedClasses.firstOrNull()))
-                                        } else {
-                                            config.copy(selectedClasses = allowedClasses)
+                        when (activeSetupTab) {
+                            // TAB 0: শ্রেণি ও রোল
+                            0 -> Column(verticalArrangement = Arrangement.spacedBy(7.dp)) {
+                                Row(
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    SeatPlanPairMode.entries.forEach { mode ->
+                                        val selected = config.pairMode == mode
+                                        FilterChip(
+                                            selected = selected,
+                                            onClick = {
+                                                val nextCols = if (mode == SeatPlanPairMode.SIDE_BY_SIDE && config.columns < 2) 2 else config.columns
+                                                config = config.copy(pairMode = mode, columns = nextCols)
+                                            },
+                                            label = { Text(mode.labelBn, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                                            colors = appFilterChipColors(),
+                                            border = appFilterChipBorder(selected),
+                                            modifier = Modifier
+                                                .weight(1f)
+                                                .testTag("seat_plan_mode_${mode.name.lowercase()}")
+                                        )
+                                    }
+                                }
+
+                                if (config.pairMode == SeatPlanPairMode.SEQUENTIAL) {
+                                    val allSelected = allowedClasses.isNotEmpty() &&
+                                        allowedClasses.all { it in config.selectedClasses }
+                                    FlowRow(
+                                        horizontalArrangement = Arrangement.spacedBy(5.dp),
+                                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                                    ) {
+                                        FilterChip(
+                                            selected = allSelected,
+                                            onClick = {
+                                                config = if (allSelected) {
+                                                    config.copy(selectedClasses = listOfNotNull(allowedClasses.firstOrNull()))
+                                                } else {
+                                                    config.copy(selectedClasses = allowedClasses)
+                                                }
+                                            },
+                                            label = { Text("সব শ্রেণি", fontSize = 11.sp) },
+                                            colors = appFilterChipColors(),
+                                            border = appFilterChipBorder(allSelected),
+                                            modifier = Modifier.testTag("seat_plan_cls_all")
+                                        )
+                                        allowedClasses.forEach { c ->
+                                            val isSel = c in config.selectedClasses
+                                            val cnt = countByClass[c] ?: 0
+                                            FilterChip(
+                                                selected = isSel,
+                                                onClick = {
+                                                    val next = if (isSel) {
+                                                        val reduced = config.selectedClasses - c
+                                                        if (reduced.isEmpty()) listOf(c) else reduced
+                                                    } else {
+                                                        (config.selectedClasses + c).distinct().sortedBy { allowedClasses.indexOf(it) }
+                                                    }
+                                                    config = config.copy(selectedClasses = next)
+                                                },
+                                                label = {
+                                                    Text("${classShortBn(c, settings)} (${bn(cnt.toString())})", fontSize = 11.sp)
+                                                },
+                                                colors = appFilterChipColors(),
+                                                border = appFilterChipBorder(isSel),
+                                                modifier = Modifier.testTag("seat_plan_cls_$c")
+                                            )
                                         }
-                                    },
-                                    label = { Text("সব শ্রেণি", fontSize = 11.5.sp) },
-                                    colors = appFilterChipColors(),
-                                    border = appFilterChipBorder(allSelected),
-                                    modifier = Modifier.testTag("seat_plan_cls_all")
-                                )
-                                allowedClasses.forEach { c ->
-                                    val isSel = c in config.selectedClasses
-                                    val cnt = countByClass[c] ?: 0
-                                    FilterChip(
-                                        selected = isSel,
-                                        onClick = {
-                                            val next = if (isSel) {
-                                                val reduced = config.selectedClasses - c
-                                                if (reduced.isEmpty()) listOf(c) else reduced
-                                            } else {
-                                                (config.selectedClasses + c).distinct().sortedBy { allowedClasses.indexOf(it) }
+                                    }
+                                } else {
+                                    Row(
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                        modifier = Modifier.fillMaxWidth()
+                                    ) {
+                                        Box(Modifier.weight(1f)) {
+                                            val leftLabel = config.leftClass?.let { "${classNameBn(it, settings)} শ্রেণি" } ?: "নির্বাচন"
+                                            OutlinedButton(
+                                                onClick = { leftClsMenuOpen = true },
+                                                shape = RoundedCornerShape(8.dp),
+                                                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                                                modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)
+                                            ) {
+                                                Text("বাম: $leftLabel", fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+                                                Icon(Icons.Rounded.ArrowDropDown, contentDescription = null)
                                             }
-                                            config = config.copy(selectedClasses = next)
+                                            DropdownMenu(expanded = leftClsMenuOpen, onDismissRequest = { leftClsMenuOpen = false }) {
+                                                allowedClasses.forEach { c ->
+                                                    DropdownMenuItem(
+                                                        text = { Text("${classNameBn(c, settings)} শ্রেণি (${bn((countByClass[c] ?: 0).toString())} জন)") },
+                                                        onClick = {
+                                                            config = config.copy(leftClass = c)
+                                                            leftClsMenuOpen = false
+                                                        }
+                                                    )
+                                                }
+                                            }
+                                        }
+                                        Box(Modifier.weight(1f)) {
+                                            val rightLabel = config.rightClass?.let { "${classNameBn(it, settings)} শ্রেণি" } ?: "নির্বাচন"
+                                            OutlinedButton(
+                                                onClick = { rightClsMenuOpen = true },
+                                                shape = RoundedCornerShape(8.dp),
+                                                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                                                modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)
+                                            ) {
+                                                Text("ডান: $rightLabel", fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+                                                Icon(Icons.Rounded.ArrowDropDown, contentDescription = null)
+                                            }
+                                            DropdownMenu(expanded = rightClsMenuOpen, onDismissRequest = { rightClsMenuOpen = false }) {
+                                                allowedClasses.forEach { c ->
+                                                    DropdownMenuItem(
+                                                        text = { Text("${classNameBn(c, settings)} শ্রেণি (${bn((countByClass[c] ?: 0).toString())} জন)") },
+                                                        onClick = {
+                                                            config = config.copy(rightClass = c)
+                                                            rightClsMenuOpen = false
+                                                        }
+                                                    )
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+
+                                Row(
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    SeatPlanRollOrder.entries.forEach { ord ->
+                                        val selected = config.rollOrder == ord
+                                        FilterChip(
+                                            selected = selected,
+                                            onClick = { config = config.copy(rollOrder = ord) },
+                                            label = { Text("রোল: ${ord.labelBn}", fontSize = 11.sp) },
+                                            colors = appFilterChipColors(),
+                                            border = appFilterChipBorder(selected),
+                                            modifier = Modifier
+                                                .weight(1f)
+                                                .testTag("seat_plan_order_${ord.name.lowercase()}")
+                                        )
+                                    }
+                                }
+
+                                Row(
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    OutlinedTextField(
+                                        value = rollFromText,
+                                        onValueChange = { raw ->
+                                            val digits = fromBn(raw).filter { it.isDigit() }.take(4)
+                                            rollFromText = digits
+                                            config = config.copy(rollFrom = digits.toIntOrNull())
+                                        },
+                                        label = { Text("রোল থেকে", fontSize = 10.5.sp) },
+                                        placeholder = { Text("সব", fontSize = 10.5.sp) },
+                                        singleLine = true,
+                                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                                        modifier = Modifier.weight(0.9f)
+                                    )
+                                    OutlinedTextField(
+                                        value = rollToText,
+                                        onValueChange = { raw ->
+                                            val digits = fromBn(raw).filter { it.isDigit() }.take(4)
+                                            rollToText = digits
+                                            config = config.copy(rollTo = digits.toIntOrNull())
+                                        },
+                                        label = { Text("রোল পর্যন্ত", fontSize = 10.5.sp) },
+                                        placeholder = { Text("সব", fontSize = 10.5.sp) },
+                                        singleLine = true,
+                                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                                        modifier = Modifier.weight(0.9f)
+                                    )
+                                    CompactStepperBox(
+                                        label = "ফাঁকা কার্ড",
+                                        valueText = bn(config.extraBlankSlips.toString()),
+                                        canDecrease = config.extraBlankSlips > 0,
+                                        canIncrease = config.extraBlankSlips < 48,
+                                        onDecrease = { config = config.copy(extraBlankSlips = config.extraBlankSlips - 1) },
+                                        onIncrease = { config = config.copy(extraBlankSlips = config.extraBlankSlips + 1) },
+                                        decreaseTag = "seat_plan_blank_minus",
+                                        increaseTag = "seat_plan_blank_plus",
+                                        modifier = Modifier.weight(1.35f)
+                                    )
+                                }
+                            }
+
+                            // TAB 1: লেআউট, মার্জিন, গ্যাপ ও ফন্ট
+                            1 -> Column(verticalArrangement = Arrangement.spacedBy(7.dp)) {
+                                // Grid Columns & Rows + Orientation
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .horizontalScroll(rememberScrollState()),
+                                    horizontalArrangement = Arrangement.spacedBy(5.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text("কলাম:", fontSize = 11.sp, color = SlateMuted, fontWeight = FontWeight.SemiBold)
+                                    listOf(1, 2, 3).forEach { colCnt ->
+                                        val selected = config.columns == colCnt
+                                        val enabled = !(config.pairMode == SeatPlanPairMode.SIDE_BY_SIDE && colCnt == 1)
+                                        FilterChip(
+                                            selected = selected,
+                                            enabled = enabled,
+                                            onClick = { config = config.copy(columns = colCnt) },
+                                            label = { Text(bn(colCnt.toString()), fontSize = 11.sp) },
+                                            colors = appFilterChipColors(),
+                                            border = appFilterChipBorder(selected),
+                                            modifier = Modifier.testTag("seat_plan_cols_$colCnt")
+                                        )
+                                    }
+                                    Spacer(Modifier.width(4.dp))
+                                    Text("রো:", fontSize = 11.sp, color = SlateMuted, fontWeight = FontWeight.SemiBold)
+                                    listOf(4, 5, 6, 7, 8).forEach { rowCnt ->
+                                        val selected = config.rows == rowCnt
+                                        FilterChip(
+                                            selected = selected,
+                                            onClick = { config = config.copy(rows = rowCnt) },
+                                            label = { Text(bn(rowCnt.toString()), fontSize = 11.sp) },
+                                            colors = appFilterChipColors(),
+                                            border = appFilterChipBorder(selected),
+                                            modifier = Modifier.testTag("seat_plan_rows_$rowCnt")
+                                        )
+                                    }
+                                }
+
+                                // Margin (default 0.40") + Orientation compact row
+                                Row(
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    CompactStepperBox(
+                                        label = "পৃষ্ঠা মার্জিন (ডিফল্ট ০.৪০\")",
+                                        valueText = "${formatInchesBn(config.safeMarginInches)} ইঞ্চি",
+                                        canDecrease = config.safeMarginInches > 0.105f,
+                                        canIncrease = config.safeMarginInches < 0.995f,
+                                        onDecrease = {
+                                            val next = ((config.safeMarginInches - 0.05f) * 20f).roundToInt() / 20f
+                                            config = config.copy(marginInches = next.coerceIn(0.10f, 1.00f))
+                                        },
+                                        onIncrease = {
+                                            val next = ((config.safeMarginInches + 0.05f) * 20f).roundToInt() / 20f
+                                            config = config.copy(marginInches = next.coerceIn(0.10f, 1.00f))
+                                        },
+                                        decreaseTag = "seat_plan_margin_minus",
+                                        increaseTag = "seat_plan_margin_plus",
+                                        modifier = Modifier.weight(1.4f)
+                                    )
+                                    FilterChip(
+                                        selected = config.orientation == SeatPlanOrientation.LANDSCAPE,
+                                        onClick = {
+                                            val next = if (config.orientation == SeatPlanOrientation.PORTRAIT) {
+                                                SeatPlanOrientation.LANDSCAPE
+                                            } else {
+                                                SeatPlanOrientation.PORTRAIT
+                                            }
+                                            config = config.copy(orientation = next)
                                         },
                                         label = {
                                             Text(
-                                                "${classShortBn(c, settings)} (${bn(cnt.toString())})",
-                                                fontSize = 11.5.sp
+                                                if (config.orientation == SeatPlanOrientation.PORTRAIT) "পোর্ট্রেট" else "ল্যান্ডস্কেপ",
+                                                fontSize = 11.sp,
+                                                maxLines = 1
                                             )
                                         },
                                         colors = appFilterChipColors(),
-                                        border = appFilterChipBorder(isSel),
-                                        modifier = Modifier.testTag("seat_plan_cls_$c")
+                                        border = appFilterChipBorder(config.orientation == SeatPlanOrientation.LANDSCAPE),
+                                        modifier = Modifier.weight(0.75f).testTag("seat_plan_orientation_toggle")
                                     )
                                 }
-                            }
-                        } else {
-                            Row(
-                                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                modifier = Modifier.fillMaxWidth()
-                            ) {
-                                Box(Modifier.weight(1f)) {
-                                    val leftLabel = config.leftClass?.let { "${classNameBn(it, settings)} শ্রেণি" } ?: "নির্বাচন করুন"
-                                    OutlinedButton(
-                                        onClick = { leftClsMenuOpen = true },
-                                        shape = RoundedCornerShape(8.dp),
-                                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp),
-                                        modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)
-                                    ) {
-                                        Text("বাম কলাম: $leftLabel", fontSize = 11.5.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
-                                        Icon(Icons.Rounded.ArrowDropDown, contentDescription = null)
-                                    }
-                                    DropdownMenu(expanded = leftClsMenuOpen, onDismissRequest = { leftClsMenuOpen = false }) {
-                                        allowedClasses.forEach { c ->
-                                            DropdownMenuItem(
-                                                text = { Text("${classNameBn(c, settings)} শ্রেণি (${bn((countByClass[c] ?: 0).toString())} জন)") },
-                                                onClick = {
-                                                    config = config.copy(leftClass = c)
-                                                    leftClsMenuOpen = false
-                                                }
-                                            )
-                                        }
-                                    }
-                                }
-                                Box(Modifier.weight(1f)) {
-                                    val rightLabel = config.rightClass?.let { "${classNameBn(it, settings)} শ্রেণি" } ?: "নির্বাচন করুন"
-                                    OutlinedButton(
-                                        onClick = { rightClsMenuOpen = true },
-                                        shape = RoundedCornerShape(8.dp),
-                                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp),
-                                        modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)
-                                    ) {
-                                        Text("ডান কলাম: $rightLabel", fontSize = 11.5.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
-                                        Icon(Icons.Rounded.ArrowDropDown, contentDescription = null)
-                                    }
-                                    DropdownMenu(expanded = rightClsMenuOpen, onDismissRequest = { rightClsMenuOpen = false }) {
-                                        allowedClasses.forEach { c ->
-                                            DropdownMenuItem(
-                                                text = { Text("${classNameBn(c, settings)} শ্রেণি (${bn((countByClass[c] ?: 0).toString())} জন)") },
-                                                onClick = {
-                                                    config = config.copy(rightClass = c)
-                                                    rightClsMenuOpen = false
-                                                }
-                                            )
-                                        }
-                                    }
-                                }
-                            }
-                        }
 
-                        // Roll order + Roll range
-                        Row(
-                            horizontalArrangement = Arrangement.spacedBy(6.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            SeatPlanRollOrder.entries.forEach { ord ->
-                                val selected = config.rollOrder == ord
-                                FilterChip(
-                                    selected = selected,
-                                    onClick = { config = config.copy(rollOrder = ord) },
-                                    label = { Text("রোল: ${ord.labelBn}", fontSize = 11.sp) },
-                                    colors = appFilterChipColors(),
-                                    border = appFilterChipBorder(selected),
-                                    modifier = Modifier
-                                        .weight(1f)
-                                        .testTag("seat_plan_order_${ord.name.lowercase()}")
-                                )
-                            }
-                        }
-
-                        Row(
-                            horizontalArrangement = Arrangement.spacedBy(6.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            OutlinedTextField(
-                                value = rollFromText,
-                                onValueChange = { raw ->
-                                    val digits = fromBn(raw).filter { it.isDigit() }.take(4)
-                                    rollFromText = digits
-                                    config = config.copy(rollFrom = digits.toIntOrNull())
-                                },
-                                label = { Text("রোল থেকে", fontSize = 11.sp) },
-                                placeholder = { Text("সব", fontSize = 11.sp) },
-                                singleLine = true,
-                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                                modifier = Modifier.weight(1f)
-                            )
-                            OutlinedTextField(
-                                value = rollToText,
-                                onValueChange = { raw ->
-                                    val digits = fromBn(raw).filter { it.isDigit() }.take(4)
-                                    rollToText = digits
-                                    config = config.copy(rollTo = digits.toIntOrNull())
-                                },
-                                label = { Text("রোল পর্যন্ত", fontSize = 11.sp) },
-                                placeholder = { Text("সব", fontSize = 11.sp) },
-                                singleLine = true,
-                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                                modifier = Modifier.weight(1f)
-                            )
-                            Surface(
-                                color = SlateBg,
-                                border = BorderStroke(1.dp, SlateOutline),
-                                shape = RoundedCornerShape(10.dp)
-                            ) {
+                                // Horizontal & Vertical Gap controls
                                 Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                    modifier = Modifier.fillMaxWidth()
                                 ) {
-                                    IconButton(
-                                        onClick = {
-                                            if (config.extraBlankSlips > 0) {
-                                                config = config.copy(extraBlankSlips = config.extraBlankSlips - 1)
-                                            }
+                                    CompactStepperBox(
+                                        label = "অনুভূমিক গ্যাপ (H)",
+                                        valueText = "${bn(config.safeHorizontalGapPt.roundToInt().toString())} pt",
+                                        canDecrease = config.safeHorizontalGapPt > 0.5f,
+                                        canIncrease = config.safeHorizontalGapPt < 35.5f,
+                                        onDecrease = {
+                                            config = config.copy(horizontalGapPt = (config.safeHorizontalGapPt - 2f).coerceIn(0f, 36f))
                                         },
-                                        modifier = Modifier.size(48.dp)
-                                    ) {
-                                        Icon(Icons.Rounded.Remove, contentDescription = "ফাঁকা কমান", modifier = Modifier.size(16.dp))
+                                        onIncrease = {
+                                            config = config.copy(horizontalGapPt = (config.safeHorizontalGapPt + 2f).coerceIn(0f, 36f))
+                                        },
+                                        decreaseTag = "seat_plan_hgap_minus",
+                                        increaseTag = "seat_plan_hgap_plus",
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                    CompactStepperBox(
+                                        label = "উল্লম্ব গ্যাপ (V)",
+                                        valueText = "${bn(config.safeVerticalGapPt.roundToInt().toString())} pt",
+                                        canDecrease = config.safeVerticalGapPt > 0.5f,
+                                        canIncrease = config.safeVerticalGapPt < 35.5f,
+                                        onDecrease = {
+                                            config = config.copy(verticalGapPt = (config.safeVerticalGapPt - 2f).coerceIn(0f, 36f))
+                                        },
+                                        onIncrease = {
+                                            config = config.copy(verticalGapPt = (config.safeVerticalGapPt + 2f).coerceIn(0f, 36f))
+                                        },
+                                        decreaseTag = "seat_plan_vgap_minus",
+                                        increaseTag = "seat_plan_vgap_plus",
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                }
+
+                                // Font Selector (Bangla + English)
+                                Row(
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Box(Modifier.weight(1.15f)) {
+                                        OutlinedButton(
+                                            onClick = { bnFontMenuOpen = true },
+                                            shape = RoundedCornerShape(8.dp),
+                                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                                            modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("seat_plan_bn_font_btn")
+                                        ) {
+                                            Column(Modifier.weight(1f)) {
+                                                Text("বাংলা ফন্ট", fontSize = 9.sp, color = SlateMuted)
+                                                Text(
+                                                    activeBnFontName,
+                                                    fontSize = 11.sp,
+                                                    fontWeight = FontWeight.SemiBold,
+                                                    color = SlateText,
+                                                    maxLines = 1,
+                                                    overflow = TextOverflow.Ellipsis
+                                                )
+                                            }
+                                            Icon(Icons.Rounded.ArrowDropDown, contentDescription = null)
+                                        }
+                                        DropdownMenu(expanded = bnFontMenuOpen, onDismissRequest = { bnFontMenuOpen = false }) {
+                                            BENGALI_PDF_FONT_LIST.forEach { font ->
+                                                val previewFamily = remember(font.id) {
+                                                    FontFamily(androidx.compose.ui.text.font.Typeface(PdfGen.resolveTypeface(ctx, font.id, false)))
+                                                }
+                                                val isSel = config.bnFontId == font.id
+                                                DropdownMenuItem(
+                                                    text = {
+                                                        Column {
+                                                            Text(
+                                                                font.labelBn.substringBefore(" ("),
+                                                                fontFamily = previewFamily,
+                                                                fontWeight = if (isSel) FontWeight.Bold else FontWeight.Normal,
+                                                                color = if (isSel) TealPrimary else SlateText
+                                                            )
+                                                            Text(
+                                                                "৩৮ নং প্রাথমিক বিদ্যালয় · আসন বিন্যাস",
+                                                                fontFamily = previewFamily,
+                                                                fontSize = 10.sp,
+                                                                color = SlateMuted
+                                                            )
+                                                        }
+                                                    },
+                                                    onClick = {
+                                                        config = config.copy(bnFontId = font.id)
+                                                        bnFontMenuOpen = false
+                                                    }
+                                                )
+                                            }
+                                        }
                                     }
-                                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                        Text("ফাঁকা", fontSize = 9.sp, color = SlateMuted)
-                                        Text(
-                                            bn(config.extraBlankSlips.toString()),
-                                            fontSize = 12.sp,
-                                            fontWeight = FontWeight.Bold,
-                                            color = SlateText
+
+                                    Box(Modifier.weight(1f)) {
+                                        OutlinedButton(
+                                            onClick = { enFontMenuOpen = true },
+                                            shape = RoundedCornerShape(8.dp),
+                                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                                            modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("seat_plan_en_font_btn")
+                                        ) {
+                                            Column(Modifier.weight(1f)) {
+                                                Text("ইংরেজি ফন্ট", fontSize = 9.sp, color = SlateMuted)
+                                                Text(
+                                                    activeEnFontName,
+                                                    fontSize = 11.sp,
+                                                    fontWeight = FontWeight.SemiBold,
+                                                    color = SlateText,
+                                                    maxLines = 1,
+                                                    overflow = TextOverflow.Ellipsis
+                                                )
+                                            }
+                                            Icon(Icons.Rounded.ArrowDropDown, contentDescription = null)
+                                        }
+                                        DropdownMenu(expanded = enFontMenuOpen, onDismissRequest = { enFontMenuOpen = false }) {
+                                            ENGLISH_PDF_FONT_LIST.forEach { font ->
+                                                val previewFamily = remember(font.id) {
+                                                    FontFamily(androidx.compose.ui.text.font.Typeface(PdfGen.resolveTypeface(ctx, font.id, false)))
+                                                }
+                                                val isSel = config.enFontId == font.id
+                                                DropdownMenuItem(
+                                                    text = {
+                                                        Text(
+                                                            font.labelBn.substringBefore(" ("),
+                                                            fontFamily = previewFamily,
+                                                            fontWeight = if (isSel) FontWeight.Bold else FontWeight.Normal,
+                                                            color = if (isSel) TealPrimary else SlateText
+                                                        )
+                                                    },
+                                                    onClick = {
+                                                        config = config.copy(enFontId = font.id)
+                                                        enFontMenuOpen = false
+                                                    }
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+
+                                // Font Size (%) + Corner Radius (pt)
+                                Row(
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    CompactStepperBox(
+                                        label = "ফন্ট সাইজ",
+                                        valueText = "${bn(config.safeFontSizePercent.toString())}%",
+                                        canDecrease = config.safeFontSizePercent > 70,
+                                        canIncrease = config.safeFontSizePercent < 140,
+                                        onDecrease = {
+                                            config = config.copy(fontSizePercent = (config.safeFontSizePercent - 5).coerceIn(70, 140))
+                                        },
+                                        onIncrease = {
+                                            config = config.copy(fontSizePercent = (config.safeFontSizePercent + 5).coerceIn(70, 140))
+                                        },
+                                        decreaseTag = "seat_plan_font_size_minus",
+                                        increaseTag = "seat_plan_font_size_plus",
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                    val borderEnabled = config.borderStyle != SeatPlanBorderStyle.NONE
+                                    val cornerLabel = if (config.safeCornerRadiusPt < 0.5f) {
+                                        "০ (সোজা)"
+                                    } else {
+                                        "${bn(config.safeCornerRadiusPt.roundToInt().toString())} pt"
+                                    }
+                                    CompactStepperBox(
+                                        label = "কোনার গোলাকার",
+                                        valueText = if (borderEnabled) cornerLabel else "—",
+                                        canDecrease = borderEnabled && config.safeCornerRadiusPt > 0.5f,
+                                        canIncrease = borderEnabled && config.safeCornerRadiusPt < 27.5f,
+                                        onDecrease = {
+                                            config = config.copy(cornerRadiusPt = (config.safeCornerRadiusPt - 2f).coerceIn(0f, 28f))
+                                        },
+                                        onIncrease = {
+                                            config = config.copy(cornerRadiusPt = (config.safeCornerRadiusPt + 2f).coerceIn(0f, 28f))
+                                        },
+                                        decreaseTag = "seat_plan_corner_minus",
+                                        increaseTag = "seat_plan_corner_plus",
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                }
+
+                                // Border Style Selector
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .horizontalScroll(rememberScrollState()),
+                                    horizontalArrangement = Arrangement.spacedBy(5.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text("বর্ডার:", fontSize = 11.sp, color = SlateMuted, fontWeight = FontWeight.SemiBold)
+                                    SeatPlanBorderStyle.entries.forEach { bs ->
+                                        val selected = config.borderStyle == bs
+                                        FilterChip(
+                                            selected = selected,
+                                            onClick = { config = config.copy(borderStyle = bs) },
+                                            label = { Text(bs.labelBn, fontSize = 10.5.sp) },
+                                            colors = appFilterChipColors(),
+                                            border = appFilterChipBorder(selected),
+                                            modifier = Modifier.testTag("seat_plan_border_${bs.name.lowercase()}")
                                         )
                                     }
-                                    IconButton(
-                                        onClick = {
-                                            if (config.extraBlankSlips < 48) {
-                                                config = config.copy(extraBlankSlips = config.extraBlankSlips + 1)
-                                            }
-                                        },
-                                        modifier = Modifier.size(48.dp)
-                                    ) {
-                                        Icon(Icons.Rounded.Add, contentDescription = "ফাঁকা বাড়ান", modifier = Modifier.size(16.dp))
-                                    }
                                 }
-                            }
-                        }
 
-                        HorizontalDivider(color = SlateOutline.copy(alpha = 0.5f))
-
-                        // B. Grid & Page Layout
-                        Text(
-                            "২. গ্রিড, পেজ ও স্টাইল",
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 12.sp,
-                            color = TealDark
-                        )
-
-                        // Columns + Rows
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .horizontalScroll(rememberScrollState()),
-                            horizontalArrangement = Arrangement.spacedBy(6.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text("কলাম:", fontSize = 11.sp, color = SlateMuted, fontWeight = FontWeight.SemiBold)
-                            listOf(1, 2, 3).forEach { colCnt ->
-                                val selected = config.columns == colCnt
-                                val enabled = !(config.pairMode == SeatPlanPairMode.SIDE_BY_SIDE && colCnt == 1)
-                                FilterChip(
-                                    selected = selected,
-                                    enabled = enabled,
-                                    onClick = { config = config.copy(columns = colCnt) },
-                                    label = { Text(bn(colCnt.toString()), fontSize = 11.5.sp) },
-                                    colors = appFilterChipColors(),
-                                    border = appFilterChipBorder(selected),
-                                    modifier = Modifier.testTag("seat_plan_cols_$colCnt")
-                                )
-                            }
-                            Spacer(Modifier.width(6.dp))
-                            Text("রো:", fontSize = 11.sp, color = SlateMuted, fontWeight = FontWeight.SemiBold)
-                            listOf(4, 5, 6, 7, 8).forEach { rowCnt ->
-                                val selected = config.rows == rowCnt
-                                FilterChip(
-                                    selected = selected,
-                                    onClick = { config = config.copy(rows = rowCnt) },
-                                    label = { Text(bn(rowCnt.toString()), fontSize = 11.5.sp) },
-                                    colors = appFilterChipColors(),
-                                    border = appFilterChipBorder(selected),
-                                    modifier = Modifier.testTag("seat_plan_rows_$rowCnt")
-                                )
-                            }
-                        }
-
-                        // Orientation + Font scale + Numerals
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .horizontalScroll(rememberScrollState()),
-                            horizontalArrangement = Arrangement.spacedBy(6.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            SeatPlanOrientation.entries.forEach { ori ->
-                                val selected = config.orientation == ori
-                                FilterChip(
-                                    selected = selected,
-                                    onClick = { config = config.copy(orientation = ori) },
-                                    label = { Text(ori.labelBn, fontSize = 11.sp) },
-                                    colors = appFilterChipColors(),
-                                    border = appFilterChipBorder(selected)
-                                )
-                            }
-                            SeatPlanNumeralMode.entries.forEach { numMode ->
-                                val selected = config.numeralMode == numMode
-                                FilterChip(
-                                    selected = selected,
-                                    onClick = { config = config.copy(numeralMode = numMode) },
-                                    label = { Text(numMode.labelBn, fontSize = 11.sp) },
-                                    colors = appFilterChipColors(),
-                                    border = appFilterChipBorder(selected)
-                                )
-                            }
-                        }
-
-                        FlowRow(
-                            horizontalArrangement = Arrangement.spacedBy(6.dp),
-                            verticalArrangement = Arrangement.spacedBy(4.dp)
-                        ) {
-                            SeatPlanFontScale.entries.forEach { fs ->
-                                val selected = config.fontScale == fs
-                                FilterChip(
-                                    selected = selected,
-                                    onClick = { config = config.copy(fontScale = fs) },
-                                    label = { Text("ফন্ট: ${fs.labelBn}", fontSize = 11.sp) },
-                                    colors = appFilterChipColors(),
-                                    border = appFilterChipBorder(selected)
-                                )
-                            }
-                            FilterChip(
-                                selected = config.showCutLines,
-                                onClick = { config = config.copy(showCutLines = !config.showCutLines) },
-                                label = { Text("কাটার দাগ", fontSize = 11.sp) },
-                                colors = appFilterChipColors(),
-                                border = appFilterChipBorder(config.showCutLines)
-                            )
-                            FilterChip(
-                                selected = config.roundedCorners,
-                                onClick = { config = config.copy(roundedCorners = !config.roundedCorners) },
-                                label = { Text("গোলাকার বর্ডার", fontSize = 11.sp) },
-                                colors = appFilterChipColors(),
-                                border = appFilterChipBorder(config.roundedCorners)
-                            )
-                            FilterChip(
-                                selected = config.boldStudentName,
-                                onClick = { config = config.copy(boldStudentName = !config.boldStudentName) },
-                                label = { Text("নাম বোল্ড", fontSize = 11.sp) },
-                                colors = appFilterChipColors(),
-                                border = appFilterChipBorder(config.boldStudentName)
-                            )
-                            FilterChip(
-                                selected = config.padRollTwoDigits,
-                                onClick = { config = config.copy(padRollTwoDigits = !config.padRollTwoDigits) },
-                                label = { Text("২ ডিজিট রোল (০১)", fontSize = 11.sp) },
-                                colors = appFilterChipColors(),
-                                border = appFilterChipBorder(config.padRollTwoDigits)
-                            )
-                        }
-
-                        HorizontalDivider(color = SlateOutline.copy(alpha = 0.5f))
-
-                        // C. Header & Room Details
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.SpaceBetween
-                        ) {
-                            Text(
-                                "৩. শিরোনাম ও কক্ষ",
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 12.sp,
-                                color = TealDark
-                            )
-                            Surface(
-                                onClick = { showAdvancedHeader = !showAdvancedHeader },
-                                color = TealSoft,
-                                shape = RoundedCornerShape(8.dp),
-                                modifier = Modifier.heightIn(min = 48.dp)
-                            ) {
-                                Row(
-                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                // Border Weight + Numerals + Card Toggles
+                                FlowRow(
+                                    horizontalArrangement = Arrangement.spacedBy(5.dp),
+                                    verticalArrangement = Arrangement.spacedBy(4.dp)
                                 ) {
-                                    Icon(Icons.Rounded.Tune, contentDescription = null, tint = TealDark, modifier = Modifier.size(13.dp))
-                                    Text(
-                                        if (showAdvancedHeader) "কাস্টম তথ্য লুকান" else "কাস্টম বিদ্যালয়/শিরোনাম",
-                                        fontSize = 10.5.sp,
-                                        fontWeight = FontWeight.SemiBold,
-                                        color = TealDark
+                                    if (config.borderStyle != SeatPlanBorderStyle.NONE) {
+                                        SeatPlanBorderWeight.entries.forEach { bw ->
+                                            val selected = config.borderWeight == bw
+                                            FilterChip(
+                                                selected = selected,
+                                                onClick = { config = config.copy(borderWeight = bw) },
+                                                label = { Text("লাইন: ${bw.labelBn}", fontSize = 10.5.sp) },
+                                                colors = appFilterChipColors(),
+                                                border = appFilterChipBorder(selected)
+                                            )
+                                        }
+                                    }
+                                    SeatPlanNumeralMode.entries.forEach { numMode ->
+                                        val selected = config.numeralMode == numMode
+                                        FilterChip(
+                                            selected = selected,
+                                            onClick = { config = config.copy(numeralMode = numMode) },
+                                            label = {
+                                                Text(
+                                                    if (numMode == SeatPlanNumeralMode.BENGALI) "সংখ্যা: বাংলা" else "Number: Eng",
+                                                    fontSize = 10.5.sp
+                                                )
+                                            },
+                                            colors = appFilterChipColors(),
+                                            border = appFilterChipBorder(selected)
+                                        )
+                                    }
+                                    FilterChip(
+                                        selected = config.showCutLines,
+                                        onClick = { config = config.copy(showCutLines = !config.showCutLines) },
+                                        label = { Text("কাটার দাগ", fontSize = 10.5.sp) },
+                                        colors = appFilterChipColors(),
+                                        border = appFilterChipBorder(config.showCutLines)
+                                    )
+                                    FilterChip(
+                                        selected = config.boldStudentName,
+                                        onClick = { config = config.copy(boldStudentName = !config.boldStudentName) },
+                                        label = { Text("বোল্ড", fontSize = 10.5.sp) },
+                                        colors = appFilterChipColors(),
+                                        border = appFilterChipBorder(config.boldStudentName)
+                                    )
+                                    FilterChip(
+                                        selected = config.padRollTwoDigits,
+                                        onClick = { config = config.copy(padRollTwoDigits = !config.padRollTwoDigits) },
+                                        label = { Text("০১ রোল", fontSize = 10.5.sp) },
+                                        colors = appFilterChipColors(),
+                                        border = appFilterChipBorder(config.padRollTwoDigits)
                                     )
                                 }
                             }
-                        }
 
-                        Row(
-                            horizontalArrangement = Arrangement.spacedBy(6.dp),
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            (1..3).forEach { t ->
-                                val selected = config.term == t
-                                FilterChip(
-                                    selected = selected,
-                                    onClick = { config = config.copy(term = t) },
-                                    label = { Text(termNameBn(t), fontSize = 11.5.sp) },
-                                    colors = appFilterChipColors(),
-                                    border = appFilterChipBorder(selected),
-                                    modifier = Modifier.weight(1f)
-                                )
-                            }
-                        }
+                            // TAB 2: শিরোনাম, প্রান্তিক ও কক্ষ
+                            else -> Column(verticalArrangement = Arrangement.spacedBy(7.dp)) {
+                                Row(
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    (1..3).forEach { t ->
+                                        val selected = config.term == t
+                                        FilterChip(
+                                            selected = selected,
+                                            onClick = { config = config.copy(term = t) },
+                                            label = { Text(termNameBn(t), fontSize = 11.sp) },
+                                            colors = appFilterChipColors(),
+                                            border = appFilterChipBorder(selected),
+                                            modifier = Modifier.weight(1f)
+                                        )
+                                    }
+                                }
 
-                        Row(
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            OutlinedTextField(
-                                value = config.subtitle,
-                                onValueChange = { config = config.copy(subtitle = it) },
-                                label = { Text("উপ-শিরোনাম", fontSize = 11.sp) },
-                                singleLine = true,
-                                modifier = Modifier.weight(1f)
-                            )
-                            OutlinedTextField(
-                                value = config.roomLabel,
-                                onValueChange = { config = config.copy(roomLabel = it) },
-                                label = { Text("কক্ষ নং (ঐচ্ছিক)", fontSize = 11.sp) },
-                                placeholder = { Text("যেমন: কক্ষ ০১", fontSize = 11.sp) },
-                                singleLine = true,
-                                modifier = Modifier.weight(1f)
-                            )
-                        }
+                                Row(
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    OutlinedTextField(
+                                        value = config.subtitle,
+                                        onValueChange = { config = config.copy(subtitle = it) },
+                                        label = { Text("উপ-শিরোনাম", fontSize = 10.5.sp) },
+                                        singleLine = true,
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                    OutlinedTextField(
+                                        value = config.roomLabel,
+                                        onValueChange = { config = config.copy(roomLabel = it) },
+                                        label = { Text("কক্ষ নং (ঐচ্ছিক)", fontSize = 10.5.sp) },
+                                        placeholder = { Text("কক্ষ ০১", fontSize = 10.5.sp) },
+                                        singleLine = true,
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                }
 
-                        AnimatedVisibility(visible = showAdvancedHeader) {
-                            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                                 OutlinedTextField(
                                     value = config.customExamTitle,
                                     onValueChange = { config = config.copy(customExamTitle = it) },
-                                    label = { Text("কাস্টম পরীক্ষার শিরোনাম", fontSize = 11.sp) },
-                                    placeholder = { Text(SeatPlanPlanner.resolvedExamTitle(config.copy(customExamTitle = ""), settings), fontSize = 11.sp) },
+                                    label = { Text("কাস্টম পরীক্ষার শিরোনাম", fontSize = 10.5.sp) },
+                                    placeholder = { Text(SeatPlanPlanner.resolvedExamTitle(config.copy(customExamTitle = ""), settings), fontSize = 10.5.sp) },
                                     singleLine = true,
                                     modifier = Modifier.fillMaxWidth()
                                 )
+
                                 OutlinedTextField(
                                     value = config.customSchoolName,
                                     onValueChange = { config = config.copy(customSchoolName = it) },
-                                    label = { Text("কাস্টম বিদ্যালয়ের নাম", fontSize = 11.sp) },
-                                    placeholder = { Text(settings.school.ifBlank { "বিদ্যালয়ের নাম" }, fontSize = 11.sp) },
+                                    label = { Text("কাস্টম বিদ্যালয়ের নাম", fontSize = 10.5.sp) },
+                                    placeholder = { Text(settings.school.ifBlank { "বিদ্যালয়ের নাম" }, fontSize = 10.5.sp) },
                                     singleLine = true,
                                     modifier = Modifier.fillMaxWidth()
                                 )
+
                                 Row(
                                     verticalAlignment = Alignment.CenterVertically,
                                     horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -756,8 +1041,8 @@ fun SeatPlanPdfScreen(
                                         value = config.customSchoolAddress,
                                         onValueChange = { config = config.copy(customSchoolAddress = it) },
                                         enabled = config.showSchoolAddress,
-                                        label = { Text("কাস্টম ঠিকানা", fontSize = 11.sp) },
-                                        placeholder = { Text(settings.schoolAddress.ifBlank { "ঠিকানা" }, fontSize = 11.sp) },
+                                        label = { Text("কাস্টম ঠিকানা", fontSize = 10.5.sp) },
+                                        placeholder = { Text(settings.schoolAddress.ifBlank { "ঠিকানা" }, fontSize = 10.5.sp) },
                                         singleLine = true,
                                         modifier = Modifier.weight(1f)
                                     )
@@ -845,7 +1130,8 @@ fun SeatPlanPdfScreen(
                             )
                             OutlinedButton(
                                 onClick = { config = config.copy(extraBlankSlips = config.slipsPerPage) },
-                                shape = RoundedCornerShape(8.dp)
+                                shape = RoundedCornerShape(8.dp),
+                                modifier = Modifier.heightIn(min = 48.dp)
                             ) {
                                 Text("১ পৃষ্ঠা ফাঁকা সিট কার্ড তৈরি করুন", fontSize = 12.sp)
                             }

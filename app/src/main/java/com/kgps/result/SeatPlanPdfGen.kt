@@ -29,17 +29,21 @@ object SeatPlanPdfGen {
         SeatPlanOrientation.LANDSCAPE -> A4_LONG to A4_SHORT
     }
 
-    private val cardBorderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = 0xFF111111.toInt()
-        style = Paint.Style.STROKE
-        strokeWidth = 0.85f
-    }
+    private fun makeBorderPaint(style: SeatPlanBorderStyle, strokeWidth: Float): Paint =
+        Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = 0xFF000000.toInt()
+            this.style = Paint.Style.STROKE
+            this.strokeWidth = strokeWidth
+            if (style == SeatPlanBorderStyle.DASHED) {
+                pathEffect = DashPathEffect(floatArrayOf(4.5f, 3.0f), 0f)
+            }
+        }
 
     private val cutGuidePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = 0xFF333333.toInt()
+        color = 0xFF1A1A1A.toInt()
         style = Paint.Style.STROKE
-        strokeWidth = 0.65f
-        pathEffect = DashPathEffect(floatArrayOf(3.2f, 2.6f), 0f)
+        strokeWidth = 0.75f
+        pathEffect = DashPathEffect(floatArrayOf(3.5f, 3.0f), 0f)
     }
 
     fun renderPageBitmap(
@@ -142,12 +146,11 @@ object SeatPlanPdfGen {
     ) {
         val cfg = page.config
         val (w, h) = pageDimensions(cfg.orientation)
-        val marginX = 18f
-        val marginY = 18f
-        val gridLeft = marginX
-        val gridTop = marginY
-        val gridRight = w - marginX
-        val gridBottom = h - marginY
+        val marginPt = cfg.safeMarginPt
+        val gridLeft = marginPt
+        val gridTop = marginPt
+        val gridRight = (w - marginPt).coerceAtLeast(gridLeft + 80f)
+        val gridBottom = (h - marginPt).coerceAtLeast(gridTop + 80f)
         val gridW = gridRight - gridLeft
         val gridH = gridBottom - gridTop
 
@@ -160,11 +163,11 @@ object SeatPlanPdfGen {
         if (cfg.showCutLines) {
             for (col in 1 until cols) {
                 val x = gridLeft + col * cellW
-                c.drawLine(x, gridTop - 4f, x, gridBottom + 4f, cutGuidePaint)
+                c.drawLine(x, gridTop - 3f, x, gridBottom + 3f, cutGuidePaint)
             }
             for (row in 1 until rows) {
                 val y = gridTop + row * cellH
-                c.drawLine(gridLeft - 4f, y, gridRight + 4f, y, cutGuidePaint)
+                c.drawLine(gridLeft - 3f, y, gridRight + 3f, y, cutGuidePaint)
             }
         }
 
@@ -173,11 +176,18 @@ object SeatPlanPdfGen {
         val examTitle = SeatPlanPlanner.resolvedExamTitle(cfg, settings)
         val subtitle = SeatPlanPlanner.resolvedSubtitle(cfg)
 
-        val bnFont = settings.pdfFont
-        val enFont = settings.pdfEnglishFont
+        val bnFont = cfg.bnFontId.ifBlank { settings.pdfFont }
+        val enFont = cfg.enFontId.ifBlank { settings.pdfEnglishFont }
 
-        val insetX = if (cols >= 3) 4.5f else 5.5f
-        val insetY = if (rows >= 7) 4.0f else 5.0f
+        val insetX = (cfg.safeHorizontalGapPt / 2f).coerceAtMost(cellW * 0.28f)
+        val insetY = (cfg.safeVerticalGapPt / 2f).coerceAtMost(cellH * 0.28f)
+
+        val borderPaint = makeBorderPaint(cfg.borderStyle, cfg.borderWeight.strokePt)
+        val innerDoublePaint = if (cfg.borderStyle == SeatPlanBorderStyle.DOUBLE) {
+            makeBorderPaint(SeatPlanBorderStyle.SOLID, (cfg.borderWeight.strokePt * 0.7f).coerceAtLeast(0.5f))
+        } else {
+            null
+        }
 
         for (r in 0 until rows) {
             for (col in 0 until cols) {
@@ -192,29 +202,46 @@ object SeatPlanPdfGen {
                     cellLeft + cellW - insetX,
                     cellTop + cellH - insetY
                 )
-                val radius = if (cfg.roundedCorners) 9f else 0f
-                c.drawRoundRect(cardRect, radius, radius, cardBorderPaint)
 
-                val cardH = cardRect.height()
-                val heightScale = (cardH / 124f).coerceIn(0.68f, 1.35f)
-                val widthScale = (cardRect.width() / 268f).coerceIn(0.72f, 1.3f)
-                val fontFactor = min(heightScale, widthScale).coerceIn(0.72f, 1.18f) * cfg.fontScale.factor
+                val cardH = cardRect.height().coerceAtLeast(36f)
+                val cardW = cardRect.width().coerceAtLeast(60f)
+                val heightScale = (cardH / 120f).coerceIn(0.62f, 1.35f)
+                val widthScale = (cardW / 256f).coerceIn(0.65f, 1.35f)
+                val fontFactor = min(heightScale, widthScale).coerceIn(0.66f, 1.20f) * cfg.fontScaleFactor
 
-                val padX = (14f * widthScale).coerceIn(8f, 22f)
+                val maxRadius = min(cardW, cardH) * 0.42f
+                val radius = (cfg.safeCornerRadiusPt * min(heightScale, widthScale)).coerceIn(0f, maxRadius)
+
+                if (cfg.borderStyle != SeatPlanBorderStyle.NONE) {
+                    c.drawRoundRect(cardRect, radius, radius, borderPaint)
+                    if (innerDoublePaint != null) {
+                        val gap = (cfg.borderWeight.strokePt + 2.2f).coerceAtMost(min(cardW, cardH) * 0.12f)
+                        val innerRect = RectF(
+                            cardRect.left + gap,
+                            cardRect.top + gap,
+                            cardRect.right - gap,
+                            cardRect.bottom - gap
+                        )
+                        val innerRadius = (radius - gap * 0.7f).coerceAtLeast(0f)
+                        c.drawRoundRect(innerRect, innerRadius, innerRadius, innerDoublePaint)
+                    }
+                }
+
+                val padX = (14.5f * widthScale).coerceIn(7f, 22f)
                 val innerLeft = cardRect.left + padX
                 val innerRight = cardRect.right - padX
-                val innerW = (innerRight - innerLeft).coerceAtLeast(40f)
+                val innerW = (innerRight - innerLeft).coerceAtLeast(30f)
                 val centerX = cardRect.centerX()
 
-                // Header block
+                // Header block (centered 4-line header matching classic slip proportions)
                 val headerLines = buildList {
-                    if (schoolName.isNotBlank()) add(schoolName to 10.2f)
-                    if (schoolAddress.isNotBlank()) add(schoolAddress to 9.4f)
-                    if (examTitle.isNotBlank()) add(examTitle to 9.4f)
-                    if (subtitle.isNotBlank()) add(subtitle to 9.4f)
+                    if (schoolName.isNotBlank()) add(schoolName to 12.0f)
+                    if (schoolAddress.isNotBlank()) add(schoolAddress to 10.6f)
+                    if (examTitle.isNotBlank()) add(examTitle to 10.6f)
+                    if (subtitle.isNotBlank()) add(subtitle to 10.4f)
                 }
-                val lineStep = (13.0f * heightScale).coerceIn(9.5f, 18f)
-                var curY = cardRect.top + (19f * heightScale).coerceIn(13f, 28f)
+                val lineStep = (13.6f * heightScale).coerceIn(9.0f, 19f)
+                var curY = cardRect.top + (19.5f * heightScale).coerceIn(12f, 28f)
                 headerLines.forEachIndexed { lineIdx, (text, baseSize) ->
                     val dp = PdfGen.dualPaint(
                         ctx = ctx,
@@ -230,8 +257,8 @@ object SeatPlanPdfGen {
                 }
 
                 // Footer student lines
-                val bottomY = cardRect.bottom - (10.5f * heightScale).coerceIn(7f, 16f)
-                val nameGap = (14.5f * heightScale).coerceIn(10.5f, 22f)
+                val bottomY = cardRect.bottom - (11.5f * heightScale).coerceIn(6.5f, 17f)
+                val nameGap = (15.8f * heightScale).coerceIn(10.0f, 24f)
                 val nameY = bottomY - nameGap
 
                 val classLabel = "শ্রেণি: ${classShortBn(slip.cls, settings)}"
@@ -239,7 +266,7 @@ object SeatPlanPdfGen {
 
                 val metaPaintLeft = PdfGen.dualPaint(
                     ctx = ctx,
-                    size = 9.5f * fontFactor,
+                    size = 11.0f * fontFactor,
                     bold = false,
                     bnFontId = bnFont,
                     enFontId = enFont,
@@ -247,7 +274,7 @@ object SeatPlanPdfGen {
                 )
                 val metaPaintRight = PdfGen.dualPaint(
                     ctx = ctx,
-                    size = 9.5f * fontFactor,
+                    size = 11.0f * fontFactor,
                     bold = false,
                     bnFontId = bnFont,
                     enFontId = enFont,
@@ -263,7 +290,7 @@ object SeatPlanPdfGen {
                 val nameText = "নাম: $studentDisplay"
                 val namePaint = PdfGen.dualPaint(
                     ctx = ctx,
-                    size = 10.0f * fontFactor,
+                    size = 11.4f * fontFactor,
                     bold = cfg.boldStudentName,
                     bnFontId = bnFont,
                     enFontId = enFont,

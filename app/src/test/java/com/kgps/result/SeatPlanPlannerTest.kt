@@ -128,4 +128,32 @@ class SeatPlanPlannerTest {
         assertEquals("৩য় প্রান্তিক মূল্যায়ন - 2026", SeatPlanPlanner.resolvedExamTitle(config, settings))
         assertEquals("আসন বিন্যাস · কক্ষ ০২", SeatPlanPlanner.resolvedSubtitle(config))
     }
+
+    @Test
+    fun defaultMarginAndGapClampingMatchRequirements() {
+        val def = SeatPlanConfig()
+        assertEquals(0.40f, def.marginInches, 0.0001f)
+        assertEquals(28.8f, def.safeMarginPt, 0.01f)
+        assertEquals(12f, def.safeHorizontalGapPt, 0.01f)
+        assertEquals(10f, def.safeVerticalGapPt, 0.01f)
+        assertEquals("kalpurush", def.bnFontId)
+        assertEquals(100, def.safeFontSizePercent)
+        assertEquals(1.0f, def.fontScaleFactor, 0.001f)
+        assertEquals(18f, def.safeCornerRadiusPt, 0.01f)
+        assertEquals(SeatPlanBorderStyle.SOLID, def.borderStyle)
+
+        val extreme = SeatPlanConfig(
+            marginInches = 5.0f,
+            horizontalGapPt = -4f,
+            verticalGapPt = 100f,
+            fontSizePercent = 200,
+            cornerRadiusPt = 99f
+        )
+        assertEquals(1.00f, extreme.safeMarginInches, 0.0001f)
+        assertEquals(72f, extreme.safeMarginPt, 0.01f)
+        assertEquals(0f, extreme.safeHorizontalGapPt, 0.01f)
+        assertEquals(36f, extreme.safeVerticalGapPt, 0.01f)
+        assertEquals(140, extreme.safeFontSizePercent)
+        assertEquals(28f, extreme.safeCornerRadiusPt, 0.01f)
+    }
 }
