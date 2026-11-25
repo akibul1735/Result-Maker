@@ -66,7 +66,7 @@ object BlankSheetPdfGen {
     private val qrBorderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = 0xFF333333.toInt()
         style = Paint.Style.STROKE
-        strokeWidth = 0.65f
+        strokeWidth = 0.55f
     }
 
     private fun dualTextPaint(
@@ -224,7 +224,7 @@ object BlankSheetPdfGen {
             qrLeft: Float,
             topY: Float = qrTop,
             boxSize: Float = leftQrBoxSize,
-            minQuietPad: Float = 3.6f
+            minQuietPad: Float = 2.2f
         ) {
             val qrBox = RectF(qrLeft, topY, qrLeft + boxSize, topY + boxSize)
             val whitePaint = Paint().apply {
@@ -236,12 +236,12 @@ object BlankSheetPdfGen {
                 style = Paint.Style.FILL
                 isAntiAlias = false
             }
-            // Crisp white quiet zone inside thin rounded border keeps ISO >= 4-module clearance from frame
+            // Crisp white margin (~1.5 modules) inside thin rounded border hugs the QR closely while separating finder patterns from frame
             c.drawRoundRect(qrBox, 2f, 2f, whitePaint)
 
             val matrixW = matrix.width.coerceAtLeast(1)
             val matrixH = matrix.height.coerceAtLeast(1)
-            val quietPad = max(minQuietPad, (boxSize / (matrixW + 8f)) * 4f)
+            val quietPad = max(minQuietPad, (boxSize / (matrixW + 3.0f)) * 1.5f)
             val drawArea = max(8f, boxSize - quietPad * 2f)
             val modW = drawArea / matrixW.toFloat()
             val modH = drawArea / matrixH.toFloat()
@@ -268,10 +268,10 @@ object BlankSheetPdfGen {
         }
 
         if (leftQrMatrix != null) {
-            drawQrBox(leftQrMatrix, marginX, boxSize = leftQrBoxSize, minQuietPad = 3.6f)
+            drawQrBox(leftQrMatrix, marginX, boxSize = leftQrBoxSize, minQuietPad = 2.2f)
         }
         if (rightQrMatrix != null) {
-            drawQrBox(rightQrMatrix, marginX + contentW - rightQrBoxSize, boxSize = rightQrBoxSize, minQuietPad = 4.0f)
+            drawQrBox(rightQrMatrix, marginX + contentW - rightQrBoxSize, boxSize = rightQrBoxSize, minQuietPad = 2.3f)
         }
 
         val hasAnyQr = leftQrMatrix != null || rightQrMatrix != null
@@ -661,7 +661,7 @@ object BlankSheetPdfGen {
                 qrLeft = marginX,
                 topY = bottomQrTop,
                 boxSize = bottomQrSize,
-                minQuietPad = 3.0f
+                minQuietPad = 2.0f
             )
             val infoX = marginX + bottomQrSize + 8f
             val refLine = page.sheetRefCode.ifBlank { "REF:${page.barcodeText.substringBeforeLast('-')}" }

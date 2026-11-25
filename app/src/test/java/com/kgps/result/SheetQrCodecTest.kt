@@ -539,7 +539,7 @@ class SheetQrCodecTest {
     }
 
     @Test
-    fun borderedQrWithIsoQuietZoneDecodesReliably() {
+    fun borderedQrWithTightMarginDecodesReliably() {
         val cols = BlankSheetCatalog.presetColumns(BlankSheetPreset.THREE_TERM_MARKS)
         val meta = BlankSheetQrMeta(
             cls = 3,
@@ -553,33 +553,42 @@ class SheetQrCodecTest {
         val matrix = SheetQrCodec.encodeQrMatrix(payload)!!
         val mw = matrix.width
 
-        // Simulate BlankSheetPdfGen geometry: 56pt box with >=4 module white quiet zone inside a thin dark border
-        val scale = 3
-        val quietPx = 4 * scale
-        val sizePx = mw * scale + quietPx * 2
-        val luma = ByteArray(sizePx * sizePx) { 0xFF.toByte() }
-        // Draw thin 1px dark border around outer edge
-        for (i in 0 until sizePx) {
-            luma[i] = 0x33.toByte()
-            luma[(sizePx - 1) * sizePx + i] = 0x33.toByte()
-            luma[i * sizePx] = 0x33.toByte()
-            luma[i * sizePx + (sizePx - 1)] = 0x33.toByte()
+        // Simulate BlankSheetPdfGen geometry: ~1.5 module white gap inside thin 0.55pt dark border + slight camera softness
+        val pxPerMod = 2.6f
+        val quietPx = kotlin.math.round(1.5f * pxPerMod).toInt().coerceAtLeast(3)
+        val boxSpan = kotlin.math.round(mw * pxPerMod).toInt() + quietPx * 2
+        val cropSize = boxSpan + 24
+        val frameL = 12
+        val frameT = 12
+        val frameR = frameL + boxSpan - 1
+        val frameB = frameT + boxSpan - 1
+
+        fun sampleBordered(x: Float, y: Float): Boolean {
+            val ix = kotlin.math.round(x).toInt()
+            val iy = kotlin.math.round(y).toInt()
+            if ((ix == frameL || ix == frameR) && iy in frameT..frameB) return true
+            if ((iy == frameT || iy == frameB) && ix in frameL..frameR) return true
+            val mx = kotlin.math.floor(((x - (frameL + quietPx)) / pxPerMod).toDouble()).toInt()
+            val my = kotlin.math.floor(((y - (frameT + quietPx)) / pxPerMod).toDouble()).toInt()
+            return mx in 0 until mw && my in 0 until mw && matrix.get(mx, my)
         }
-        for (my in 0 until mw) {
-            for (mx in 0 until mw) {
-                if (matrix.get(mx, my)) {
-                    val sx = quietPx + mx * scale
-                    val sy = quietPx + my * scale
-                    for (dy in 0 until scale) {
-                        for (dx in 0 until scale) {
-                            luma[(sy + dy) * sizePx + (sx + dx)] = 0x00.toByte()
-                        }
+
+        val luma = ByteArray(cropSize * cropSize)
+        val offsets = floatArrayOf(-0.28f, 0f, 0.28f)
+        for (y in 0 until cropSize) {
+            for (x in 0 until cropSize) {
+                var dark = 0f
+                for (oy in offsets) {
+                    for (ox in offsets) {
+                        if (sampleBordered(x + ox, y + oy)) dark += 1f / 9f
                     }
                 }
+                val lum = (242f - 205f * dark).toInt().coerceIn(0, 255)
+                luma[y * cropSize + x] = lum.toByte()
             }
         }
-        val decoded = QrLuminanceDecoder.decodeAllQrs(sizePx, sizePx, luma, addQuietZone = true)
-        assertTrue("Bordered QR with ISO quiet zone should decode cleanly, got $decoded", decoded.contains(payload))
+        val decoded = QrLuminanceDecoder.decodeAllQrs(cropSize, cropSize, luma, addQuietZone = true)
+        assertTrue("Tight-bordered QR with 1.5-module gap should decode cleanly under blur, got $decoded", decoded.contains(payload))
     }
 
     private fun decodeQrMatrixWithZxing(matrix: com.google.zxing.common.BitMatrix): String {
