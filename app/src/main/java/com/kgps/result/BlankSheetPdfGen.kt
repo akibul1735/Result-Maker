@@ -63,6 +63,12 @@ object BlankSheetPdfGen {
         style = Paint.Style.FILL
     }
 
+    private val qrBorderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = 0xFF333333.toInt()
+        style = Paint.Style.STROKE
+        strokeWidth = 0.65f
+    }
+
     private fun dualTextPaint(
         ctx: Context?,
         size: Float,
@@ -200,12 +206,12 @@ object BlankSheetPdfGen {
         // 1. Far-Left Thin Firestore/Cache QR + Centered [DPE Logo + School Title & Subtitle] + Far-Right Compact Offline QR
         val leftQrMatrix = if (page.thinQrPayload.isNotBlank()) SheetQrCodec.encodeQrMatrix(page.thinQrPayload) else null
         val rightQrMatrix = if (page.qrPayload.isNotBlank()) SheetQrCodec.encodeQrMatrix(page.qrPayload) else null
-        val leftQrBoxSize = 42f
+        val leftQrBoxSize = 48f
         val rightQrBoxSize = when {
-            rightQrMatrix == null -> 42f
-            rightQrMatrix.width >= 33 -> 50f
-            rightQrMatrix.width >= 29 -> 47f
-            else -> 44f
+            rightQrMatrix == null -> 48f
+            rightQrMatrix.width >= 33 -> 56f
+            rightQrMatrix.width >= 29 -> 53f
+            else -> 50f
         }
         val maxTopQrBox = max(
             if (leftQrMatrix != null) leftQrBoxSize else 0f,
@@ -218,7 +224,7 @@ object BlankSheetPdfGen {
             qrLeft: Float,
             topY: Float = qrTop,
             boxSize: Float = leftQrBoxSize,
-            minQuietPad: Float = 3.2f
+            minQuietPad: Float = 3.6f
         ) {
             val qrBox = RectF(qrLeft, topY, qrLeft + boxSize, topY + boxSize)
             val whitePaint = Paint().apply {
@@ -230,8 +236,8 @@ object BlankSheetPdfGen {
                 style = Paint.Style.FILL
                 isAntiAlias = false
             }
-            // Borderless white background ensures ISO >= 4-module quiet zone without dark border interference
-            c.drawRect(qrBox, whitePaint)
+            // Crisp white quiet zone inside thin rounded border keeps ISO >= 4-module clearance from frame
+            c.drawRoundRect(qrBox, 2f, 2f, whitePaint)
 
             val matrixW = matrix.width.coerceAtLeast(1)
             val matrixH = matrix.height.coerceAtLeast(1)
@@ -258,13 +264,14 @@ object BlankSheetPdfGen {
                     }
                 }
             }
+            c.drawRoundRect(qrBox, 2f, 2f, qrBorderPaint)
         }
 
         if (leftQrMatrix != null) {
-            drawQrBox(leftQrMatrix, marginX, boxSize = leftQrBoxSize, minQuietPad = 3.2f)
+            drawQrBox(leftQrMatrix, marginX, boxSize = leftQrBoxSize, minQuietPad = 3.6f)
         }
         if (rightQrMatrix != null) {
-            drawQrBox(rightQrMatrix, marginX + contentW - rightQrBoxSize, boxSize = rightQrBoxSize, minQuietPad = 3.6f)
+            drawQrBox(rightQrMatrix, marginX + contentW - rightQrBoxSize, boxSize = rightQrBoxSize, minQuietPad = 4.0f)
         }
 
         val hasAnyQr = leftQrMatrix != null || rightQrMatrix != null
@@ -393,8 +400,8 @@ object BlankSheetPdfGen {
 
         // Optional shared single-place মোট কার্যদিবস strip (replaces repeating কার্যদিবস on every row)
         val tableTop = if (page.showSharedWorkingDaysStrip) {
-            val wdTop = metaTop + metaH + 5f
-            val wdH = 19f
+            val wdTop = metaTop + metaH + 7f
+            val wdH = 22f
             val wdRect = RectF(marginX, wdTop, marginX + contentW, wdTop + wdH)
             c.drawRoundRect(wdRect, 2.5f, 2.5f, metaFillPaint)
             c.drawRoundRect(wdRect, 2.5f, 2.5f, borderPaint)
@@ -409,7 +416,7 @@ object BlankSheetPdfGen {
                 }
                 "মোট কার্যদিবস (${termNameBn(t)}): $valStr"
             } else {
-                val termParts = page.sharedWorkingDaysTerms.joinToString("    |    ") { t ->
+                val termParts = page.sharedWorkingDaysTerms.joinToString("       |       ") { t ->
                     val raw = page.workingDaysByTerm[t]?.let { fromBn(it).trim() }.orEmpty()
                     val valStr = if (raw.isNotEmpty()) {
                         "${BlankSheetCatalog.formatDigits(raw, numStyle)} দিন"
@@ -418,7 +425,7 @@ object BlankSheetPdfGen {
                     }
                     "${termNameBn(t)}: $valStr"
                 }
-                "মোট কার্যদিবস —   $termParts"
+                "মোট কার্যদিবস —    $termParts"
             }
 
             val wdPaint = dualTextPaint(ctx, 8.8f, bold = true, bnFontId = fontId, enFontId = enFontId, color = 0xFF000000.toInt())
@@ -426,7 +433,7 @@ object BlankSheetPdfGen {
             PdfGen.shrinkMixedToFit(wdPaint, wdText, maxWdTextW, step = 0.25f, minSize = 6.4f)
             val wdBaseline = wdTop + (wdH + wdPaint.textSize * 0.72f) / 2f
             PdfGen.drawMixedText(c, wdText, pageW / 2f, wdBaseline, wdPaint, Paint.Align.CENTER)
-            wdTop + wdH + 5f
+            wdTop + wdH + 7f
         } else {
             metaTop + metaH + 7f
         }
@@ -446,7 +453,7 @@ object BlankSheetPdfGen {
             SheetQrCodec.encodeBarcodeMatrix(page.barcodeText)
         } else null
         val footerReservedH = when {
-            bottomQrMatrix != null -> 46f
+            bottomQrMatrix != null -> 53f
             barcodeMatrix != null -> 56f
             else -> 22f
         }
@@ -647,22 +654,22 @@ object BlankSheetPdfGen {
         val footerY = pageH - marginBottom + 2f
 
         if (bottomQrMatrix != null) {
-            val bottomQrSize = 31f
-            val bottomQrTop = footerY - 39f
+            val bottomQrSize = 38f
+            val bottomQrTop = footerY - 47f
             drawQrBox(
                 matrix = bottomQrMatrix,
                 qrLeft = marginX,
                 topY = bottomQrTop,
                 boxSize = bottomQrSize,
-                minQuietPad = 2.6f
+                minQuietPad = 3.0f
             )
-            val infoX = marginX + bottomQrSize + 7f
+            val infoX = marginX + bottomQrSize + 8f
             val refLine = page.sheetRefCode.ifBlank { "REF:${page.barcodeText.substringBeforeLast('-')}" }
-            val refPaint = dualTextPaint(ctx, 7.1f, bold = true, bnFontId = fontId, enFontId = enFontId, color = 0xFF1A1A1A.toInt())
-            val idPaint = dualTextPaint(ctx, 6.4f, bold = false, bnFontId = fontId, enFontId = enFontId, color = 0xFF3A3A3A.toInt())
-            PdfGen.drawMixedText(c, refLine, infoX, bottomQrTop + 12f, refPaint, Paint.Align.LEFT)
+            val refPaint = dualTextPaint(ctx, 7.2f, bold = true, bnFontId = fontId, enFontId = enFontId, color = 0xFF1A1A1A.toInt())
+            val idPaint = dualTextPaint(ctx, 6.5f, bold = false, bnFontId = fontId, enFontId = enFontId, color = 0xFF3A3A3A.toInt())
+            PdfGen.drawMixedText(c, refLine, infoX, bottomQrTop + 15.5f, refPaint, Paint.Align.LEFT)
             val tidSuffix = page.templateId.takeIf { it.isNotBlank() }?.let { "ID: $it · " }.orEmpty()
-            PdfGen.drawMixedText(c, "${tidSuffix}অফলাইন ক্যাশ/ক্লাউড QR", infoX, bottomQrTop + 23f, idPaint, Paint.Align.LEFT)
+            PdfGen.drawMixedText(c, "${tidSuffix}অফলাইন ক্যাশ/ক্লাউড QR", infoX, bottomQrTop + 27.5f, idPaint, Paint.Align.LEFT)
         } else if (barcodeMatrix != null) {
             val barH = 22f
             val barQuietX = 12f

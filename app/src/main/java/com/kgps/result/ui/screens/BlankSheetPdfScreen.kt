@@ -18,6 +18,7 @@ import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -1008,24 +1009,25 @@ fun BlankSheetPdfScreen(
 
                         // Shared Working Days strip setup (when 3-term traits or single-term ATT without per-row DAYS column)
                         if (sharedWorkingDaysTerms.isNotEmpty() && config.showSharedWorkingDaysHeader) {
+                            Spacer(modifier = Modifier.height(2.dp))
                             Surface(
-                                shape = RoundedCornerShape(8.dp),
+                                shape = RoundedCornerShape(10.dp),
                                 color = SlateBg,
                                 border = BorderStroke(1.dp, SlateOutline),
                                 modifier = Modifier.fillMaxWidth()
                             ) {
                                 Column(
-                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
-                                    verticalArrangement = Arrangement.spacedBy(5.dp)
+                                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+                                    verticalArrangement = Arrangement.spacedBy(10.dp)
                                 ) {
                                     Row(
                                         modifier = Modifier.fillMaxWidth(),
                                         verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
                                     ) {
                                         Text(
                                             "প্রান্তিকের মোট কার্যদিবস (উপরে এক জায়গায় ছাপাবে):",
-                                            fontSize = 10.5.sp,
+                                            fontSize = 11.sp,
                                             fontWeight = FontWeight.SemiBold,
                                             color = TealDark,
                                             modifier = Modifier.weight(1f)
@@ -1050,7 +1052,7 @@ fun BlankSheetPdfScreen(
                                                     fontSize = 10.sp,
                                                     fontWeight = FontWeight.Bold,
                                                     color = TealPrimary,
-                                                    modifier = Modifier.padding(horizontal = 7.dp, vertical = 3.dp)
+                                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
                                                 )
                                             }
                                         }
@@ -1071,39 +1073,54 @@ fun BlankSheetPdfScreen(
                                                     fontSize = 10.sp,
                                                     fontWeight = FontWeight.Medium,
                                                     color = SlateMuted,
-                                                    modifier = Modifier.padding(horizontal = 7.dp, vertical = 3.dp)
+                                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
                                                 )
                                             }
                                         }
                                     }
-                                    Row(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        horizontalArrangement = Arrangement.spacedBy(6.dp)
-                                    ) {
-                                        sharedWorkingDaysTerms.forEach { t ->
-                                            val rawVal = config.workingDaysByTerm[t].orEmpty()
-                                            val displayVal = if (rawVal.isEmpty()) "" else BlankSheetCatalog.formatDigits(rawVal, config.numeralStyle)
-                                            OutlinedTextField(
-                                                value = displayVal,
-                                                onValueChange = { txt ->
-                                                    val clean = fromBn(txt).filter { it.isDigit() }.take(3)
-                                                    val next = config.workingDaysByTerm.toMutableMap()
-                                                    if (clean.isEmpty()) next.remove(t) else next[t] = clean
-                                                    config = config.copy(workingDaysByTerm = next)
-                                                },
-                                                label = { Text(termNameBn(t), fontSize = 10.sp) },
-                                                placeholder = { Text("ফাঁকা=লাইন", fontSize = 10.sp) },
-                                                singleLine = true,
-                                                textStyle = TextStyle(fontSize = 11.5.sp),
-                                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                                                modifier = Modifier
-                                                    .weight(1f)
-                                                    .testTag("blank_wd_input_$t")
-                                            )
+                                    BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
+                                        val termRows = if (maxWidth < 400.dp && sharedWorkingDaysTerms.size >= 3) {
+                                            sharedWorkingDaysTerms.chunked(2)
+                                        } else {
+                                            listOf(sharedWorkingDaysTerms)
+                                        }
+                                        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                                            termRows.forEach { rowTerms ->
+                                                Row(
+                                                    modifier = Modifier.fillMaxWidth(),
+                                                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                                                ) {
+                                                    rowTerms.forEach { t ->
+                                                        val rawVal = config.workingDaysByTerm[t].orEmpty()
+                                                        val displayVal = if (rawVal.isEmpty()) "" else BlankSheetCatalog.formatDigits(rawVal, config.numeralStyle)
+                                                        OutlinedTextField(
+                                                            value = displayVal,
+                                                            onValueChange = { txt ->
+                                                                val clean = fromBn(txt).filter { it.isDigit() }.take(3)
+                                                                val next = config.workingDaysByTerm.toMutableMap()
+                                                                if (clean.isEmpty()) next.remove(t) else next[t] = clean
+                                                                config = config.copy(workingDaysByTerm = next)
+                                                            },
+                                                            label = { Text(termNameBn(t), fontSize = 10.5.sp) },
+                                                            placeholder = { Text("ফাঁকা = লাইন", fontSize = 10.sp) },
+                                                            singleLine = true,
+                                                            textStyle = TextStyle(fontSize = 12.sp),
+                                                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                                                            modifier = Modifier
+                                                                .weight(1f)
+                                                                .testTag("blank_wd_input_$t")
+                                                        )
+                                                    }
+                                                    if (termRows.size > 1 && rowTerms.size == 1) {
+                                                        Spacer(modifier = Modifier.weight(1f))
+                                                    }
+                                                }
+                                            }
                                         }
                                     }
                                 }
                             }
+                            Spacer(modifier = Modifier.height(2.dp))
                         }
 
                         // Inline Custom Column Adder
@@ -1149,7 +1166,7 @@ fun BlankSheetPdfScreen(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .horizontalScroll(rememberScrollState()),
-                            horizontalArrangement = Arrangement.spacedBy(4.dp),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             pickerColumns.forEach { catalogCol ->
@@ -1172,8 +1189,8 @@ fun BlankSheetPdfScreen(
                                 ) {
                                     Row(
                                         verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(3.dp),
-                                        modifier = Modifier.padding(horizontal = 7.dp, vertical = 4.dp)
+                                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp)
                                     ) {
                                         if (isAdded) {
                                             Icon(Icons.Rounded.Check, contentDescription = null, tint = Color.White, modifier = Modifier.size(12.dp))

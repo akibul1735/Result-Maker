@@ -2399,7 +2399,7 @@ class ResultMakerViewModel(
         loadImageJob = viewModelScope.launch {
             try {
                 val bmp = withContext(Dispatchers.IO) {
-                    VisionImageOptimizer.decodeUriBitmap(appContext, uri, 2400)
+                    VisionImageOptimizer.decodeUriBitmap(appContext, uri, 2800)
                 }
                 if (bmp == null) {
                     _aiState.update {

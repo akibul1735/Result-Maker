@@ -8,6 +8,9 @@ import android.graphics.Paint
 import android.graphics.RectF
 import com.kgps.result.BlankSheetQrMeta
 import com.kgps.result.SheetQrCodec
+import kotlin.math.abs
+import kotlin.math.max
+import kotlin.math.min
 import kotlin.math.roundToInt
 
 data class SheetScanDetection(
@@ -184,6 +187,18 @@ object SheetQrScanner {
                 fromOfflineQr
             }
         }
+        if (!fromOfflineQr) {
+            scanAutoZoomZone(
+                bitmap = bitmap,
+                zone = CropRegion(0.42f, 0.00f, 1.00f, 0.56f),
+                preferOfflineQr = true,
+                maxCandidates = 4,
+                onTextFound = { text ->
+                    handleDecodedQrText(text, QrSlot.TOP_RIGHT)
+                    fromOfflineQr
+                }
+            )
+        }
         if (fromOfflineQr) return buildResult()
 
         // ২) ডান পাশের QR না পেলে বাম পাশের স্মার্ট ID QR স্ক্যান
@@ -198,6 +213,18 @@ object SheetQrScanner {
                 handleDecodedQrText(text, QrSlot.TOP_LEFT)
                 fromOfflineQr || fromThinQr
             }
+        }
+        if (!fromOfflineQr && !fromThinQr) {
+            scanAutoZoomZone(
+                bitmap = bitmap,
+                zone = CropRegion(0.00f, 0.00f, 0.58f, 0.56f),
+                preferOfflineQr = false,
+                maxCandidates = 4,
+                onTextFound = { text ->
+                    handleDecodedQrText(text, QrSlot.TOP_LEFT)
+                    fromOfflineQr || fromThinQr
+                }
+            )
         }
         if (fromOfflineQr || fromThinQr) return buildResult()
 
@@ -214,9 +241,21 @@ object SheetQrScanner {
                 fromOfflineQr || fromBottomQr
             }
         }
+        if (!fromOfflineQr && !fromBottomQr) {
+            scanAutoZoomZone(
+                bitmap = bitmap,
+                zone = CropRegion(0.00f, 0.45f, 1.00f, 1.00f),
+                preferOfflineQr = false,
+                maxCandidates = 4,
+                onTextFound = { text ->
+                    handleDecodedQrText(text, QrSlot.BOTTOM)
+                    fromOfflineQr || fromBottomQr
+                }
+            )
+        }
         if (fromOfflineQr || fromBottomQr) return buildResult()
 
-        // ৪) শেষ চেষ্টা: অপ্রচলিত মার্জিন/ক্রপের জন্য প্রশস্ত অঞ্চল ও পূর্ণ ছবিতে বহু-QR অনুসন্ধান
+        // ৪) শেষ চেষ্টা: অপ্রচলিত মার্জিন/ক্রপের জন্য প্রশস্ত অঞ্চল, পূর্ণ ছবি ও পূর্ণ-ফ্রেম অটো-জুম অনুসন্ধান
         for (region in qrWideFallbackRegions) {
             if (fromOfflineQr || fromThinQr) break
             scanQrRegionMulti(bitmap, region, preferOfflineQr = true).forEach {
@@ -237,6 +276,19 @@ object SheetQrScanner {
             } finally {
                 if (fullScaled !== bitmap) fullScaled.recycle()
             }
+        }
+        if (!fromOfflineQr && !fromThinQr && !fromBottomQr) {
+            scanAutoZoomZone(
+                bitmap = bitmap,
+                zone = CropRegion(0.00f, 0.00f, 1.00f, 1.00f),
+                preferOfflineQr = true,
+                maxCandidates = 6,
+                minScaleFrac = 0.055f,
+                onTextFound = { text ->
+                    handleDecodedQrText(text, QrSlot.GENERIC)
+                    fromOfflineQr
+                }
+            )
         }
 
         return buildResult()
@@ -359,6 +411,267 @@ object SheetQrScanner {
         val nw = (src.width * factor).roundToInt().coerceAtLeast(src.width)
         val nh = (src.height * factor).roundToInt().coerceAtLeast(src.height)
         return Bitmap.createScaledBitmap(src, nw, nh, true)
+    }
+
+    internal data class AutoZoomBox(
+        val left: Float,
+        val top: Float,
+        val right: Float,
+        val bottom: Float,
+        val score: Float
+    )
+
+    private inline fun scanAutoZoomZone(
+        bitmap: Bitmap,
+        zone: CropRegion,
+        preferOfflineQr: Boolean,
+        maxCandidates: Int = 4,
+        minScaleFrac: Float = 0.075f,
+        onTextFound: (String) -> Boolean
+    ) {
+        val zoneCrop = if (zone.left <= 0.001f && zone.top <= 0.001f && zone.right >= 0.999f && zone.bottom >= 0.999f) {
+            bitmap
+        } else {
+            extractNormalizedCrop(bitmap, zone) ?: return
+        }
+        try {
+            val analysisBmp = downscaleIfTooLarge(zoneCrop, maxLongestSide = 440)
+            val candidates = try {
+                val aw = analysisBmp.width
+                val ah = analysisBmp.height
+                if (aw < 28 || ah < 28) {
+                    emptyList()
+                } else {
+                    val pixels = IntArray(aw * ah)
+                    analysisBmp.getPixels(pixels, 0, aw, 0, 0, aw, ah)
+                    val luma = BarcodeLuminanceDecoder.argbToLuminance(pixels)
+                    findAutoZoomCandidateBoxesLuma(
+                        luma = luma,
+                        width = aw,
+                        height = ah,
+                        minScaleFrac = minScaleFrac,
+                        maxScaleFrac = 0.34f,
+                        maxCandidates = maxCandidates
+                    )
+                }
+            } finally {
+                if (analysisBmp !== zoneCrop) analysisBmp.recycle()
+            }
+
+            val zoneW = (zone.right - zone.left).coerceAtLeast(0.01f)
+            val zoneH = (zone.bottom - zone.top).coerceAtLeast(0.01f)
+            for ((idx, box) in candidates.withIndex()) {
+                val padX = (box.right - box.left) * 0.34f
+                val padY = (box.bottom - box.top) * 0.34f
+                val fullRegion = CropRegion(
+                    left = (zone.left + (box.left - padX) * zoneW).coerceIn(0f, 0.95f),
+                    top = (zone.top + (box.top - padY) * zoneH).coerceIn(0f, 0.95f),
+                    right = (zone.left + (box.right + padX) * zoneW).coerceIn(0.05f, 1f),
+                    bottom = (zone.top + (box.bottom + padY) * zoneH).coerceIn(0.05f, 1f)
+                )
+                val candCrop = extractNormalizedCrop(bitmap, fullRegion) ?: continue
+                try {
+                    val zoomed = upscaleIfSmall(candCrop, minSideTarget = 720, maxFactor = 6.5f, maxOutSide = 1280)
+                    try {
+                        var hit = false
+                        val texts = decodeAllQrsWithLuminance(zoomed, stopOnOfflineQr = preferOfflineQr)
+                        for (t in texts) {
+                            hit = onTextFound(t)
+                            if (hit) return
+                        }
+                        if (!hit && idx < 2) {
+                            for (angle in floatArrayOf(-5.5f, 5.5f)) {
+                                val tilted = rotateBitmapWhiteBg(zoomed, angle)
+                                try {
+                                    val tiltTexts = decodeAllQrsWithLuminance(tilted, stopOnOfflineQr = preferOfflineQr)
+                                    for (t in tiltTexts) {
+                                        if (onTextFound(t)) return
+                                    }
+                                } finally {
+                                    tilted.recycle()
+                                }
+                            }
+                        }
+                    } finally {
+                        if (zoomed !== candCrop) zoomed.recycle()
+                    }
+                } finally {
+                    if (candCrop !== bitmap) candCrop.recycle()
+                }
+            }
+        } finally {
+            if (zoneCrop !== bitmap) zoneCrop.recycle()
+        }
+    }
+
+    internal fun findAutoZoomCandidateBoxesLuma(
+        luma: ByteArray,
+        width: Int,
+        height: Int,
+        minScaleFrac: Float = 0.075f,
+        maxScaleFrac: Float = 0.34f,
+        maxCandidates: Int = 4
+    ): List<AutoZoomBox> {
+        if (width < 28 || height < 28 || luma.size < width * height) return emptyList()
+
+        // Adaptive dark threshold from [p15..p85] luminance percentiles
+        val hist = IntArray(256)
+        var sampled = 0
+        var idx = 0
+        val stepSample = if (width * height > 60_000) 2 else 1
+        while (idx < width * height) {
+            hist[luma[idx].toInt() and 0xFF]++
+            sampled++
+            idx += stepSample
+        }
+        var p15 = 40
+        var p85 = 215
+        if (sampled > 0) {
+            val t15 = (sampled * 0.15f).toInt()
+            val t85 = (sampled * 0.85f).toInt().coerceAtLeast(t15 + 1)
+            var acc = 0
+            var got15 = false
+            for (v in 0..255) {
+                acc += hist[v]
+                if (!got15 && acc >= t15) {
+                    p15 = v
+                    got15 = true
+                }
+                if (acc >= t85) {
+                    p85 = v
+                    break
+                }
+            }
+        }
+        val darkThresh = (p15 + ((p85 - p15) * 0.48f).toInt()).coerceIn(60, 195)
+
+        val iw = width + 1
+        val intGx = LongArray(iw * (height + 1))
+        val intGy = LongArray(iw * (height + 1))
+        val intDark = IntArray(iw * (height + 1))
+
+        for (y in 0 until height) {
+            var rowGx = 0L
+            var rowGy = 0L
+            var rowDark = 0
+            val curOff = (y + 1) * iw
+            val prevOff = y * iw
+            val rowPix = y * width
+            val topPix = max(0, y - 1) * width
+            val botPix = min(height - 1, y + 1) * width
+            for (x in 0 until width) {
+                val lum = luma[rowPix + x].toInt() and 0xFF
+                if (lum < darkThresh) rowDark++
+                val xl = max(0, x - 1)
+                val xr = min(width - 1, x + 1)
+                val gx = abs((luma[rowPix + xr].toInt() and 0xFF) - (luma[rowPix + xl].toInt() and 0xFF))
+                val gy = abs((luma[botPix + x].toInt() and 0xFF) - (luma[topPix + x].toInt() and 0xFF))
+                if (gx >= 20) rowGx += gx
+                if (gy >= 20) rowGy += gy
+                intGx[curOff + x + 1] = intGx[prevOff + x + 1] + rowGx
+                intGy[curOff + x + 1] = intGy[prevOff + x + 1] + rowGy
+                intDark[curOff + x + 1] = intDark[prevOff + x + 1] + rowDark
+            }
+        }
+
+        fun sumLong(arr: LongArray, x0: Int, y0: Int, x1: Int, y1: Int): Long =
+            arr[y1 * iw + x1] - arr[y0 * iw + x1] - arr[y1 * iw + x0] + arr[y0 * iw + x0]
+
+        fun sumInt(arr: IntArray, x0: Int, y0: Int, x1: Int, y1: Int): Int =
+            arr[y1 * iw + x1] - arr[y0 * iw + x1] - arr[y1 * iw + x0] + arr[y0 * iw + x0]
+
+        val minDim = min(width, height)
+        val rawFracs = floatArrayOf(0.06f, 0.09f, 0.13f, 0.18f, 0.24f, 0.31f)
+        val windowSizes = rawFracs
+            .filter { it in (minScaleFrac - 0.015f)..(maxScaleFrac + 0.02f) }
+            .map { (minDim * it).roundToInt().coerceIn(18, minDim) }
+            .distinct()
+
+        val scored = ArrayList<AutoZoomBox>(64)
+        for (s in windowSizes) {
+            val step = max(5, (s * 0.38f).roundToInt())
+            val half = (s / 2).coerceAtLeast(4)
+            val area = (s * s).toFloat()
+            var y = 0
+            while (y <= height - s) {
+                var x = 0
+                while (x <= width - s) {
+                    val sumGx = sumLong(intGx, x, y, x + s, y + s)
+                    val sumGy = sumLong(intGy, x, y, x + s, y + s)
+                    val meanGx = sumGx.toFloat() / area
+                    val meanGy = sumGy.toFloat() / area
+                    if (meanGx >= 7f && meanGy >= 7f) {
+                        val darkRatio = sumInt(intDark, x, y, x + s, y + s).toFloat() / area
+                        if (darkRatio in 0.14f..0.76f) {
+                            val tl = min(
+                                sumLong(intGx, x, y, x + half, y + half),
+                                sumLong(intGy, x, y, x + half, y + half)
+                            )
+                            val tr = min(
+                                sumLong(intGx, x + half, y, x + s, y + half),
+                                sumLong(intGy, x + half, y, x + s, y + half)
+                            )
+                            val bl = min(
+                                sumLong(intGx, x, y + half, x + half, y + s),
+                                sumLong(intGy, x, y + half, x + half, y + s)
+                            )
+                            val br = min(
+                                sumLong(intGx, x + half, y + half, x + s, y + s),
+                                sumLong(intGy, x + half, y + half, x + s, y + s)
+                            )
+                            val qList = longArrayOf(tl, tr, bl, br).apply { sort() }
+                            val qThird = qList[1] // 2nd smallest == weakest of the top 3 finder quadrants
+                            val qMax = qList[3]
+                            if (qMax > 0L) {
+                                val quadUniformity = qThird.toFloat() / qMax.toFloat()
+                                if (quadUniformity >= 0.22f) {
+                                    val xyMin = min(meanGx, meanGy)
+                                    val xyMax = max(meanGx, meanGy)
+                                    val xyBalance = xyMin / xyMax
+                                    val darkBonus = 1f - abs(darkRatio - 0.44f).coerceAtMost(0.32f)
+                                    val score = xyMin * xyBalance * (0.45f + 0.55f * quadUniformity) * darkBonus
+                                    scored.add(
+                                        AutoZoomBox(
+                                            left = x.toFloat() / width,
+                                            top = y.toFloat() / height,
+                                            right = (x + s).toFloat() / width,
+                                            bottom = (y + s).toFloat() / height,
+                                            score = score
+                                        )
+                                    )
+                                }
+                            }
+                        }
+                    }
+                    x += step
+                }
+                y += step
+            }
+        }
+
+        if (scored.isEmpty()) return emptyList()
+        scored.sortByDescending { it.score }
+
+        val picked = ArrayList<AutoZoomBox>(maxCandidates)
+        for (cand in scored) {
+            val overlaps = picked.any { existing ->
+                val ix0 = max(existing.left, cand.left)
+                val iy0 = max(existing.top, cand.top)
+                val ix1 = min(existing.right, cand.right)
+                val iy1 = min(existing.bottom, cand.bottom)
+                val inter = max(0f, ix1 - ix0) * max(0f, iy1 - iy0)
+                if (inter <= 0f) return@any false
+                val a1 = (existing.right - existing.left) * (existing.bottom - existing.top)
+                val a2 = (cand.right - cand.left) * (cand.bottom - cand.top)
+                val union = (a1 + a2 - inter).coerceAtLeast(1e-6f)
+                inter / union > 0.28f || inter / min(a1, a2).coerceAtLeast(1e-6f) > 0.50f
+            }
+            if (!overlaps) {
+                picked.add(cand)
+                if (picked.size >= maxCandidates) break
+            }
+        }
+        return picked
     }
 
     private fun downscaleIfTooLarge(src: Bitmap, maxLongestSide: Int): Bitmap {

@@ -117,7 +117,7 @@ object BlankSheetCatalog {
         val tOrd = termOrdinalBn(term)
         val grp = termNameBn(term)
         return listOf(
-            BlankSheetColumn("T${term}_DAYS", "কার্যদিবস", widthWeight = 0.78f, groupBn = grp, pickerLabelBn = "$tOrd-কার্যদিবস"),
+            BlankSheetColumn("T${term}_DAYS", "কার্যদিবস", widthWeight = 0.86f, groupBn = grp, pickerLabelBn = "$tOrd-কার্যদিবস"),
             BlankSheetColumn("T${term}_PRES", "উপস্থিতি", widthWeight = 0.78f, groupBn = grp, pickerLabelBn = "$tOrd-উপস্থিতি"),
             BlankSheetColumn("T${term}_ACT", "সক্রিয়তা", widthWeight = 0.85f, groupBn = grp, pickerLabelBn = "$tOrd-সক্রিয়তা"),
             BlankSheetColumn("T${term}_DISC", "শৃঙ্খলা", widthWeight = 0.82f, groupBn = grp, pickerLabelBn = "$tOrd-শৃঙ্খলা"),

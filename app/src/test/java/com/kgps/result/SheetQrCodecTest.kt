@@ -469,6 +469,119 @@ class SheetQrCodecTest {
         assertEquals(null, bottomThin.bestLocalMeta)
     }
 
+    @Test
+    fun autoZoomCandidateFinderLocatesSmallDistantQrWithTextClutter() {
+        val cols = BlankSheetCatalog.presetColumns(BlankSheetPreset.FULL_MARKS)
+        val meta = BlankSheetQrMeta(
+            cls = 4,
+            subjectKey = "MATH",
+            term = 2,
+            sheetKind = ClassSheetKind.SINGLE_TERM_MARKS,
+            importScope = ClassSheetImportScope.BOTH,
+            columnIds = cols.map { it.id }
+        )
+        val matrix = SheetQrCodec.encodeQrMatrix(SheetQrCodec.encodePayload(meta))!!
+        val mw = matrix.width
+
+        // Simulate a 420x520 analysis frame where the sheet sits inset on a desk
+        // and the distant QR is only ~36x36 px inside the upper-right area.
+        val fw = 420
+        val fh = 520
+        val luma = ByteArray(fw * fh) { 0xE2.toByte() } // light gray desk
+
+        // Draw sheet background rectangle (70..350, 60..460)
+        for (y in 60 until 460) {
+            for (x in 70 until 350) {
+                luma[y * fw + x] = 0xFA.toByte()
+            }
+        }
+        // Draw simulated horizontal Bengali title/table text lines in center
+        for (rowY in intArrayOf(96, 112, 140, 180, 210, 240, 270)) {
+            for (dy in 0..3) {
+                for (x in 135..275 step 3) {
+                    luma[(rowY + dy) * fw + x] = 35.toByte()
+                }
+            }
+        }
+        // Draw distant small QR (1.35 px/module ~35px square) at inset (x=298, y=78)
+        val qrLeft = 298
+        val qrTop = 78
+        val pxPerMod = 1.35f
+        val qrSpan = (mw * pxPerMod).toInt()
+        for (y in qrTop until (qrTop + qrSpan)) {
+            val my = ((y - qrTop) / pxPerMod).toInt().coerceIn(0, mw - 1)
+            for (x in qrLeft until (qrLeft + qrSpan)) {
+                val mx = ((x - qrLeft) / pxPerMod).toInt().coerceIn(0, mw - 1)
+                if (matrix.get(mx, my)) {
+                    luma[y * fw + x] = 20.toByte()
+                }
+            }
+        }
+
+        val candidates = com.kgps.result.ai.SheetQrScanner.findAutoZoomCandidateBoxesLuma(
+            luma = luma,
+            width = fw,
+            height = fh,
+            minScaleFrac = 0.06f,
+            maxScaleFrac = 0.34f,
+            maxCandidates = 4
+        )
+        assertTrue("Expected auto-zoom candidates to be detected", candidates.isNotEmpty())
+        val qrCx = (qrLeft + qrSpan / 2f) / fw
+        val qrCy = (qrTop + qrSpan / 2f) / fh
+        val hit = candidates.any { box ->
+            val padX = (box.right - box.left) * 0.34f
+            val padY = (box.bottom - box.top) * 0.34f
+            qrCx in (box.left - padX)..(box.right + padX) &&
+                qrCy in (box.top - padY)..(box.bottom + padY)
+        }
+        assertTrue("Expected one of top auto-zoom boxes $candidates to cover distant QR center ($qrCx, $qrCy)", hit)
+    }
+
+    @Test
+    fun borderedQrWithIsoQuietZoneDecodesReliably() {
+        val cols = BlankSheetCatalog.presetColumns(BlankSheetPreset.THREE_TERM_MARKS)
+        val meta = BlankSheetQrMeta(
+            cls = 3,
+            subjectKey = "BAN",
+            term = 1,
+            sheetKind = ClassSheetKind.THREE_TERM_MARKS,
+            importScope = ClassSheetImportScope.BOTH,
+            columnIds = cols.map { it.id }
+        )
+        val payload = SheetQrCodec.encodePayload(meta)
+        val matrix = SheetQrCodec.encodeQrMatrix(payload)!!
+        val mw = matrix.width
+
+        // Simulate BlankSheetPdfGen geometry: 56pt box with >=4 module white quiet zone inside a thin dark border
+        val scale = 3
+        val quietPx = 4 * scale
+        val sizePx = mw * scale + quietPx * 2
+        val luma = ByteArray(sizePx * sizePx) { 0xFF.toByte() }
+        // Draw thin 1px dark border around outer edge
+        for (i in 0 until sizePx) {
+            luma[i] = 0x33.toByte()
+            luma[(sizePx - 1) * sizePx + i] = 0x33.toByte()
+            luma[i * sizePx] = 0x33.toByte()
+            luma[i * sizePx + (sizePx - 1)] = 0x33.toByte()
+        }
+        for (my in 0 until mw) {
+            for (mx in 0 until mw) {
+                if (matrix.get(mx, my)) {
+                    val sx = quietPx + mx * scale
+                    val sy = quietPx + my * scale
+                    for (dy in 0 until scale) {
+                        for (dx in 0 until scale) {
+                            luma[(sy + dy) * sizePx + (sx + dx)] = 0x00.toByte()
+                        }
+                    }
+                }
+            }
+        }
+        val decoded = QrLuminanceDecoder.decodeAllQrs(sizePx, sizePx, luma, addQuietZone = true)
+        assertTrue("Bordered QR with ISO quiet zone should decode cleanly, got $decoded", decoded.contains(payload))
+    }
+
     private fun decodeQrMatrixWithZxing(matrix: com.google.zxing.common.BitMatrix): String {
         val scale = 4
         val quiet = 4
