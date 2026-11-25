@@ -61,7 +61,6 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -502,7 +501,7 @@ private fun StudentDeckCard(
                     .padding(horizontal = 10.dp, vertical = 9.dp),
                 verticalArrangement = Arrangement.spacedBy(7.dp)
             ) {
-                // 1. Upfront Header: Roll badge + Name + Religion + Grade/Merit pill + Delete icon
+                // 1. Upfront Header: Roll badge + Name + Religion + Grade/Merit pill
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically,
@@ -615,23 +614,6 @@ private fun StudentDeckCard(
                             modifier = Modifier.padding(horizontal = 7.dp, vertical = 4.dp),
                             maxLines = 1
                         )
-                    }
-
-                    if (canManage && onRequestDelete != null) {
-                        IconButton(
-                            onClick = onRequestDelete,
-                            modifier = Modifier
-                                .minimumInteractiveComponentSize()
-                                .size(38.dp)
-                                .testTag("roster_delete_student_${student.id}")
-                        ) {
-                            Icon(
-                                imageVector = Icons.Rounded.DeleteOutline,
-                                contentDescription = "শিক্ষার্থী মুছুন",
-                                tint = RoseDanger,
-                                modifier = Modifier.size(19.dp)
-                            )
-                        }
                     }
                 }
 

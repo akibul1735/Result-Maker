@@ -956,7 +956,14 @@ fun AiAssistantScreen(
                                 fallbackDocumentPicker.launch(arrayOf("image/*"))
                             }
                         },
-                        onAskClearImage = { askClearImage = true },
+                        onAskClearImage = {
+                            if (state.classSheetResult != null || state.analysisResult != null) {
+                                askClearImage = true
+                            } else {
+                                resetToAuto()
+                                onClearImage()
+                            }
+                        },
                         onOpenZoom = { zoomDialogOpen = true },
                         onOpenCrop = { cropDialogOpen = true },
                         onRotateImage = onRotateImage,
@@ -1212,16 +1219,29 @@ fun AiAssistantScreen(
     }
 
     if (askClearImage) {
-        BiometricDeleteConfirmDialog(
-            title = "নির্বাচিত ছবি মুছবেন?",
-            description = "নম্বরপত্রের ছবি ও বিশ্লেষিত প্রিভিউ মুছে ফেলা হবে।",
-            warningDescription = "নির্বাচিত নম্বরপত্রের ছবি ও প্রিভিউ মুছতে আপনার ফিঙ্গারপ্রিন্ট অনুমতি দিন।",
-            confirmActionLabel = "ফিঙ্গারপ্রিন্ট অনুমতি দিয়ে মুছুন",
-            confirmButtonTestTag = "ai_confirm_clear_photo_btn",
-            onDismiss = { askClearImage = false },
-            onConfirmedDelete = {
-                resetToAuto()
-                onClearImage()
+        AlertDialog(
+            onDismissRequest = { askClearImage = false },
+            title = { Text("নির্বাচিত ছবি সরাবেন?", fontWeight = FontWeight.Bold) },
+            text = {
+                Text(
+                    "নম্বরপত্রের সংযুক্ত ছবি ও স্ক্যান প্রিভিউ এখান থেকে সরিয়ে ফেলা হবে।",
+                    fontSize = 13.sp,
+                    color = SlateText
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        askClearImage = false
+                        resetToAuto()
+                        onClearImage()
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = TealPrimary),
+                    modifier = Modifier.testTag("ai_confirm_clear_photo_btn")
+                ) { Text("সরান") }
+            },
+            dismissButton = {
+                TextButton(onClick = { askClearImage = false }) { Text("বাতিল") }
             }
         )
     }
