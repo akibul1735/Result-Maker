@@ -1505,9 +1505,9 @@ fun ReportStudioScreen(
                                     modifier = Modifier.testTag("studio_class_highest_checkbox")
                                 )
                                 Column(Modifier.weight(1f)) {
-                                    Text("৩য় পৃষ্ঠায় 'শ্রেণিতে সর্বোচ্চ নম্বর' কলাম যোগ করুন", fontSize = 13.sp, fontWeight = FontWeight.Medium)
+                                    Text("৩য় পৃষ্ঠায় 'সর্বোচ্চ গড় নম্বর' কলাম যোগ করুন", fontSize = 13.sp, fontWeight = FontWeight.Medium)
                                     Text(
-                                        "চূড়ান্ত ফলাফলের অধীনে শ্রেণির সর্বোচ্চ নম্বর দেখাবে",
+                                        "চূড়ান্ত ফলাফলের অধীনে সর্বোচ্চ গড় নম্বর দেখাবে",
                                         fontSize = 11.sp,
                                         color = SlateMuted
                                     )

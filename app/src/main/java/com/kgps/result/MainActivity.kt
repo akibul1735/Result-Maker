@@ -1297,13 +1297,13 @@ fun ResultMakerWorkspace(
                             )
                             Column(Modifier.weight(1f).padding(end = 6.dp)) {
                                 Text(
-                                    "৩য় পৃষ্ঠায় 'শ্রেণিতে সর্বোচ্চ নম্বর' কলাম যোগ করুন",
+                                    "৩য় পৃষ্ঠায় 'সর্বোচ্চ গড় নম্বর' কলাম যোগ করুন",
                                     fontSize = 12.5.sp,
                                     fontWeight = FontWeight.SemiBold,
                                     color = SlateText
                                 )
                                 Text(
-                                    "চূড়ান্ত ফলাফলের অধীনে শ্রেণির সর্বোচ্চ নম্বর দেখাবে",
+                                    "চূড়ান্ত ফলাফলের অধীনে সর্বোচ্চ গড় নম্বর দেখাবে",
                                     fontSize = 11.sp,
                                     color = SlateMuted
                                 )

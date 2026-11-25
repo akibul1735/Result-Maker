@@ -647,13 +647,13 @@ fun BatchReportDialog(
                             )
                             Column(Modifier.weight(1f).padding(end = 6.dp)) {
                                 Text(
-                                    "৩য় পৃষ্ঠায় 'শ্রেণিতে সর্বোচ্চ নম্বর' কলাম যোগ করুন",
+                                    "৩য় পৃষ্ঠায় 'সর্বোচ্চ গড় নম্বর' কলাম যোগ করুন",
                                     fontSize = 12.sp,
                                     fontWeight = FontWeight.SemiBold,
                                     color = SlateText
                                 )
                                 Text(
-                                    "চূড়ান্ত ফলাফলের অধীনে বিষয়ভিত্তিক শ্রেণির সর্বোচ্চ নম্বর দেখাবে",
+                                    "চূড়ান্ত ফলাফলের অধীনে বিষয়ভিত্তিক সর্বোচ্চ গড় নম্বর দেখাবে",
                                     fontSize = 10.5.sp,
                                     color = SlateMuted,
                                     maxLines = 1,
