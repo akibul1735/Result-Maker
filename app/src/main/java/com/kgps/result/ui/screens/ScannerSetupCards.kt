@@ -554,6 +554,7 @@ internal fun ScannerPhotoAndActionCard(
     documentEnhance: Boolean,
     preparedStatsLabel: String?,
     preparedStatsGood: Boolean,
+    loadingImage: Boolean = false,
     analyzingImage: Boolean,
     onLaunchCamera: () -> Unit,
     onLaunchGallery: () -> Unit,
@@ -619,6 +620,32 @@ internal fun ScannerPhotoAndActionCard(
                             .testTag("ai_clear_photo_btn")
                     ) {
                         Icon(Icons.Rounded.Close, contentDescription = "ছবি সরান", modifier = Modifier.size(16.dp))
+                    }
+                }
+            }
+
+            if (loadingImage) {
+                Surface(
+                    color = SlateSurfaceVariant,
+                    border = BorderStroke(1.dp, SlateOutline),
+                    shape = RoundedCornerShape(8.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(16.dp),
+                            strokeWidth = 2.dp,
+                            color = TealPrimary
+                        )
+                        Text(
+                            "গ্যালারি/ক্যামেরা থেকে ছবি প্রস্তুত হচ্ছে...",
+                            fontSize = 11.5.sp,
+                            color = SlateText
+                        )
                     }
                 }
             }

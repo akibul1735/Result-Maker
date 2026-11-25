@@ -5,10 +5,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentSender
 import android.graphics.Bitmap
-import android.graphics.BitmapFactory
-import android.graphics.ImageDecoder
 import android.net.Uri
-import android.os.Build
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.google.firebase.firestore.FirebaseFirestoreException
@@ -117,6 +114,7 @@ data class AiAssistantState(
     val resolvedTemplateMeta: BlankSheetQrMeta? = null,
     val resolvedTemplateSource: String? = null,
     val resolvingSheetTemplate: Boolean = false,
+    val loadingImage: Boolean = false,
     val analyzingImage: Boolean = false,
     val analysisError: String? = null,
     val analysisResult: ExtractedMarksheet? = null,
@@ -144,6 +142,7 @@ class ResultMakerViewModel(
     private val syncedTemplateIdsInSession = mutableSetOf<String>()
     private val preloadedTemplateSchoolKeys = mutableSetOf<String>()
     private var originalMarksheetBitmap: Bitmap? = null
+    private var loadImageJob: Job? = null
 
     val localSeedCount: Int get() = initialLocalSnapshot?.first?.size ?: 0
     val localSeedSettings: Settings? get() = initialLocalSnapshot?.second
@@ -2389,26 +2388,92 @@ class ResultMakerViewModel(
     }
 
     fun loadMarksheetImage(uri: Uri) {
-        viewModelScope.launch {
-            val loaded = withContext(Dispatchers.IO) {
-                val bmp = decodeAndScaleBitmap(uri, 2800) ?: return@withContext null
-                val stats = VisionImageOptimizer.computeStatsOnly(bmp, _aiState.value.documentEnhance)
-                val detection = SheetQrScanner.decodeAllFromBitmap(bmp)
-                Triple(bmp, stats, detection)
-            }
-            if (loaded == null) {
-                showMessage("ছবি পড়া যায়নি")
-            } else {
-                val (bmp, stats, detection) = loaded
+        loadImageJob?.cancel()
+        _aiState.update {
+            it.copy(
+                activeTab = 1,
+                loadingImage = true,
+                analysisError = null
+            )
+        }
+        loadImageJob = viewModelScope.launch {
+            try {
+                val bmp = withContext(Dispatchers.IO) {
+                    VisionImageOptimizer.decodeUriBitmap(appContext, uri, 2400)
+                }
+                if (bmp == null) {
+                    _aiState.update {
+                        it.copy(
+                            loadingImage = false,
+                            analysisError = "গ্যালারি থেকে ছবিটি পড়া যায়নি — অনুগ্রহ করে অন্য ছবি দিন অথবা স্ক্রিনশট/ক্রপ করে চেষ্টা করুন।"
+                        )
+                    }
+                    showMessage("ছবি পড়া যায়নি")
+                    return@launch
+                }
+
+                // ছবি ডিকোড হওয়ার সাথে সাথেই প্রিভিউ দেখান, যেন QR স্ক্যানের অপেক্ষায় ছবি খালি না থাকে
                 originalMarksheetBitmap = bmp
-                applyDetectedSheetState(
-                    targetBmp = bmp,
-                    stats = stats,
-                    detection = detection,
-                    hasOriginalBackup = false,
-                    switchToScannerTab = true,
-                    keepExistingOnMiss = false
-                )
+                _aiState.update {
+                    it.copy(
+                        activeTab = 1,
+                        loadingImage = false,
+                        selectedImageBitmap = bmp,
+                        preparedImageStats = null,
+                        hasOriginalImageBackup = false,
+                        detectedSheetQr = null,
+                        sheetDetectionSource = null,
+                        sheetDetection = null,
+                        resolvedTemplateMeta = null,
+                        resolvedTemplateSource = null,
+                        resolvingSheetTemplate = false,
+                        analysisResult = null,
+                        classSheetResult = null,
+                        analysisError = null
+                    )
+                }
+
+                val enhance = _aiState.value.documentEnhance
+                val (stats, detection) = withContext(Dispatchers.Default) {
+                    val computedStats = runCatching {
+                        VisionImageOptimizer.computeStatsOnly(bmp, enhance)
+                    }.getOrElse {
+                        PreparedImageStats(
+                            width = bmp.width,
+                            height = bmp.height,
+                            byteSize = 0,
+                            qualityUsed = 86,
+                            documentEnhanced = enhance
+                        )
+                    }
+                    val detected = runCatching {
+                        SheetQrScanner.decodeAllFromBitmap(bmp)
+                    }.getOrElse {
+                        SheetScanDetection()
+                    }
+                    computedStats to detected
+                }
+
+                if (_aiState.value.selectedImageBitmap === bmp) {
+                    applyDetectedSheetState(
+                        targetBmp = bmp,
+                        stats = stats,
+                        detection = detection,
+                        hasOriginalBackup = false,
+                        switchToScannerTab = true,
+                        keepExistingOnMiss = false
+                    )
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (_: Throwable) {
+                _aiState.update {
+                    it.copy(
+                        loadingImage = false,
+                        analysisError = "গ্যালারি থেকে ছবি লোড করতে সমস্যা হয়েছে — আবার চেষ্টা করুন।"
+                    )
+                }
+                showMessage("ছবি লোড করা যায়নি")
             }
         }
     }
@@ -2493,9 +2558,11 @@ class ResultMakerViewModel(
     }
 
     fun clearMarksheetImage() {
+        loadImageJob?.cancel()
         originalMarksheetBitmap = null
         _aiState.update {
             it.copy(
+                loadingImage = false,
                 selectedImageBitmap = null,
                 preparedImageStats = null,
                 hasOriginalImageBackup = false,
@@ -3568,7 +3635,7 @@ class ResultMakerViewModel(
             if (result.availableModels.isNotEmpty()) {
                 applyDiscoveredModels(result.availableModels)
             }
-            if (result.ok) {
+            if (result.ok || result.availableModels.isNotEmpty()) {
                 GeminiApiConfig.saveApiKey(appContext, cleanKey)
                 _geminiApiKey.value = cleanKey
             }
@@ -3598,37 +3665,6 @@ class ResultMakerViewModel(
         val tid = templateId.trim().uppercase().takeIf { it.length >= 6 } ?: return null
         return cloudRepo.fetchSheetTemplate(schoolId, tid).getOrNull()?.also { fetched ->
             withContext(Dispatchers.IO) { sheetTemplateCache.put(fetched) }
-        }
-    }
-
-    private fun decodeAndScaleBitmap(uri: Uri, maxDim: Int): Bitmap? {
-        return try {
-            val raw = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-                val source = ImageDecoder.createSource(contentResolver, uri)
-                ImageDecoder.decodeBitmap(source) { decoder, info, _ ->
-                    val w = info.size.width
-                    val h = info.size.height
-                    val longest = maxOf(w, h)
-                    if (longest > maxDim) {
-                        val ratio = maxDim.toFloat() / longest
-                        decoder.setTargetSize((w * ratio).toInt().coerceAtLeast(1), (h * ratio).toInt().coerceAtLeast(1))
-                    }
-                    decoder.allocator = ImageDecoder.ALLOCATOR_SOFTWARE
-                }
-            } else {
-                contentResolver.openInputStream(uri)?.use { stream ->
-                    BitmapFactory.decodeStream(stream)
-                }
-            } ?: return null
-
-            val longest = maxOf(raw.width, raw.height)
-            if (longest <= maxDim) raw
-            else {
-                val ratio = maxDim.toFloat() / longest
-                Bitmap.createScaledBitmap(raw, (raw.width * ratio).toInt().coerceAtLeast(1), (raw.height * ratio).toInt().coerceAtLeast(1), true)
-            }
-        } catch (_: Exception) {
-            null
         }
     }
 }

@@ -327,6 +327,12 @@ fun AiAssistantScreen(
         if (uri != null) onPickMarksheetUri(uri)
     }
 
+    val fallbackDocumentPicker = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument()
+    ) { uri ->
+        if (uri != null) onPickMarksheetUri(uri)
+    }
+
     val cameraLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.TakePicture()
     ) { success ->
@@ -932,6 +938,7 @@ fun AiAssistantScreen(
                         documentEnhance = state.documentEnhance,
                         preparedStatsLabel = preparedStatsInfo?.first,
                         preparedStatsGood = preparedStatsInfo?.second == true,
+                        loadingImage = state.loadingImage,
                         analyzingImage = state.analyzingImage,
                         onLaunchCamera = {
                             activeConfigMenu = null
@@ -941,9 +948,13 @@ fun AiAssistantScreen(
                         },
                         onLaunchGallery = {
                             activeConfigMenu = null
-                            photoPicker.launch(
-                                PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
-                            )
+                            runCatching {
+                                photoPicker.launch(
+                                    PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
+                                )
+                            }.onFailure {
+                                fallbackDocumentPicker.launch(arrayOf("image/*"))
+                            }
                         },
                         onAskClearImage = { askClearImage = true },
                         onOpenZoom = { zoomDialogOpen = true },

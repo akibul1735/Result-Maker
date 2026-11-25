@@ -3,6 +3,7 @@ package com.kgps.result
 import com.kgps.result.ai.AutoScanResult
 import com.kgps.result.ai.ClassSheetKind
 import com.kgps.result.ai.DirectGeminiAiRepository
+import com.kgps.result.ai.GeminiApiConfig
 import com.kgps.result.ai.parseAutoScanJson
 import com.kgps.result.ai.parseClassSheetJsonRobust
 import com.kgps.result.ai.parseExtractedClassSheetJson
@@ -140,5 +141,33 @@ class AiRepositoryParsingAndCooldownTest {
         assertTrue(DirectGeminiAiRepository.isKnownTextOnlyModel("gemma-2-9b-it"))
         assertFalse(DirectGeminiAiRepository.isKnownTextOnlyModel("gemma-3-27b-it"))
         assertFalse(DirectGeminiAiRepository.isKnownTextOnlyModel("gemini-2.5-flash"))
+    }
+
+    @Test
+    fun `gemini-3_5-flash-lite stays first in config normalization and execution queue`() {
+        assertEquals(
+            "gemini-3.5-flash-lite",
+            GeminiApiConfig.normalizeModelId("gemini-3.5-flash-lite")
+        )
+        val ordered = GeminiApiConfig.normalizeOrderedModels(
+            listOf("gemini-3.5-flash-lite", "gemini-3.1-flash-lite")
+        )
+        assertEquals(listOf("gemini-3.5-flash-lite", "gemini-3.1-flash-lite"), ordered)
+
+        val plan = DirectGeminiAiRepository.buildModelQueuePlan(
+            userOrdered = ordered,
+            cooldownUntilMs = emptyMap(),
+            nowMs = 100_000L
+        )
+        assertEquals(listOf("gemini-3.5-flash-lite", "gemini-3.1-flash-lite"), plan.healthyModels)
+
+        // Cached live model IDs passed into queue planning must never be silently dropped either
+        val customPlan = DirectGeminiAiRepository.buildModelQueuePlan(
+            userOrdered = listOf("gemini-3.8-flash", "gemini-3.1-flash-lite"),
+            cooldownUntilMs = emptyMap(),
+            nowMs = 100_000L,
+            cachedIds = setOf("gemini-3.8-flash", "gemini-3.1-flash-lite")
+        )
+        assertEquals(listOf("gemini-3.8-flash", "gemini-3.1-flash-lite"), customPlan.healthyModels)
     }
 }

@@ -2,10 +2,7 @@ package com.kgps.result.ui.screens
 
 import android.content.Context
 import android.graphics.Bitmap
-import android.graphics.BitmapFactory
-import android.graphics.ImageDecoder
 import android.net.Uri
-import android.os.Build
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -70,6 +67,7 @@ import com.kgps.result.Repo
 import com.kgps.result.Settings
 import com.kgps.result.Student
 import com.kgps.result.ai.SheetQrScanner
+import com.kgps.result.ai.VisionImageOptimizer
 import com.kgps.result.bn
 import com.kgps.result.cloud.SheetTemplateCache
 import com.kgps.result.defaultSelectedColumnKeys
@@ -92,47 +90,8 @@ private fun createCsvScanTempUri(context: Context): Uri {
     return FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", imgFile)
 }
 
-private fun decodeScaledSheetBitmap(context: Context, uri: Uri, maxDim: Int = 2800): Bitmap? {
-    return try {
-        val raw = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-            val source = ImageDecoder.createSource(context.contentResolver, uri)
-            ImageDecoder.decodeBitmap(source) { decoder, info, _ ->
-                val w = info.size.width
-                val h = info.size.height
-                val longest = maxOf(w, h)
-                if (longest > maxDim) {
-                    val ratio = maxDim.toFloat() / longest
-                    decoder.setTargetSize(
-                        (w * ratio).toInt().coerceAtLeast(1),
-                        (h * ratio).toInt().coerceAtLeast(1)
-                    )
-                }
-                decoder.allocator = ImageDecoder.ALLOCATOR_SOFTWARE
-            }
-        } else {
-            context.contentResolver.openInputStream(uri)?.use { stream ->
-                BitmapFactory.decodeStream(stream)
-            }
-        } ?: return null
-
-        val longest = maxOf(raw.width, raw.height)
-        if (longest <= maxDim) {
-            raw
-        } else {
-            val ratio = maxDim.toFloat() / longest
-            val scaled = Bitmap.createScaledBitmap(
-                raw,
-                (raw.width * ratio).toInt().coerceAtLeast(1),
-                (raw.height * ratio).toInt().coerceAtLeast(1),
-                true
-            )
-            if (scaled !== raw) raw.recycle()
-            scaled
-        }
-    } catch (_: Exception) {
-        null
-    }
-}
+private fun decodeScaledSheetBitmap(context: Context, uri: Uri, maxDim: Int = 2400): Bitmap? =
+    VisionImageOptimizer.decodeUriBitmap(context, uri, maxDim)
 
 private enum class CsvWizardStep(val num: Int, val shortTitle: String) {
     OPTIONS(1, "অপশন"),
@@ -276,6 +235,12 @@ fun SmartCsvImportDialog(
         if (uri != null) scanSheetUri(uri)
     }
 
+    val sheetDocFallbackPicker = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument()
+    ) { uri ->
+        if (uri != null) scanSheetUri(uri)
+    }
+
     val sheetCameraLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.TakePicture()
     ) { success ->
@@ -295,7 +260,11 @@ fun SmartCsvImportDialog(
         }
     }
     val launchSheetGallery: () -> Unit = {
-        sheetGalleryPicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
+        runCatching {
+            sheetGalleryPicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
+        }.onFailure {
+            sheetDocFallbackPicker.launch(arrayOf("image/*"))
+        }
     }
 
     LaunchedEffect(promptConfig.targetCls) {

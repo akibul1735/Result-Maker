@@ -1,13 +1,21 @@
 package com.kgps.result.ai
 
+import android.content.Context
 import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.graphics.Canvas
 import android.graphics.ColorMatrix
 import android.graphics.ColorMatrixColorFilter
+import android.graphics.ImageDecoder
 import android.graphics.Matrix
 import android.graphics.Paint
+import android.media.ExifInterface
+import android.net.Uri
+import android.os.Build
 import android.util.Base64
 import java.io.ByteArrayOutputStream
+import java.io.File
+import java.io.FileInputStream
 import java.security.MessageDigest
 
 data class PreparedImageStats(
@@ -35,6 +43,150 @@ object VisionImageOptimizer {
     private const val SOFT_MAX_BYTES = 480_000
     private const val HARD_MAX_BYTES = 640_000
     private const val RESCALE_TRIGGER_BYTES = 750_000
+
+    /**
+     * গ্যালারি, ফটো-পিকার বা ক্যামেরা URI থেকে নিরাপদে Bitmap ডিকোড করে:
+     * ১. Android 9+ এ ImageDecoder দিয়ে সরাসরি স্কেলড ডিকোড।
+     * ২. ব্যর্থ হলে URI-র বাইট একবারেই অস্থায়ী ফাইলে কপি করে (one-shot cloud/picker stream সাপোর্টসহ)
+     *    BitmapFactory (inSampleSize) + EXIF রোটেশন প্রয়োগ।
+     * ৩. openInputStream ব্যর্থ হলে openFileDescriptor ফ্লোব্যাক।
+     */
+    fun decodeUriBitmap(context: Context, uri: Uri, maxLongestSide: Int = 2400): Bitmap? {
+        val resolver = context.contentResolver
+
+        // Tier 1: ImageDecoder on Android P+
+        val fromImageDecoder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            try {
+                val source = ImageDecoder.createSource(resolver, uri)
+                ImageDecoder.decodeBitmap(source) { decoder, info, _ ->
+                    val w = info.size.width
+                    val h = info.size.height
+                    val longest = maxOf(w, h)
+                    if (longest > maxLongestSide) {
+                        val ratio = maxLongestSide.toFloat() / longest
+                        decoder.setTargetSize(
+                            (w * ratio).toInt().coerceAtLeast(1),
+                            (h * ratio).toInt().coerceAtLeast(1)
+                        )
+                    }
+                    decoder.allocator = ImageDecoder.ALLOCATOR_SOFTWARE
+                }
+            } catch (_: Throwable) {
+                null
+            }
+        } else null
+
+        if (fromImageDecoder != null && fromImageDecoder.width > 0 && fromImageDecoder.height > 0) {
+            return scaleDownIfNeeded(fromImageDecoder, maxLongestSide)
+        }
+
+        // Tier 2 & 3: Single-pass copy to temp cache file -> BitmapFactory + ExifInterface
+        var tempFile: File? = null
+        return try {
+            tempFile = File.createTempFile("pick_img_", ".tmp", context.cacheDir)
+            val copiedBytes = copyUriToFile(resolver, uri, tempFile)
+            if (copiedBytes <= 0L) {
+                return null
+            }
+
+            val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            BitmapFactory.decodeFile(tempFile.absolutePath, bounds)
+            val rawW = bounds.outWidth
+            val rawH = bounds.outHeight
+            if (rawW <= 0 || rawH <= 0) {
+                return null
+            }
+
+            val targetCap = (maxLongestSide * 1.35f).toInt().coerceAtLeast(maxLongestSide)
+            var sampleSize = 1
+            while ((maxOf(rawW, rawH) / sampleSize) > targetCap) {
+                sampleSize *= 2
+            }
+
+            var decoded: Bitmap? = null
+            var attemptSample = sampleSize
+            for (attempt in 0 until 2) {
+                decoded = try {
+                    val opts = BitmapFactory.Options().apply {
+                        inSampleSize = attemptSample
+                        inPreferredConfig = Bitmap.Config.ARGB_8888
+                    }
+                    BitmapFactory.decodeFile(tempFile.absolutePath, opts)
+                } catch (_: OutOfMemoryError) {
+                    attemptSample *= 2
+                    null
+                } catch (_: Throwable) {
+                    null
+                }
+                if (decoded != null) break
+            }
+            val bmp = decoded ?: return null
+            val oriented = applyExifOrientation(bmp, tempFile)
+            scaleDownIfNeeded(oriented, maxLongestSide)
+        } catch (_: Throwable) {
+            null
+        } finally {
+            runCatching { tempFile?.delete() }
+        }
+    }
+
+    private fun copyUriToFile(
+        resolver: android.content.ContentResolver,
+        uri: Uri,
+        dest: File
+    ): Long {
+        val fromInput = try {
+            resolver.openInputStream(uri)?.use { input ->
+                dest.outputStream().use { out -> input.copyTo(out) }
+            } ?: 0L
+        } catch (_: Throwable) {
+            0L
+        }
+        if (fromInput > 0L) return fromInput
+
+        return try {
+            resolver.openFileDescriptor(uri, "r")?.use { pfd ->
+                FileInputStream(pfd.fileDescriptor).use { input ->
+                    dest.outputStream().use { out -> input.copyTo(out) }
+                }
+            } ?: 0L
+        } catch (_: Throwable) {
+            0L
+        }
+    }
+
+    private fun applyExifOrientation(src: Bitmap, file: File): Bitmap {
+        val orientation = try {
+            ExifInterface(file.absolutePath)
+                .getAttributeInt(ExifInterface.TAG_ORIENTATION, ExifInterface.ORIENTATION_NORMAL)
+        } catch (_: Throwable) {
+            ExifInterface.ORIENTATION_NORMAL
+        }
+        val matrix = Matrix()
+        when (orientation) {
+            ExifInterface.ORIENTATION_ROTATE_90 -> matrix.postRotate(90f)
+            ExifInterface.ORIENTATION_ROTATE_180 -> matrix.postRotate(180f)
+            ExifInterface.ORIENTATION_ROTATE_270 -> matrix.postRotate(270f)
+            ExifInterface.ORIENTATION_FLIP_HORIZONTAL -> matrix.postScale(-1f, 1f)
+            ExifInterface.ORIENTATION_FLIP_VERTICAL -> matrix.postScale(1f, -1f)
+            ExifInterface.ORIENTATION_TRANSPOSE -> {
+                matrix.postRotate(90f)
+                matrix.postScale(-1f, 1f)
+            }
+            ExifInterface.ORIENTATION_TRANSVERSE -> {
+                matrix.postRotate(270f)
+                matrix.postScale(-1f, 1f)
+            }
+            else -> return src
+        }
+        return try {
+            val rotated = Bitmap.createBitmap(src, 0, 0, src.width, src.height, matrix, true)
+            if (rotated !== src) src.recycle()
+            rotated
+        } catch (_: Throwable) {
+            src
+        }
+    }
 
     fun rotate90Clockwise(src: Bitmap): Bitmap {
         val matrix = Matrix().apply { postRotate(90f) }

@@ -73,7 +73,6 @@ object GeminiApiConfig {
 
     internal val LEGACY_INVALID_MODELS: Set<String> = setOf(
         "gemini-3.8-flash",
-        "gemini-3.5-flash-lite",
         "gemini-4-argon",
         "gemini-4-hydrogen"
     )
@@ -1292,6 +1291,8 @@ class DirectGeminiAiRepository(
     private fun resolveModelId(@Suppress("UNUSED_PARAMETER") mode: AiModelMode? = null): String =
         requireOrderedModels().first()
 
+    @Volatile
+    private var lastSeenApiKey: String? = null
     private val modelCooldownUntilMs = ConcurrentHashMap<String, Long>()
     private val cacheLock = Any()
     private val singleSheetCache = object : LinkedHashMap<String, ExtractedMarksheet>(8, 0.75f, true) {
@@ -1307,17 +1308,31 @@ class DirectGeminiAiRepository(
         override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, AiDraftRemarkResult>?): Boolean = size > 16
     }
 
+    private fun syncApiKeyChange(apiKey: String) {
+        val prev = lastSeenApiKey
+        if (prev != null && prev != apiKey) {
+            modelCooldownUntilMs.clear()
+            synchronized(cacheLock) {
+                singleSheetCache.clear()
+                classSheetCache.clear()
+                autoScanCache.clear()
+                remarkCache.clear()
+            }
+        }
+        lastSeenApiKey = apiKey
+    }
+
     fun clearCooldowns() {
         modelCooldownUntilMs.clear()
     }
 
     fun clearCooldownFor(modelId: String) {
-        val clean = GeminiApiConfig.normalizeModelId(modelId)
+        val clean = stripModelPrefix(modelId)
         if (clean.isNotBlank()) modelCooldownUntilMs.remove(clean)
     }
 
     private fun remainingCooldownSeconds(modelId: String): Int {
-        val clean = GeminiApiConfig.normalizeModelId(modelId)
+        val clean = stripModelPrefix(modelId)
         if (clean.isBlank()) return 0
         val until = modelCooldownUntilMs[clean] ?: return 0
         val diff = until - System.currentTimeMillis()
@@ -1329,7 +1344,7 @@ class DirectGeminiAiRepository(
     }
 
     private fun recordRateLimitCooldown(modelId: String, retryAfterSec: Int?, isZeroQuota: Boolean = false) {
-        val clean = GeminiApiConfig.normalizeModelId(modelId)
+        val clean = stripModelPrefix(modelId)
         if (clean.isBlank()) return
         val defaultWait = if (isZeroQuota) ZERO_QUOTA_COOLDOWN_SEC else DEFAULT_RATE_LIMIT_COOLDOWN_SEC
         val waitSec = maxOf(retryAfterSec ?: defaultWait, if (isZeroQuota) ZERO_QUOTA_COOLDOWN_SEC else 0)
@@ -1338,7 +1353,7 @@ class DirectGeminiAiRepository(
     }
 
     private fun recordServerBusyCooldown(modelId: String, waitSec: Int = 20) {
-        val clean = GeminiApiConfig.normalizeModelId(modelId)
+        val clean = stripModelPrefix(modelId)
         if (clean.isBlank()) return
         modelCooldownUntilMs[clean] = System.currentTimeMillis() + waitSec.coerceIn(5, 60) * 1000L
     }
@@ -1356,8 +1371,11 @@ class DirectGeminiAiRepository(
             )
         }
 
+        syncApiKeyChange(apiKey)
         val userOrdered = requireOrderedModels()
-        val plan = buildModelQueuePlan(userOrdered, modelCooldownUntilMs, System.currentTimeMillis())
+        val cachedIds = GeminiApiConfig.getCachedModels(appContext).map { it.id }.toSet() +
+            userOrdered.map { stripModelPrefix(it) }.toSet()
+        val plan = buildModelQueuePlan(userOrdered, modelCooldownUntilMs, System.currentTimeMillis(), cachedIds)
         plan.expiredKeysToPrune.forEach { modelCooldownUntilMs.remove(it) }
 
         if (plan.healthyModels.isEmpty()) {
@@ -1841,8 +1859,8 @@ class DirectGeminiAiRepository(
 
     companion object {
         private const val BASE_URL = "https://generativelanguage.googleapis.com/v1beta"
-        internal const val DEFAULT_RATE_LIMIT_COOLDOWN_SEC = 30
-        internal const val ZERO_QUOTA_COOLDOWN_SEC = 180
+        internal const val DEFAULT_RATE_LIMIT_COOLDOWN_SEC = 15
+        internal const val ZERO_QUOTA_COOLDOWN_SEC = 45
 
         internal enum class Config400Kind {
             THINKING_CONFIG,
@@ -1873,6 +1891,9 @@ class DirectGeminiAiRepository(
             cause: Throwable? = null
         ) : IllegalStateException(userMessage, cause)
 
+        internal fun stripModelPrefix(raw: String): String =
+            raw.trim().removePrefix("models/").trim()
+
         internal fun hasNetworkTransport(context: Context): Boolean {
             return runCatching {
                 val cm = context.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
@@ -1886,14 +1907,15 @@ class DirectGeminiAiRepository(
         internal fun buildModelQueuePlan(
             userOrdered: List<String>,
             cooldownUntilMs: Map<String, Long>,
-            nowMs: Long
+            nowMs: Long,
+            cachedIds: Set<String> = emptySet()
         ): ModelQueuePlan {
             val healthy = mutableListOf<String>()
             val cooling = mutableListOf<Pair<String, Int>>()
             val expired = mutableListOf<String>()
 
             for (raw in userOrdered) {
-                val clean = GeminiApiConfig.normalizeModelId(raw)
+                val clean = GeminiApiConfig.normalizeModelId(raw, cachedIds)
                 if (clean.isBlank()) continue
                 val until = cooldownUntilMs[clean]
                 if (until == null || until <= nowMs) {
@@ -2013,7 +2035,7 @@ class DirectGeminiAiRepository(
             body: JSONObject,
             preSerializedBody: ByteArray? = null
         ): String = withContext(Dispatchers.IO) {
-            val cleanModel = GeminiApiConfig.normalizeModelId(modelId)
+            val cleanModel = stripModelPrefix(modelId)
             val hasImage = bodyHasInlineImage(body)
             if (hasImage && isKnownTextOnlyModel(cleanModel)) {
                 throw GeminiHttpException(
@@ -2240,21 +2262,21 @@ class DirectGeminiAiRepository(
             }
 
             // 2. Ping the effective model with a minimal generateContent call
-            try {
-                val pingPayload = JSONObject().apply {
-                    put("contents", JSONArray().apply {
-                        put(JSONObject().apply {
-                            put("role", "user")
-                            put("parts", JSONArray().apply {
-                                put(JSONObject().put("text", "OK"))
-                            })
+            val pingPayload = JSONObject().apply {
+                put("contents", JSONArray().apply {
+                    put(JSONObject().apply {
+                        put("role", "user")
+                        put("parts", JSONArray().apply {
+                            put(JSONObject().put("text", "OK"))
                         })
                     })
-                    put("generationConfig", JSONObject().apply {
-                        put("maxOutputTokens", 8)
-                        put("temperature", 0.0)
-                    })
-                }
+                })
+                put("generationConfig", JSONObject().apply {
+                    put("maxOutputTokens", 8)
+                    put("temperature", 0.0)
+                })
+            }
+            try {
                 callGenerateContent(apiKey, effectiveModelId, pingPayload)
                 val statusText = if (cleanRequested.isBlank()) {
                     "API Key যাচাই সফল ($effectiveModelId)! ${bn(fetchedModels.size.toString())}টি লাইভ মডেল পাওয়া গেছে — এখন তালিকা থেকে পছন্দের ৩টি মডেল নির্বাচন করুন।"
@@ -2267,6 +2289,23 @@ class DirectGeminiAiRepository(
                     availableModels = fetchedModels
                 )
             } catch (e: Exception) {
+                val fallbackProbe = if (cleanRequested.isBlank() && e is GeminiHttpException && e.httpCode in setOf(404, 429)) {
+                    fetchedModels.firstOrNull {
+                        it.id != effectiveModelId && it.id.contains("flash", ignoreCase = true)
+                    }?.id
+                } else null
+                if (fallbackProbe != null) {
+                    val secondAttempt = runCatching {
+                        callGenerateContent(apiKey, fallbackProbe, pingPayload)
+                    }
+                    if (secondAttempt.isSuccess) {
+                        return@withContext GeminiConnectionCheckResult(
+                            ok = true,
+                            message = "API Key যাচাই সফল ($fallbackProbe)! ${bn(fetchedModels.size.toString())}টি লাইভ মডেল পাওয়া গেছে — এখন তালিকা থেকে পছন্দের ৩টি মডেল নির্বাচন করুন।",
+                            availableModels = fetchedModels
+                        )
+                    }
+                }
                 val hint = if (fetchedModels.isNotEmpty()) {
                     "\nউপলব্ধ লাইভ তালিকা থেকে অন্য একটি মডেল বেছে নিন।"
                 } else ""
@@ -2347,9 +2386,20 @@ class DirectGeminiAiRepository(
             return collected.values.sortedWith(
                 compareByDescending<DiscoveredGeminiModel> { it.id.startsWith("gemini-", ignoreCase = true) }
                     .thenByDescending { parseModelMajorMinorScore(it.id) }
+                    .thenBy { modelFamilySortRank(it.id) }
                     .thenBy { hasDatedSuffix(it.id) }
                     .thenBy { it.id }
             )
+        }
+
+        private fun modelFamilySortRank(id: String): Int {
+            val lower = id.lowercase()
+            return when {
+                lower.contains("flash-lite") -> 0
+                lower.contains("flash") -> 1
+                lower.contains("pro") -> 3
+                else -> 2
+            }
         }
 
         private fun parseModelMajorMinorScore(id: String): Double {
