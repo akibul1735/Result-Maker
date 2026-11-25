@@ -207,7 +207,7 @@ object SeatPlanPdfGen {
                 val cardW = cardRect.width().coerceAtLeast(60f)
                 val heightScale = (cardH / 120f).coerceIn(0.62f, 1.35f)
                 val widthScale = (cardW / 256f).coerceIn(0.65f, 1.35f)
-                val fontFactor = min(heightScale, widthScale).coerceIn(0.66f, 1.20f) * cfg.fontScaleFactor
+                val cellScale = min(heightScale, widthScale).coerceIn(0.66f, 1.20f)
 
                 val maxRadius = min(cardW, cardH) * 0.42f
                 val radius = (cfg.safeCornerRadiusPt * min(heightScale, widthScale)).coerceIn(0f, maxRadius)
@@ -233,32 +233,34 @@ object SeatPlanPdfGen {
                 val innerW = (innerRight - innerLeft).coerceAtLeast(30f)
                 val centerX = cardRect.centerX()
 
-                // Header block (centered 4-line header matching classic slip proportions)
+                // Header block with per-part size & bold control
+                data class HeaderEntry(val text: String, val sizePt: Float, val isBold: Boolean)
                 val headerLines = buildList {
-                    if (schoolName.isNotBlank()) add(schoolName to 12.0f)
-                    if (schoolAddress.isNotBlank()) add(schoolAddress to 10.6f)
-                    if (examTitle.isNotBlank()) add(examTitle to 10.6f)
-                    if (subtitle.isNotBlank()) add(subtitle to 10.4f)
+                    if (schoolName.isNotBlank()) add(HeaderEntry(schoolName, cfg.safeSchoolFontPt, cfg.boldSchoolName))
+                    if (schoolAddress.isNotBlank()) add(HeaderEntry(schoolAddress, cfg.safeHeaderMetaFontPt, cfg.boldAddress))
+                    if (examTitle.isNotBlank()) add(HeaderEntry(examTitle, cfg.safeHeaderMetaFontPt, cfg.boldExamTitle))
+                    if (subtitle.isNotBlank()) add(HeaderEntry(subtitle, cfg.safeHeaderMetaFontPt, cfg.boldExamTitle))
                 }
-                val lineStep = (13.6f * heightScale).coerceIn(9.0f, 19f)
-                var curY = cardRect.top + (19.5f * heightScale).coerceIn(12f, 28f)
-                headerLines.forEachIndexed { lineIdx, (text, baseSize) ->
+                val maxHeaderPt = headerLines.maxOfOrNull { it.sizePt } ?: 11f
+                val lineStep = ((maxHeaderPt * 1.15f).coerceAtLeast(11.5f) * heightScale).coerceIn(9.0f, 22f)
+                var curY = cardRect.top + ((cfg.safeSchoolFontPt * 1.62f).coerceAtLeast(14f) * heightScale).coerceIn(12f, 30f)
+                headerLines.forEach { entry ->
                     val dp = PdfGen.dualPaint(
                         ctx = ctx,
-                        size = baseSize * fontFactor,
-                        bold = (lineIdx == 0 && cfg.boldStudentName),
+                        size = entry.sizePt * cellScale,
+                        bold = entry.isBold,
                         bnFontId = bnFont,
                         enFontId = enFont,
                         textColor = 0xFF000000.toInt()
                     )
-                    PdfGen.shrinkMixedToFit(dp, text, innerW, step = 0.25f, minSize = 5.5f)
-                    PdfGen.drawMixedText(c, text, centerX, curY, dp, Paint.Align.CENTER)
+                    PdfGen.shrinkMixedToFit(dp, entry.text, innerW, step = 0.25f, minSize = 5.5f)
+                    PdfGen.drawMixedText(c, entry.text, centerX, curY, dp, Paint.Align.CENTER)
                     curY += lineStep
                 }
 
-                // Footer student lines
-                val bottomY = cardRect.bottom - (11.5f * heightScale).coerceIn(6.5f, 17f)
-                val nameGap = (15.8f * heightScale).coerceIn(10.0f, 24f)
+                // Footer student lines with per-part size & bold control
+                val bottomY = cardRect.bottom - (11.5f * heightScale).coerceIn(6.5f, 18f)
+                val nameGap = ((maxOf(cfg.safeStudentNameFontPt, cfg.safeClassRollFontPt) * 1.38f).coerceAtLeast(13.5f) * heightScale).coerceIn(10.0f, 26f)
                 val nameY = bottomY - nameGap
 
                 val classLabel = "শ্রেণি: ${classShortBn(slip.cls, settings)}"
@@ -266,16 +268,16 @@ object SeatPlanPdfGen {
 
                 val metaPaintLeft = PdfGen.dualPaint(
                     ctx = ctx,
-                    size = 11.0f * fontFactor,
-                    bold = false,
+                    size = cfg.safeClassRollFontPt * cellScale,
+                    bold = cfg.boldClassRoll,
                     bnFontId = bnFont,
                     enFontId = enFont,
                     textColor = 0xFF000000.toInt()
                 )
                 val metaPaintRight = PdfGen.dualPaint(
                     ctx = ctx,
-                    size = 11.0f * fontFactor,
-                    bold = false,
+                    size = cfg.safeClassRollFontPt * cellScale,
+                    bold = cfg.boldClassRoll,
                     bnFontId = bnFont,
                     enFontId = enFont,
                     textColor = 0xFF000000.toInt()
@@ -290,7 +292,7 @@ object SeatPlanPdfGen {
                 val nameText = "নাম: $studentDisplay"
                 val namePaint = PdfGen.dualPaint(
                     ctx = ctx,
-                    size = 11.4f * fontFactor,
+                    size = cfg.safeStudentNameFontPt * cellScale,
                     bold = cfg.boldStudentName,
                     bnFontId = bnFont,
                     enFontId = enFont,

@@ -56,12 +56,19 @@ data class SeatPlanConfig(
     val verticalGapPt: Float = 10f,
     val bnFontId: String = "kalpurush",
     val enFontId: String = "times_new_roman",
-    val fontSizePercent: Int = 100,
+    val schoolFontPt: Float = 12.0f,
+    val headerMetaFontPt: Float = 10.5f,
+    val studentNameFontPt: Float = 11.5f,
+    val classRollFontPt: Float = 11.0f,
+    val boldSchoolName: Boolean = false,
+    val boldAddress: Boolean = false,
+    val boldExamTitle: Boolean = false,
+    val boldStudentName: Boolean = false,
+    val boldClassRoll: Boolean = false,
     val borderStyle: SeatPlanBorderStyle = SeatPlanBorderStyle.SOLID,
     val borderWeight: SeatPlanBorderWeight = SeatPlanBorderWeight.NORMAL,
     val cornerRadiusPt: Float = 18f,
     val showCutLines: Boolean = true,
-    val boldStudentName: Boolean = false,
     val padRollTwoDigits: Boolean = true,
     val numeralMode: SeatPlanNumeralMode = SeatPlanNumeralMode.BENGALI,
     val extraBlankSlips: Int = 0
@@ -73,8 +80,10 @@ data class SeatPlanConfig(
     val safeMarginPt: Float get() = safeMarginInches * 72f
     val safeHorizontalGapPt: Float get() = horizontalGapPt.coerceIn(0f, 36f)
     val safeVerticalGapPt: Float get() = verticalGapPt.coerceIn(0f, 36f)
-    val safeFontSizePercent: Int get() = fontSizePercent.coerceIn(70, 140)
-    val fontScaleFactor: Float get() = safeFontSizePercent / 100f
+    val safeSchoolFontPt: Float get() = schoolFontPt.coerceIn(7.5f, 18.0f)
+    val safeHeaderMetaFontPt: Float get() = headerMetaFontPt.coerceIn(7.0f, 16.0f)
+    val safeStudentNameFontPt: Float get() = studentNameFontPt.coerceIn(7.5f, 17.0f)
+    val safeClassRollFontPt: Float get() = classRollFontPt.coerceIn(7.0f, 16.0f)
     val safeCornerRadiusPt: Float get() = cornerRadiusPt.coerceIn(0f, 28f)
 }
 

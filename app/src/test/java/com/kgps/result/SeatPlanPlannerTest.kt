@@ -137,8 +137,15 @@ class SeatPlanPlannerTest {
         assertEquals(12f, def.safeHorizontalGapPt, 0.01f)
         assertEquals(10f, def.safeVerticalGapPt, 0.01f)
         assertEquals("kalpurush", def.bnFontId)
-        assertEquals(100, def.safeFontSizePercent)
-        assertEquals(1.0f, def.fontScaleFactor, 0.001f)
+        assertEquals(12.0f, def.safeSchoolFontPt, 0.01f)
+        assertEquals(10.5f, def.safeHeaderMetaFontPt, 0.01f)
+        assertEquals(11.5f, def.safeStudentNameFontPt, 0.01f)
+        assertEquals(11.0f, def.safeClassRollFontPt, 0.01f)
+        assertFalse(def.boldSchoolName)
+        assertFalse(def.boldAddress)
+        assertFalse(def.boldExamTitle)
+        assertFalse(def.boldStudentName)
+        assertFalse(def.boldClassRoll)
         assertEquals(18f, def.safeCornerRadiusPt, 0.01f)
         assertEquals(SeatPlanBorderStyle.SOLID, def.borderStyle)
 
@@ -146,14 +153,20 @@ class SeatPlanPlannerTest {
             marginInches = 5.0f,
             horizontalGapPt = -4f,
             verticalGapPt = 100f,
-            fontSizePercent = 200,
+            schoolFontPt = 30f,
+            headerMetaFontPt = 3f,
+            studentNameFontPt = 25f,
+            classRollFontPt = 2f,
             cornerRadiusPt = 99f
         )
         assertEquals(1.00f, extreme.safeMarginInches, 0.0001f)
         assertEquals(72f, extreme.safeMarginPt, 0.01f)
         assertEquals(0f, extreme.safeHorizontalGapPt, 0.01f)
         assertEquals(36f, extreme.safeVerticalGapPt, 0.01f)
-        assertEquals(140, extreme.safeFontSizePercent)
+        assertEquals(18.0f, extreme.safeSchoolFontPt, 0.01f)
+        assertEquals(7.0f, extreme.safeHeaderMetaFontPt, 0.01f)
+        assertEquals(17.0f, extreme.safeStudentNameFontPt, 0.01f)
+        assertEquals(7.0f, extreme.safeClassRollFontPt, 0.01f)
         assertEquals(28f, extreme.safeCornerRadiusPt, 0.01f)
     }
 }
