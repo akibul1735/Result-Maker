@@ -2,7 +2,6 @@
 
 package com.kgps.result.ui.screens
 
-import android.content.Context
 import android.graphics.Bitmap
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
@@ -64,14 +63,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.kgps.result.AdmitCardConfig
 import com.kgps.result.AdmitCardPlanner
-import com.kgps.result.BENGALI_PDF_FONT_LIST
-import com.kgps.result.BaseRoutineTemplate
-import com.kgps.result.ENGLISH_PDF_FONT_LIST
-import com.kgps.result.ExamRoutineEntry
-import com.kgps.result.PdfGen
-import com.kgps.result.SeatPlanBorderStyle
-import com.kgps.result.SeatPlanBorderWeight
-import com.kgps.result.SeatPlanNumeralMode
 import com.kgps.result.SeatPlanRollOrder
 import com.kgps.result.Settings
 import com.kgps.result.bn
@@ -100,7 +91,7 @@ internal val ADMIT_SIG_SCALE_OPTIONS = listOf(0.7f, 0.85f, 1.0f, 1.2f, 1.4f)
 internal fun formatAdmitInchesBn(inches: Float): String =
     bn(String.format(Locale.US, "%.2f", inches)) + "\""
 
-private fun formatAdmitPtBn(value: Float): String {
+internal fun formatAdmitPtBn(value: Float): String {
     val roundedHalf = (value * 2f).roundToInt() / 2f
     val raw = if (abs(roundedHalf - roundedHalf.toInt()) < 0.05f) {
         roundedHalf.toInt().toString()
@@ -123,8 +114,8 @@ internal fun AdmitSectionGroupCard(
         modifier = modifier.fillMaxWidth()
     ) {
         Column(
-            modifier = Modifier.padding(horizontal = 9.dp, vertical = 8.dp),
-            verticalArrangement = Arrangement.spacedBy(7.dp)
+            modifier = Modifier.padding(horizontal = 9.dp, vertical = 7.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp)
         ) {
             Text(
                 title,
@@ -441,7 +432,7 @@ internal fun AdmitClassAndRollTab(
                         enabled = config.extraBlankCards < 40,
                         modifier = Modifier.size(48.dp).testTag("admit_card_blank_plus")
                     ) {
-                        Icon(Icons.Rounded.Add, contentDescription = "ফাঁকা প্রবেশপত্র বাড়ান", modifier = Modifier.size(16.dp))
+                        Icon(Icons.Rounded.Add, contentDescription = "ফাঁকা প্রবেশপত্র বাড়ান", modifier = Modifier.size(16.dp))
                     }
                 }
             }
@@ -450,49 +441,15 @@ internal fun AdmitClassAndRollTab(
 }
 
 @Composable
-internal fun AdmitRoutineAndSignatureTab(
+internal fun AdmitSignatureAndInfoTab(
     config: AdmitCardConfig,
     settings: Settings,
-    allowedClasses: List<Int>,
-    baseRoutines: List<BaseRoutineTemplate>,
-    activeBaseId: String?,
-    routineRows: List<ExamRoutineEntry>,
     signatureBitmap: Bitmap?,
-    onSelectBase: (String) -> Unit,
-    onSelectClass: (Int) -> Unit,
-    onAddBaseRoutine: (String) -> Unit,
-    onRenameBaseRoutine: (String, String) -> Unit,
-    onDeleteBaseRoutine: (String) -> Unit,
-    onUpdateActiveExamTime: (String) -> Unit,
-    onUpdateActiveRows: (List<ExamRoutineEntry>) -> Unit,
-    onResetClassDefault: () -> Unit,
-    onSaveActiveFeedback: () -> Unit,
-    onCopyToClasses: (targetClasses: List<Int>, matchClassSubjects: Boolean, copyExamTime: Boolean) -> Unit,
     onUpdateConfig: (AdmitCardConfig) -> Unit,
     onPickSignatureImage: () -> Unit,
     onClearSignatureImage: () -> Unit
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        AdmitRoutineEditorSectionHeader(
-            config = config,
-            settings = settings,
-            allowedClasses = allowedClasses,
-            baseRoutines = baseRoutines,
-            activeBaseId = activeBaseId,
-            routineRows = routineRows,
-            onSelectBase = onSelectBase,
-            onSelectClass = onSelectClass,
-            onAddBaseRoutine = onAddBaseRoutine,
-            onRenameBaseRoutine = onRenameBaseRoutine,
-            onDeleteBaseRoutine = onDeleteBaseRoutine,
-            onUpdateActiveExamTime = onUpdateActiveExamTime,
-            onUpdateActiveRows = onUpdateActiveRows,
-            onResetClassDefault = onResetClassDefault,
-            onSaveActiveFeedback = onSaveActiveFeedback,
-            onCopyToClasses = onCopyToClasses,
-            onUpdateConfig = onUpdateConfig
-        )
-
         AdmitSectionGroupCard(title = "প্রধান শিক্ষকের স্বাক্ষর") {
             Surface(
                 color = MaterialTheme.colorScheme.surface,
@@ -501,29 +458,29 @@ internal fun AdmitRoutineAndSignatureTab(
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Column(
-                    modifier = Modifier.padding(10.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                    modifier = Modifier.padding(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
                     if (signatureBitmap != null) {
                         Box(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .height(72.dp)
+                                .height(64.dp)
                                 .background(Color.White, RoundedCornerShape(8.dp))
-                                .padding(6.dp),
+                                .padding(4.dp),
                             contentAlignment = Alignment.Center
                         ) {
                             Image(
                                 bitmap = signatureBitmap.asImageBitmap(),
                                 contentDescription = "প্রধান শিক্ষকের স্বাক্ষরের ছবি",
                                 contentScale = ContentScale.Fit,
-                                modifier = Modifier.fillMaxWidth().height(56.dp)
+                                modifier = Modifier.fillMaxWidth().height(52.dp)
                             )
                         }
                     } else {
                         Text(
                             "স্বাক্ষরের ছবি যুক্ত করা নেই (কার্ডে পরিষ্কার ফাঁকা স্বাক্ষর ঘর থাকবে)",
-                            fontSize = 11.5.sp,
+                            fontSize = 11.sp,
                             color = SlateMuted
                         )
                     }
@@ -558,7 +515,7 @@ internal fun AdmitRoutineAndSignatureTab(
 
             if (signatureBitmap != null) {
                 AdmitCompactSwitchRow(
-                    label = "কার্ডে স্বাক্ষরের ছবি দেখাও (বন্ধ করলে ফাঁকা ঘর)",
+                    label = "স্বাক্ষরের ছবি দেখাও (বন্ধ করলে ফাঁকা ঘর)",
                     checked = config.showSignatureImage,
                     onCheckedChange = { onUpdateConfig(config.copy(showSignatureImage = it)) },
                     testTag = "admit_card_show_sig_img_switch"
@@ -583,240 +540,54 @@ internal fun AdmitRoutineAndSignatureTab(
                 modifier = Modifier.fillMaxWidth().testTag("admit_card_sig_title_input")
             )
         }
-    }
-}
 
-@Composable
-private fun AdmitRoutineEditorSectionHeader(
-    config: AdmitCardConfig,
-    settings: Settings,
-    allowedClasses: List<Int>,
-    baseRoutines: List<BaseRoutineTemplate>,
-    activeBaseId: String?,
-    routineRows: List<ExamRoutineEntry>,
-    onSelectBase: (String) -> Unit,
-    onSelectClass: (Int) -> Unit,
-    onAddBaseRoutine: (String) -> Unit,
-    onRenameBaseRoutine: (String, String) -> Unit,
-    onDeleteBaseRoutine: (String) -> Unit,
-    onUpdateActiveExamTime: (String) -> Unit,
-    onUpdateActiveRows: (List<ExamRoutineEntry>) -> Unit,
-    onResetClassDefault: () -> Unit,
-    onSaveActiveFeedback: () -> Unit,
-    onCopyToClasses: (targetClasses: List<Int>, matchClassSubjects: Boolean, copyExamTime: Boolean) -> Unit,
-    onUpdateConfig: (AdmitCardConfig) -> Unit
-) {
-    AdmitCardRoutineEditor(
-        config = config,
-        settings = settings,
-        allowedClasses = allowedClasses,
-        baseRoutines = baseRoutines,
-        activeBaseId = activeBaseId,
-        classRoutineRows = routineRows,
-        onSelectBase = onSelectBase,
-        onSelectClass = onSelectClass,
-        onAddBaseRoutine = onAddBaseRoutine,
-        onRenameBaseRoutine = onRenameBaseRoutine,
-        onDeleteBaseRoutine = onDeleteBaseRoutine,
-        onUpdateActiveExamTime = onUpdateActiveExamTime,
-        onUpdateActiveRows = onUpdateActiveRows,
-        onResetClassDefault = onResetClassDefault,
-        onSaveActiveFeedback = onSaveActiveFeedback,
-        onCopyToClasses = onCopyToClasses,
-        onUpdateConfig = onUpdateConfig
-    )
-}
-
-@Composable
-internal fun AdmitLayoutAndStyleTab(
-    ctx: Context,
-    config: AdmitCardConfig,
-    settings: Settings,
-    activeBnFontName: String,
-    activeEnFontName: String,
-    onUpdateConfig: (AdmitCardConfig) -> Unit
-) {
-    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        AdmitSectionGroupCard(title = "কাগজ ও কার্ড সংখ্যা (A4 পোর্ট্রেট)") {
-            Text("প্রতি পৃষ্ঠায় প্রবেশপত্র", fontSize = 10.5.sp, color = SlateMuted)
-            AdmitSegmentedOptionBar(
-                items = listOf(2, 3, 4, 5).map { it to "${bn(it.toString())}টি" },
-                selected = config.safeCardsPerPage,
-                onSelect = { onUpdateConfig(config.copy(cardsPerPage = it)) },
-                tagPrefix = "admit_card_per_page"
-            )
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                AdmitCompactPickerBox(
-                    label = "পৃষ্ঠা মার্জিন",
-                    valueText = formatAdmitInchesBn(config.safeMarginInches),
-                    options = ADMIT_MARGIN_INCH_OPTIONS,
-                    selectedValue = config.safeMarginInches,
-                    optionLabel = { formatAdmitInchesBn(it) + if (abs(it - 0.28f) < 0.01f) " (ডিফল্ট)" else "" },
-                    onSelect = { onUpdateConfig(config.copy(marginInches = it)) },
-                    modifier = Modifier.weight(1f),
-                    testTag = "admit_card_margin_picker"
-                )
-                AdmitCompactPickerBox(
-                    label = "কার্ডের মাঝের ফাঁক",
-                    valueText = formatAdmitPtBn(config.safeVerticalGapPt),
-                    options = ADMIT_GAP_PT_OPTIONS,
-                    selectedValue = config.safeVerticalGapPt,
-                    optionLabel = { formatAdmitPtBn(it) },
-                    onSelect = { onUpdateConfig(config.copy(verticalGapPt = it)) },
-                    modifier = Modifier.weight(1f),
-                    testTag = "admit_card_gap_picker"
-                )
-            }
-        }
-
-        AdmitSectionGroupCard(title = "ফন্ট ও বর্ডার") {
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                AdmitCompactPickerBox(
-                    label = "বাংলা ফন্ট",
-                    valueText = activeBnFontName,
-                    options = BENGALI_PDF_FONT_LIST.map { it.id },
-                    selectedValue = config.bnFontId,
-                    optionLabel = { id ->
-                        BENGALI_PDF_FONT_LIST.find { it.id == id }?.labelBn?.substringBefore(" (") ?: id
-                    },
-                    onSelect = { onUpdateConfig(config.copy(bnFontId = it)) },
-                    isFontDropdown = true,
-                    modifier = Modifier.weight(1.1f),
-                    testTag = "admit_card_bn_font_btn",
-                    optionFontFamily = { id ->
-                        FontFamily(androidx.compose.ui.text.font.Typeface(PdfGen.resolveTypeface(ctx, id, false)))
-                    }
-                )
-                AdmitCompactPickerBox(
-                    label = "ইংরেজি ফন্ট",
-                    valueText = activeEnFontName,
-                    options = ENGLISH_PDF_FONT_LIST.map { it.id },
-                    selectedValue = config.enFontId,
-                    optionLabel = { id ->
-                        ENGLISH_PDF_FONT_LIST.find { it.id == id }?.labelBn?.substringBefore(" (") ?: id
-                    },
-                    onSelect = { onUpdateConfig(config.copy(enFontId = it)) },
-                    isFontDropdown = true,
-                    modifier = Modifier.weight(0.95f),
-                    testTag = "admit_card_en_font_btn",
-                    optionFontFamily = { id ->
-                        FontFamily(androidx.compose.ui.text.font.Typeface(PdfGen.resolveTypeface(ctx, id, false)))
-                    }
-                )
-            }
-
-            AdmitSegmentedOptionBar(
-                items = SeatPlanBorderStyle.entries.map { it to it.labelBn },
-                selected = config.borderStyle,
-                onSelect = { onUpdateConfig(config.copy(borderStyle = it)) },
-                tagPrefix = "admit_card_border"
-            )
-            if (config.borderStyle != SeatPlanBorderStyle.NONE) {
-                AdmitSegmentedOptionBar(
-                    items = SeatPlanBorderWeight.entries.map { it to it.labelBn },
-                    selected = config.borderWeight,
-                    onSelect = { onUpdateConfig(config.copy(borderWeight = it)) },
-                    tagPrefix = "admit_card_border_weight"
-                )
-                AdmitCompactPickerBox(
-                    label = "কোনার গোলাকার",
-                    valueText = if (config.safeCornerRadiusPt < 0.5f) "০ pt (সোজা)" else formatAdmitPtBn(config.safeCornerRadiusPt),
-                    options = ADMIT_CORNER_RADIUS_OPTIONS,
-                    selectedValue = config.safeCornerRadiusPt,
-                    optionLabel = { r -> if (r < 0.5f) "০ pt (সোজা)" else formatAdmitPtBn(r) },
-                    onSelect = { onUpdateConfig(config.copy(cornerRadiusPt = it)) },
-                    testTag = "admit_card_corner_picker"
-                )
-            }
-        }
-
-        AdmitSectionGroupCard(title = "অপশন ও শিরোনাম") {
-            AdmitCompactSwitchRow(
-                label = "সংখ্যা বাংলা (০১/১২/২০২৬)",
-                checked = config.numeralMode == SeatPlanNumeralMode.BENGALI,
-                onCheckedChange = { bnOn ->
-                    onUpdateConfig(
-                        config.copy(numeralMode = if (bnOn) SeatPlanNumeralMode.BENGALI else SeatPlanNumeralMode.ENGLISH)
-                    )
-                },
-                testTag = "admit_card_opt_bn_num"
-            )
-            HorizontalDivider(color = SlateOutline.copy(alpha = 0.4f))
-            AdmitCompactSwitchRow(
-                label = "কার্ডের মাঝে কাটার দাগ",
-                checked = config.showCutLines,
-                onCheckedChange = { onUpdateConfig(config.copy(showCutLines = it)) },
-                testTag = "admit_card_opt_cut_lines"
-            )
-            HorizontalDivider(color = SlateOutline.copy(alpha = 0.4f))
-            AdmitCompactSwitchRow(
-                label = "মাঝে লম্বা ড্যাশড বিভাজক",
-                checked = config.showCenterDivider,
-                onCheckedChange = { onUpdateConfig(config.copy(showCenterDivider = it)) },
-                testTag = "admit_card_opt_center_divider"
-            )
-            HorizontalDivider(color = SlateOutline.copy(alpha = 0.4f))
-            AdmitCompactSwitchRow(
-                label = "০১ রোল (২ ডিজিট)",
-                checked = config.padRollTwoDigits,
-                onCheckedChange = { onUpdateConfig(config.copy(padRollTwoDigits = it)) },
-                testTag = "admit_card_opt_pad_roll"
-            )
-            HorizontalDivider(color = SlateOutline.copy(alpha = 0.4f))
-            AdmitCompactSwitchRow(
-                label = "ডান পাশে পরীক্ষার রুটিন টেবিল দেখাও",
-                checked = config.showRoutineTable,
-                onCheckedChange = { onUpdateConfig(config.copy(showRoutineTable = it)) },
-                testTag = "admit_card_opt_show_routine"
-            )
-            HorizontalDivider(color = SlateOutline.copy(alpha = 0.4f))
+        AdmitSectionGroupCard(title = "বিদ্যালয় ও কার্ড শিরোনাম") {
             AdmitCompactSwitchRow(
                 label = "বিদ্যালয়ের ঠিকানা দেখাও",
                 checked = config.showSchoolAddress,
                 onCheckedChange = { onUpdateConfig(config.copy(showSchoolAddress = it)) },
                 testTag = "admit_card_opt_show_address"
             )
-
-            OutlinedTextField(
-                value = config.badgeLabel,
-                onValueChange = { onUpdateConfig(config.copy(badgeLabel = it)) },
-                label = { Text("প্রবেশপত্র শিরোনাম", fontSize = 11.sp) },
-                placeholder = { Text("প্রবেশপত্র", fontSize = 11.sp) },
-                singleLine = true,
+            HorizontalDivider(color = SlateOutline.copy(alpha = 0.4f))
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
                 modifier = Modifier.fillMaxWidth()
-            )
-            OutlinedTextField(
-                value = config.customExamTitle,
-                onValueChange = { onUpdateConfig(config.copy(customExamTitle = it)) },
-                label = { Text("কাস্টম পরীক্ষার শিরোনাম", fontSize = 11.sp) },
-                placeholder = {
-                    Text(AdmitCardPlanner.resolvedExamTitle(config.copy(customExamTitle = ""), settings), fontSize = 11.sp)
-                },
-                singleLine = true,
-                modifier = Modifier.fillMaxWidth()
-            )
+            ) {
+                OutlinedTextField(
+                    value = config.badgeLabel,
+                    onValueChange = { onUpdateConfig(config.copy(badgeLabel = it)) },
+                    label = { Text("কার্ড শিরোনাম", fontSize = 10.5.sp) },
+                    placeholder = { Text("প্রবেশপত্র", fontSize = 10.5.sp) },
+                    singleLine = true,
+                    modifier = Modifier.weight(0.85f).testTag("admit_card_badge_label_input")
+                )
+                OutlinedTextField(
+                    value = config.customExamTitle,
+                    onValueChange = { onUpdateConfig(config.copy(customExamTitle = it)) },
+                    label = { Text("পরীক্ষার শিরোনাম", fontSize = 10.5.sp) },
+                    placeholder = {
+                        Text(AdmitCardPlanner.resolvedExamTitle(config.copy(customExamTitle = ""), settings), fontSize = 10.5.sp)
+                    },
+                    singleLine = true,
+                    modifier = Modifier.weight(1.15f).testTag("admit_card_exam_title_input")
+                )
+            }
             OutlinedTextField(
                 value = config.customSchoolName,
                 onValueChange = { onUpdateConfig(config.copy(customSchoolName = it)) },
-                label = { Text("কাস্টম বিদ্যালয়ের নাম", fontSize = 11.sp) },
+                label = { Text("বিদ্যালয়ের নাম (ঐচ্ছিক)", fontSize = 11.sp) },
                 placeholder = { Text(settings.school.ifBlank { "বিদ্যালয়ের নাম" }, fontSize = 11.sp) },
                 singleLine = true,
-                modifier = Modifier.fillMaxWidth()
+                modifier = Modifier.fillMaxWidth().testTag("admit_card_school_name_input")
             )
             OutlinedTextField(
                 value = config.customSchoolAddress,
                 onValueChange = { onUpdateConfig(config.copy(customSchoolAddress = it)) },
                 enabled = config.showSchoolAddress,
-                label = { Text("কাস্টম ঠিকানা", fontSize = 11.sp) },
+                label = { Text("বিদ্যালয়ের ঠিকানা (ঐচ্ছিক)", fontSize = 11.sp) },
                 placeholder = { Text(settings.schoolAddress.ifBlank { "ঠিকানা" }, fontSize = 11.sp) },
                 singleLine = true,
-                modifier = Modifier.fillMaxWidth()
+                modifier = Modifier.fillMaxWidth().testTag("admit_card_school_addr_input")
             )
         }
     }
