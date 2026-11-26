@@ -29,10 +29,11 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.DeleteOutline
+import androidx.compose.material.icons.rounded.FolderOpen
 import androidx.compose.material.icons.rounded.KeyboardArrowDown
+import androidx.compose.material.icons.rounded.PhotoLibrary
 import androidx.compose.material.icons.rounded.Remove
 import androidx.compose.material.icons.rounded.UnfoldMore
-import androidx.compose.material.icons.rounded.Upload
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -81,17 +82,16 @@ import com.kgps.result.ui.theme.SlateSurfaceVariant
 import com.kgps.result.ui.theme.SlateText
 import com.kgps.result.ui.theme.TealDark
 import com.kgps.result.ui.theme.TealPrimary
-import com.kgps.result.ui.theme.TealSoft
 import java.util.Locale
 import kotlin.math.abs
 import kotlin.math.roundToInt
 
 internal val ADMIT_MARGIN_INCH_OPTIONS = listOf(0.15f, 0.20f, 0.25f, 0.28f, 0.30f, 0.35f, 0.40f, 0.45f, 0.50f, 0.60f)
-internal val ADMIT_GAP_PT_OPTIONS = listOf(0f, 2f, 4f, 6f, 8f, 10f, 12f, 16f, 20f)
+internal val ADMIT_GAP_PT_OPTIONS = listOf(0f, 2f, 4f, 6f, 8f, 10f, 12f, 14f, 16f, 20f, 24f)
 internal val ADMIT_HEADER_INFO_GAP_OPTIONS = listOf(4f, 6f, 8f, 10f, 12f, 15.5f, 18f, 22f, 26f, 30f, 34f)
 internal val ADMIT_CORNER_RADIUS_OPTIONS = listOf(0f, 2f, 4f, 5f, 6f, 8f, 10f, 12f, 16f, 20f)
 internal val ADMIT_SIG_SCALE_OPTIONS = listOf(0.7f, 0.85f, 1.0f, 1.2f, 1.4f)
-internal val ADMIT_FONT_SCALE_OPTIONS = listOf(0.80f, 0.90f, 1.00f, 1.10f, 1.20f, 1.30f)
+internal val ADMIT_WORD_PT_OPTIONS = listOf(6.5f, 7f, 7.5f, 8f, 8.5f, 9f, 9.5f, 10f, 10.5f, 11f, 11.5f, 12f, 13f, 14f, 16f)
 
 internal fun formatAdmitInchesBn(inches: Float): String =
     bn(String.format(Locale.US, "%.2f", inches)) + "\""
@@ -104,11 +104,6 @@ internal fun formatAdmitPtBn(value: Float): String {
         String.format(Locale.US, "%.1f", roundedHalf)
     }
     return "${bn(raw)} pt"
-}
-
-internal fun formatAdmitScalePctBn(scale: Float): String {
-    val pct = (scale * 100f).roundToInt()
-    return "${bn(pct.toString())}%"
 }
 
 @Composable
@@ -221,7 +216,7 @@ internal fun AdmitCompactTogglePill(
         Row(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.Center,
-            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+            modifier = Modifier.padding(horizontal = 7.dp, vertical = 4.dp)
         ) {
             if (checked) {
                 Icon(
@@ -234,7 +229,7 @@ internal fun AdmitCompactTogglePill(
             }
             Text(
                 text = label,
-                fontSize = 10.5.sp,
+                fontSize = 10.sp,
                 fontWeight = if (checked) FontWeight.Bold else FontWeight.Medium,
                 color = if (checked) Color.White else SlateText,
                 maxLines = 1,
@@ -468,15 +463,6 @@ internal fun AdmitClassAndRollTab(
             }
         }
 
-        AdmitSectionGroupCard(title = "প্রান্তিক মূল্যায়ন") {
-            AdmitSegmentedOptionBar(
-                items = (1..3).map { it to termNameBn(it) },
-                selected = config.term,
-                onSelect = { onUpdateConfig(config.copy(term = it)) },
-                tagPrefix = "admit_card_term"
-            )
-        }
-
         AdmitSectionGroupCard(title = "রোল ক্রম ও পরিসর") {
             AdmitSegmentedOptionBar(
                 items = SeatPlanRollOrder.entries.map { it to it.labelBn },
@@ -569,7 +555,8 @@ internal fun AdmitSignatureAndInfoTab(
     settings: Settings,
     signatureBitmap: Bitmap?,
     onUpdateConfig: (AdmitCardConfig) -> Unit,
-    onPickSignatureImage: () -> Unit,
+    onPickFromGallery: () -> Unit,
+    onPickFromFileManager: () -> Unit,
     onClearSignatureImage: () -> Unit
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -608,47 +595,62 @@ internal fun AdmitSignatureAndInfoTab(
                         )
                     }
                     Row(
-                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        horizontalArrangement = Arrangement.spacedBy(5.dp),
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         OutlinedButton(
-                            onClick = onPickSignatureImage,
+                            onClick = onPickFromGallery,
                             shape = RoundedCornerShape(7.dp),
-                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 0.dp),
-                            modifier = Modifier.weight(1f).height(34.dp).testTag("admit_card_pick_sig_btn")
+                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
+                            modifier = Modifier.weight(1f).height(34.dp).testTag("admit_card_pick_gallery_btn")
                         ) {
-                            Icon(Icons.Rounded.Upload, contentDescription = null, modifier = Modifier.size(14.dp))
+                            Icon(Icons.Rounded.PhotoLibrary, contentDescription = null, modifier = Modifier.size(14.dp))
                             Spacer(Modifier.width(4.dp))
-                            Text(if (signatureBitmap == null) "গ্যালারি থেকে স্বাক্ষর" else "ছবি বদলান", fontSize = 11.sp)
+                            Text("গ্যালারি", fontSize = 10.5.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        }
+                        OutlinedButton(
+                            onClick = onPickFromFileManager,
+                            shape = RoundedCornerShape(7.dp),
+                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
+                            modifier = Modifier.weight(1.15f).height(34.dp).testTag("admit_card_pick_file_btn")
+                        ) {
+                            Icon(Icons.Rounded.FolderOpen, contentDescription = null, modifier = Modifier.size(14.dp))
+                            Spacer(Modifier.width(4.dp))
+                            Text("ফাইল ম্যানেজার", fontSize = 10.5.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                         }
                         if (signatureBitmap != null) {
                             OutlinedButton(
                                 onClick = onClearSignatureImage,
                                 shape = RoundedCornerShape(7.dp),
-                                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 0.dp),
+                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
                                 border = BorderStroke(1.dp, RoseDanger.copy(alpha = 0.5f)),
                                 modifier = Modifier.height(34.dp).testTag("admit_card_clear_sig_btn")
                             ) {
                                 Icon(Icons.Rounded.DeleteOutline, contentDescription = "স্বাক্ষর মুছুন", tint = RoseDanger, modifier = Modifier.size(14.dp))
-                                Spacer(Modifier.width(3.dp))
-                                Text("মুছুন", fontSize = 11.sp, color = RoseDanger)
                             }
                         }
                     }
                 }
             }
 
-            if (signatureBitmap != null) {
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier.fillMaxWidth()
-                ) {
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(5.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                AdmitCompactTogglePill(
+                    label = "স্বাক্ষরের উপরে লাইন",
+                    checked = config.showSignatureLine,
+                    onCheckedChange = { onUpdateConfig(config.copy(showSignatureLine = it)) },
+                    modifier = Modifier.weight(1f),
+                    testTag = "admit_card_sig_line_toggle"
+                )
+                if (signatureBitmap != null) {
                     AdmitCompactTogglePill(
-                        label = "স্বাক্ষর ছবি",
+                        label = "ছবি দেখাও",
                         checked = config.showSignatureImage,
                         onCheckedChange = { onUpdateConfig(config.copy(showSignatureImage = it)) },
-                        modifier = Modifier.weight(1f),
+                        modifier = Modifier.weight(0.85f),
                         testTag = "admit_card_show_sig_img_switch"
                     )
                     AdmitCompactPickerBox(
@@ -658,7 +660,7 @@ internal fun AdmitSignatureAndInfoTab(
                         selectedValue = config.safeSignatureScale,
                         optionLabel = { "${bn(String.format(Locale.US, "%.2g", it))}×" },
                         onSelect = { onUpdateConfig(config.copy(signatureScale = it)) },
-                        modifier = Modifier.weight(1f),
+                        modifier = Modifier.weight(0.85f),
                         testTag = "admit_card_sig_scale_picker"
                     )
                 }
@@ -674,6 +676,18 @@ internal fun AdmitSignatureAndInfoTab(
         }
 
         AdmitSectionGroupCard(title = "বিদ্যালয় ও কার্ড শিরোনাম") {
+            Text(
+                "প্রান্তিক মূল্যায়ন",
+                fontSize = 9.5.sp,
+                fontWeight = FontWeight.Medium,
+                color = SlateMuted
+            )
+            AdmitSegmentedOptionBar(
+                items = (1..3).map { it to termNameBn(it) },
+                selected = config.term,
+                onSelect = { onUpdateConfig(config.copy(term = it)) },
+                tagPrefix = "admit_card_term"
+            )
             AdmitCompactSwitchRow(
                 label = "বিদ্যালয়ের ঠিকানা দেখাও",
                 checked = config.showSchoolAddress,

@@ -20,6 +20,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.AddCircleOutline
@@ -43,7 +44,6 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -55,7 +55,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -121,7 +123,7 @@ internal fun AdmitCardRoutineEditor(
     var renamingBase by remember { mutableStateOf<BaseRoutineTemplate?>(null) }
     var showCopyDialog by remember { mutableStateOf(false) }
 
-    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
         // 1. Top Horizontal Selector Strip: Base Routines + New Base + Class Chips
         Surface(
             color = MaterialTheme.colorScheme.surface,
@@ -430,6 +432,13 @@ internal fun AdmitCardRoutineEditor(
                 onValueChange = { onUpdateConfig(config.copy(customRoutineTitle = it)) },
                 placeholder = AdmitCardPlanner.resolvedRoutineTitle(config.copy(customRoutineTitle = ""), settings)
             )
+            AdmitCompactTextInput(
+                label = "রুটিনের নিচে নোটস (ঐচ্ছিক - অটো ফিট)",
+                value = config.routineNote,
+                onValueChange = { onUpdateConfig(config.copy(routineNote = it)) },
+                placeholder = "যেমন: পরীক্ষার হলে ১৫ মিনিট আগে উপস্থিত থাকতে হবে",
+                testTag = "admit_card_routine_note_input"
+            )
             AdmitCompactSwitchRow(
                 label = "রুটিনের নিচে ১টি ফাঁকা সারি দেখাও",
                 checked = config.includeBlankRoutineRow,
@@ -509,35 +518,42 @@ private fun RoutineDayCard(
     Surface(
         color = MaterialTheme.colorScheme.surface,
         border = BorderStroke(1.dp, SlateOutline),
-        shape = RoundedCornerShape(12.dp),
+        shape = RoundedCornerShape(10.dp),
         modifier = Modifier.fillMaxWidth()
     ) {
         Row(
-            modifier = Modifier.fillMaxWidth().padding(8.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 6.dp, vertical = 5.dp),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
+            horizontalArrangement = Arrangement.spacedBy(5.dp)
         ) {
-            // Left: Clickable Calendar Date & Auto Weekday Pill
+            // Left: Compact Clickable Calendar Date & Auto Weekday Pill
             Surface(
                 onClick = onPickDateClick,
                 color = Color(0xFFE6F4EC),
                 border = BorderStroke(1.dp, TealPrimary.copy(alpha = 0.28f)),
-                shape = RoundedCornerShape(10.dp),
+                shape = RoundedCornerShape(8.dp),
                 modifier = Modifier
-                    .widthIn(min = 96.dp, max = 114.dp)
-                    .heightIn(min = 66.dp)
+                    .widthIn(min = 76.dp, max = 90.dp)
+                    .heightIn(min = 42.dp)
                     .testTag("admit_day_date_btn_$index")
             ) {
                 Column(
-                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 8.dp),
+                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 5.dp),
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.Center
                 ) {
                     if (entry.date.isBlank()) {
-                        Icon(Icons.Rounded.CalendarMonth, contentDescription = "তারিখ বাছুন", tint = TealDark, modifier = Modifier.size(18.dp))
+                        Icon(
+                            Icons.Rounded.CalendarMonth,
+                            contentDescription = "তারিখ বাছুন",
+                            tint = TealDark,
+                            modifier = Modifier.size(15.dp)
+                        )
                         Text(
-                            "তারিখ বাছুন",
-                            fontSize = 10.5.sp,
+                            "তারিখ",
+                            fontSize = 9.5.sp,
                             fontWeight = FontWeight.SemiBold,
                             color = TealDark,
                             textAlign = TextAlign.Center
@@ -545,7 +561,7 @@ private fun RoutineDayCard(
                     } else {
                         Text(
                             entry.date,
-                            fontSize = 11.5.sp,
+                            fontSize = 10.5.sp,
                             fontWeight = FontWeight.Bold,
                             color = TealDark,
                             textAlign = TextAlign.Center,
@@ -553,7 +569,7 @@ private fun RoutineDayCard(
                         )
                         Text(
                             entry.day.ifBlank { AdmitCardPlanner.inferBanglaWeekday(entry.date).ifBlank { "বার" } },
-                            fontSize = 10.5.sp,
+                            fontSize = 9.5.sp,
                             color = TealPrimary,
                             textAlign = TextAlign.Center,
                             maxLines = 1
@@ -562,38 +578,80 @@ private fun RoutineDayCard(
                 }
             }
 
-            // Middle: Subject Slots (বিষয় ১, বিষয় ২, ...)
+            // Middle: Compact Subject Slots
             Column(
                 modifier = Modifier.weight(1f),
-                verticalArrangement = Arrangement.spacedBy(6.dp)
+                verticalArrangement = Arrangement.spacedBy(4.dp)
             ) {
                 slots.forEachIndexed { sIdx, subjText ->
                     var menuOpen by remember { mutableStateOf(false) }
 
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(2.dp),
+                        horizontalArrangement = Arrangement.spacedBy(3.dp),
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         Box(modifier = Modifier.weight(1f)) {
-                            OutlinedTextField(
-                                value = subjText,
-                                onValueChange = { nextVal ->
-                                    val updatedSlots = slots.mapIndexed { i, v -> if (i == sIdx) nextVal else v }
-                                    onUpdateEntry(entry.copy(subjects = updatedSlots))
-                                },
-                                placeholder = { Text("বিষয় ${bn((sIdx + 1).toString())}", fontSize = 11.5.sp) },
-                                singleLine = true,
-                                trailingIcon = {
-                                    IconButton(
-                                        onClick = { menuOpen = true },
-                                        modifier = Modifier.size(40.dp).testTag("admit_subj_picker_${index}_$sIdx")
+                            Surface(
+                                color = SlateBg,
+                                border = BorderStroke(1.dp, SlateOutline),
+                                shape = RoundedCornerShape(7.dp),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .heightIn(min = 32.dp)
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(start = 7.dp, end = 2.dp, top = 3.dp, bottom = 3.dp)
+                                ) {
+                                    Box(
+                                        contentAlignment = Alignment.CenterStart,
+                                        modifier = Modifier.weight(1f)
                                     ) {
-                                        Icon(Icons.Rounded.KeyboardArrowDown, contentDescription = "বিষয় তালিকা", modifier = Modifier.size(18.dp))
+                                        if (subjText.isEmpty()) {
+                                            Text(
+                                                text = "বিষয় ${bn((sIdx + 1).toString())}",
+                                                fontSize = 10.5.sp,
+                                                color = SlateMuted.copy(alpha = 0.65f),
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis
+                                            )
+                                        }
+                                        BasicTextField(
+                                            value = subjText,
+                                            onValueChange = { nextVal ->
+                                                val updatedSlots = slots.mapIndexed { i, v -> if (i == sIdx) nextVal else v }
+                                                onUpdateEntry(entry.copy(subjects = updatedSlots))
+                                            },
+                                            singleLine = true,
+                                            textStyle = TextStyle(
+                                                fontSize = 11.sp,
+                                                color = SlateText
+                                            ),
+                                            cursorBrush = SolidColor(TealPrimary),
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .testTag("admit_subj_input_${index}_$sIdx")
+                                        )
                                     }
-                                },
-                                modifier = Modifier.fillMaxWidth().testTag("admit_subj_input_${index}_$sIdx")
-                            )
+                                    Box(
+                                        contentAlignment = Alignment.Center,
+                                        modifier = Modifier
+                                            .size(26.dp)
+                                            .clickable { menuOpen = true }
+                                            .testTag("admit_subj_picker_${index}_$sIdx")
+                                    ) {
+                                        Icon(
+                                            Icons.Rounded.KeyboardArrowDown,
+                                            contentDescription = "বিষয় তালিকা",
+                                            tint = SlateMuted,
+                                            modifier = Modifier.size(16.dp)
+                                        )
+                                    }
+                                }
+                            }
 
                             DropdownMenu(
                                 expanded = menuOpen,
@@ -601,7 +659,7 @@ private fun RoutineDayCard(
                             ) {
                                 subjectOptions.forEach { opt ->
                                     DropdownMenuItem(
-                                        text = { Text(opt, fontSize = 12.5.sp) },
+                                        text = { Text(opt, fontSize = 12.sp) },
                                         onClick = {
                                             val updatedSlots = slots.mapIndexed { i, v -> if (i == sIdx) opt else v }
                                             onUpdateEntry(entry.copy(subjects = updatedSlots))
@@ -617,7 +675,7 @@ private fun RoutineDayCard(
                                         .forEach { alt ->
                                             DropdownMenuItem(
                                                 text = {
-                                                    Text("অথবা: ${subjText.trim()} / $alt", fontSize = 11.5.sp, color = TealDark)
+                                                    Text("অথবা: ${subjText.trim()} / $alt", fontSize = 11.sp, color = TealDark)
                                                 },
                                                 onClick = {
                                                     val combined = "${subjText.trim()} / $alt"
@@ -631,41 +689,63 @@ private fun RoutineDayCard(
                             }
                         }
 
-                        IconButton(
-                            onClick = {
-                                val nextSlots = if (slots.size > 1) {
-                                    slots.filterIndexed { i, _ -> i != sIdx }
-                                } else {
-                                    listOf("")
+                        Box(
+                            contentAlignment = Alignment.Center,
+                            modifier = Modifier
+                                .size(24.dp)
+                                .clickable {
+                                    val nextSlots = if (slots.size > 1) {
+                                        slots.filterIndexed { i, _ -> i != sIdx }
+                                    } else {
+                                        listOf("")
+                                    }
+                                    onUpdateEntry(entry.copy(subjects = nextSlots))
                                 }
-                                onUpdateEntry(entry.copy(subjects = nextSlots))
-                            },
-                            modifier = Modifier.size(42.dp).testTag("admit_subj_remove_${index}_$sIdx")
+                                .testTag("admit_subj_remove_${index}_$sIdx")
                         ) {
-                            Icon(Icons.Rounded.Close, contentDescription = "বিষয় বাদ দিন", tint = RoseDanger, modifier = Modifier.size(16.dp))
+                            Icon(
+                                Icons.Rounded.Close,
+                                contentDescription = "বিষয় বাদ দিন",
+                                tint = RoseDanger,
+                                modifier = Modifier.size(14.dp)
+                            )
                         }
                     }
                 }
             }
 
-            // Right: + Add subject on same day & Trash delete day
+            // Right: Compact + Add subject & Delete day icons
             Column(
                 horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(2.dp)
+                verticalArrangement = Arrangement.spacedBy(1.dp)
             ) {
-                IconButton(
-                    onClick = {
-                        onUpdateEntry(entry.copy(subjects = slots + ""))
-                    },
-                    modifier = Modifier.size(48.dp).testTag("admit_day_add_subj_$index")
+                Box(
+                    contentAlignment = Alignment.Center,
+                    modifier = Modifier
+                        .size(28.dp)
+                        .clickable { onUpdateEntry(entry.copy(subjects = slots + "")) }
+                        .testTag("admit_day_add_subj_$index")
                 ) {
-                    Icon(Icons.Rounded.AddCircleOutline, contentDescription = "একই দিনে আরেকটি বিষয় যোগ", tint = TealPrimary, modifier = Modifier.size(21.dp))
+                    Icon(
+                        Icons.Rounded.AddCircleOutline,
+                        contentDescription = "একই দিনে আরেকটি বিষয় যোগ",
+                        tint = TealPrimary,
+                        modifier = Modifier.size(18.dp)
+                    )
                 }
-                IconButton(
-                    onClick = onDeleteDay,
-                    modifier = Modifier.size(48.dp).testTag("admit_day_del_$index")
+                Box(
+                    contentAlignment = Alignment.Center,
+                    modifier = Modifier
+                        .size(28.dp)
+                        .clickable(onClick = onDeleteDay)
+                        .testTag("admit_day_del_$index")
                 ) {
-                    Icon(Icons.Rounded.DeleteOutline, contentDescription = "দিন মুছুন", tint = RoseDanger, modifier = Modifier.size(20.dp))
+                    Icon(
+                        Icons.Rounded.DeleteOutline,
+                        contentDescription = "দিন মুছুন",
+                        tint = RoseDanger,
+                        modifier = Modifier.size(17.dp)
+                    )
                 }
             }
         }

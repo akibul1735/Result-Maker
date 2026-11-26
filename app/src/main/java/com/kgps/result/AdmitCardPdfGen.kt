@@ -30,27 +30,29 @@ object AdmitCardPdfGen {
         strokeWidth = 0.65f
     }
 
-    private val centerDividerPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = 0xFF1A1A1A.toInt()
-        style = Paint.Style.STROKE
-        strokeWidth = 0.7f
-        pathEffect = DashPathEffect(floatArrayOf(3.0f, 2.6f), 0f)
-    }
+    private fun makeDashPaint(dashStyle: AdmitDashStyle, strokeWidth: Float, colorInt: Int): Paint =
+        Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = colorInt
+            style = Paint.Style.STROKE
+            this.strokeWidth = strokeWidth
+            pathEffect = DashPathEffect(dashStyle.intervals, 0f)
+        }
 
-    private val cutGuidePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = 0xFF000000.toInt()
-        style = Paint.Style.STROKE
-        strokeWidth = 0.9f
-        pathEffect = DashPathEffect(floatArrayOf(4.2f, 3.2f), 0f)
-    }
-
-    private fun makeBorderPaint(style: SeatPlanBorderStyle, strokeWidth: Float): Paint =
+    private fun makeBorderPaint(
+        style: AdmitBorderStyle,
+        dashStyle: AdmitDashStyle,
+        strokeWidth: Float
+    ): Paint =
         Paint(Paint.ANTI_ALIAS_FLAG).apply {
             color = 0xFF000000.toInt()
             this.style = Paint.Style.STROKE
-            this.strokeWidth = strokeWidth
-            if (style == SeatPlanBorderStyle.DASHED) {
-                pathEffect = DashPathEffect(floatArrayOf(4.0f, 3.0f), 0f)
+            this.strokeWidth = if (style == AdmitBorderStyle.THICK_THIN) {
+                (strokeWidth * 1.45f).coerceAtLeast(1.1f)
+            } else {
+                strokeWidth
+            }
+            if (style == AdmitBorderStyle.DASHED) {
+                pathEffect = DashPathEffect(dashStyle.intervals, 0f)
             }
         }
 
@@ -162,7 +164,10 @@ object AdmitCardPdfGen {
         val rows = cfg.safeCardsPerPage
         val cellH = gridH / rows.toFloat()
 
-        // Full-width horizontal dashed cut lines between stacked cards
+        val centerDividerPaint = makeDashPaint(cfg.dashStyle, 0.7f, 0xFF1A1A1A.toInt())
+        val cutGuidePaint = makeDashPaint(cfg.dashStyle, 0.85f, 0xFF000000.toInt())
+
+        // Full-width horizontal cut lines between stacked cards
         if (cfg.showCutLines) {
             val cutLeft = (gridLeft - 12f).coerceAtLeast(6f)
             val cutRight = (gridRight + 12f).coerceAtMost(A4_WIDTH - 6f)
@@ -181,13 +186,29 @@ object AdmitCardPdfGen {
         val bnFont = cfg.bnFontId.ifBlank { settings.pdfFont }
         val enFont = cfg.enFontId.ifBlank { settings.pdfEnglishFont }
 
-        val insetY = (cfg.safeVerticalGapPt / 2f).coerceAtMost(cellH * 0.22f)
-        val borderPaint = makeBorderPaint(cfg.borderStyle, cfg.borderWeight.strokePt)
-        val innerDoublePaint = if (cfg.borderStyle == SeatPlanBorderStyle.DOUBLE) {
-            makeBorderPaint(SeatPlanBorderStyle.SOLID, (cfg.borderWeight.strokePt * 0.7f).coerceAtLeast(0.5f))
-        } else {
-            null
+        val insetY = (cfg.safeVerticalGapPt / 2f).coerceAtMost(cellH * 0.24f)
+        val borderPaint = makeBorderPaint(cfg.borderStyle, cfg.dashStyle, cfg.borderWeight.strokePt)
+        val innerSecondaryPaint = when (cfg.borderStyle) {
+            AdmitBorderStyle.DOUBLE -> Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                color = 0xFF000000.toInt()
+                style = Paint.Style.STROKE
+                strokeWidth = (cfg.borderWeight.strokePt * 0.7f).coerceAtLeast(0.5f)
+            }
+            AdmitBorderStyle.THICK_THIN -> Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                color = 0xFF000000.toInt()
+                style = Paint.Style.STROKE
+                strokeWidth = (cfg.borderWeight.strokePt * 0.55f).coerceAtLeast(0.45f)
+            }
+            else -> null
         }
+        val cornerAccentPaint = if (cfg.borderStyle == AdmitBorderStyle.CORNER_ACCENT) {
+            Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                color = 0xFF000000.toInt()
+                style = Paint.Style.STROKE
+                strokeWidth = (cfg.borderWeight.strokePt * 2.0f).coerceAtLeast(1.4f)
+                strokeCap = Paint.Cap.SQUARE
+            }
+        } else null
 
         for (r in 0 until rows) {
             val item = page.items.getOrNull(r) ?: continue
@@ -201,14 +222,19 @@ object AdmitCardPdfGen {
             val cardW = cardRect.width().coerceAtLeast(140f)
             val cardH = cardRect.height().coerceAtLeast(80f)
             val heightScale = (cardH / 184f).coerceIn(0.68f, 1.38f)
+            val densityScale = (cardH / 184f).coerceIn(0.82f, 1.18f)
 
             val maxRadius = min(cardW, cardH) * 0.25f
-            val radius = (cfg.safeCornerRadiusPt * heightScale).coerceIn(0f, maxRadius)
+            val radius = if (cfg.borderStyle == AdmitBorderStyle.CORNER_ACCENT) {
+                0f
+            } else {
+                (cfg.safeCornerRadiusPt * heightScale).coerceIn(0f, maxRadius)
+            }
 
-            if (cfg.borderStyle != SeatPlanBorderStyle.NONE) {
+            if (cfg.borderStyle != AdmitBorderStyle.NONE) {
                 c.drawRoundRect(cardRect, radius, radius, borderPaint)
-                if (innerDoublePaint != null) {
-                    val gap = (cfg.borderWeight.strokePt + 2.0f).coerceAtMost(min(cardW, cardH) * 0.08f)
+                if (innerSecondaryPaint != null) {
+                    val gap = (cfg.borderWeight.strokePt + 2.1f).coerceAtMost(min(cardW, cardH) * 0.08f)
                     val innerRect = RectF(
                         cardRect.left + gap,
                         cardRect.top + gap,
@@ -216,7 +242,18 @@ object AdmitCardPdfGen {
                         cardRect.bottom - gap
                     )
                     val innerRadius = (radius - gap * 0.7f).coerceAtLeast(0f)
-                    c.drawRoundRect(innerRect, innerRadius, innerRadius, innerDoublePaint)
+                    c.drawRoundRect(innerRect, innerRadius, innerRadius, innerSecondaryPaint)
+                }
+                if (cornerAccentPaint != null) {
+                    val arm = min(14f, min(cardW, cardH) * 0.14f)
+                    c.drawLine(cardRect.left, cardRect.top, cardRect.left + arm, cardRect.top, cornerAccentPaint)
+                    c.drawLine(cardRect.left, cardRect.top, cardRect.left, cardRect.top + arm, cornerAccentPaint)
+                    c.drawLine(cardRect.right - arm, cardRect.top, cardRect.right, cardRect.top, cornerAccentPaint)
+                    c.drawLine(cardRect.right, cardRect.top, cardRect.right, cardRect.top + arm, cornerAccentPaint)
+                    c.drawLine(cardRect.left, cardRect.bottom, cardRect.left + arm, cardRect.bottom, cornerAccentPaint)
+                    c.drawLine(cardRect.left, cardRect.bottom - arm, cardRect.left, cardRect.bottom, cornerAccentPaint)
+                    c.drawLine(cardRect.right - arm, cardRect.bottom, cardRect.right, cardRect.bottom, cornerAccentPaint)
+                    c.drawLine(cardRect.right, cardRect.bottom - arm, cardRect.right, cardRect.bottom, cornerAccentPaint)
                 }
             }
 
@@ -247,42 +284,44 @@ object AdmitCardPdfGen {
             }
 
             // --- LEFT PANEL: School Header, প্রবেশপত্র Badge, Student Info, Head Teacher Signature ---
-            val hdrScale = cfg.safeHeaderFontScale
-            var curY = contentTop + (9.5f * heightScale * hdrScale.coerceAtMost(1.15f)).coerceIn(6.5f, 16f)
-            val headerStep = (11.6f * heightScale * hdrScale).coerceIn(8.0f, 21f)
+            val schoolSize = cfg.safeSchoolFontPt * densityScale
+            val metaSize = cfg.safeHeaderMetaFontPt * densityScale
+            var curY = contentTop + (schoolSize * 0.95f).coerceIn(6.5f, 16f)
+            val schoolStep = (schoolSize * 1.18f).coerceIn(8.0f, 20f)
+            val metaStep = (metaSize * 1.24f).coerceIn(7.8f, 19f)
 
             if (schoolName.isNotBlank()) {
-                val dp = PdfGen.dualPaint(ctx, 9.8f * heightScale * hdrScale, cfg.headerBold, bnFont, enFont, 0xFF000000.toInt())
+                val dp = PdfGen.dualPaint(ctx, schoolSize, cfg.headerBold, bnFont, enFont, 0xFF000000.toInt())
                 PdfGen.shrinkMixedToFit(dp, schoolName, leftW - 4f, step = 0.25f, minSize = 5.5f)
                 PdfGen.drawMixedText(c, schoolName, leftCenterX, curY, dp, Paint.Align.CENTER)
-                curY += headerStep
+                curY += schoolStep
             }
             if (schoolAddress.isNotBlank()) {
-                val dp = PdfGen.dualPaint(ctx, 9.2f * heightScale * hdrScale, cfg.headerBold, bnFont, enFont, 0xFF000000.toInt())
+                val dp = PdfGen.dualPaint(ctx, metaSize, cfg.headerBold, bnFont, enFont, 0xFF000000.toInt())
                 PdfGen.shrinkMixedToFit(dp, schoolAddress, leftW - 4f, step = 0.25f, minSize = 5.2f)
                 PdfGen.drawMixedText(c, schoolAddress, leftCenterX, curY, dp, Paint.Align.CENTER)
-                curY += headerStep + (1.2f * heightScale)
+                curY += metaStep + (1.2f * heightScale)
             }
             if (examTitle.isNotBlank()) {
-                val dp = PdfGen.dualPaint(ctx, 9.2f * heightScale * hdrScale, cfg.headerBold, bnFont, enFont, 0xFF000000.toInt())
+                val dp = PdfGen.dualPaint(ctx, metaSize, cfg.headerBold, bnFont, enFont, 0xFF000000.toInt())
                 PdfGen.shrinkMixedToFit(dp, examTitle, leftW - 4f, step = 0.25f, minSize = 5.2f)
                 PdfGen.drawMixedText(c, examTitle, leftCenterX, curY, dp, Paint.Align.CENTER)
-                curY += headerStep + (2.5f * heightScale)
+                curY += metaStep + (2.4f * heightScale)
             }
 
             // "প্রবেশপত্র" title badge
-            val badgeDp = PdfGen.dualPaint(ctx, 9.8f * heightScale * cfg.safeBadgeFontScale, cfg.badgeBold, bnFont, enFont, 0xFF000000.toInt()).apply {
+            val badgeDp = PdfGen.dualPaint(ctx, cfg.safeBadgeFontPt * densityScale, cfg.badgeBold, bnFont, enFont, 0xFF000000.toInt()).apply {
                 bn.isUnderlineText = cfg.badgeUnderline
                 en.isUnderlineText = cfg.badgeUnderline
             }
             PdfGen.shrinkMixedToFit(badgeDp, badgeText, leftW - 8f, step = 0.2f, minSize = 5.8f)
             PdfGen.drawMixedText(c, badgeText, leftCenterX, curY, badgeDp, Paint.Align.CENTER)
 
-            // Reserve signature area at bottom-right of Left Panel (clean blank space when no image)
+            // Reserve signature area at bottom-right of Left Panel (optional horizontal signature line)
             val sigLabelText = cfg.headTeacherTitle.trim().ifBlank { "প্রধান শিক্ষকের স্বাক্ষর" }
             val sigLabelDp = PdfGen.dualPaint(
                 ctx,
-                8.6f * heightScale * cfg.safeSignatureTitleFontScale,
+                cfg.safeSignatureTitleFontPt * densityScale,
                 cfg.signatureTitleBold,
                 bnFont,
                 enFont,
@@ -293,8 +332,21 @@ object AdmitCardPdfGen {
             val sigAnchorX = leftEndX - (leftW * 0.26f)
             PdfGen.drawMixedText(c, sigLabelText, sigAnchorX, sigLabelY, sigLabelDp, Paint.Align.CENTER)
 
+            val sigAreaBottom = if (cfg.showSignatureLine) {
+                val sigLineY = sigLabelY - (8.8f * heightScale)
+                val lineHalfW = (leftW * 0.22f)
+                val linePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                    color = 0xFF000000.toInt()
+                    style = Paint.Style.STROKE
+                    strokeWidth = 0.65f
+                }
+                c.drawLine(sigAnchorX - lineHalfW, sigLineY, sigAnchorX + lineHalfW, sigLineY, linePaint)
+                sigLineY - (2.0f * heightScale)
+            } else {
+                sigLabelY - (6.5f * heightScale)
+            }
+
             val sigAreaTop = (contentBottom - (38f * heightScale)).coerceAtLeast(curY + 8f)
-            val sigAreaBottom = sigLabelY - (6.5f * heightScale)
             if (cfg.showSignatureImage && signatureBitmap != null && sigAreaBottom > sigAreaTop + 6f) {
                 val maxSigW = (leftW * 0.44f) * cfg.safeSignatureScale
                 val maxSigH = (sigAreaBottom - sigAreaTop) * cfg.safeSignatureScale
@@ -311,7 +363,7 @@ object AdmitCardPdfGen {
                 c.drawBitmap(signatureBitmap, null, dstRect, imgPaint)
             }
 
-            // Student details on left side: configurable gap below headline, font size, and label/value boldness
+            // Student details on left side: configurable gap below headline, Word pt font size, and label/value boldness
             val sigReserveTop = contentBottom - (28f * heightScale)
             val rawInfoStartY = curY + (cfg.safeHeaderToInfoGapPt * heightScale)
             val infoStartY = rawInfoStartY.coerceAtMost((sigReserveTop - 22f).coerceAtLeast(curY + 6f))
@@ -323,7 +375,7 @@ object AdmitCardPdfGen {
             val nameVal = if (item.isBlank) "............................" else item.studentName
             val clsVal = classShortBn(item.cls, settings)
             val rollVal = AdmitCardPlanner.formatRoll(item.roll, cfg)
-            val labelSize = 9.5f * heightScale * cfg.safeStudentInfoFontScale
+            val labelSize = cfg.safeStudentInfoFontPt * densityScale
 
             drawLabelValueLine(
                 ctx, c, "নাম : ", nameVal, infoLeftX, infoStartY, infoMaxW, labelSize,
@@ -338,7 +390,7 @@ object AdmitCardPdfGen {
                 cfg.studentLabelBold, cfg.studentValueBold, bnFont, enFont
             )
 
-            // --- RIGHT PANEL: Clean White Exam Routine Table ---
+            // --- RIGHT PANEL: Clean White Exam Routine Table + Optional Auto-Fit Note ---
             if (showRoutine) {
                 val rLeft = leftEndX + gapW
                 val rRight = contentRight
@@ -350,12 +402,14 @@ object AdmitCardPdfGen {
                 val dataRows = page.routineRows
                 val blankExtra = if (cfg.includeBlankRoutineRow) 1 else 0
                 val totalDataRows = (dataRows.size + blankExtra).coerceAtLeast(1)
+                val noteText = cfg.routineNote.trim()
+                val noteRowH = if (noteText.isNotEmpty()) (rH * 0.145f).coerceIn(11f, 22f) else 0f
 
-                // Allocate heights: top title + 2 sub-header rows + data rows
-                val titleRowH = (rH * 0.138f).coerceIn(11f, 21f)
-                val subHdrRowH = (rH * 0.118f).coerceIn(9.5f, 17f)
+                // Allocate heights: top title + 2 sub-header rows + data rows + optional note row
+                val titleRowH = (rH * 0.135f).coerceIn(11f, 20f)
+                val subHdrRowH = (rH * 0.115f).coerceIn(9.5f, 16.5f)
                 val subHdrTotalH = subHdrRowH * 2f
-                val bodyH = (rH - titleRowH - subHdrTotalH).coerceAtLeast(24f)
+                val bodyH = (rH - titleRowH - subHdrTotalH - noteRowH).coerceAtLeast(22f)
                 val rowH = bodyH / totalDataRows.toFloat()
 
                 val colDateW = rW * 0.225f
@@ -365,23 +419,24 @@ object AdmitCardPdfGen {
                 val col1End = rLeft + colDateW
                 val col2End = col1End + colDayW
 
-                val rtScale = cfg.safeRoutineFontScale
+                val rtHdrPt = cfg.safeRoutineHeaderFontPt * densityScale
+                val rtBodyPt = cfg.safeRoutineBodyFontPt * densityScale
 
                 // Row 1: Routine Title
                 drawCenteredTableCell(
                     ctx, c, routineTitle, rLeft, rTop, rW, titleRowH,
-                    8.5f * heightScale * rtScale, cfg.routineHeaderBold, bnFont, enFont
+                    rtHdrPt, cfg.routineHeaderBold, bnFont, enFont
                 )
 
                 // Row 2-3: তারিখ (2-row span), বার (2-row span), Time / বিষয়
                 val hdrTopY = rTop + titleRowH
                 drawCenteredTableCell(
                     ctx, c, "তারিখ", rLeft, hdrTopY, colDateW, subHdrTotalH,
-                    8.3f * heightScale * rtScale, cfg.routineHeaderBold, bnFont, enFont
+                    (rtHdrPt * 0.96f), cfg.routineHeaderBold, bnFont, enFont
                 )
                 drawCenteredTableCell(
                     ctx, c, "বার", col1End, hdrTopY, colDayW, subHdrTotalH,
-                    8.3f * heightScale * rtScale, cfg.routineHeaderBold, bnFont, enFont
+                    (rtHdrPt * 0.96f), cfg.routineHeaderBold, bnFont, enFont
                 )
                 val timeStr = AdmitCardPlanner.formatDigits(
                     cfg.examTimeLabel.trim().ifBlank { "দুপুর ০১:০০-০৩:৩০ টা" },
@@ -389,15 +444,15 @@ object AdmitCardPdfGen {
                 )
                 drawCenteredTableCell(
                     ctx, c, timeStr, col2End, hdrTopY, colSubjW, subHdrRowH,
-                    8.0f * heightScale * rtScale, cfg.routineHeaderBold, bnFont, enFont
+                    (rtHdrPt * 0.94f), cfg.routineHeaderBold, bnFont, enFont
                 )
                 drawCenteredTableCell(
                     ctx, c, "বিষয়", col2End, hdrTopY + subHdrRowH, colSubjW, subHdrRowH,
-                    8.2f * heightScale * rtScale, cfg.routineHeaderBold, bnFont, enFont
+                    (rtHdrPt * 0.96f), cfg.routineHeaderBold, bnFont, enFont
                 )
 
                 // Data rows
-                val cellTextPt = min(8.3f * heightScale * rtScale, (rowH * 0.68f)).coerceIn(5.0f, 11.5f)
+                val cellTextPt = min(rtBodyPt, (rowH * 0.68f)).coerceIn(5.0f, 12.0f)
                 val bodyStartY = hdrTopY + subHdrTotalH
                 for (i in 0 until totalDataRows) {
                     val ry = bodyStartY + i * rowH
@@ -413,8 +468,24 @@ object AdmitCardPdfGen {
                     )
                 }
 
+                val tableDataBottom = bodyStartY + totalDataRows * rowH
+                if (noteText.isNotEmpty() && noteRowH > 0f) {
+                    drawAutoFitNoteCell(
+                        ctx = ctx,
+                        c = c,
+                        text = noteText,
+                        x = rLeft,
+                        y = tableDataBottom,
+                        w = rW,
+                        h = noteRowH,
+                        baseSizePt = min(rtBodyPt * 0.92f, noteRowH * 0.62f).coerceIn(5.0f, 9.5f),
+                        bnFont = bnFont,
+                        enFont = enFont
+                    )
+                }
+
                 // Crisp outer border of routine table
-                c.drawRect(rLeft, rTop, rRight, bodyStartY + totalDataRows * rowH, tableLinePaint)
+                c.drawRect(rLeft, rTop, rRight, tableDataBottom + noteRowH, tableLinePaint)
             }
         }
     }
@@ -514,5 +585,54 @@ object AdmitCardPdfGen {
         val fm = dp.bn.fontMetrics
         val baselineY = y + h / 2f - (fm.ascent + fm.descent) / 2f
         PdfGen.drawMixedText(c, text, x + w / 2f, baselineY, dp, Paint.Align.CENTER)
+    }
+
+    private fun drawAutoFitNoteCell(
+        ctx: Context?,
+        c: Canvas,
+        text: String,
+        x: Float,
+        y: Float,
+        w: Float,
+        h: Float,
+        baseSizePt: Float,
+        bnFont: String,
+        enFont: String
+    ) {
+        c.drawRect(x, y, x + w, y + h, tableLinePaint)
+        val availW = (w - 8f).coerceAtLeast(12f)
+        val probe = PdfGen.dualPaint(ctx, baseSizePt, false, bnFont, enFont, 0xFF000000.toInt())
+        PdfGen.shrinkMixedToFit(probe, text, availW, step = 0.2f, minSize = 4.2f)
+        val words = text.trim().split(Regex("\\s+")).filter { it.isNotEmpty() }
+        if (probe.textSize >= 6.0f || words.size <= 2 || h < 13f) {
+            val fm = probe.bn.fontMetrics
+            val baselineY = y + h / 2f - (fm.ascent + fm.descent) / 2f
+            PdfGen.drawMixedText(c, text, x + w / 2f, baselineY, probe, Paint.Align.CENTER)
+        } else {
+            // Split cleanly near midpoint into 2 auto-fitted lines
+            val totalChars = text.length
+            var splitIdx = words.size / 2
+            var acc = 0
+            for (idx in words.indices) {
+                acc += words[idx].length + 1
+                if (acc >= totalChars / 2) {
+                    splitIdx = (idx + 1).coerceIn(1, words.lastIndex)
+                    break
+                }
+            }
+            val line1 = words.take(splitIdx).joinToString(" ")
+            val line2 = words.drop(splitIdx).joinToString(" ")
+            val linePt = min(baseSizePt * 0.86f, h * 0.36f).coerceIn(4.2f, 7.8f)
+            val dp1 = PdfGen.dualPaint(ctx, linePt, false, bnFont, enFont, 0xFF000000.toInt())
+            PdfGen.shrinkMixedToFit(dp1, line1, availW, step = 0.2f, minSize = 4.0f)
+            val dp2 = PdfGen.dualPaint(ctx, linePt, false, bnFont, enFont, 0xFF000000.toInt())
+            PdfGen.shrinkMixedToFit(dp2, line2, availW, step = 0.2f, minSize = 4.0f)
+            val fm1 = dp1.bn.fontMetrics
+            val fm2 = dp2.bn.fontMetrics
+            val y1 = y + h * 0.31f - (fm1.ascent + fm1.descent) / 2f
+            val y2 = y + h * 0.72f - (fm2.ascent + fm2.descent) / 2f
+            PdfGen.drawMixedText(c, line1, x + w / 2f, y1, dp1, Paint.Align.CENTER)
+            PdfGen.drawMixedText(c, line2, x + w / 2f, y2, dp2, Paint.Align.CENTER)
+        }
     }
 }

@@ -6,6 +6,23 @@ import java.util.UUID
 import kotlin.math.max
 import kotlin.math.min
 
+enum class AdmitBorderStyle(val labelBn: String) {
+    DASHED("ড্যাশড"),
+    SOLID("সলিড"),
+    DOUBLE("ডাবল"),
+    THICK_THIN("মোটা-চিকন"),
+    CORNER_ACCENT("কোনা সজ্জা"),
+    NONE("বর্ডার নেই")
+}
+
+enum class AdmitDashStyle(val labelBn: String, val intervals: FloatArray) {
+    NORMAL("সাধারণ ড্যাশ", floatArrayOf(4.2f, 3.0f)),
+    SHORT("ছোট ড্যাশ", floatArrayOf(2.2f, 1.8f)),
+    LONG("লম্বা ড্যাশ", floatArrayOf(8.0f, 3.5f)),
+    DOTTED("ডটেড (বিন্দু)", floatArrayOf(1.2f, 2.3f)),
+    DASH_DOT("ড্যাশ-ডট", floatArrayOf(6.5f, 2.4f, 1.4f, 2.4f))
+}
+
 data class ExamRoutineEntry(
     val id: String = UUID.randomUUID().toString(),
     val date: String = "",
@@ -53,7 +70,8 @@ data class AdmitCardConfig(
     val verticalGapPt: Float = 10f,
     val bnFontId: String = "kalpurush",
     val enFontId: String = "times_new_roman",
-    val borderStyle: SeatPlanBorderStyle = SeatPlanBorderStyle.DASHED,
+    val borderStyle: AdmitBorderStyle = AdmitBorderStyle.DASHED,
+    val dashStyle: AdmitDashStyle = AdmitDashStyle.NORMAL,
     val borderWeight: SeatPlanBorderWeight = SeatPlanBorderWeight.THIN,
     val cornerRadiusPt: Float = 5f,
     val showCutLines: Boolean = true,
@@ -68,38 +86,44 @@ data class AdmitCardConfig(
     val customRoutineTitle: String = "",
     val examTimeLabel: String = "দুপুর ০১:০০-০৩:৩০ টা",
     val headTeacherTitle: String = "প্রধান শিক্ষকের স্বাক্ষর",
+    val showSignatureLine: Boolean = false,
     val showRoutineTable: Boolean = true,
-    val includeBlankRoutineRow: Boolean = true,
+    val includeBlankRoutineRow: Boolean = false,
+    val routineNote: String = "",
     val showSignatureImage: Boolean = true,
     val signatureScale: Float = 1.0f,
     val extraBlankCards: Int = 0,
     val headerToInfoGapPt: Float = 15.5f,
-    val headerFontScale: Float = 1.0f,
+    val schoolFontPt: Float = 10.0f,
+    val headerMetaFontPt: Float = 9.0f,
     val headerBold: Boolean = false,
-    val badgeFontScale: Float = 1.0f,
+    val badgeFontPt: Float = 10.0f,
     val badgeBold: Boolean = true,
     val badgeUnderline: Boolean = true,
-    val studentInfoFontScale: Float = 1.0f,
+    val studentInfoFontPt: Float = 9.5f,
     val studentLabelBold: Boolean = true,
     val studentValueBold: Boolean = false,
-    val routineFontScale: Float = 1.0f,
+    val routineHeaderFontPt: Float = 8.5f,
     val routineHeaderBold: Boolean = false,
+    val routineBodyFontPt: Float = 8.5f,
     val routineBodyBold: Boolean = false,
-    val signatureTitleFontScale: Float = 1.0f,
+    val signatureTitleFontPt: Float = 8.5f,
     val signatureTitleBold: Boolean = false
 ) {
     val safeCardsPerPage: Int get() = cardsPerPage.coerceIn(2, 5)
     val safeMarginInches: Float get() = marginInches.coerceIn(0.15f, 0.85f)
     val safeMarginPt: Float get() = safeMarginInches * 72f
-    val safeVerticalGapPt: Float get() = verticalGapPt.coerceIn(0f, 24f)
+    val safeVerticalGapPt: Float get() = verticalGapPt.coerceIn(0f, 28f)
     val safeCornerRadiusPt: Float get() = cornerRadiusPt.coerceIn(0f, 24f)
     val safeSignatureScale: Float get() = signatureScale.coerceIn(0.6f, 1.5f)
     val safeHeaderToInfoGapPt: Float get() = headerToInfoGapPt.coerceIn(4f, 36f)
-    val safeHeaderFontScale: Float get() = headerFontScale.coerceIn(0.75f, 1.4f)
-    val safeBadgeFontScale: Float get() = badgeFontScale.coerceIn(0.75f, 1.4f)
-    val safeStudentInfoFontScale: Float get() = studentInfoFontScale.coerceIn(0.75f, 1.4f)
-    val safeRoutineFontScale: Float get() = routineFontScale.coerceIn(0.75f, 1.4f)
-    val safeSignatureTitleFontScale: Float get() = signatureTitleFontScale.coerceIn(0.75f, 1.4f)
+    val safeSchoolFontPt: Float get() = schoolFontPt.coerceIn(6f, 18f)
+    val safeHeaderMetaFontPt: Float get() = headerMetaFontPt.coerceIn(6f, 16f)
+    val safeBadgeFontPt: Float get() = badgeFontPt.coerceIn(6f, 18f)
+    val safeStudentInfoFontPt: Float get() = studentInfoFontPt.coerceIn(6f, 18f)
+    val safeRoutineHeaderFontPt: Float get() = routineHeaderFontPt.coerceIn(5.5f, 16f)
+    val safeRoutineBodyFontPt: Float get() = routineBodyFontPt.coerceIn(5.5f, 16f)
+    val safeSignatureTitleFontPt: Float get() = signatureTitleFontPt.coerceIn(5.5f, 16f)
 }
 
 data class AdmitCardItem(

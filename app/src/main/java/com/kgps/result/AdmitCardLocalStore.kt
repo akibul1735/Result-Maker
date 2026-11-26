@@ -169,43 +169,47 @@ object AdmitCardLocalStore {
      * removes bright white paper background cleanly for crisp PDF stamping, and persists PNG.
      */
     fun saveSignatureFromUri(ctx: Context, uri: Uri): Bitmap? {
-        val boundsOpts = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-        ctx.contentResolver.openInputStream(uri)?.use { inp ->
-            BitmapFactory.decodeStream(inp, null, boundsOpts)
-        }
-        val srcW = boundsOpts.outWidth
-        val srcH = boundsOpts.outHeight
-        if (srcW <= 0 || srcH <= 0) return null
-
-        var sample = 1
-        while ((srcW / sample) > 960 || (srcH / sample) > 480) {
-            sample *= 2
-        }
-        val decodeOpts = BitmapFactory.Options().apply { inSampleSize = sample }
-        val rawBmp = ctx.contentResolver.openInputStream(uri)?.use { inp ->
-            BitmapFactory.decodeStream(inp, null, decodeOpts)
-        } ?: return null
-
-        val maxW = 480
-        val maxH = 240
-        val scale = min(maxW.toFloat() / rawBmp.width, maxH.toFloat() / rawBmp.height).coerceAtMost(1f)
-        val targetW = (rawBmp.width * scale).toInt().coerceAtLeast(1)
-        val targetH = (rawBmp.height * scale).toInt().coerceAtLeast(1)
-        val scaled = if (targetW != rawBmp.width || targetH != rawBmp.height) {
-            Bitmap.createScaledBitmap(rawBmp, targetW, targetH, true).also {
-                if (it !== rawBmp) rawBmp.recycle()
+        return try {
+            val boundsOpts = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            ctx.contentResolver.openInputStream(uri)?.use { inp ->
+                BitmapFactory.decodeStream(inp, null, boundsOpts)
             }
-        } else {
-            rawBmp
-        }
+            val srcW = boundsOpts.outWidth
+            val srcH = boundsOpts.outHeight
+            if (srcW <= 0 || srcH <= 0) return null
 
-        val cleaned = stripWhitePaperBackground(scaled)
-        if (cleaned !== scaled) scaled.recycle()
+            var sample = 1
+            while ((srcW / sample) > 960 || (srcH / sample) > 480) {
+                sample *= 2
+            }
+            val decodeOpts = BitmapFactory.Options().apply { inSampleSize = sample }
+            val rawBmp = ctx.contentResolver.openInputStream(uri)?.use { inp ->
+                BitmapFactory.decodeStream(inp, null, decodeOpts)
+            } ?: return null
 
-        FileOutputStream(signatureFile(ctx)).use { out ->
-            cleaned.compress(Bitmap.CompressFormat.PNG, 100, out)
+            val maxW = 480
+            val maxH = 240
+            val scale = min(maxW.toFloat() / rawBmp.width, maxH.toFloat() / rawBmp.height).coerceAtMost(1f)
+            val targetW = (rawBmp.width * scale).toInt().coerceAtLeast(1)
+            val targetH = (rawBmp.height * scale).toInt().coerceAtLeast(1)
+            val scaled = if (targetW != rawBmp.width || targetH != rawBmp.height) {
+                Bitmap.createScaledBitmap(rawBmp, targetW, targetH, true).also {
+                    if (it !== rawBmp) rawBmp.recycle()
+                }
+            } else {
+                rawBmp
+            }
+
+            val cleaned = stripWhitePaperBackground(scaled)
+            if (cleaned !== scaled) scaled.recycle()
+
+            FileOutputStream(signatureFile(ctx)).use { out ->
+                cleaned.compress(Bitmap.CompressFormat.PNG, 100, out)
+            }
+            cleaned
+        } catch (_: Exception) {
+            null
         }
-        return cleaned
     }
 
     private fun stripWhitePaperBackground(src: Bitmap): Bitmap {

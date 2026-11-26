@@ -104,7 +104,8 @@ class AdmitCardPlannerTest {
         assertEquals("০৪", AdmitCardPlanner.formatRoll(4, cfg))
         assertEquals("14", AdmitCardPlanner.formatRoll(14, cfg.copy(numeralMode = SeatPlanNumeralMode.ENGLISH)))
         assertEquals("........", AdmitCardPlanner.formatRoll(null, cfg))
-        assertEquals(SeatPlanBorderStyle.DASHED, cfg.borderStyle)
+        assertEquals(AdmitBorderStyle.DASHED, cfg.borderStyle)
+        assertEquals(AdmitDashStyle.NORMAL, cfg.dashStyle)
         assertTrue(cfg.showCenterDivider)
         assertEquals("৩য় প্রান্তিক মূল্যায়ন - ২০২৬", AdmitCardPlanner.resolvedExamTitle(cfg, settings))
         assertEquals("৩য় প্রান্তিক মূল্যায়ন - ২০২৬ এর রুটিন", AdmitCardPlanner.resolvedRoutineTitle(cfg, settings))
@@ -157,22 +158,29 @@ class AdmitCardPlannerTest {
     fun typographyAndSpacingDefaults_clampSafely() {
         val defaultCfg = AdmitCardConfig()
         assertEquals(15.5f, defaultCfg.safeHeaderToInfoGapPt, 0.01f)
-        assertEquals(1.0f, defaultCfg.safeHeaderFontScale, 0.01f)
-        assertEquals(1.0f, defaultCfg.safeBadgeFontScale, 0.01f)
-        assertEquals(1.0f, defaultCfg.safeStudentInfoFontScale, 0.01f)
-        assertEquals(1.0f, defaultCfg.safeRoutineFontScale, 0.01f)
-        assertEquals(1.0f, defaultCfg.safeSignatureTitleFontScale, 0.01f)
+        assertEquals(10.0f, defaultCfg.safeSchoolFontPt, 0.01f)
+        assertEquals(9.0f, defaultCfg.safeHeaderMetaFontPt, 0.01f)
+        assertEquals(10.0f, defaultCfg.safeBadgeFontPt, 0.01f)
+        assertEquals(9.5f, defaultCfg.safeStudentInfoFontPt, 0.01f)
+        assertEquals(8.5f, defaultCfg.safeRoutineHeaderFontPt, 0.01f)
+        assertEquals(8.5f, defaultCfg.safeRoutineBodyFontPt, 0.01f)
+        assertEquals(8.5f, defaultCfg.safeSignatureTitleFontPt, 0.01f)
+        assertEquals(false, defaultCfg.includeBlankRoutineRow)
+        assertEquals(false, defaultCfg.showSignatureLine)
+        assertEquals("", defaultCfg.routineNote)
         assertTrue(defaultCfg.badgeBold)
         assertTrue(defaultCfg.badgeUnderline)
         assertTrue(defaultCfg.studentLabelBold)
 
-        val clampedLow = AdmitCardConfig(
+        val clamped = AdmitCardConfig(
             headerToInfoGapPt = 0f,
-            headerFontScale = 0.2f,
-            routineFontScale = 3.0f
+            verticalGapPt = 40f,
+            schoolFontPt = 2f,
+            routineBodyFontPt = 30f
         )
-        assertEquals(4f, clampedLow.safeHeaderToInfoGapPt, 0.01f)
-        assertEquals(0.75f, clampedLow.safeHeaderFontScale, 0.01f)
-        assertEquals(1.4f, clampedLow.safeRoutineFontScale, 0.01f)
+        assertEquals(4f, clamped.safeHeaderToInfoGapPt, 0.01f)
+        assertEquals(28f, clamped.safeVerticalGapPt, 0.01f)
+        assertEquals(6f, clamped.safeSchoolFontPt, 0.01f)
+        assertEquals(16f, clamped.safeRoutineBodyFontPt, 0.01f)
     }
 }

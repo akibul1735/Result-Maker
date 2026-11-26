@@ -17,11 +17,12 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.kgps.result.AdmitBorderStyle
 import com.kgps.result.AdmitCardConfig
+import com.kgps.result.AdmitDashStyle
 import com.kgps.result.BENGALI_PDF_FONT_LIST
 import com.kgps.result.ENGLISH_PDF_FONT_LIST
 import com.kgps.result.PdfGen
-import com.kgps.result.SeatPlanBorderStyle
 import com.kgps.result.SeatPlanBorderWeight
 import com.kgps.result.SeatPlanNumeralMode
 import com.kgps.result.bn
@@ -38,8 +39,8 @@ internal fun AdmitLayoutAndStyleTab(
     onUpdateConfig: (AdmitCardConfig) -> Unit
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        // 1. Page, Spacing & Fonts
-        AdmitSectionGroupCard(title = "১. পৃষ্ঠা, ফাঁকা স্থান ও ফন্ট পরিবার") {
+        // 1. Page, Vertical Gap, Header-Info Gap & Fonts
+        AdmitSectionGroupCard(title = "১. পৃষ্ঠা, ভার্টিক্যাল গ্যাপ ও ফন্ট") {
             AdmitSegmentedOptionBar(
                 items = listOf(2, 3, 4, 5).map { it to "${bn(it.toString())}টি/পৃষ্ঠা" },
                 selected = config.safeCardsPerPage,
@@ -61,13 +62,13 @@ internal fun AdmitLayoutAndStyleTab(
                     testTag = "admit_card_margin_picker"
                 )
                 AdmitCompactPickerBox(
-                    label = "কার্ড ফাঁক",
+                    label = "ভার্টিক্যাল গ্যাপ",
                     valueText = formatAdmitPtBn(config.safeVerticalGapPt),
                     options = ADMIT_GAP_PT_OPTIONS,
                     selectedValue = config.safeVerticalGapPt,
                     optionLabel = { formatAdmitPtBn(it) },
                     onSelect = { onUpdateConfig(config.copy(verticalGapPt = it)) },
-                    modifier = Modifier.weight(1f),
+                    modifier = Modifier.weight(1.05f),
                     testTag = "admit_card_gap_picker"
                 )
                 AdmitCompactPickerBox(
@@ -77,7 +78,7 @@ internal fun AdmitLayoutAndStyleTab(
                     selectedValue = config.safeHeaderToInfoGapPt,
                     optionLabel = { g -> formatAdmitPtBn(g) + if (abs(g - 15.5f) < 0.2f) " (ডিফল্ট)" else "" },
                     onSelect = { onUpdateConfig(config.copy(headerToInfoGapPt = it)) },
-                    modifier = Modifier.weight(1.15f),
+                    modifier = Modifier.weight(1.1f),
                     testTag = "admit_card_header_info_gap_picker"
                 )
             }
@@ -120,65 +121,63 @@ internal fun AdmitLayoutAndStyleTab(
             }
         }
 
-        // 2. Header & Headline Badge Typography
-        AdmitSectionGroupCard(title = "২. উপরের হেডার ও প্রবেশপত্র শিরোনাম") {
-            Text(
-                "বিদ্যালয়, ঠিকানা ও পরীক্ষা",
-                fontSize = 9.5.sp,
-                fontWeight = FontWeight.Medium,
-                color = SlateMuted
-            )
+        // 2. Header & Headline Badge Typography (Word pt)
+        AdmitSectionGroupCard(title = "২. উপরের হেডার ও প্রবেশপত্র শিরোনাম (pt)") {
             Row(
                 horizontalArrangement = Arrangement.spacedBy(5.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 modifier = Modifier.fillMaxWidth()
             ) {
                 AdmitCompactPickerBox(
-                    label = "হেডার সাইজ",
-                    valueText = formatAdmitScalePctBn(config.safeHeaderFontScale),
-                    options = ADMIT_FONT_SCALE_OPTIONS,
-                    selectedValue = config.safeHeaderFontScale,
-                    optionLabel = { formatAdmitScalePctBn(it) },
-                    onSelect = { onUpdateConfig(config.copy(headerFontScale = it)) },
+                    label = "বিদ্যালয় নাম",
+                    valueText = formatAdmitPtBn(config.safeSchoolFontPt),
+                    options = ADMIT_WORD_PT_OPTIONS,
+                    selectedValue = config.safeSchoolFontPt,
+                    optionLabel = { formatAdmitPtBn(it) },
+                    onSelect = { onUpdateConfig(config.copy(schoolFontPt = it)) },
                     modifier = Modifier.weight(1f),
-                    testTag = "admit_header_size_picker"
+                    testTag = "admit_school_pt_picker"
+                )
+                AdmitCompactPickerBox(
+                    label = "ঠিকানা ও পরীক্ষা",
+                    valueText = formatAdmitPtBn(config.safeHeaderMetaFontPt),
+                    options = ADMIT_WORD_PT_OPTIONS,
+                    selectedValue = config.safeHeaderMetaFontPt,
+                    optionLabel = { formatAdmitPtBn(it) },
+                    onSelect = { onUpdateConfig(config.copy(headerMetaFontPt = it)) },
+                    modifier = Modifier.weight(1f),
+                    testTag = "admit_meta_pt_picker"
                 )
                 AdmitCompactTogglePill(
                     label = "বোল্ড",
                     checked = config.headerBold,
                     onCheckedChange = { onUpdateConfig(config.copy(headerBold = it)) },
-                    modifier = Modifier.weight(0.85f),
+                    modifier = Modifier.weight(0.75f),
                     testTag = "admit_header_bold_toggle"
                 )
             }
 
             HorizontalDivider(color = SlateOutline.copy(alpha = 0.35f))
-            Text(
-                "প্রবেশপত্র শিরোনাম (হেড লাইন)",
-                fontSize = 9.5.sp,
-                fontWeight = FontWeight.Medium,
-                color = SlateMuted
-            )
             Row(
                 horizontalArrangement = Arrangement.spacedBy(5.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 modifier = Modifier.fillMaxWidth()
             ) {
                 AdmitCompactPickerBox(
-                    label = "শিরোনাম সাইজ",
-                    valueText = formatAdmitScalePctBn(config.safeBadgeFontScale),
-                    options = ADMIT_FONT_SCALE_OPTIONS,
-                    selectedValue = config.safeBadgeFontScale,
-                    optionLabel = { formatAdmitScalePctBn(it) },
-                    onSelect = { onUpdateConfig(config.copy(badgeFontScale = it)) },
-                    modifier = Modifier.weight(1f),
-                    testTag = "admit_badge_size_picker"
+                    label = "প্রবেশপত্র শিরোনাম",
+                    valueText = formatAdmitPtBn(config.safeBadgeFontPt),
+                    options = ADMIT_WORD_PT_OPTIONS,
+                    selectedValue = config.safeBadgeFontPt,
+                    optionLabel = { formatAdmitPtBn(it) },
+                    onSelect = { onUpdateConfig(config.copy(badgeFontPt = it)) },
+                    modifier = Modifier.weight(1.05f),
+                    testTag = "admit_badge_pt_picker"
                 )
                 AdmitCompactTogglePill(
                     label = "বোল্ড",
                     checked = config.badgeBold,
                     onCheckedChange = { onUpdateConfig(config.copy(badgeBold = it)) },
-                    modifier = Modifier.weight(0.75f),
+                    modifier = Modifier.weight(0.7f),
                     testTag = "admit_badge_bold_toggle"
                 )
                 AdmitCompactTogglePill(
@@ -200,47 +199,47 @@ internal fun AdmitLayoutAndStyleTab(
             ) {
                 AdmitCompactPickerBox(
                     label = "তথ্য সাইজ",
-                    valueText = formatAdmitScalePctBn(config.safeStudentInfoFontScale),
-                    options = ADMIT_FONT_SCALE_OPTIONS,
-                    selectedValue = config.safeStudentInfoFontScale,
-                    optionLabel = { formatAdmitScalePctBn(it) },
-                    onSelect = { onUpdateConfig(config.copy(studentInfoFontScale = it)) },
-                    modifier = Modifier.weight(1f),
-                    testTag = "admit_info_size_picker"
+                    valueText = formatAdmitPtBn(config.safeStudentInfoFontPt),
+                    options = ADMIT_WORD_PT_OPTIONS,
+                    selectedValue = config.safeStudentInfoFontPt,
+                    optionLabel = { formatAdmitPtBn(it) },
+                    onSelect = { onUpdateConfig(config.copy(studentInfoFontPt = it)) },
+                    modifier = Modifier.weight(0.95f),
+                    testTag = "admit_info_pt_picker"
                 )
                 AdmitCompactTogglePill(
                     label = "লেবেল বোল্ড",
                     checked = config.studentLabelBold,
                     onCheckedChange = { onUpdateConfig(config.copy(studentLabelBold = it)) },
-                    modifier = Modifier.weight(0.9f),
+                    modifier = Modifier.weight(0.95f),
                     testTag = "admit_info_label_bold_toggle"
                 )
                 AdmitCompactTogglePill(
                     label = "নাম/রোল বোল্ড",
                     checked = config.studentValueBold,
                     onCheckedChange = { onUpdateConfig(config.copy(studentValueBold = it)) },
-                    modifier = Modifier.weight(1f),
+                    modifier = Modifier.weight(1.05f),
                     testTag = "admit_info_value_bold_toggle"
                 )
             }
         }
 
-        // 4. Routine Table & Signature Title Typography
-        AdmitSectionGroupCard(title = "৪. রুটিন টেবিল ও স্বাক্ষর পদবি") {
+        // 4. Routine Table & Signature Title Typography (Word pt)
+        AdmitSectionGroupCard(title = "৪. রুটিন টেবিল ও স্বাক্ষর পদবি (pt)") {
             Row(
                 horizontalArrangement = Arrangement.spacedBy(5.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 modifier = Modifier.fillMaxWidth()
             ) {
                 AdmitCompactPickerBox(
-                    label = "রুটিন সাইজ",
-                    valueText = formatAdmitScalePctBn(config.safeRoutineFontScale),
-                    options = ADMIT_FONT_SCALE_OPTIONS,
-                    selectedValue = config.safeRoutineFontScale,
-                    optionLabel = { formatAdmitScalePctBn(it) },
-                    onSelect = { onUpdateConfig(config.copy(routineFontScale = it)) },
+                    label = "রুটিন হেডার",
+                    valueText = formatAdmitPtBn(config.safeRoutineHeaderFontPt),
+                    options = ADMIT_WORD_PT_OPTIONS,
+                    selectedValue = config.safeRoutineHeaderFontPt,
+                    optionLabel = { formatAdmitPtBn(it) },
+                    onSelect = { onUpdateConfig(config.copy(routineHeaderFontPt = it)) },
                     modifier = Modifier.weight(1f),
-                    testTag = "admit_routine_size_picker"
+                    testTag = "admit_routine_hdr_pt_picker"
                 )
                 AdmitCompactTogglePill(
                     label = "হেডার বোল্ড",
@@ -248,6 +247,22 @@ internal fun AdmitLayoutAndStyleTab(
                     onCheckedChange = { onUpdateConfig(config.copy(routineHeaderBold = it)) },
                     modifier = Modifier.weight(0.95f),
                     testTag = "admit_routine_hdr_bold_toggle"
+                )
+            }
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(5.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                AdmitCompactPickerBox(
+                    label = "রুটিন বিষয়",
+                    valueText = formatAdmitPtBn(config.safeRoutineBodyFontPt),
+                    options = ADMIT_WORD_PT_OPTIONS,
+                    selectedValue = config.safeRoutineBodyFontPt,
+                    optionLabel = { formatAdmitPtBn(it) },
+                    onSelect = { onUpdateConfig(config.copy(routineBodyFontPt = it)) },
+                    modifier = Modifier.weight(1f),
+                    testTag = "admit_routine_body_pt_picker"
                 )
                 AdmitCompactTogglePill(
                     label = "বিষয় বোল্ড",
@@ -264,34 +279,59 @@ internal fun AdmitLayoutAndStyleTab(
                 modifier = Modifier.fillMaxWidth()
             ) {
                 AdmitCompactPickerBox(
-                    label = "স্বাক্ষর পদবি সাইজ",
-                    valueText = formatAdmitScalePctBn(config.safeSignatureTitleFontScale),
-                    options = ADMIT_FONT_SCALE_OPTIONS,
-                    selectedValue = config.safeSignatureTitleFontScale,
-                    optionLabel = { formatAdmitScalePctBn(it) },
-                    onSelect = { onUpdateConfig(config.copy(signatureTitleFontScale = it)) },
+                    label = "স্বাক্ষর পদবি",
+                    valueText = formatAdmitPtBn(config.safeSignatureTitleFontPt),
+                    options = ADMIT_WORD_PT_OPTIONS,
+                    selectedValue = config.safeSignatureTitleFontPt,
+                    optionLabel = { formatAdmitPtBn(it) },
+                    onSelect = { onUpdateConfig(config.copy(signatureTitleFontPt = it)) },
                     modifier = Modifier.weight(1f),
-                    testTag = "admit_sig_title_size_picker"
+                    testTag = "admit_sig_title_pt_picker"
                 )
                 AdmitCompactTogglePill(
-                    label = "স্বাক্ষর পদবি বোল্ড",
+                    label = "পদবি বোল্ড",
                     checked = config.signatureTitleBold,
                     onCheckedChange = { onUpdateConfig(config.copy(signatureTitleBold = it)) },
-                    modifier = Modifier.weight(1f),
+                    modifier = Modifier.weight(0.95f),
                     testTag = "admit_sig_title_bold_toggle"
                 )
             }
         }
 
-        // 5. Border & General Switches
-        AdmitSectionGroupCard(title = "৫. বর্ডার ও অন্যান্য অপশন") {
-            AdmitSegmentedOptionBar(
-                items = SeatPlanBorderStyle.entries.map { it to it.labelBn },
-                selected = config.borderStyle,
-                onSelect = { onUpdateConfig(config.copy(borderStyle = it)) },
-                tagPrefix = "admit_card_border"
-            )
-            if (config.borderStyle != SeatPlanBorderStyle.NONE) {
+        // 5. Border Styles, Dash Styles & Options
+        AdmitSectionGroupCard(title = "৫. বর্ডার, ড্যাশ স্টাইল ও অন্যান্য") {
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(5.dp),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                AdmitCompactPickerBox(
+                    label = "বর্ডার স্টাইল",
+                    valueText = config.borderStyle.labelBn,
+                    options = AdmitBorderStyle.entries,
+                    selectedValue = config.borderStyle,
+                    optionLabel = { it.labelBn },
+                    onSelect = { onUpdateConfig(config.copy(borderStyle = it)) },
+                    modifier = Modifier.weight(1f),
+                    testTag = "admit_card_border_style_picker"
+                )
+                AdmitCompactPickerBox(
+                    label = "ড্যাশ স্টাইল",
+                    valueText = config.dashStyle.labelBn,
+                    options = AdmitDashStyle.entries,
+                    selectedValue = config.dashStyle,
+                    optionLabel = { it.labelBn },
+                    onSelect = { onUpdateConfig(config.copy(dashStyle = it)) },
+                    modifier = Modifier.weight(1.05f),
+                    testTag = "admit_card_dash_style_picker"
+                )
+            }
+            if (config.borderStyle != AdmitBorderStyle.NONE) {
+                Text(
+                    "বর্ডার পুরুত্ব ও কোনা",
+                    fontSize = 9.5.sp,
+                    fontWeight = FontWeight.Medium,
+                    color = SlateMuted
+                )
                 Row(
                     horizontalArrangement = Arrangement.spacedBy(5.dp),
                     verticalAlignment = Alignment.CenterVertically,
@@ -311,6 +351,7 @@ internal fun AdmitLayoutAndStyleTab(
                         selectedValue = config.safeCornerRadiusPt,
                         optionLabel = { r -> if (r < 0.5f) "০ pt (সোজা)" else formatAdmitPtBn(r) },
                         onSelect = { onUpdateConfig(config.copy(cornerRadiusPt = it)) },
+                        enabled = config.borderStyle != AdmitBorderStyle.CORNER_ACCENT,
                         modifier = Modifier.weight(0.75f),
                         testTag = "admit_card_corner_picker"
                     )

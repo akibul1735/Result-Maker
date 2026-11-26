@@ -2,11 +2,13 @@
 
 package com.kgps.result.ui.screens
 
+import android.content.Intent
 import android.graphics.Bitmap
+import android.net.Uri
+import android.provider.MediaStore
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
@@ -16,6 +18,7 @@ import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -67,6 +70,8 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -76,7 +81,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -173,6 +180,9 @@ fun AdmitCardPdfScreen(
     var rollFromText by remember { mutableStateOf("") }
     var rollToText by remember { mutableStateOf("") }
     var showFullscreen by remember { mutableStateOf(false) }
+    var panelHeightFraction by remember { mutableFloatStateOf(0.48f) }
+    var isCustomPanelHeight by remember { mutableStateOf(false) }
+    var previewViewportHeightPx by remember { mutableIntStateOf(0) }
 
     // Back button closes open compact panel first; otherwise exits screen
     if (onBack != null) {
@@ -182,19 +192,61 @@ fun AdmitCardPdfScreen(
         openTab = null
     }
 
-    val signaturePickerLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.PickVisualMedia()
-    ) { uri ->
-        if (uri != null) {
-            scope.launch {
-                val loaded = withContext(Dispatchers.IO) {
-                    AdmitCardLocalStore.saveSignatureFromUri(ctx, uri)
-                }
-                if (loaded != null) {
-                    signatureBitmap = loaded
-                    config = config.copy(showSignatureImage = true)
-                }
+    fun handlePickedSignatureUri(uri: Uri?) {
+        if (uri == null) return
+        scope.launch {
+            val loaded = withContext(Dispatchers.IO) {
+                AdmitCardLocalStore.saveSignatureFromUri(ctx, uri)
             }
+            if (loaded != null) {
+                signatureBitmap = loaded
+                config = config.copy(showSignatureImage = true)
+            } else {
+                Toast.makeText(ctx, "স্বাক্ষরের ছবি লোড করা যায়নি", Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+
+    val signatureIntentLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        handlePickedSignatureUri(result.data?.data)
+    }
+
+    fun openGalleryPicker() {
+        val pickIntent = Intent(Intent.ACTION_PICK, MediaStore.Images.Media.EXTERNAL_CONTENT_URI).apply {
+            type = "image/*"
+        }
+        val chooser = Intent.createChooser(pickIntent, "গ্যালারি থেকে স্বাক্ষর বাছুন")
+        runCatching {
+            signatureIntentLauncher.launch(chooser)
+        }.onFailure {
+            val fallback = Intent.createChooser(
+                Intent(Intent.ACTION_GET_CONTENT).apply {
+                    type = "image/*"
+                    addCategory(Intent.CATEGORY_OPENABLE)
+                },
+                "গ্যালারি থেকে স্বাক্ষর বাছুন"
+            )
+            runCatching { signatureIntentLauncher.launch(fallback) }
+        }
+    }
+
+    fun openFileManagerPicker() {
+        val getContentIntent = Intent(Intent.ACTION_GET_CONTENT).apply {
+            type = "image/*"
+            addCategory(Intent.CATEGORY_OPENABLE)
+            putExtra(Intent.EXTRA_LOCAL_ONLY, false)
+        }
+        val chooser = Intent.createChooser(getContentIntent, "ফাইল ম্যানেজার থেকে স্বাক্ষর বাছুন")
+        runCatching {
+            signatureIntentLauncher.launch(chooser)
+        }.onFailure {
+            val openDocFallback = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+                type = "image/*"
+                addCategory(Intent.CATEGORY_OPENABLE)
+            }
+            runCatching { signatureIntentLauncher.launch(openDocFallback) }
         }
     }
 
@@ -237,8 +289,15 @@ fun AdmitCardPdfScreen(
     }
     val exportName = "প্রবেশপত্র-${classShortBn(config.selectedClass, settings)}-শ্রেণি.pdf"
 
+    val density = LocalDensity.current
     BoxWithConstraints(modifier = modifier.fillMaxSize()) {
-        val overlayMaxHeight = (maxHeight * 0.50f).coerceIn(220.dp, 370.dp)
+        val maxPanelHeight = (maxHeight * 0.90f).coerceAtLeast(240.dp)
+        val overlayTargetHeight = if (previewViewportHeightPx > 0) {
+            with(density) { (previewViewportHeightPx * panelHeightFraction).toDp() }
+                .coerceIn(170.dp, maxPanelHeight)
+        } else {
+            (maxHeight * panelHeightFraction).coerceIn(170.dp, maxPanelHeight)
+        }
 
         Column(modifier = Modifier.fillMaxSize()) {
             // 1. Compact Top Status & Export Action Bar
@@ -331,6 +390,7 @@ fun AdmitCardPdfScreen(
                 modifier = Modifier
                     .weight(1f)
                     .fillMaxWidth()
+                    .onSizeChanged { previewViewportHeightPx = it.height }
             ) {
                 // Full-Size Live Preview (never shrinks when overlay panel opens)
                 Column(
@@ -465,45 +525,92 @@ fun AdmitCardPdfScreen(
                         shape = RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp),
                         modifier = Modifier
                             .fillMaxWidth()
-                            .heightIn(max = overlayMaxHeight)
+                            .let { baseMod ->
+                                if (isCustomPanelHeight) {
+                                    baseMod.height(overlayTargetHeight)
+                                } else {
+                                    baseMod.heightIn(max = overlayTargetHeight)
+                                }
+                            }
                             .testTag("admit_slide_panel")
                     ) {
                         Column(Modifier.fillMaxWidth()) {
-                            // Compact drag handle & title row
-                            Box(
-                                modifier = Modifier.fillMaxWidth().padding(top = 5.dp),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Box(
-                                    modifier = Modifier
-                                        .width(32.dp)
-                                        .height(3.dp)
-                                        .background(SlateOutline, RoundedCornerShape(999.dp))
-                                )
-                            }
-                            Row(
+                            // Draggable top handle & title row (drag up to expand, down to shrink/close)
+                            Column(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .padding(start = 10.dp, end = 4.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.SpaceBetween
+                                    .pointerInput(previewViewportHeightPx) {
+                                        detectVerticalDragGestures(
+                                            onDragStart = { isCustomPanelHeight = true },
+                                            onVerticalDrag = { change, dragAmount ->
+                                                change.consume()
+                                                val denom = if (previewViewportHeightPx > 0) {
+                                                    previewViewportHeightPx.toFloat()
+                                                } else {
+                                                    540f
+                                                }
+                                                panelHeightFraction = (panelHeightFraction - dragAmount / denom)
+                                                    .coerceIn(0.18f, 0.94f)
+                                            },
+                                            onDragEnd = {
+                                                if (panelHeightFraction < 0.24f) {
+                                                    openTab = null
+                                                    panelHeightFraction = 0.48f
+                                                    isCustomPanelHeight = false
+                                                }
+                                            },
+                                            onDragCancel = {
+                                                if (panelHeightFraction < 0.24f) {
+                                                    openTab = null
+                                                    panelHeightFraction = 0.48f
+                                                    isCustomPanelHeight = false
+                                                }
+                                            }
+                                        )
+                                    }
                             ) {
-                                Text(
-                                    text = tabMeta.panelTitle,
-                                    fontWeight = FontWeight.Bold,
-                                    fontSize = 12.sp,
-                                    color = TealDark
-                                )
-                                IconButton(
-                                    onClick = { openTab = null },
-                                    modifier = Modifier.size(36.dp).testTag("admit_panel_close_btn")
+                                Box(
+                                    modifier = Modifier.fillMaxWidth().padding(top = 6.dp, bottom = 2.dp),
+                                    contentAlignment = Alignment.Center
                                 ) {
-                                    Icon(
-                                        Icons.Rounded.KeyboardArrowDown,
-                                        contentDescription = "প্যানেল বন্ধ করুন",
-                                        tint = SlateMuted,
-                                        modifier = Modifier.size(20.dp)
+                                    Box(
+                                        modifier = Modifier
+                                            .width(38.dp)
+                                            .height(4.dp)
+                                            .background(SlateOutline, RoundedCornerShape(999.dp))
                                     )
+                                }
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(start = 10.dp, end = 4.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Column(Modifier.weight(1f)) {
+                                        Text(
+                                            text = tabMeta.panelTitle,
+                                            fontWeight = FontWeight.Bold,
+                                            fontSize = 12.sp,
+                                            color = TealDark
+                                        )
+                                        Text(
+                                            text = "উপরে টেনে বড় করুন · নিচে নামিয়ে ছোট করুন",
+                                            fontSize = 8.5.sp,
+                                            color = SlateMuted
+                                        )
+                                    }
+                                    IconButton(
+                                        onClick = { openTab = null },
+                                        modifier = Modifier.size(36.dp).testTag("admit_panel_close_btn")
+                                    ) {
+                                        Icon(
+                                            Icons.Rounded.KeyboardArrowDown,
+                                            contentDescription = "প্যানেল বন্ধ করুন",
+                                            tint = SlateMuted,
+                                            modifier = Modifier.size(20.dp)
+                                        )
+                                    }
                                 }
                             }
                             HorizontalDivider(color = SlateOutline.copy(alpha = 0.55f))
@@ -672,11 +779,8 @@ fun AdmitCardPdfScreen(
                                             settings = settings,
                                             signatureBitmap = signatureBitmap,
                                             onUpdateConfig = { config = it },
-                                            onPickSignatureImage = {
-                                                signaturePickerLauncher.launch(
-                                                    PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
-                                                )
-                                            },
+                                            onPickFromGallery = ::openGalleryPicker,
+                                            onPickFromFileManager = ::openFileManagerPicker,
                                             onClearSignatureImage = {
                                                 AdmitCardLocalStore.clearSignature(ctx)
                                                 signatureBitmap = null
