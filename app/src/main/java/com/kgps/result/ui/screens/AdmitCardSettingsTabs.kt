@@ -34,6 +34,9 @@ import androidx.compose.material.icons.rounded.KeyboardArrowDown
 import androidx.compose.material.icons.rounded.PhotoLibrary
 import androidx.compose.material.icons.rounded.Remove
 import androidx.compose.material.icons.rounded.UnfoldMore
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -46,6 +49,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -559,6 +563,8 @@ internal fun AdmitSignatureAndInfoTab(
     onPickFromFileManager: () -> Unit,
     onClearSignatureImage: () -> Unit
 ) {
+    var showClearSigConfirm by remember { mutableStateOf(false) }
+
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
         AdmitSectionGroupCard(title = "প্রধান শিক্ষকের স্বাক্ষর") {
             Surface(
@@ -620,7 +626,7 @@ internal fun AdmitSignatureAndInfoTab(
                         }
                         if (signatureBitmap != null) {
                             OutlinedButton(
-                                onClick = onClearSignatureImage,
+                                onClick = { showClearSigConfirm = true },
                                 shape = RoundedCornerShape(7.dp),
                                 contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
                                 border = BorderStroke(1.dp, RoseDanger.copy(alpha = 0.5f)),
@@ -732,5 +738,39 @@ internal fun AdmitSignatureAndInfoTab(
                 testTag = "admit_card_school_addr_input"
             )
         }
+    }
+
+    if (showClearSigConfirm) {
+        AlertDialog(
+            onDismissRequest = { showClearSigConfirm = false },
+            title = { Text("স্বাক্ষর মুছে ফেলবেন?", fontWeight = FontWeight.Bold, fontSize = 15.5.sp) },
+            text = {
+                Text(
+                    "সংরক্ষিত প্রধান শিক্ষকের স্বাক্ষরের ছবি মুছে ফেলা হবে। পরে আবার গ্যালারি বা ফাইল থেকে যুক্ত করতে পারবেন।",
+                    fontSize = 13.sp,
+                    color = SlateText
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        showClearSigConfirm = false
+                        onClearSignatureImage()
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = RoseDanger),
+                    modifier = Modifier.heightIn(min = 48.dp).testTag("confirm_clear_sig_btn")
+                ) {
+                    Text("মুছে ফেলুন", color = Color.White)
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = { showClearSigConfirm = false },
+                    modifier = Modifier.heightIn(min = 48.dp)
+                ) {
+                    Text("বাতিল")
+                }
+            }
+        )
     }
 }

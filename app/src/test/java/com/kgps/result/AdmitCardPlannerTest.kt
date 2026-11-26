@@ -202,4 +202,53 @@ class AdmitCardPlannerTest {
         assertEquals(0.35f, lowerClamped.safeSignatureScale, 0.01f)
         assertEquals(0.08f, lowerClamped.safeMarginInches, 0.01f)
     }
+
+    @Test
+    fun buildMultiClassPages_combinesClassesWithSeparateRoutinesAndTimes() {
+        val settings = Settings()
+        val students = listOf(
+            student(2, 1, "প্রথম"),
+            student(2, 2, "দ্বিতীয়"),
+            student(5, 1, "পঞ্চম এক"),
+            student(5, 2, "পঞ্চম দুই"),
+            student(5, 3, "পঞ্চম তিন")
+        )
+        val routine2 = listOf(ExamRoutineEntry("০১/১২/২০২৬", "মঙ্গলবার", "ইংরেজি"))
+        val routine5 = listOf(
+            ExamRoutineEntry("০১/১২/২০২৬", "মঙ্গলবার", "ইংরেজি"),
+            ExamRoutineEntry("০৮/১২/২০২৬", "মঙ্গলবার", "প্রাথমিক বিজ্ঞান")
+        )
+
+        val pages = AdmitCardPlanner.buildMultiClassPages(
+            students = students,
+            settings = settings,
+            baseConfig = AdmitCardConfig(cardsPerPage = 2, rollOrder = SeatPlanRollOrder.ASCENDING),
+            selectedClasses = listOf(5, 2),
+            routineProvider = { cls -> if (cls == 2) routine2 else routine5 },
+            examTimeProvider = { cls -> if (cls == 2) "সকাল ১০:০০-১১:৩০ টা" else "দুপুর ০১:০০-০৩:৩০ টা" },
+            allowedClassIds = listOf(2, 5)
+        )
+
+        // Allowed class order: Class 2 (2 students -> 1 page) + Class 5 (3 students -> 2 pages) = 3 pages total
+        assertEquals(3, pages.size)
+        assertEquals(listOf(1, 2, 3), pages.map { it.pageNumber })
+        assertTrue(pages.all { it.totalPages == 3 })
+        assertEquals(2, pages[0].items.first().cls)
+        assertEquals("সকাল ১০:০০-১১:৩০ টা", pages[0].config.examTimeLabel)
+        assertEquals(1, pages[0].routineRows.size)
+        assertEquals(5, pages[1].items.first().cls)
+        assertEquals("দুপুর ০১:০০-০৩:৩০ টা", pages[1].config.examTimeLabel)
+        assertEquals(2, pages[1].routineRows.size)
+
+        // Blank card cap allows up to 100
+        val manyBlanks = AdmitCardPlanner.buildPages(
+            students = emptyList(),
+            settings = settings,
+            config = AdmitCardConfig(selectedClass = 5, cardsPerPage = 5, extraBlankCards = 60),
+            routineRows = routine5,
+            allowedClassIds = listOf(5)
+        )
+        assertEquals(12, manyBlanks.size)
+        assertEquals(60, manyBlanks.sumOf { it.items.size })
+    }
 }

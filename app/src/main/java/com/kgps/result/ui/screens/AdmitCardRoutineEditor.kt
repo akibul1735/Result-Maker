@@ -37,6 +37,7 @@ import androidx.compose.material.icons.rounded.PictureAsPdf
 import androidx.compose.material.icons.rounded.RestartAlt
 import androidx.compose.material.icons.rounded.Save
 import androidx.compose.material.icons.rounded.Star
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.DropdownMenu
@@ -50,6 +51,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -133,6 +135,7 @@ internal fun AdmitCardRoutineEditor(
     var datePickerRowIndex by remember { mutableIntStateOf(-1) }
     var showCreateBaseDialog by remember { mutableStateOf(false) }
     var renamingBase by remember { mutableStateOf<BaseRoutineTemplate?>(null) }
+    var deletingBase by remember { mutableStateOf<BaseRoutineTemplate?>(null) }
     var showCopyDialog by remember { mutableStateOf(false) }
 
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -384,11 +387,11 @@ internal fun AdmitCardRoutineEditor(
                             }
                             if (baseRoutines.size > 1) {
                                 Surface(
-                                    onClick = { onDeleteBaseRoutine(activeBase.id) },
+                                    onClick = { deletingBase = activeBase },
                                     color = SlateBg,
                                     border = BorderStroke(1.dp, RoseDanger.copy(alpha = 0.4f)),
                                     shape = RoundedCornerShape(7.dp),
-                                    modifier = Modifier.heightIn(min = 36.dp)
+                                    modifier = Modifier.heightIn(min = 36.dp).testTag("admit_delete_base_btn")
                                 ) {
                                     Row(
                                         verticalAlignment = Alignment.CenterVertically,
@@ -635,6 +638,40 @@ internal fun AdmitCardRoutineEditor(
             onConfirm = { targets, matchSubs, copyTime ->
                 onCopyToClasses(targets, matchSubs, copyTime)
                 showCopyDialog = false
+            }
+        )
+    }
+
+    deletingBase?.let { base ->
+        AlertDialog(
+            onDismissRequest = { deletingBase = null },
+            title = { Text("বেস রুটিন মুছে ফেলবেন?", fontWeight = FontWeight.Bold, fontSize = 15.5.sp) },
+            text = {
+                Text(
+                    "“${base.name}” বেস রুটিনটি মুছে ফেলা হবে। নিশ্চিত কি?",
+                    fontSize = 13.sp,
+                    color = SlateText
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        onDeleteBaseRoutine(base.id)
+                        deletingBase = null
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = RoseDanger),
+                    modifier = Modifier.heightIn(min = 48.dp).testTag("confirm_delete_base_btn")
+                ) {
+                    Text("মুছে ফেলুন", color = Color.White)
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = { deletingBase = null },
+                    modifier = Modifier.heightIn(min = 48.dp)
+                ) {
+                    Text("বাতিল")
+                }
             }
         )
     }

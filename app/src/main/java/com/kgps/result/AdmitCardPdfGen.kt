@@ -317,7 +317,7 @@ object AdmitCardPdfGen {
             PdfGen.shrinkMixedToFit(badgeDp, badgeText, leftW - 8f, step = 0.2f, minSize = 5.8f)
             PdfGen.drawMixedText(c, badgeText, leftCenterX, curY, badgeDp, Paint.Align.CENTER)
 
-            // Reserve signature area at bottom-right of Left Panel (optional horizontal signature line)
+            // Reserve signature area at bottom-right of Left Panel (exact text-width line + clean non-overlapping gaps)
             val sigLabelText = cfg.headTeacherTitle.trim().ifBlank { "প্রধান শিক্ষকের স্বাক্ষর" }
             val sigLabelDp = PdfGen.dualPaint(
                 ctx,
@@ -327,29 +327,41 @@ object AdmitCardPdfGen {
                 enFont,
                 0xFF000000.toInt()
             )
-            PdfGen.shrinkMixedToFit(sigLabelDp, sigLabelText, leftW * 0.56f, step = 0.2f, minSize = 5.2f)
+            PdfGen.shrinkMixedToFit(sigLabelDp, sigLabelText, leftW * 0.54f, step = 0.2f, minSize = 5.0f)
+            val sigTextW = PdfGen.measureMixedText(sigLabelText, sigLabelDp)
+            val sigHalfTextW = sigTextW / 2f
+            val sigAnchorX = (leftEndX - (leftW * 0.26f)).coerceIn(
+                contentLeft + 2f + sigHalfTextW,
+                (leftEndX - 2f - sigHalfTextW).coerceAtLeast(contentLeft + 2f + sigHalfTextW)
+            )
             val sigLabelY = contentBottom - (1.5f * heightScale)
-            val sigAnchorX = leftEndX - (leftW * 0.26f)
             PdfGen.drawMixedText(c, sigLabelText, sigAnchorX, sigLabelY, sigLabelDp, Paint.Align.CENTER)
 
+            val sigFm = sigLabelDp.bn.fontMetrics
+            val sigTextTopY = sigLabelY + sigFm.ascent // ascent is negative; actual top edge of Bengali glyphs/matra
+
             val sigAreaBottom = if (cfg.showSignatureLine) {
-                val sigLineY = sigLabelY - (8.8f * heightScale)
-                val lineHalfW = (leftW * 0.22f)
+                val labelToLineGap = (4.2f * heightScale).coerceIn(3.2f, 6.5f)
+                val sigLineY = sigTextTopY - labelToLineGap
+                val lineHalfW = sigHalfTextW.coerceAtLeast(10f)
                 val linePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
                     color = 0xFF000000.toInt()
                     style = Paint.Style.STROKE
                     strokeWidth = 0.65f
                 }
                 c.drawLine(sigAnchorX - lineHalfW, sigLineY, sigAnchorX + lineHalfW, sigLineY, linePaint)
-                sigLineY - (2.0f * heightScale)
+                val lineToSignGap = (4.8f * heightScale).coerceIn(3.6f, 7.5f)
+                sigLineY - lineToSignGap
             } else {
-                sigLabelY - (6.5f * heightScale)
+                val labelToSignGap = (4.5f * heightScale).coerceIn(3.4f, 7.0f)
+                sigTextTopY - labelToSignGap
             }
 
-            val sigAreaTop = (contentBottom - (38f * heightScale)).coerceAtLeast(curY + 8f)
+            val preferredSigTop = (contentBottom - (46f * heightScale)).coerceAtLeast(curY + 8f)
+            val sigAreaTop = min(preferredSigTop, (sigAreaBottom - 14f * heightScale).coerceAtLeast(curY + 6f))
             if (cfg.showSignatureImage && signatureBitmap != null && sigAreaBottom > sigAreaTop + 6f) {
                 val maxAllowedW = (leftW * 0.62f).coerceAtLeast(20f)
-                val maxAllowedH = (sigAreaBottom - (curY + 6f)).coerceAtLeast(10f)
+                val maxAllowedH = (sigAreaBottom - (curY + 6f)).coerceAtLeast(8f)
                 val maxSigW = min(maxAllowedW, (leftW * 0.44f) * cfg.safeSignatureScale)
                 val maxSigH = min(maxAllowedH, (sigAreaBottom - sigAreaTop) * cfg.safeSignatureScale)
                 val bmpScale = min(maxSigW / signatureBitmap.width, maxSigH / signatureBitmap.height)

@@ -216,6 +216,10 @@ fun AdmitCardPdfScreen(
     var previewPanOffset by remember { mutableStateOf(Offset.Zero) }
     var previewPageBoxSize by remember { mutableStateOf(IntSize.Zero) }
     var topAiMenuOpen by remember { mutableStateOf(false) }
+    var pendingExportAction by remember { mutableStateOf<AdmitExportAction?>(null) }
+    var selectedExportClasses by remember(defaultConfig.selectedClass) {
+        mutableStateOf(setOf(defaultConfig.selectedClass))
+    }
 
     val directAiRepository = remember(ctx) { DirectGeminiAiRepository(ctx.applicationContext) }
     var aiRoutineBusy by remember { mutableStateOf(false) }
@@ -402,7 +406,6 @@ fun AdmitCardPdfScreen(
         append(" · ${bn(config.safeCardsPerPage.toString())} কার্ড/পৃষ্ঠা")
         append(" · ${bn(totalCardCount.toString())} জন")
     }
-    val exportName = "প্রবেশপত্র-${classShortBn(config.selectedClass, settings)}-শ্রেণি.pdf"
 
     val density = LocalDensity.current
     BoxWithConstraints(modifier = modifier.fillMaxSize()) {
@@ -521,20 +524,20 @@ fun AdmitCardPdfScreen(
                         )
                     }
                     IconButton(
-                        onClick = { onPrint(pages, signatureBitmap, "প্রবেশপত্র") },
-                        enabled = pages.isNotEmpty(),
+                        onClick = { pendingExportAction = AdmitExportAction.PRINT },
+                        enabled = allowedClasses.isNotEmpty(),
                         modifier = Modifier.size(38.dp).testTag("admit_card_print_btn")
                     ) {
                         Icon(
                             Icons.Rounded.Print,
                             contentDescription = "প্রিন্ট করুন",
-                            tint = if (pages.isNotEmpty()) TealPrimary else SlateMuted.copy(alpha = 0.45f),
+                            tint = if (allowedClasses.isNotEmpty()) TealPrimary else SlateMuted.copy(alpha = 0.45f),
                             modifier = Modifier.size(18.dp)
                         )
                     }
                     Button(
-                        onClick = { onExportPdf(pages, signatureBitmap, exportName) },
-                        enabled = pages.isNotEmpty(),
+                        onClick = { pendingExportAction = AdmitExportAction.PDF },
+                        enabled = allowedClasses.isNotEmpty(),
                         colors = ButtonDefaults.buttonColors(containerColor = TealPrimary),
                         shape = RoundedCornerShape(8.dp),
                         contentPadding = PaddingValues(horizontal = 9.dp, vertical = 0.dp),
@@ -880,6 +883,9 @@ fun AdmitCardPdfScreen(
                                                 )
                                                 routineRows = AdmitCardLocalStore.loadRoutine(ctx, newCls, settings)
                                                 activeBaseId = null
+                                                if (selectedExportClasses.size <= 1) {
+                                                    selectedExportClasses = setOf(newCls)
+                                                }
                                             },
                                             onUpdateConfig = { config = it },
                                             onRollFromChange = { digits ->
@@ -907,6 +913,9 @@ fun AdmitCardPdfScreen(
                                                     examTimeLabel = AdmitCardLocalStore.loadExamTime(ctx, newCls, settings)
                                                 )
                                                 routineRows = AdmitCardLocalStore.loadRoutine(ctx, newCls, settings)
+                                                if (selectedExportClasses.size <= 1) {
+                                                    selectedExportClasses = setOf(newCls)
+                                                }
                                             },
                                             onAddBaseRoutine = { newName ->
                                                 val sourceBase = baseRoutines.find { it.id == activeBaseId }
@@ -1180,6 +1189,37 @@ fun AdmitCardPdfScreen(
                     "${bn(selection.classPlans.size.toString())}টি শ্রেণির রুটিন AI থেকে বসানো হয়েছে",
                     Toast.LENGTH_SHORT
                 ).show()
+            }
+        )
+    }
+
+    pendingExportAction?.let { exportAction ->
+        AdmitMultiClassExportDialog(
+            action = exportAction,
+            allowedClasses = allowedClasses,
+            currentClass = config.selectedClass,
+            countByClass = countByClass,
+            initialSelection = selectedExportClasses,
+            settings = settings,
+            students = students,
+            config = config,
+            routineProvider = { c ->
+                if (c == config.selectedClass) routineRows
+                else AdmitCardLocalStore.loadRoutine(ctx, c, settings)
+            },
+            examTimeProvider = { c ->
+                if (c == config.selectedClass) config.examTimeLabel
+                else AdmitCardLocalStore.loadExamTime(ctx, c, settings)
+            },
+            onDismiss = { pendingExportAction = null },
+            onConfirm = { chosenClasses, combinedPages, fileNameOrJob ->
+                selectedExportClasses = chosenClasses
+                pendingExportAction = null
+                if (exportAction == AdmitExportAction.PDF) {
+                    onExportPdf(combinedPages, signatureBitmap, fileNameOrJob)
+                } else {
+                    onPrint(combinedPages, signatureBitmap, fileNameOrJob)
+                }
             }
         )
     }

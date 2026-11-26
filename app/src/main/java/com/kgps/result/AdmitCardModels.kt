@@ -457,7 +457,7 @@ object AdmitCardPlanner {
                 isBlank = false
             )
         }
-        val blankCards = List(config.extraBlankCards.coerceIn(0, 40)) {
+        val blankCards = List(config.extraBlankCards.coerceIn(0, 100)) {
             AdmitCardItem(
                 studentName = "",
                 cls = cls,
@@ -483,6 +483,43 @@ object AdmitCardPlanner {
                 routineRows = cleanedRoutine,
                 config = config
             )
+        }
+    }
+
+    fun buildMultiClassPages(
+        students: List<Student>,
+        settings: Settings,
+        baseConfig: AdmitCardConfig,
+        selectedClasses: List<Int>,
+        routineProvider: (Int) -> List<ExamRoutineEntry>,
+        examTimeProvider: (Int) -> String,
+        allowedClassIds: List<Int> = activeClassIds(settings)
+    ): List<AdmitCardPageSpec> {
+        val orderedClasses = allowedClassIds.filter { it in selectedClasses }.ifEmpty {
+            selectedClasses.filter { it in allowedClassIds }.distinct()
+        }
+        if (orderedClasses.isEmpty()) return emptyList()
+
+        val combined = mutableListOf<AdmitCardPageSpec>()
+        orderedClasses.forEach { cls ->
+            val clsConfig = baseConfig.copy(
+                selectedClass = cls,
+                examTimeLabel = examTimeProvider(cls).ifBlank { defaultExamTimeForClass(cls, settings) }
+            )
+            val clsPages = buildPages(
+                students = students,
+                settings = settings,
+                config = clsConfig,
+                routineRows = routineProvider(cls),
+                allowedClassIds = allowedClassIds
+            )
+            combined.addAll(clsPages)
+        }
+
+        val total = combined.size
+        if (total == 0) return emptyList()
+        return combined.mapIndexed { idx, page ->
+            page.copy(pageNumber = idx + 1, totalPages = total)
         }
     }
 }
