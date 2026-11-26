@@ -389,11 +389,13 @@ object AdmitCardPdfGen {
                     val entry = dataRows.getOrNull(i)
                     val dateTxt = entry?.date?.let { AdmitCardPlanner.formatDigits(it, cfg.numeralMode) }.orEmpty()
                     val dayTxt = entry?.day.orEmpty()
-                    val subjTxt = entry?.subject.orEmpty()
 
                     drawCenteredTableCell(ctx, c, dateTxt, rLeft, ry, colDateW, rowH, cellTextPt, false, bnFont, enFont)
                     drawCenteredTableCell(ctx, c, dayTxt, col1End, ry, colDayW, rowH, cellTextPt, false, bnFont, enFont)
-                    drawCenteredTableCell(ctx, c, subjTxt, col2End, ry, colSubjW, rowH, cellTextPt, false, bnFont, enFont)
+                    drawRoutineSubjectCell(
+                        ctx, c, entry?.nonEmptySubjects ?: emptyList(),
+                        col2End, ry, colSubjW, rowH, cellTextPt, bnFont, enFont
+                    )
                 }
 
                 // Crisp outer border of routine table
@@ -429,6 +431,49 @@ object AdmitCardPdfGen {
         PdfGen.drawMixedText(c, label, x, y, labelDp, Paint.Align.LEFT)
         val labelW = PdfGen.measureMixedText(label, labelDp)
         PdfGen.drawMixedText(c, value, x + labelW, y, valueDp, Paint.Align.LEFT)
+    }
+
+    private fun drawRoutineSubjectCell(
+        ctx: Context?,
+        c: Canvas,
+        subjects: List<String>,
+        x: Float,
+        y: Float,
+        w: Float,
+        h: Float,
+        size: Float,
+        bnFont: String,
+        enFont: String
+    ) {
+        val joined = subjects.joinToString(" / ")
+        if (subjects.size <= 1) {
+            drawCenteredTableCell(ctx, c, joined, x, y, w, h, size, false, bnFont, enFont)
+            return
+        }
+        val availW = (w - 4f).coerceAtLeast(8f)
+        val probeDp = PdfGen.dualPaint(ctx, size, false, bnFont, enFont, 0xFF000000.toInt())
+        PdfGen.shrinkMixedToFit(probeDp, joined, availW, step = 0.2f, minSize = 4.6f)
+        if (probeDp.textSize >= 6.4f || h < 14f) {
+            c.drawRect(x, y, x + w, y + h, tableLinePaint)
+            val fm = probeDp.bn.fontMetrics
+            val baselineY = y + h / 2f - (fm.ascent + fm.descent) / 2f
+            PdfGen.drawMixedText(c, joined, x + w / 2f, baselineY, probeDp, Paint.Align.CENTER)
+        } else {
+            c.drawRect(x, y, x + w, y + h, tableLinePaint)
+            val line1 = subjects.first()
+            val line2 = subjects.drop(1).joinToString(" / ")
+            val lineSize = min(size * 0.85f, (h * 0.36f)).coerceIn(4.6f, 7.6f)
+            val dp1 = PdfGen.dualPaint(ctx, lineSize, false, bnFont, enFont, 0xFF000000.toInt())
+            PdfGen.shrinkMixedToFit(dp1, line1, availW, step = 0.2f, minSize = 4.4f)
+            val dp2 = PdfGen.dualPaint(ctx, lineSize, false, bnFont, enFont, 0xFF000000.toInt())
+            PdfGen.shrinkMixedToFit(dp2, line2, availW, step = 0.2f, minSize = 4.4f)
+            val fm1 = dp1.bn.fontMetrics
+            val fm2 = dp2.bn.fontMetrics
+            val y1 = y + h * 0.32f - (fm1.ascent + fm1.descent) / 2f
+            val y2 = y + h * 0.72f - (fm2.ascent + fm2.descent) / 2f
+            PdfGen.drawMixedText(c, line1, x + w / 2f, y1, dp1, Paint.Align.CENTER)
+            PdfGen.drawMixedText(c, line2, x + w / 2f, y2, dp2, Paint.Align.CENTER)
+        }
     }
 
     private fun drawCenteredTableCell(

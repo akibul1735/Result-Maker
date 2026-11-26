@@ -3,6 +3,7 @@
 package com.kgps.result.ui.screens
 
 import android.graphics.Bitmap
+import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
@@ -158,7 +159,7 @@ fun AdmitCardPdfScreen(
             verticalGapPt = 10f,
             bnFontId = "kalpurush",
             enFontId = settings.pdfEnglishFont.ifBlank { "times_new_roman" },
-            examTimeLabel = AdmitCardLocalStore.loadExamTime(ctx)
+            examTimeLabel = AdmitCardLocalStore.loadExamTime(ctx, defaultCls, settings)
         )
     }
 
@@ -166,6 +167,10 @@ fun AdmitCardPdfScreen(
     var routineRows by remember(defaultConfig.selectedClass) {
         mutableStateOf(AdmitCardLocalStore.loadRoutine(ctx, defaultConfig.selectedClass, settings))
     }
+    var baseRoutines by remember {
+        mutableStateOf(AdmitCardLocalStore.loadBaseRoutines(ctx, settings))
+    }
+    var activeBaseId by remember { mutableStateOf<String?>(null) }
     var signatureBitmap by remember { mutableStateOf(AdmitCardLocalStore.loadSignatureBitmap(ctx)) }
     var setupExpanded by remember { mutableStateOf(true) }
     var activeSetupTab by remember { mutableIntStateOf(0) } // 0=শ্রেণি ও রোল, 1=রুটিন ও স্বাক্ষর, 2=লেআউট ও ফন্ট
@@ -306,11 +311,13 @@ fun AdmitCardPdfScreen(
                     }
                     IconButton(
                         onClick = {
-                            config = defaultConfig.copy(examTimeLabel = "দুপুর ০১:০০-০৩:৩০ টা")
-                            AdmitCardLocalStore.saveExamTime(ctx, config.examTimeLabel)
+                            val resetTime = AdmitCardPlanner.defaultExamTimeForClass(defaultConfig.selectedClass, settings)
+                            config = defaultConfig.copy(examTimeLabel = resetTime)
+                            AdmitCardLocalStore.saveExamTime(ctx, defaultConfig.selectedClass, resetTime)
                             val resetRoutine = AdmitCardPlanner.defaultRoutineForClass(defaultConfig.selectedClass, settings)
                             routineRows = resetRoutine
                             AdmitCardLocalStore.saveRoutine(ctx, defaultConfig.selectedClass, resetRoutine)
+                            activeBaseId = null
                             rollFromText = ""
                             rollToText = ""
                         },
@@ -353,8 +360,12 @@ fun AdmitCardPdfScreen(
                                 rollFromText = rollFromText,
                                 rollToText = rollToText,
                                 onSelectClass = { newCls ->
-                                    config = config.copy(selectedClass = newCls)
+                                    config = config.copy(
+                                        selectedClass = newCls,
+                                        examTimeLabel = AdmitCardLocalStore.loadExamTime(ctx, newCls, settings)
+                                    )
                                     routineRows = AdmitCardLocalStore.loadRoutine(ctx, newCls, settings)
+                                    activeBaseId = null
                                 },
                                 onUpdateConfig = { config = it },
                                 onRollFromChange = { digits ->
@@ -370,17 +381,124 @@ fun AdmitCardPdfScreen(
                             1 -> AdmitRoutineAndSignatureTab(
                                 config = config,
                                 settings = settings,
+                                allowedClasses = allowedClasses,
+                                baseRoutines = baseRoutines,
+                                activeBaseId = activeBaseId,
                                 routineRows = routineRows,
                                 signatureBitmap = signatureBitmap,
+                                onSelectBase = { baseId ->
+                                    activeBaseId = baseId
+                                },
+                                onSelectClass = { newCls ->
+                                    activeBaseId = null
+                                    config = config.copy(
+                                        selectedClass = newCls,
+                                        examTimeLabel = AdmitCardLocalStore.loadExamTime(ctx, newCls, settings)
+                                    )
+                                    routineRows = AdmitCardLocalStore.loadRoutine(ctx, newCls, settings)
+                                },
+                                onAddBaseRoutine = { newName ->
+                                    val sourceBase = baseRoutines.find { it.id == activeBaseId }
+                                    val seedRows = sourceBase?.rows ?: routineRows
+                                    val seedTime = sourceBase?.examTimeLabel ?: config.examTimeLabel
+                                    val created = com.kgps.result.BaseRoutineTemplate(
+                                        id = "base_${System.currentTimeMillis()}",
+                                        name = newName,
+                                        examTimeLabel = seedTime,
+                                        rows = seedRows.map { it.copy(id = java.util.UUID.randomUUID().toString()) }
+                                    )
+                                    val next = baseRoutines + created
+                                    baseRoutines = next
+                                    AdmitCardLocalStore.saveBaseRoutines(ctx, next)
+                                    activeBaseId = created.id
+                                },
+                                onRenameBaseRoutine = { baseId, newName ->
+                                    val next = baseRoutines.map { if (it.id == baseId) it.copy(name = newName) else it }
+                                    baseRoutines = next
+                                    AdmitCardLocalStore.saveBaseRoutines(ctx, next)
+                                },
+                                onDeleteBaseRoutine = { baseId ->
+                                    if (baseRoutines.size > 1) {
+                                        val next = baseRoutines.filterNot { it.id == baseId }
+                                        baseRoutines = next
+                                        AdmitCardLocalStore.saveBaseRoutines(ctx, next)
+                                        if (activeBaseId == baseId) {
+                                            activeBaseId = next.firstOrNull()?.id
+                                        }
+                                    }
+                                },
+                                onUpdateActiveExamTime = { newTime ->
+                                    val currentBaseId = activeBaseId
+                                    if (currentBaseId != null) {
+                                        val next = baseRoutines.map {
+                                            if (it.id == currentBaseId) it.copy(examTimeLabel = newTime) else it
+                                        }
+                                        baseRoutines = next
+                                        AdmitCardLocalStore.saveBaseRoutines(ctx, next)
+                                    } else {
+                                        config = config.copy(examTimeLabel = newTime)
+                                        AdmitCardLocalStore.saveExamTime(ctx, config.selectedClass, newTime)
+                                    }
+                                },
+                                onUpdateActiveRows = { updated ->
+                                    val currentBaseId = activeBaseId
+                                    if (currentBaseId != null) {
+                                        val next = baseRoutines.map {
+                                            if (it.id == currentBaseId) it.copy(rows = updated) else it
+                                        }
+                                        baseRoutines = next
+                                        AdmitCardLocalStore.saveBaseRoutines(ctx, next)
+                                    } else {
+                                        routineRows = updated
+                                        AdmitCardLocalStore.saveRoutine(ctx, config.selectedClass, updated)
+                                    }
+                                },
+                                onResetClassDefault = {
+                                    val reset = AdmitCardPlanner.defaultRoutineForClass(config.selectedClass, settings)
+                                    routineRows = reset
+                                    AdmitCardLocalStore.saveRoutine(ctx, config.selectedClass, reset)
+                                    Toast.makeText(ctx, "শ্রেণির মূল বিষয় লোড হয়েছে", Toast.LENGTH_SHORT).show()
+                                },
+                                onSaveActiveFeedback = {
+                                    val currentBase = baseRoutines.find { it.id == activeBaseId }
+                                    if (currentBase != null) {
+                                        AdmitCardLocalStore.saveBaseRoutines(ctx, baseRoutines)
+                                        Toast.makeText(ctx, "${currentBase.name} সংরক্ষিত হয়েছে", Toast.LENGTH_SHORT).show()
+                                    } else {
+                                        AdmitCardLocalStore.saveRoutine(ctx, config.selectedClass, routineRows)
+                                        AdmitCardLocalStore.saveExamTime(ctx, config.selectedClass, config.examTimeLabel)
+                                        Toast.makeText(ctx, "${classShortBn(config.selectedClass, settings)} শ্রেণির রুটিন সংরক্ষিত হয়েছে", Toast.LENGTH_SHORT).show()
+                                    }
+                                },
+                                onCopyToClasses = { targetClasses, matchClassSubjects, copyExamTime ->
+                                    val currentBase = baseRoutines.find { it.id == activeBaseId }
+                                    val sourceRows = currentBase?.rows ?: routineRows
+                                    val sourceTime = currentBase?.examTimeLabel ?: config.examTimeLabel
+                                    targetClasses.forEach { targetCls ->
+                                        val resolved = AdmitCardPlanner.resolveRoutineForClass(
+                                            baseRows = sourceRows,
+                                            targetCls = targetCls,
+                                            settings = settings,
+                                            matchClassSubjects = matchClassSubjects
+                                        )
+                                        AdmitCardLocalStore.saveRoutine(ctx, targetCls, resolved)
+                                        if (copyExamTime) {
+                                            AdmitCardLocalStore.saveExamTime(ctx, targetCls, sourceTime)
+                                        }
+                                        if (targetCls == config.selectedClass) {
+                                            routineRows = resolved
+                                            if (copyExamTime) {
+                                                config = config.copy(examTimeLabel = sourceTime)
+                                            }
+                                        }
+                                    }
+                                    Toast.makeText(
+                                        ctx,
+                                        "${bn(targetClasses.size.toString())}টি শ্রেণিতে রুটিন কপি হয়েছে",
+                                        Toast.LENGTH_SHORT
+                                    ).show()
+                                },
                                 onUpdateConfig = { config = it },
-                                onExamTimeChange = { newTime ->
-                                    config = config.copy(examTimeLabel = newTime)
-                                    AdmitCardLocalStore.saveExamTime(ctx, newTime)
-                                },
-                                onUpdateRoutineRows = { updated ->
-                                    routineRows = updated
-                                    AdmitCardLocalStore.saveRoutine(ctx, config.selectedClass, updated)
-                                },
                                 onPickSignatureImage = {
                                     signaturePickerLauncher.launch(
                                         PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)

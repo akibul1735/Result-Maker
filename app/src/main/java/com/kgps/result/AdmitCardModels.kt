@@ -1,15 +1,7 @@
 package com.kgps.result
 
-import android.content.Context
-import android.graphics.Bitmap
-import android.graphics.BitmapFactory
-import android.graphics.Color
-import android.net.Uri
-import org.json.JSONArray
-import org.json.JSONObject
-import java.io.File
-import java.io.FileOutputStream
 import java.util.Calendar
+import java.util.TimeZone
 import java.util.UUID
 import kotlin.math.max
 import kotlin.math.min
@@ -18,7 +10,36 @@ data class ExamRoutineEntry(
     val id: String = UUID.randomUUID().toString(),
     val date: String = "",
     val day: String = "",
-    val subject: String = ""
+    val subjects: List<String> = listOf("")
+) {
+    constructor(date: String, day: String, subject: String) : this(
+        id = UUID.randomUUID().toString(),
+        date = date,
+        day = day,
+        subjects = parseSubjects(subject)
+    )
+
+    val nonEmptySubjects: List<String>
+        get() = subjects.map { it.trim() }.filter { it.isNotEmpty() }
+
+    val subject: String
+        get() = nonEmptySubjects.joinToString(" / ")
+
+    companion object {
+        fun parseSubjects(raw: String): List<String> {
+            val parts = raw.split(Regex("\\s*/\\s*|\\s+অথবা\\s+"))
+                .map { it.trim() }
+                .filter { it.isNotEmpty() }
+            return if (parts.isEmpty()) listOf("") else parts
+        }
+    }
+}
+
+data class BaseRoutineTemplate(
+    val id: String,
+    val name: String,
+    val examTimeLabel: String = "দুপুর ০১:০০-০৩:৩০ টা",
+    val rows: List<ExamRoutineEntry> = emptyList()
 )
 
 data class AdmitCardConfig(
@@ -88,6 +109,14 @@ object AdmitCardPlanner {
         "শনিবার"
     )
 
+    val EXAM_TIME_PRESETS = listOf(
+        "১০:০০-১১:৩০ টা",
+        "১০:০০-১২:৩০ টা",
+        "১১:৩০-০১:০০ টা",
+        "০১:০০-০৩:০০ টা",
+        "০১:০০-০৩:৩০ টা"
+    )
+
     fun formatDigits(raw: String, mode: SeatPlanNumeralMode): String = when (mode) {
         SeatPlanNumeralMode.BENGALI -> bn(raw)
         SeatPlanNumeralMode.ENGLISH -> fromBn(raw)
@@ -124,6 +153,13 @@ object AdmitCardPlanner {
         return "${resolvedExamTitle(cfg, settings)} এর রুটিন"
     }
 
+    fun defaultExamTimeForClass(cls: Int, settings: Settings): String =
+        if (syllabusTierForClass(cls, settings) <= 2) {
+            "সকাল ১০:০০-১১:৩০ টা"
+        } else {
+            "দুপুর ০১:০০-০৩:৩০ টা"
+        }
+
     fun routineSubjectLabel(sub: Sub): String = when (sub.key) {
         "BAN" -> "বাংলা"
         "ENG" -> "ইংরেজি"
@@ -138,6 +174,26 @@ object AdmitCardPlanner {
         else -> sub.bn
     }
 
+    fun classSubjectLabelsFor(cls: Int, settings: Settings): List<String> {
+        val allSubs = subjectsFor(cls, RELIGIONS.first(), settings)
+        val preferredOrder = listOf("ENG", "BAN", "BGW", "MATH", "REL", "SCI", "SOC", "PE", "ART", "MUSIC")
+        return allSubs
+            .sortedBy { sub ->
+                val idx = preferredOrder.indexOf(sub.key)
+                if (idx >= 0) idx else preferredOrder.size
+            }
+            .map { routineSubjectLabel(it) }
+            .distinct()
+    }
+
+    fun allSchoolSubjectLabels(settings: Settings): List<String> {
+        val out = linkedSetOf<String>()
+        activeClassIds(settings).forEach { cls ->
+            out.addAll(classSubjectLabelsFor(cls, settings))
+        }
+        return out.toList()
+    }
+
     fun defaultRoutineForClass(
         cls: Int,
         settings: Settings
@@ -145,7 +201,6 @@ object AdmitCardPlanner {
         val allSubs = subjectsFor(cls, RELIGIONS.first(), settings)
         val writtenFirst = allSubs.filter { it.written > 0 }
         val selected = if (writtenFirst.isNotEmpty()) writtenFirst else allSubs
-        // Arrange English -> Bangla -> BGW -> Math -> Rel -> Science if matching standard 6 subjects, else natural order
         val preferredOrder = listOf("ENG", "BAN", "BGW", "MATH", "REL", "SCI", "SOC")
         val ordered = selected.sortedBy { sub ->
             val idx = preferredOrder.indexOf(sub.key)
@@ -155,8 +210,150 @@ object AdmitCardPlanner {
             ExamRoutineEntry(
                 date = "",
                 day = "",
-                subject = routineSubjectLabel(sub)
+                subjects = listOf(routineSubjectLabel(sub))
             )
+        }
+    }
+
+    fun defaultBaseRoutines(settings: Settings): List<BaseRoutineTemplate> = listOf(
+        BaseRoutineTemplate(
+            id = "base_1",
+            name = "মূল বেস ১ (৩য়–৫ম)",
+            examTimeLabel = "দুপুর ০১:০০-০৩:৩০ টা",
+            rows = defaultRoutineForClass(5, settings)
+        ),
+        BaseRoutineTemplate(
+            id = "base_2",
+            name = "বেস ২ (প্রাক–২য়)",
+            examTimeLabel = "সকাল ১০:০০-১১:৩০ টা",
+            rows = defaultRoutineForClass(2, settings)
+        )
+    )
+
+    private fun canonicalKey(label: String): String {
+        val norm = label.trim()
+            .replace("য়", "য়")
+            .replace("ড়", "ড়")
+            .lowercase()
+        return when {
+            norm.startsWith("বাংলাদেশ") -> "BGW"
+            norm == "বাংলা" -> "BAN"
+            norm == "ইংরেজি" || norm == "english" -> "ENG"
+            norm.contains("গণিত") -> "MATH"
+            norm.contains("সামাজিক বিজ্ঞান") -> "SOC"
+            norm.contains("বিজ্ঞান") -> "SCI"
+            norm.contains("ধর্ম") -> "REL"
+            norm.contains("শারীরিক") || norm.contains("স্বাস্থ্য") -> "PE"
+            norm.contains("শিল্পকলা") || norm.contains("চারু") -> "ART"
+            norm.contains("সংগীত") -> "MUSIC"
+            else -> norm
+        }
+    }
+
+    /**
+     * Resolves a Base Routine into a class-specific routine:
+     * - Handles multiple subjects on the same day AND "অথবা (/)" alternatives.
+     * - Automatically picks the subject(s) belonging to [targetCls] when curriculum differs,
+     *   omitting days whose subjects belong exclusively to other class tiers,
+     *   while preserving custom non-curriculum subjects cleanly.
+     */
+    fun resolveRoutineForClass(
+        baseRows: List<ExamRoutineEntry>,
+        targetCls: Int,
+        settings: Settings,
+        matchClassSubjects: Boolean = true
+    ): List<ExamRoutineEntry> {
+        if (!matchClassSubjects) {
+            return baseRows.map { row ->
+                row.copy(
+                    id = UUID.randomUUID().toString(),
+                    subjects = row.subjects.ifEmpty { listOf("") }
+                )
+            }
+        }
+
+        val targetSubs = subjectsFor(targetCls, RELIGIONS.first(), settings)
+        val targetMap = targetSubs.associate { sub ->
+            sub.key to routineSubjectLabel(sub)
+        }
+        val allOtherKeys = activeClassIds(settings)
+            .flatMap { c -> subjectsFor(c, RELIGIONS.first(), settings).map { it.key } }
+            .toSet() - targetMap.keys
+
+        return baseRows.mapNotNull { row ->
+            val rawSlots = row.nonEmptySubjects
+            if (rawSlots.isEmpty()) {
+                return@mapNotNull row.copy(id = UUID.randomUUID().toString(), subjects = listOf(""))
+            }
+            val resolvedSubjects = linkedSetOf<String>()
+            var sawAnyOtherTierCurriculum = false
+
+            rawSlots.forEach { slot ->
+                val alternatives = slot.split(Regex("\\s*/\\s*|\\s+অথবা\\s+"))
+                    .map { it.trim() }
+                    .filter { it.isNotEmpty() }
+
+                alternatives.forEach { cand ->
+                    val key = canonicalKey(cand)
+                    val matchedTarget = targetMap[key]
+                    if (matchedTarget != null) {
+                        resolvedSubjects.add(matchedTarget)
+                    } else if (key in allOtherKeys) {
+                        sawAnyOtherTierCurriculum = true
+                    } else {
+                        // Custom user subject (e.g., মৌখিক, সাধারণ জ্ঞান) — always keep
+                        resolvedSubjects.add(cand)
+                    }
+                }
+            }
+
+            if (resolvedSubjects.isEmpty() && sawAnyOtherTierCurriculum) {
+                null
+            } else {
+                ExamRoutineEntry(
+                    id = UUID.randomUUID().toString(),
+                    date = row.date,
+                    day = row.day,
+                    subjects = if (resolvedSubjects.isEmpty()) listOf("") else resolvedSubjects.toList()
+                )
+            }
+        }
+    }
+
+    fun formatDateAndDayFromUtcMillis(utcMillis: Long): Pair<String, String> {
+        val cal = Calendar.getInstance(TimeZone.getTimeZone("UTC")).apply {
+            timeInMillis = utcMillis
+        }
+        val d = cal.get(Calendar.DAY_OF_MONTH).toString().padStart(2, '0')
+        val m = (cal.get(Calendar.MONTH) + 1).toString().padStart(2, '0')
+        val y = cal.get(Calendar.YEAR).toString()
+        val dateBn = bn("$d/$m/$y")
+        val dayBn = weekdayFromCalendar(cal)
+        return dateBn to dayBn
+    }
+
+    fun parseDateToUtcMillis(rawDate: String): Long? {
+        val ascii = fromBn(rawDate.trim())
+        val parts = ascii.split('/', '-', '.')
+            .map { it.trim() }
+            .filter { it.isNotEmpty() }
+        if (parts.size != 3) return null
+        val day = parts[0].toIntOrNull() ?: return null
+        val month = parts[1].toIntOrNull() ?: return null
+        val yearRaw = parts[2].toIntOrNull() ?: return null
+        val year = if (yearRaw < 100) 2000 + yearRaw else yearRaw
+        if (month !in 1..12 || day !in 1..31 || year !in 1900..2100) return null
+        val cal = Calendar.getInstance(TimeZone.getTimeZone("UTC")).apply {
+            isLenient = false
+            clear()
+            set(Calendar.YEAR, year)
+            set(Calendar.MONTH, month - 1)
+            set(Calendar.DAY_OF_MONTH, day)
+        }
+        return try {
+            cal.timeInMillis
+        } catch (_: Exception) {
+            null
         }
     }
 
@@ -165,36 +362,22 @@ object AdmitCardPlanner {
      * and returns the matching Bangla weekday name, or empty string if unparseable.
      */
     fun inferBanglaWeekday(rawDate: String): String {
-        val ascii = fromBn(rawDate.trim())
-        val parts = ascii.split('/', '-', '.')
-            .map { it.trim() }
-            .filter { it.isNotEmpty() }
-        if (parts.size != 3) return ""
-        val day = parts[0].toIntOrNull() ?: return ""
-        val month = parts[1].toIntOrNull() ?: return ""
-        val yearRaw = parts[2].toIntOrNull() ?: return ""
-        val year = if (yearRaw < 100) 2000 + yearRaw else yearRaw
-        if (month !in 1..12 || day !in 1..31 || year !in 1900..2100) return ""
-        val cal = Calendar.getInstance().apply {
-            isLenient = false
-            set(Calendar.YEAR, year)
-            set(Calendar.MONTH, month - 1)
-            set(Calendar.DAY_OF_MONTH, day)
+        val millis = parseDateToUtcMillis(rawDate) ?: return ""
+        val cal = Calendar.getInstance(TimeZone.getTimeZone("UTC")).apply {
+            timeInMillis = millis
         }
-        return try {
-            when (cal.get(Calendar.DAY_OF_WEEK)) {
-                Calendar.SUNDAY -> "রবিবার"
-                Calendar.MONDAY -> "সোমবার"
-                Calendar.TUESDAY -> "মঙ্গলবার"
-                Calendar.WEDNESDAY -> "বুধবার"
-                Calendar.THURSDAY -> "বৃহস্পতিবার"
-                Calendar.FRIDAY -> "শুক্রবার"
-                Calendar.SATURDAY -> "শনিবার"
-                else -> ""
-            }
-        } catch (_: Exception) {
-            ""
-        }
+        return weekdayFromCalendar(cal)
+    }
+
+    private fun weekdayFromCalendar(cal: Calendar): String = when (cal.get(Calendar.DAY_OF_WEEK)) {
+        Calendar.SUNDAY -> "রবিবার"
+        Calendar.MONDAY -> "সোমবার"
+        Calendar.TUESDAY -> "মঙ্গলবার"
+        Calendar.WEDNESDAY -> "বুধবার"
+        Calendar.THURSDAY -> "বৃহস্পতিবার"
+        Calendar.FRIDAY -> "শুক্রবার"
+        Calendar.SATURDAY -> "শনিবার"
+        else -> ""
     }
 
     fun buildPages(
@@ -255,157 +438,5 @@ object AdmitCardPlanner {
                 config = config
             )
         }
-    }
-}
-
-object AdmitCardLocalStore {
-    private const val PREFS_NAME = "admit_card_prefs"
-    private const val SIGNATURE_FILE = "admit_head_signature.png"
-
-    fun loadRoutine(ctx: Context, cls: Int, settings: Settings): List<ExamRoutineEntry> {
-        val prefs = ctx.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-        val raw = prefs.getString("routine_cls_$cls", null)
-        if (!raw.isNullOrBlank()) {
-            try {
-                val arr = JSONArray(raw)
-                val parsed = buildList {
-                    for (i in 0 until arr.length()) {
-                        val o = arr.optJSONObject(i) ?: continue
-                        add(
-                            ExamRoutineEntry(
-                                id = o.optString("id").ifBlank { UUID.randomUUID().toString() },
-                                date = o.optString("date"),
-                                day = o.optString("day"),
-                                subject = o.optString("subject")
-                            )
-                        )
-                    }
-                }
-                if (parsed.isNotEmpty()) return parsed
-            } catch (_: Exception) {
-                // Fall back to default class subjects
-            }
-        }
-        return AdmitCardPlanner.defaultRoutineForClass(cls, settings)
-    }
-
-    fun saveRoutine(ctx: Context, cls: Int, rows: List<ExamRoutineEntry>) {
-        val arr = JSONArray()
-        rows.forEach { r ->
-            arr.put(
-                JSONObject().apply {
-                    put("id", r.id)
-                    put("date", r.date)
-                    put("day", r.day)
-                    put("subject", r.subject)
-                }
-            )
-        }
-        ctx.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-            .edit()
-            .putString("routine_cls_$cls", arr.toString())
-            .apply()
-    }
-
-    fun loadExamTime(ctx: Context): String {
-        val prefs = ctx.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-        return prefs.getString("exam_time", null) ?: "দুপুর ০১:০০-০৩:৩০ টা"
-    }
-
-    fun saveExamTime(ctx: Context, examTime: String) {
-        ctx.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-            .edit()
-            .putString("exam_time", examTime)
-            .apply()
-    }
-
-    fun signatureFile(ctx: Context): File = File(ctx.filesDir, SIGNATURE_FILE)
-
-    fun loadSignatureBitmap(ctx: Context): Bitmap? {
-        val f = signatureFile(ctx)
-        if (!f.exists() || f.length() <= 0L) return null
-        return try {
-            BitmapFactory.decodeFile(f.absolutePath)
-        } catch (_: Exception) {
-            null
-        }
-    }
-
-    fun clearSignature(ctx: Context) {
-        runCatching {
-            val f = signatureFile(ctx)
-            if (f.exists()) f.delete()
-        }
-    }
-
-    /**
-     * Reads picked image via ContentResolver, scales to compact stamp dimensions,
-     * removes bright white paper background cleanly for crisp PDF stamping, and persists PNG.
-     */
-    fun saveSignatureFromUri(ctx: Context, uri: Uri): Bitmap? {
-        val boundsOpts = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-        ctx.contentResolver.openInputStream(uri)?.use { inp ->
-            BitmapFactory.decodeStream(inp, null, boundsOpts)
-        }
-        val srcW = boundsOpts.outWidth
-        val srcH = boundsOpts.outHeight
-        if (srcW <= 0 || srcH <= 0) return null
-
-        var sample = 1
-        while ((srcW / sample) > 960 || (srcH / sample) > 480) {
-            sample *= 2
-        }
-        val decodeOpts = BitmapFactory.Options().apply { inSampleSize = sample }
-        val rawBmp = ctx.contentResolver.openInputStream(uri)?.use { inp ->
-            BitmapFactory.decodeStream(inp, null, decodeOpts)
-        } ?: return null
-
-        val maxW = 480
-        val maxH = 240
-        val scale = min(maxW.toFloat() / rawBmp.width, maxH.toFloat() / rawBmp.height).coerceAtMost(1f)
-        val targetW = (rawBmp.width * scale).toInt().coerceAtLeast(1)
-        val targetH = (rawBmp.height * scale).toInt().coerceAtLeast(1)
-        val scaled = if (targetW != rawBmp.width || targetH != rawBmp.height) {
-            Bitmap.createScaledBitmap(rawBmp, targetW, targetH, true).also {
-                if (it !== rawBmp) rawBmp.recycle()
-            }
-        } else {
-            rawBmp
-        }
-
-        val cleaned = stripWhitePaperBackground(scaled)
-        if (cleaned !== scaled) scaled.recycle()
-
-        FileOutputStream(signatureFile(ctx)).use { out ->
-            cleaned.compress(Bitmap.CompressFormat.PNG, 100, out)
-        }
-        return cleaned
-    }
-
-    private fun stripWhitePaperBackground(src: Bitmap): Bitmap {
-        val w = src.width
-        val h = src.height
-        val pixels = IntArray(w * h)
-        src.getPixels(pixels, 0, w, 0, 0, w, h)
-        for (i in pixels.indices) {
-            val px = pixels[i]
-            val a = Color.alpha(px)
-            if (a == 0) continue
-            val r = Color.red(px)
-            val g = Color.green(px)
-            val b = Color.blue(px)
-            val maxC = max(r, max(g, b))
-            val minC = min(r, min(g, b))
-            val spread = maxC - minC
-            val lum = (r + g + b) / 3
-            // Make near-white neutral paper pixels transparent while keeping ink crisp
-            if (lum >= 225 && spread <= 28) {
-                pixels[i] = Color.TRANSPARENT
-            } else if (lum >= 195 && spread <= 32) {
-                val nextA = ((225 - lum).coerceIn(0, 30) * a / 30).coerceIn(0, a)
-                pixels[i] = Color.argb(nextA, r, g, b)
-            }
-        }
-        return Bitmap.createBitmap(pixels, w, h, Bitmap.Config.ARGB_8888)
     }
 }

@@ -26,12 +26,9 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Add
-import androidx.compose.material.icons.rounded.ArrowDownward
-import androidx.compose.material.icons.rounded.ArrowUpward
 import androidx.compose.material.icons.rounded.DeleteOutline
 import androidx.compose.material.icons.rounded.KeyboardArrowDown
 import androidx.compose.material.icons.rounded.Remove
-import androidx.compose.material.icons.rounded.RestartAlt
 import androidx.compose.material.icons.rounded.UnfoldMore
 import androidx.compose.material.icons.rounded.Upload
 import androidx.compose.material3.DropdownMenu
@@ -68,10 +65,10 @@ import androidx.compose.ui.unit.sp
 import com.kgps.result.AdmitCardConfig
 import com.kgps.result.AdmitCardPlanner
 import com.kgps.result.BENGALI_PDF_FONT_LIST
+import com.kgps.result.BaseRoutineTemplate
 import com.kgps.result.ENGLISH_PDF_FONT_LIST
 import com.kgps.result.ExamRoutineEntry
 import com.kgps.result.PdfGen
-import com.kgps.result.RELIGIONS
 import com.kgps.result.SeatPlanBorderStyle
 import com.kgps.result.SeatPlanBorderWeight
 import com.kgps.result.SeatPlanNumeralMode
@@ -80,7 +77,6 @@ import com.kgps.result.Settings
 import com.kgps.result.bn
 import com.kgps.result.classShortBn
 import com.kgps.result.fromBn
-import com.kgps.result.subjectsFor
 import com.kgps.result.termNameBn
 import com.kgps.result.ui.theme.RoseDanger
 import com.kgps.result.ui.theme.SlateBg
@@ -457,136 +453,45 @@ internal fun AdmitClassAndRollTab(
 internal fun AdmitRoutineAndSignatureTab(
     config: AdmitCardConfig,
     settings: Settings,
+    allowedClasses: List<Int>,
+    baseRoutines: List<BaseRoutineTemplate>,
+    activeBaseId: String?,
     routineRows: List<ExamRoutineEntry>,
     signatureBitmap: Bitmap?,
+    onSelectBase: (String) -> Unit,
+    onSelectClass: (Int) -> Unit,
+    onAddBaseRoutine: (String) -> Unit,
+    onRenameBaseRoutine: (String, String) -> Unit,
+    onDeleteBaseRoutine: (String) -> Unit,
+    onUpdateActiveExamTime: (String) -> Unit,
+    onUpdateActiveRows: (List<ExamRoutineEntry>) -> Unit,
+    onResetClassDefault: () -> Unit,
+    onSaveActiveFeedback: () -> Unit,
+    onCopyToClasses: (targetClasses: List<Int>, matchClassSubjects: Boolean, copyExamTime: Boolean) -> Unit,
     onUpdateConfig: (AdmitCardConfig) -> Unit,
-    onExamTimeChange: (String) -> Unit,
-    onUpdateRoutineRows: (List<ExamRoutineEntry>) -> Unit,
     onPickSignatureImage: () -> Unit,
     onClearSignatureImage: () -> Unit
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        AdmitSectionGroupCard(title = "পরীক্ষার রুটিন (${classShortBn(config.selectedClass, settings)} শ্রেণি)") {
-            OutlinedTextField(
-                value = config.examTimeLabel,
-                onValueChange = onExamTimeChange,
-                label = { Text("পরীক্ষার সময়", fontSize = 11.sp) },
-                placeholder = { Text("দুপুর ০১:০০-০৩:৩০ টা", fontSize = 11.sp) },
-                singleLine = true,
-                modifier = Modifier.fillMaxWidth().testTag("admit_card_exam_time_input")
-            )
-            OutlinedTextField(
-                value = config.customRoutineTitle,
-                onValueChange = { onUpdateConfig(config.copy(customRoutineTitle = it)) },
-                label = { Text("কাস্টম রুটিন শিরোনাম (ঐচ্ছিক)", fontSize = 11.sp) },
-                placeholder = {
-                    Text(AdmitCardPlanner.resolvedRoutineTitle(config.copy(customRoutineTitle = ""), settings), fontSize = 11.sp)
-                },
-                singleLine = true,
-                modifier = Modifier.fillMaxWidth()
-            )
-
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                OutlinedButton(
-                    onClick = {
-                        onUpdateRoutineRows(routineRows + ExamRoutineEntry(date = "", day = "", subject = ""))
-                    },
-                    shape = RoundedCornerShape(9.dp),
-                    modifier = Modifier.weight(1f).heightIn(min = 48.dp).testTag("admit_card_add_row_btn")
-                ) {
-                    Icon(Icons.Rounded.Add, contentDescription = null, modifier = Modifier.size(16.dp))
-                    Spacer(Modifier.width(4.dp))
-                    Text("নতুন বিষয় যোগ", fontSize = 11.5.sp)
-                }
-                OutlinedButton(
-                    onClick = {
-                        onUpdateRoutineRows(AdmitCardPlanner.defaultRoutineForClass(config.selectedClass, settings))
-                    },
-                    shape = RoundedCornerShape(9.dp),
-                    modifier = Modifier.weight(1f).heightIn(min = 48.dp).testTag("admit_card_reset_routine_btn")
-                ) {
-                    Icon(Icons.Rounded.RestartAlt, contentDescription = null, modifier = Modifier.size(16.dp))
-                    Spacer(Modifier.width(4.dp))
-                    Text("শ্রেণির মূল বিষয়", fontSize = 11.5.sp)
-                }
-            }
-            Text(
-                "টিপস: DD/MM/YYYY তারিখ লিখলে বাংলা বার স্বয়ংক্রিয়ভাবে বসবে",
-                fontSize = 10.5.sp,
-                color = SlateMuted
-            )
-
-            // Quick-add missing subjects from class curriculum (e.g. PE, Art, Music)
-            val classSubjects = remember(config.selectedClass, settings) {
-                subjectsFor(config.selectedClass, RELIGIONS.first(), settings)
-                    .map { AdmitCardPlanner.routineSubjectLabel(it) }
-            }
-            val existingLower = remember(routineRows) {
-                routineRows.map { it.subject.trim().lowercase() }.toSet()
-            }
-            val missingSubjects = classSubjects.filter { it.trim().lowercase() !in existingLower }
-            if (missingSubjects.isNotEmpty()) {
-                FlowRow(
-                    horizontalArrangement = Arrangement.spacedBy(5.dp),
-                    verticalArrangement = Arrangement.spacedBy(4.dp)
-                ) {
-                    missingSubjects.forEach { subj ->
-                        FilterChip(
-                            selected = false,
-                            onClick = {
-                                onUpdateRoutineRows(routineRows + ExamRoutineEntry(date = "", day = "", subject = subj))
-                            },
-                            label = { Text("+ $subj", fontSize = 10.5.sp) },
-                            colors = appFilterChipColors(),
-                            border = appFilterChipBorder(false),
-                            modifier = Modifier.heightIn(min = 40.dp)
-                        )
-                    }
-                }
-            }
-
-            routineRows.forEachIndexed { idx, row ->
-                RoutineRowEditorCard(
-                    index = idx,
-                    totalCount = routineRows.size,
-                    entry = row,
-                    onUpdateEntry = { updated ->
-                        onUpdateRoutineRows(routineRows.mapIndexed { i, item -> if (i == idx) updated else item })
-                    },
-                    onMoveUp = {
-                        if (idx > 0) {
-                            val mutable = routineRows.toMutableList()
-                            val prev = mutable[idx - 1]
-                            mutable[idx - 1] = mutable[idx]
-                            mutable[idx] = prev
-                            onUpdateRoutineRows(mutable)
-                        }
-                    },
-                    onMoveDown = {
-                        if (idx < routineRows.lastIndex) {
-                            val mutable = routineRows.toMutableList()
-                            val next = mutable[idx + 1]
-                            mutable[idx + 1] = mutable[idx]
-                            mutable[idx] = next
-                            onUpdateRoutineRows(mutable)
-                        }
-                    },
-                    onDelete = {
-                        onUpdateRoutineRows(routineRows.filterIndexed { i, _ -> i != idx })
-                    }
-                )
-            }
-
-            AdmitCompactSwitchRow(
-                label = "রুটিনের নিচে ১টি ফাঁকা সারি দেখাও",
-                checked = config.includeBlankRoutineRow,
-                onCheckedChange = { onUpdateConfig(config.copy(includeBlankRoutineRow = it)) },
-                testTag = "admit_card_blank_routine_row"
-            )
-        }
+        AdmitRoutineEditorSectionHeader(
+            config = config,
+            settings = settings,
+            allowedClasses = allowedClasses,
+            baseRoutines = baseRoutines,
+            activeBaseId = activeBaseId,
+            routineRows = routineRows,
+            onSelectBase = onSelectBase,
+            onSelectClass = onSelectClass,
+            onAddBaseRoutine = onAddBaseRoutine,
+            onRenameBaseRoutine = onRenameBaseRoutine,
+            onDeleteBaseRoutine = onDeleteBaseRoutine,
+            onUpdateActiveExamTime = onUpdateActiveExamTime,
+            onUpdateActiveRows = onUpdateActiveRows,
+            onResetClassDefault = onResetClassDefault,
+            onSaveActiveFeedback = onSaveActiveFeedback,
+            onCopyToClasses = onCopyToClasses,
+            onUpdateConfig = onUpdateConfig
+        )
 
         AdmitSectionGroupCard(title = "প্রধান শিক্ষকের স্বাক্ষর") {
             Surface(
@@ -682,127 +587,44 @@ internal fun AdmitRoutineAndSignatureTab(
 }
 
 @Composable
-private fun RoutineRowEditorCard(
-    index: Int,
-    totalCount: Int,
-    entry: ExamRoutineEntry,
-    onUpdateEntry: (ExamRoutineEntry) -> Unit,
-    onMoveUp: () -> Unit,
-    onMoveDown: () -> Unit,
-    onDelete: () -> Unit
+private fun AdmitRoutineEditorSectionHeader(
+    config: AdmitCardConfig,
+    settings: Settings,
+    allowedClasses: List<Int>,
+    baseRoutines: List<BaseRoutineTemplate>,
+    activeBaseId: String?,
+    routineRows: List<ExamRoutineEntry>,
+    onSelectBase: (String) -> Unit,
+    onSelectClass: (Int) -> Unit,
+    onAddBaseRoutine: (String) -> Unit,
+    onRenameBaseRoutine: (String, String) -> Unit,
+    onDeleteBaseRoutine: (String) -> Unit,
+    onUpdateActiveExamTime: (String) -> Unit,
+    onUpdateActiveRows: (List<ExamRoutineEntry>) -> Unit,
+    onResetClassDefault: () -> Unit,
+    onSaveActiveFeedback: () -> Unit,
+    onCopyToClasses: (targetClasses: List<Int>, matchClassSubjects: Boolean, copyExamTime: Boolean) -> Unit,
+    onUpdateConfig: (AdmitCardConfig) -> Unit
 ) {
-    var weekdayMenuOpen by remember { mutableStateOf(false) }
-
-    Surface(
-        color = MaterialTheme.colorScheme.surface,
-        border = BorderStroke(1.dp, SlateOutline.copy(alpha = 0.85f)),
-        shape = RoundedCornerShape(10.dp),
-        modifier = Modifier.fillMaxWidth()
-    ) {
-        Column(
-            modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
-            verticalArrangement = Arrangement.spacedBy(5.dp)
-        ) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween,
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Text(
-                    "বিষয় #${bn((index + 1).toString())}",
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    color = TealDark
-                )
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    IconButton(
-                        onClick = onMoveUp,
-                        enabled = index > 0,
-                        modifier = Modifier.size(48.dp)
-                    ) {
-                        Icon(Icons.Rounded.ArrowUpward, contentDescription = "উপরে তুলুন", modifier = Modifier.size(16.dp))
-                    }
-                    IconButton(
-                        onClick = onMoveDown,
-                        enabled = index < totalCount - 1,
-                        modifier = Modifier.size(48.dp)
-                    ) {
-                        Icon(Icons.Rounded.ArrowDownward, contentDescription = "নিচে নামান", modifier = Modifier.size(16.dp))
-                    }
-                    IconButton(
-                        onClick = onDelete,
-                        modifier = Modifier.size(48.dp).testTag("admit_card_del_row_$index")
-                    ) {
-                        Icon(Icons.Rounded.DeleteOutline, contentDescription = "সারি মুছুন", tint = RoseDanger, modifier = Modifier.size(16.dp))
-                    }
-                }
-            }
-
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                OutlinedTextField(
-                    value = entry.date,
-                    onValueChange = { newDate ->
-                        val inferredDay = AdmitCardPlanner.inferBanglaWeekday(newDate)
-                        val nextDay = if (inferredDay.isNotEmpty()) inferredDay else entry.day
-                        onUpdateEntry(entry.copy(date = newDate, day = nextDay))
-                    },
-                    label = { Text("তারিখ", fontSize = 10.5.sp) },
-                    placeholder = { Text("০১/১২/২০২৬", fontSize = 10.5.sp) },
-                    singleLine = true,
-                    modifier = Modifier.weight(1.05f).testTag("admit_card_row_date_$index")
-                )
-
-                Box(modifier = Modifier.weight(0.95f)) {
-                    OutlinedTextField(
-                        value = entry.day,
-                        onValueChange = { newDay ->
-                            onUpdateEntry(entry.copy(day = newDay))
-                        },
-                        label = { Text("বার", fontSize = 10.5.sp) },
-                        placeholder = { Text("মঙ্গলবার", fontSize = 10.5.sp) },
-                        singleLine = true,
-                        trailingIcon = {
-                            IconButton(
-                                onClick = { weekdayMenuOpen = true },
-                                modifier = Modifier.size(40.dp)
-                            ) {
-                                Icon(Icons.Rounded.KeyboardArrowDown, contentDescription = "বার বাছাই", modifier = Modifier.size(18.dp))
-                            }
-                        },
-                        modifier = Modifier.fillMaxWidth().testTag("admit_card_row_day_$index")
-                    )
-                    DropdownMenu(
-                        expanded = weekdayMenuOpen,
-                        onDismissRequest = { weekdayMenuOpen = false }
-                    ) {
-                        AdmitCardPlanner.BANGLA_WEEKDAYS.forEach { wd ->
-                            DropdownMenuItem(
-                                text = { Text(wd, fontSize = 13.sp) },
-                                onClick = {
-                                    onUpdateEntry(entry.copy(day = wd))
-                                    weekdayMenuOpen = false
-                                }
-                            )
-                        }
-                    }
-                }
-            }
-
-            OutlinedTextField(
-                value = entry.subject,
-                onValueChange = { newSubj ->
-                    onUpdateEntry(entry.copy(subject = newSubj))
-                },
-                label = { Text("বিষয়ের নাম", fontSize = 10.5.sp) },
-                placeholder = { Text("যেমন: বাংলা", fontSize = 10.5.sp) },
-                singleLine = true,
-                modifier = Modifier.fillMaxWidth().testTag("admit_card_row_subj_$index")
-            )
-        }
-    }
+    AdmitCardRoutineEditor(
+        config = config,
+        settings = settings,
+        allowedClasses = allowedClasses,
+        baseRoutines = baseRoutines,
+        activeBaseId = activeBaseId,
+        classRoutineRows = routineRows,
+        onSelectBase = onSelectBase,
+        onSelectClass = onSelectClass,
+        onAddBaseRoutine = onAddBaseRoutine,
+        onRenameBaseRoutine = onRenameBaseRoutine,
+        onDeleteBaseRoutine = onDeleteBaseRoutine,
+        onUpdateActiveExamTime = onUpdateActiveExamTime,
+        onUpdateActiveRows = onUpdateActiveRows,
+        onResetClassDefault = onResetClassDefault,
+        onSaveActiveFeedback = onSaveActiveFeedback,
+        onCopyToClasses = onCopyToClasses,
+        onUpdateConfig = onUpdateConfig
+    )
 }
 
 @Composable

@@ -109,4 +109,47 @@ class AdmitCardPlannerTest {
         assertEquals("৩য় প্রান্তিক মূল্যায়ন - ২০২৬", AdmitCardPlanner.resolvedExamTitle(cfg, settings))
         assertEquals("৩য় প্রান্তিক মূল্যায়ন - ২০২৬ এর রুটিন", AdmitCardPlanner.resolvedRoutineTitle(cfg, settings))
     }
+
+    @Test
+    fun calendarDateHelpers_and_multiSubjectResolution_workPerClass() {
+        val settings = Settings()
+        val millis = AdmitCardPlanner.parseDateToUtcMillis("২৬/১১/২০২৬")
+        assertTrue(millis != null)
+        val (dateBn, dayBn) = AdmitCardPlanner.formatDateAndDayFromUtcMillis(millis!!)
+        assertEquals("২৬/১১/২০২৬", dateBn)
+        assertEquals("বৃহস্পতিবার", dayBn)
+
+        val baseRows = listOf(
+            ExamRoutineEntry(date = "০১/১২/২০২৬", day = "মঙ্গলবার", subjects = listOf("ইংরেজি")),
+            ExamRoutineEntry(
+                date = "০৩/১২/২০২৬",
+                day = "বৃহস্পতিবার",
+                subjects = listOf("বাংলাদেশ ও বিশ্বপরিচয়", "সামাজিক বিজ্ঞান ও বিজ্ঞান")
+            ),
+            ExamRoutineEntry(date = "০৬/১২/২০২৬", day = "রবিবার", subjects = listOf("প্রাথমিক বিজ্ঞান অথবা মৌখিক")),
+            ExamRoutineEntry(date = "০৭/১২/২০২৬", day = "সোমবার", subjects = listOf("বাংলা", "ধর্ম ও নৈতিক শিক্ষা"))
+        )
+
+        assertEquals("বাংলা / ধর্ম ও নৈতিক শিক্ষা", baseRows[3].subject)
+
+        val cls5 = AdmitCardPlanner.resolveRoutineForClass(baseRows, targetCls = 5, settings = settings)
+        assertEquals(4, cls5.size)
+        assertEquals(listOf("বাংলাদেশ ও বিশ্বপরিচয়"), cls5[1].nonEmptySubjects)
+        assertEquals(listOf("প্রাথমিক বিজ্ঞান", "মৌখিক"), cls5[2].nonEmptySubjects)
+        assertEquals(listOf("বাংলা", "ধর্ম ও নৈতিক শিক্ষা"), cls5[3].nonEmptySubjects)
+
+        val cls2 = AdmitCardPlanner.resolveRoutineForClass(baseRows, targetCls = 2, settings = settings)
+        assertEquals(4, cls2.size)
+        assertEquals(listOf("সামাজিক বিজ্ঞান ও বিজ্ঞান"), cls2[1].nonEmptySubjects)
+        // Class 2 doesn't have প্রাথমিক বিজ্ঞান, so it resolves cleanly to the custom alternative "মৌখিক"
+        assertEquals(listOf("মৌখিক"), cls2[2].nonEmptySubjects)
+
+        // A day containing ONLY upper-tier subjects is omitted cleanly for lower classes
+        val upperOnlyDay = listOf(ExamRoutineEntry(date = "০৮/১২/২০২৬", day = "মঙ্গলবার", subjects = listOf("প্রাথমিক বিজ্ঞান")))
+        val cls1Resolved = AdmitCardPlanner.resolveRoutineForClass(upperOnlyDay, targetCls = 1, settings = settings)
+        assertTrue(cls1Resolved.isEmpty())
+
+        val defaults = AdmitCardPlanner.defaultBaseRoutines(settings)
+        assertEquals(2, defaults.size)
+    }
 }
