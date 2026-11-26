@@ -2,6 +2,7 @@
 
 package com.kgps.result
 
+import android.graphics.Bitmap
 import android.graphics.Color as AndroidColor
 import android.os.Build
 import android.os.Bundle
@@ -121,6 +122,7 @@ import com.kgps.result.cloud.onGoogleSignInClicked
 import com.kgps.result.cloud.signOutFromGoogle
 import com.kgps.result.ui.components.AddCustomClassDialog
 import com.kgps.result.ui.components.SummaryTableConfigCard
+import com.kgps.result.ui.screens.AdmitCardPdfScreen
 import com.kgps.result.ui.screens.AiAssistantScreen
 import com.kgps.result.ui.screens.AuthScreen
 import com.kgps.result.ui.screens.BasicStudentImportDialog
@@ -688,6 +690,33 @@ fun ResultMakerWorkspace(
             }
         }
     }
+    var pendingAdmitCardPdf by remember { mutableStateOf<Pair<List<AdmitCardPageSpec>, Bitmap?>?>(null) }
+    val admitCardPdfLauncher = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/pdf")) { uri ->
+        val payload = pendingAdmitCardPdf
+        if (uri != null && payload != null && payload.first.isNotEmpty()) {
+            val (pagesToWrite, sigBmp) = payload
+            workspaceScope.launch {
+                val result = runCatching {
+                    withContext(Dispatchers.IO) {
+                        ctx.contentResolver.openOutputStream(uri)?.use { out ->
+                            AdmitCardPdfGen.write(
+                                ctx = ctx,
+                                pages = pagesToWrite,
+                                settings = settings,
+                                signatureBitmap = sigBmp,
+                                out = out
+                            )
+                        }
+                    }
+                }
+                result.onSuccess {
+                    vm.showMessage("প্রবেশপত্র PDF সংরক্ষিত হয়েছে (${bn(pagesToWrite.size.toString())} পৃষ্ঠা)")
+                }.onFailure { e ->
+                    vm.showMessage("PDF তৈরি করা যায়নি: ${e.message ?: "ত্রুটি"}")
+                }
+            }
+        }
+    }
     val pdfLauncher = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/pdf")) { uri ->
         val listToWrite = pendingPdfStudents
         if (uri != null && listToWrite.isNotEmpty()) {
@@ -747,11 +776,13 @@ fun ResultMakerWorkspace(
     val isBlankSheet = section == NavSection.BLANK_SHEET
     val isSeatPlan = section == NavSection.SEAT_PLAN
     val isTabulation = section == NavSection.TABULATION
+    val isAdmitCard = section == NavSection.ADMIT_CARD
     val secondaryTitle = when {
         isSettings -> "সেটিংস, সদস্য ও ব্যাকআপ"
         isBlankSheet -> "ফাঁকা ফর্ম / শিট PDF"
         isSeatPlan -> "আসন বিন্যাস (সিট প্ল্যান)"
         isTabulation -> "ফলাফল টেবিল (ট্যাবুলেশন)"
+        isAdmitCard -> "প্রবেশপত্র (Admit Card)"
         else -> null
     }
     val showPrimaryChrome = !isEditing && secondaryTitle == null
@@ -764,7 +795,7 @@ fun ResultMakerWorkspace(
         }
     }
 
-    BackHandler(enabled = !isEditing && (section == NavSection.ROSTER || section == NavSection.SHEET || section == NavSection.ASSISTANT || section == NavSection.BLANK_SHEET || section == NavSection.SEAT_PLAN || section == NavSection.TABULATION)) {
+    BackHandler(enabled = !isEditing && (section == NavSection.ROSTER || section == NavSection.SHEET || section == NavSection.ASSISTANT || section == NavSection.BLANK_SHEET || section == NavSection.SEAT_PLAN || section == NavSection.TABULATION || section == NavSection.ADMIT_CARD)) {
         vm.navigate(NavSection.DASHBOARD)
     }
 
@@ -792,6 +823,7 @@ fun ResultMakerWorkspace(
                             isBlankSheet -> "blank_sheet_back_btn"
                             isSeatPlan -> "seat_plan_back_btn"
                             isTabulation -> "tabulation_back_btn"
+                            isAdmitCard -> "admit_card_back_btn"
                             else -> "settings_back_btn"
                         },
                         onBackFromSecondary = { vm.navigate(NavSection.DASHBOARD) },
@@ -809,6 +841,7 @@ fun ResultMakerWorkspace(
                         onOpenBlankSheetPdf = vm::openBlankSheetPdf,
                         onOpenSeatPlanPdf = vm::openSeatPlanPdf,
                         onOpenTabulationPdf = vm::openTabulationPdf,
+                        onOpenAdmitCardPdf = vm::openAdmitCardPdf,
                         onOpenSchoolHub = onOpenSchoolHub,
                         onRequestSignOut = {
                             if (vm.isLocalPreviewMode) onSignOut() else askSignOut = true
@@ -994,6 +1027,7 @@ fun ResultMakerWorkspace(
                                     onOpenBlankSheetPdf = vm::openBlankSheetPdf,
                                     onOpenSeatPlanPdf = vm::openSeatPlanPdf,
                                     onOpenTabulationPdf = vm::openTabulationPdf,
+                                    onOpenAdmitCardPdf = vm::openAdmitCardPdf,
                                     onPrintBatch = { batchList, jobName ->
                                         if (!permissions.canExportPdf) {
                                             vm.showMessage("প্রিন্ট করার অনুমতি আপনার নেই")
@@ -1355,6 +1389,77 @@ fun ResultMakerWorkspace(
                                     }
                                 }
 
+                                NavSection.ADMIT_CARD -> if (!permissions.canExportPdf) {
+                                    Column(
+                                        Modifier.fillMaxSize().padding(24.dp),
+                                        verticalArrangement = Arrangement.Center,
+                                        horizontalAlignment = Alignment.CenterHorizontally
+                                    ) {
+                                        Icon(Icons.Rounded.Lock, contentDescription = null, tint = AmberNotice, modifier = Modifier.size(36.dp))
+                                        Text(
+                                            "প্রবেশপত্র PDF তৈরির অনুমতি আপনার নেই",
+                                            fontWeight = FontWeight.Bold,
+                                            fontSize = 15.sp,
+                                            color = SlateText,
+                                            modifier = Modifier.padding(top = 10.dp)
+                                        )
+                                        Text(
+                                            "অ্যাডমিন আপনার জন্য PDF অনুমতি চালু করলে এখান থেকে প্রবেশপত্র তৈরি ও প্রিন্ট করতে পারবেন।",
+                                            fontSize = 12.sp,
+                                            color = SlateMuted,
+                                            modifier = Modifier.padding(top = 4.dp, bottom = 12.dp)
+                                        )
+                                        Button(onClick = { vm.navigate(NavSection.DASHBOARD) }) {
+                                            Text("ড্যাশবোর্ডে ফিরুন")
+                                        }
+                                    }
+                                } else {
+                                    val allowedCls = permissions.effectiveClasses().toSet()
+                                    val allowedStudents = students
+                                        .filter { it.cls in allowedCls }
+                                        .sortedWith(compareBy({ it.cls }, { it.roll }))
+                                    Column(
+                                        modifier = Modifier.fillMaxSize().padding(horizontal = 8.dp, vertical = 4.dp),
+                                        horizontalAlignment = Alignment.CenterHorizontally
+                                    ) {
+                                        Box(Modifier.widthIn(max = 920.dp).fillMaxSize()) {
+                                            AdmitCardPdfScreen(
+                                                students = allowedStudents,
+                                                settings = settings,
+                                                permissions = permissions,
+                                                initialClass = cls,
+                                                onExportPdf = { pages, sigBmp, fileName ->
+                                                    if (!permissions.canExportPdf) {
+                                                        vm.showMessage("PDF তৈরি করার অনুমতি আপনার নেই")
+                                                    } else if (pages.isEmpty()) {
+                                                        vm.showMessage("PDF তৈরির জন্য কোনো পৃষ্ঠা নেই")
+                                                    } else {
+                                                        pendingAdmitCardPdf = pages to sigBmp
+                                                        admitCardPdfLauncher.launch(fileName)
+                                                    }
+                                                },
+                                                onPrint = { pages, sigBmp, jobName ->
+                                                    if (!permissions.canExportPdf) {
+                                                        vm.showMessage("প্রিন্ট করার অনুমতি আপনার নেই")
+                                                    } else if (pages.isEmpty()) {
+                                                        vm.showMessage("প্রিন্ট করার জন্য কোনো পৃষ্ঠা নেই")
+                                                    } else {
+                                                        AdmitCardPdfGen.print(
+                                                            ctx = ctx,
+                                                            pages = pages,
+                                                            settings = settings,
+                                                            signatureBitmap = sigBmp,
+                                                            jobName = jobName
+                                                        )
+                                                    }
+                                                },
+                                                onBack = { vm.navigate(NavSection.DASHBOARD) },
+                                                modifier = Modifier.fillMaxSize()
+                                            )
+                                        }
+                                    }
+                                }
+
                                 NavSection.ASSISTANT -> AiAssistantScreen(
                                     state = aiState,
                                     students = students,
@@ -1697,6 +1802,7 @@ private fun ResultMakerTopBar(
     onOpenBlankSheetPdf: () -> Unit,
     onOpenSeatPlanPdf: () -> Unit = {},
     onOpenTabulationPdf: () -> Unit = {},
+    onOpenAdmitCardPdf: () -> Unit = {},
     onOpenSchoolHub: () -> Unit,
     onRequestSignOut: () -> Unit
 ) {
@@ -1815,6 +1921,11 @@ private fun ResultMakerTopBar(
                                 text = { Text("ফলাফল টেবিল (ট্যাবুলেশন)") },
                                 onClick = { menuOpen = false; onOpenTabulationPdf() },
                                 modifier = Modifier.testTag("menu_tabulation_pdf")
+                            )
+                            DropdownMenuItem(
+                                text = { Text("প্রবেশপত্র (Admit Card)") },
+                                onClick = { menuOpen = false; onOpenAdmitCardPdf() },
+                                modifier = Modifier.testTag("menu_admit_card_pdf")
                             )
                             DropdownMenuItem(
                                 text = { Text("সব শ্রেণির সব শিক্ষার্থীর PDF") },

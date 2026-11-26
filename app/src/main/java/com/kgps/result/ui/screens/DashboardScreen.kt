@@ -114,6 +114,7 @@ fun DashboardScreen(
     onOpenBlankSheetPdf: () -> Unit = {},
     onOpenSeatPlanPdf: () -> Unit = {},
     onOpenTabulationPdf: () -> Unit = {},
+    onOpenAdmitCardPdf: () -> Unit = {},
     onPrintBatch: (List<Student>, String) -> Unit,
     onExportBatchPdf: (List<Student>, String) -> Unit,
     onBackupNowAll: () -> Unit,
@@ -472,6 +473,16 @@ fun DashboardScreen(
                                 tint = TealDark,
                                 testTag = "dash_tabulation_pdf_btn",
                                 onClick = onOpenTabulationPdf
+                            )
+                        )
+                        add(
+                            QuickToolSpec(
+                                icon = Icons.Rounded.Badge,
+                                title = "প্রবেশপত্র",
+                                subtitle = "রুটিনসহ Admit",
+                                tint = TealPrimary,
+                                testTag = "dash_admit_card_pdf_btn",
+                                onClick = onOpenAdmitCardPdf
                             )
                         )
                     }
