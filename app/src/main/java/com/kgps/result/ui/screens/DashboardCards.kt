@@ -373,6 +373,14 @@ fun MeritAndResultsCard(
                 HorizontalDivider(color = SlateOutline)
 
                 val visibleMerit = if (showAllMerit) summary.meritList else summary.meritList.take(5)
+                if (visibleMerit.isEmpty()) {
+                    Text(
+                        "মেধাক্রম প্রদর্শনের মতো উত্তীর্ণ শিক্ষার্থী পাওয়া যায়নি।",
+                        fontSize = 11.5.sp,
+                        color = SlateMuted,
+                        modifier = Modifier.padding(vertical = 4.dp)
+                    )
+                }
                 Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
                     visibleMerit.forEach { entry ->
                         val rankBg = when (entry.rank) {

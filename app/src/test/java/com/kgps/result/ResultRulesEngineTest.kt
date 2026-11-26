@@ -306,6 +306,8 @@ class ResultRulesEngineTest {
             promotionCheckAllSubjects = true,
             meritTierAllSubPassFirst = false,
             meritTierAvgPassEnabled = true,
+            meritFailSubCountPriority = false,
+            meritRankForFailedStudents = false,
             dynamicTermAveraging = true,
             absentCountsAsFail = false,
             jointMeritEnabled = true,
@@ -368,5 +370,87 @@ class ResultRulesEngineTest {
         assertTrue(st.isSubTermAbsent(mathSub, 1))
         assertTrue(ResultRulesEngine.isSubjectTermFailed(st, mathSub, 1, ResultEvaluationRules(absentCountsAsFail = true)))
         assertFalse(ResultRulesEngine.isSubjectTermFailed(st, mathSub, 1, ResultEvaluationRules(absentCountsAsFail = false)))
+    }
+
+    @Test
+    fun rule5_below40AndFailedSubjectsOrderByFinalSubjectAvgFailCountFirst() {
+        // Class 3 total max = 700 (6*100 + 2*50). Pass = 40%.
+        // Student A (fail1LowTotal): avg < 40%, ONLY 1 subject avg < 40% (BAN: (30+40)/2=35 < 40), others = 40 (PE/ART = 20)
+        // Total avg = 35 + 40 + 40 + 40 + 40 + 40 + 20 + 20 = 275 / 700 = 39.29% (< 40%)
+        val fail1 = makeClass3Student(
+            id = "fail_1",
+            roll = 3,
+            term1Marks = fullTermMarks(1, 40.0, 20.0).toMutableMap().apply {
+                put(mk("BAN", 1, "CONT"), 10.0)
+                put(mk("BAN", 1, "WR"), 20.0) // 30
+            },
+            term2Marks = fullTermMarks(2, 40.0, 20.0).toMutableMap().apply {
+                put(mk("BAN", 2, "CONT"), 10.0)
+                put(mk("BAN", 2, "WR"), 30.0) // 40 -> avg 35 (< 40%)
+            }
+        )
+        // Student B (fail2HigherTotal): avg < 40%, 2 subjects avg < 40% (BAN=30, ENG=35), others = 41 -> higher total 277/700 = 39.57%!
+        val fail2 = makeClass3Student(
+            id = "fail_2",
+            roll = 2,
+            term1Marks = fullTermMarks(1, 41.0, 21.0).toMutableMap().apply {
+                put(mk("BAN", 1, "CONT"), 10.0)
+                put(mk("BAN", 1, "WR"), 20.0) // 30
+                put(mk("ENG", 1, "CONT"), 10.0)
+                put(mk("ENG", 1, "WR"), 25.0) // 35
+            },
+            term2Marks = fullTermMarks(2, 41.0, 21.0).toMutableMap().apply {
+                put(mk("BAN", 2, "CONT"), 10.0)
+                put(mk("BAN", 2, "WR"), 20.0) // 30
+                put(mk("ENG", 2, "CONT"), 10.0)
+                put(mk("ENG", 2, "WR"), 25.0) // 35
+            }
+        )
+        // Student C (fail3): 3 subjects < 40% (BAN=30, ENG=30, PE=18 -> 18/50=36%) -> 278/700 = 39.71%
+        val fail3 = makeClass3Student(
+            id = "fail_3",
+            roll = 1,
+            term1Marks = fullTermMarks(1, 44.5, 22.0).toMutableMap().apply {
+                put(mk("BAN", 1, "CONT"), 10.0)
+                put(mk("BAN", 1, "WR"), 20.0)
+                put(mk("ENG", 1, "CONT"), 10.0)
+                put(mk("ENG", 1, "WR"), 20.0)
+                put(mk("PE", 1, "CONT"), 18.0)
+            },
+            term2Marks = fullTermMarks(2, 44.5, 22.0).toMutableMap().apply {
+                put(mk("BAN", 2, "CONT"), 10.0)
+                put(mk("BAN", 2, "WR"), 20.0)
+                put(mk("ENG", 2, "CONT"), 10.0)
+                put(mk("ENG", 2, "WR"), 20.0)
+                put(mk("PE", 2, "CONT"), 18.0)
+            }
+        )
+        // Student D (passed via average across 2 terms: Term1 BAN=30, Term2 BAN=50 -> avg=40 -> 0 fails!)
+        val passByAvg = makeClass3Student(
+            id = "pass_0",
+            roll = 4,
+            term1Marks = fullTermMarks(1, 40.0, 20.0).toMutableMap().apply {
+                put(mk("BAN", 1, "CONT"), 10.0)
+                put(mk("BAN", 1, "WR"), 20.0) // 30
+            },
+            term2Marks = fullTermMarks(2, 40.0, 20.0).toMutableMap().apply {
+                put(mk("BAN", 2, "CONT"), 15.0)
+                put(mk("BAN", 2, "WR"), 35.0) // 50 -> final avg = 40 (>= 40%)
+            }
+        )
+
+        val rules = ResultEvaluationRules()
+        val ranked = ResultRulesEngine.rankClassStudents(listOf(fail3, fail2, fail1, passByAvg), rules)
+        assertEquals(listOf("pass_0", "fail_1", "fail_2", "fail_3"), ranked.map { it.student.id })
+        assertEquals(listOf(1, 2, 3, 4), ranked.map { it.rank })
+
+        // With meritRankForFailedStudents = false, pass_0 gets rank 1 and failed (<40%) students get rank 0
+        val noFailedRanks = ResultRulesEngine.rankClassStudents(
+            listOf(fail3, fail2, fail1, passByAvg),
+            rules.copy(meritRankForFailedStudents = false)
+        )
+        assertEquals(listOf("pass_0", "fail_1", "fail_2", "fail_3"), noFailedRanks.map { it.student.id })
+        assertEquals(listOf(1, 0, 0, 0), noFailedRanks.map { it.rank })
+        assertTrue(noFailedRanks.drop(1).none { it.isJointRank })
     }
 }

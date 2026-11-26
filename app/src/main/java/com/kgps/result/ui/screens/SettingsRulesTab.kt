@@ -290,7 +290,12 @@ fun SettingsRulesTab(
                         active = attendanceOn
                     )
                     SummaryChip(
-                        text = "মেধাক্রম: $meritTierLabel${if (rules.jointMeritEnabled) " · যৌথ" else ""}",
+                        text = buildString {
+                            append("মেধাক্রম: ")
+                            append(meritTierLabel)
+                            if (!rules.meritRankForFailedStudents) append(" · ফেল ক্রম অফ")
+                            if (rules.jointMeritEnabled) append(" · যৌথ")
+                        },
                         active = rules.meritTierAllSubPassFirst || rules.meritTierAvgPassEnabled
                     )
                     SummaryChip(
@@ -600,15 +605,47 @@ fun SettingsRulesTab(
                     applyRulesUpdate(rules.copy(meritTierAvgPassEnabled = checked))
                 }
             )
-            val flowPreview = when {
+            RuleSwitchRow(
+                label = "৩) অকৃতকার্যে কম বিষয়ে ফেল আগে (১ বিষয়ে ফেল → ২ বিষয়ে ফেল...)",
+                sub = "প্রতি বিষয়ের চূড়ান্ত গড় % অনুযায়ী ১ বিষয়ে ফেল আগে, তারপর ২ বিষয়ে ফেল এভাবে ক্রম হবে",
+                checked = rules.meritFailSubCountPriority,
+                enabled = isAdmin && (rules.meritTierAllSubPassFirst || rules.meritTierAvgPassEnabled),
+                testTag = "rule_5_fail_sub_count_switch",
+                onCheckedChange = { checked ->
+                    applyRulesUpdate(rules.copy(meritFailSubCountPriority = checked))
+                }
+            )
+            RuleSwitchRow(
+                label = "৪) ফেল (অনুত্তীর্ণ) শিক্ষার্থীদের মেধাক্রম দেওয়া হবে",
+                sub = if (rules.meritRankForFailedStudents) {
+                    "অন — অনুত্তীর্ণ শিক্ষার্থীরাও মেধাক্রম নম্বর পাবে"
+                } else {
+                    "অফ — অনুত্তীর্ণ শিক্ষার্থীরা মেধাক্রম নম্বর পাবে না (শুধু উত্তীর্ণরা পাবে)"
+                },
+                checked = rules.meritRankForFailedStudents,
+                enabled = isAdmin,
+                testTag = "rule_5_failed_merit_rank_switch",
+                onCheckedChange = { checked ->
+                    applyRulesUpdate(rules.copy(meritRankForFailedStudents = checked))
+                }
+            )
+            val baseTierText = when {
                 rules.meritTierAllSubPassFirst && rules.meritTierAvgPassEnabled ->
                     "ক্রম: ① সব বিষয়ে ৪০%+ → ② গড়ে ৪০%+ → ③ গড়ে ৪০%-এর নিচে"
                 rules.meritTierAllSubPassFirst && !rules.meritTierAvgPassEnabled ->
-                    "ক্রম: ① সব বিষয়ে ৪০%+ → ② অবশিষ্ট সবাই (নম্বর অনুসারে)"
+                    "ক্রম: ① সব বিষয়ে ৪০%+ → ② অবশিষ্ট সবাই"
                 !rules.meritTierAllSubPassFirst && rules.meritTierAvgPassEnabled ->
                     "ক্রম: ① গড়ে ৪০%+ → ② ৪০%-এর নিচে"
                 else ->
                     "ক্রম: শুধু মোট প্রাপ্ত নম্বরের সিরিয়াল"
+            }
+            val flowPreview = buildString {
+                append(baseTierText)
+                if (rules.meritFailSubCountPriority && (rules.meritTierAllSubPassFirst || rules.meritTierAvgPassEnabled)) {
+                    append(" (১ বিষয় ফেল আগে → ২ বিষয়...)")
+                }
+                append(" · ফেলদের মেধাক্রম: ")
+                append(if (rules.meritRankForFailedStudents) "অন" else "অফ (শুধু উত্তীর্ণ)")
             }
             Surface(
                 color = TealSoft,

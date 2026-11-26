@@ -127,6 +127,8 @@ data class ResultEvaluationRules(
     // Rule 5: অনুত্তীর্ণ শিক্ষার্থীর মেধাক্রম শ্রেণিবিন্যাস
     val meritTierAllSubPassFirst: Boolean = true,
     val meritTierAvgPassEnabled: Boolean = true,
+    val meritFailSubCountPriority: Boolean = true,
+    val meritRankForFailedStudents: Boolean = true,
 
     // Rule 6: প্রান্তিকভিত্তিক গড় (১/২/৩ প্রান্তিক অনুযায়ী গড়)
     val dynamicTermAveraging: Boolean = true,
@@ -159,6 +161,8 @@ data class ResultEvaluationRules(
         "promotionCheckAllSubjects" to promotionCheckAllSubjects,
         "meritTierAllSubPassFirst" to meritTierAllSubPassFirst,
         "meritTierAvgPassEnabled" to meritTierAvgPassEnabled,
+        "meritFailSubCountPriority" to meritFailSubCountPriority,
+        "meritRankForFailedStudents" to meritRankForFailedStudents,
         "dynamicTermAveraging" to dynamicTermAveraging,
         "absentCountsAsFail" to absentCountsAsFail,
         "jointMeritEnabled" to jointMeritEnabled,
@@ -182,6 +186,8 @@ data class ResultEvaluationRules(
         put("promotionCheckAllSubjects", promotionCheckAllSubjects)
         put("meritTierAllSubPassFirst", meritTierAllSubPassFirst)
         put("meritTierAvgPassEnabled", meritTierAvgPassEnabled)
+        put("meritFailSubCountPriority", meritFailSubCountPriority)
+        put("meritRankForFailedStudents", meritRankForFailedStudents)
         put("dynamicTermAveraging", dynamicTermAveraging)
         put("absentCountsAsFail", absentCountsAsFail)
         put("jointMeritEnabled", jointMeritEnabled)
@@ -217,6 +223,8 @@ data class ResultEvaluationRules(
                 promotionCheckAllSubjects = bool("promotionCheckAllSubjects", false),
                 meritTierAllSubPassFirst = bool("meritTierAllSubPassFirst", true),
                 meritTierAvgPassEnabled = bool("meritTierAvgPassEnabled", true),
+                meritFailSubCountPriority = bool("meritFailSubCountPriority", true),
+                meritRankForFailedStudents = bool("meritRankForFailedStudents", true),
                 dynamicTermAveraging = bool("dynamicTermAveraging", true),
                 absentCountsAsFail = bool("absentCountsAsFail", true),
                 jointMeritEnabled = bool("jointMeritEnabled", false),
@@ -251,6 +259,8 @@ data class ResultEvaluationRules(
                 promotionCheckAllSubjects = obj.optBoolean("promotionCheckAllSubjects", false),
                 meritTierAllSubPassFirst = obj.optBoolean("meritTierAllSubPassFirst", true),
                 meritTierAvgPassEnabled = obj.optBoolean("meritTierAvgPassEnabled", true),
+                meritFailSubCountPriority = obj.optBoolean("meritFailSubCountPriority", true),
+                meritRankForFailedStudents = obj.optBoolean("meritRankForFailedStudents", true),
                 dynamicTermAveraging = obj.optBoolean("dynamicTermAveraging", true),
                 absentCountsAsFail = obj.optBoolean("absentCountsAsFail", true),
                 jointMeritEnabled = obj.optBoolean("jointMeritEnabled", false),
@@ -652,17 +662,29 @@ object ResultRulesEngine {
             (eval.traitScore * 100.0).roundToLong()
 
         val sorted = evaluated.sortedWith { (sA, eA), (sB, eB) ->
+            // ০. ফেল শিক্ষার্থীদের মেধাক্রম বন্ধ থাকলে উত্তীর্ণরা আগে থাকবে
+            if (!rules.meritRankForFailedStudents) {
+                val promCmp = eB.isPromoted.compareTo(eA.isPromoted)
+                if (promCmp != 0) return@sortedWith promCmp
+            }
+
             // ১. মেধাক্রম শ্রেণি/স্তর (Tier)
             val tCmp = eA.meritTier.compareTo(eB.meritTier)
             if (tCmp != 0) return@sortedWith tCmp
 
-            // ২. শতাংশ এবং প্রাপ্ত মোট নম্বর (বেশি নম্বর আগে)
+            // ২. ৪০%-এর নিচে / অকৃতকার্য স্তরে কম বিষয়ে ফেল আগে (১ বিষয়ে ফেল → ২ বিষয়ে ফেল...)
+            if (rules.meritFailSubCountPriority && eA.meritTier > 0) {
+                val fCmp = eA.failedSubjectKeys.size.compareTo(eB.failedSubjectKeys.size)
+                if (fCmp != 0) return@sortedWith fCmp
+            }
+
+            // ৩. শতাংশ এবং প্রাপ্ত মোট নম্বর (বেশি নম্বর আগে)
             val pCmp = pctKey(eB).compareTo(pctKey(eA))
             if (pCmp != 0) return@sortedWith pCmp
             val mCmp = scoreKey(eB).compareTo(scoreKey(eA))
             if (mCmp != 0) return@sortedWith mCmp
 
-            // ৩. টাই-ব্রেকারসমূহ
+            // ৪. টাই-ব্রেকারসমূহ
             if (rules.tieBreakAttendance) {
                 val aCmp = attKey(eB).compareTo(attKey(eA))
                 if (aCmp != 0) return@sortedWith aCmp
@@ -683,7 +705,11 @@ object ResultRulesEngine {
         fun isTied(a: Pair<Student, StudentEvalSummary>, b: Pair<Student, StudentEvalSummary>): Boolean {
             val (sA, eA) = a
             val (sB, eB) = b
+            if (!rules.meritRankForFailedStudents && eA.isPromoted != eB.isPromoted) return false
             if (eA.meritTier != eB.meritTier) return false
+            if (rules.meritFailSubCountPriority && eA.meritTier > 0 &&
+                eA.failedSubjectKeys.size != eB.failedSubjectKeys.size
+            ) return false
             if (pctKey(eA) != pctKey(eB) || scoreKey(eA) != scoreKey(eB)) return false
             if (rules.tieBreakAttendance && attKey(eA) != attKey(eB)) return false
             if (rules.tieBreakTraits && traitKey(eA) != traitKey(eB)) return false
@@ -695,17 +721,20 @@ object ResultRulesEngine {
         val withoutData = sorted.filter { !it.second.hasAnyData }
 
         val rankedWithData = mutableListOf<RankedStudentResult>()
+        val eligibleIndices = withData.indices.filter { idx ->
+            rules.meritRankForFailedStudents || withData[idx].second.isPromoted
+        }
         val rawRanks = IntArray(withData.size)
-        for (i in withData.indices) {
-            rawRanks[i] = if (!rules.jointMeritEnabled) {
-                i + 1
+        for (pos in eligibleIndices.indices) {
+            val idx = eligibleIndices[pos]
+            rawRanks[idx] = if (!rules.jointMeritEnabled || pos == 0) {
+                pos + 1
             } else {
-                if (i == 0) 1
-                else if (isTied(withData[i - 1], withData[i])) rawRanks[i - 1]
-                else i + 1
+                val prevIdx = eligibleIndices[pos - 1]
+                if (isTied(withData[prevIdx], withData[idx])) rawRanks[prevIdx] else pos + 1
             }
         }
-        val rankCounts = rawRanks.toList().groupingBy { it }.eachCount()
+        val rankCounts = rawRanks.filter { it > 0 }.groupingBy { it }.eachCount()
         for (i in withData.indices) {
             val r = rawRanks[i]
             rankedWithData.add(
@@ -713,7 +742,7 @@ object ResultRulesEngine {
                     student = withData[i].first,
                     eval = withData[i].second,
                     rank = r,
-                    isJointRank = rules.jointMeritEnabled && (rankCounts[r] ?: 0) > 1
+                    isJointRank = r > 0 && rules.jointMeritEnabled && (rankCounts[r] ?: 0) > 1
                 )
             )
         }
