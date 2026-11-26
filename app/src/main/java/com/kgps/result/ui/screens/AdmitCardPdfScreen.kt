@@ -8,12 +8,9 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.tween
-import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
-import androidx.compose.animation.shrinkVertically
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.BorderStroke
@@ -241,41 +238,41 @@ fun AdmitCardPdfScreen(
     val exportName = "প্রবেশপত্র-${classShortBn(config.selectedClass, settings)}-শ্রেণি.pdf"
 
     BoxWithConstraints(modifier = modifier.fillMaxSize()) {
-        val panelMaxHeight = (maxHeight * 0.54f).coerceIn(220.dp, 420.dp)
+        val overlayMaxHeight = (maxHeight * 0.50f).coerceIn(220.dp, 370.dp)
 
         Column(modifier = Modifier.fillMaxSize()) {
             // 1. Compact Top Status & Export Action Bar
             Surface(
                 color = MaterialTheme.colorScheme.surface,
                 border = BorderStroke(1.dp, SlateOutline),
-                shape = RoundedCornerShape(12.dp),
-                modifier = Modifier.fillMaxWidth().padding(top = 4.dp)
+                shape = RoundedCornerShape(10.dp),
+                modifier = Modifier.fillMaxWidth().padding(top = 3.dp)
             ) {
                 Row(
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp),
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 7.dp, vertical = 3.dp),
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    horizontalArrangement = Arrangement.spacedBy(3.dp)
                 ) {
-                    Surface(color = TealSoft, shape = RoundedCornerShape(8.dp)) {
+                    Surface(color = TealSoft, shape = RoundedCornerShape(7.dp)) {
                         Icon(
                             Icons.Rounded.Badge,
                             contentDescription = null,
                             tint = TealPrimary,
-                            modifier = Modifier.padding(6.dp).size(16.dp)
+                            modifier = Modifier.padding(5.dp).size(15.dp)
                         )
                     }
                     Column(Modifier.weight(1f)) {
                         Text(
                             text = if (pages.isEmpty()) "লাইভ প্রিভিউ" else "পৃষ্ঠা ${bn((pagerState.currentPage + 1).toString())}/${bn(pages.size.toString())}",
                             fontWeight = FontWeight.Bold,
-                            fontSize = 12.5.sp,
+                            fontSize = 12.sp,
                             color = SlateText,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis
                         )
                         Text(
                             text = summaryLine,
-                            fontSize = 10.sp,
+                            fontSize = 9.5.sp,
                             color = SlateMuted,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis
@@ -293,411 +290,419 @@ fun AdmitCardPdfScreen(
                             rollFromText = ""
                             rollToText = ""
                         },
-                        modifier = Modifier.size(48.dp).testTag("admit_card_reset_btn")
+                        modifier = Modifier.size(40.dp).testTag("admit_card_reset_btn")
                     ) {
                         Icon(
                             Icons.Rounded.RestartAlt,
                             contentDescription = "ডিফল্ট সেটিংস রিসেট",
                             tint = SlateMuted,
-                            modifier = Modifier.size(18.dp)
+                            modifier = Modifier.size(17.dp)
                         )
                     }
                     IconButton(
                         onClick = { onPrint(pages, signatureBitmap, "প্রবেশপত্র") },
                         enabled = pages.isNotEmpty(),
-                        modifier = Modifier.size(48.dp).testTag("admit_card_print_btn")
+                        modifier = Modifier.size(40.dp).testTag("admit_card_print_btn")
                     ) {
                         Icon(
                             Icons.Rounded.Print,
                             contentDescription = "প্রিন্ট করুন",
                             tint = if (pages.isNotEmpty()) TealPrimary else SlateMuted.copy(alpha = 0.45f),
-                            modifier = Modifier.size(19.dp)
+                            modifier = Modifier.size(18.dp)
                         )
                     }
                     Button(
                         onClick = { onExportPdf(pages, signatureBitmap, exportName) },
                         enabled = pages.isNotEmpty(),
                         colors = ButtonDefaults.buttonColors(containerColor = TealPrimary),
-                        shape = RoundedCornerShape(9.dp),
-                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp),
-                        modifier = Modifier.heightIn(min = 48.dp).testTag("admit_card_export_btn")
+                        shape = RoundedCornerShape(8.dp),
+                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 0.dp),
+                        modifier = Modifier.height(36.dp).testTag("admit_card_export_btn")
                     ) {
-                        Icon(Icons.Rounded.Download, contentDescription = null, modifier = Modifier.size(16.dp))
-                        Spacer(Modifier.width(4.dp))
-                        Text("PDF", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                        Icon(Icons.Rounded.Download, contentDescription = null, modifier = Modifier.size(15.dp))
+                        Spacer(Modifier.width(3.dp))
+                        Text("PDF", fontWeight = FontWeight.Bold, fontSize = 11.5.sp)
                     }
                 }
             }
 
-            // 2. Upper Live Layout Preview (HorizontalPager + Double-Tap Fullscreen)
-            Column(
+            // 2. Main Preview Viewport + Floating Bottom Overlay Settings Panel
+            Box(
                 modifier = Modifier
                     .weight(1f)
                     .fillMaxWidth()
-                    .padding(vertical = 6.dp),
-                horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                if (pages.isEmpty()) {
-                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                        Surface(
-                            color = MaterialTheme.colorScheme.surface,
-                            border = BorderStroke(1.dp, SlateOutline),
-                            shape = RoundedCornerShape(14.dp),
-                            modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp)
+                // Full-Size Live Preview (never shrinks when overlay panel opens)
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(vertical = 5.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    if (pages.isEmpty()) {
+                        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                            Surface(
+                                color = MaterialTheme.colorScheme.surface,
+                                border = BorderStroke(1.dp, SlateOutline),
+                                shape = RoundedCornerShape(12.dp),
+                                modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp)
+                            ) {
+                                Column(
+                                    modifier = Modifier.padding(18.dp),
+                                    horizontalAlignment = Alignment.CenterHorizontally,
+                                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    Text(
+                                        "নির্বাচিত শ্রেণি বা রোল রেঞ্জে কোনো শিক্ষার্থী নেই।",
+                                        fontSize = 12.5.sp,
+                                        color = SlateMuted
+                                    )
+                                    OutlinedButton(
+                                        onClick = { config = config.copy(extraBlankCards = config.safeCardsPerPage) },
+                                        shape = RoundedCornerShape(8.dp),
+                                        modifier = Modifier.heightIn(min = 38.dp)
+                                    ) {
+                                        Text("১ পৃষ্ঠা ফাঁকা প্রবেশপত্র তৈরি করুন", fontSize = 11.5.sp)
+                                    }
+                                }
+                            }
+                        }
+                    } else {
+                        HorizontalPager(
+                            state = pagerState,
+                            pageSpacing = 12.dp,
+                            modifier = Modifier
+                                .weight(1f)
+                                .fillMaxWidth()
+                                .testTag("admit_preview_pager")
+                        ) { pageIdx ->
+                            val pageSpec = pages[pageIdx]
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .padding(horizontal = 4.dp)
+                                    .pointerInput(pageIdx) {
+                                        detectTapGestures(onDoubleTap = { showFullscreen = true })
+                                    },
+                                contentAlignment = Alignment.Center
+                            ) {
+                                AdmitCardRenderedPage(
+                                    ctx = ctx,
+                                    page = pageSpec,
+                                    settings = settings,
+                                    signatureBitmap = signatureBitmap,
+                                    renderScale = 1.9f
+                                )
+                            }
+                        }
+
+                        // Compact Page Indicator & Gesture Hint Strip
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(top = 2.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.Center
                         ) {
-                            Column(
-                                modifier = Modifier.padding(20.dp),
-                                horizontalAlignment = Alignment.CenterHorizontally,
-                                verticalArrangement = Arrangement.spacedBy(10.dp)
+                            if (pages.size > 1) {
+                                IconButton(
+                                    onClick = {
+                                        scope.launch {
+                                            pagerState.animateScrollToPage((pagerState.currentPage - 1).coerceAtLeast(0))
+                                        }
+                                    },
+                                    enabled = pagerState.currentPage > 0,
+                                    modifier = Modifier.size(38.dp).testTag("admit_prev_page_btn")
+                                ) {
+                                    Icon(Icons.AutoMirrored.Rounded.KeyboardArrowLeft, contentDescription = "আগের পৃষ্ঠা", modifier = Modifier.size(20.dp))
+                                }
+                            }
+                            Text(
+                                text = "বামে/ডানে সোয়াইপ · ডাবল ট্যাপে ফুল স্ক্রিন",
+                                fontSize = 10.sp,
+                                color = SlateMuted,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.padding(horizontal = 6.dp)
+                            )
+                            if (pages.size > 1) {
+                                IconButton(
+                                    onClick = {
+                                        scope.launch {
+                                            pagerState.animateScrollToPage((pagerState.currentPage + 1).coerceAtMost(pages.lastIndex))
+                                        }
+                                    },
+                                    enabled = pagerState.currentPage < pages.lastIndex,
+                                    modifier = Modifier.size(38.dp).testTag("admit_next_page_btn")
+                                ) {
+                                    Icon(Icons.AutoMirrored.Rounded.KeyboardArrowRight, contentDescription = "পরের পৃষ্ঠা", modifier = Modifier.size(20.dp))
+                                }
+                            }
+                            IconButton(
+                                onClick = { showFullscreen = true },
+                                modifier = Modifier.size(38.dp).testTag("admit_card_fullscreen_btn")
+                            ) {
+                                Icon(Icons.Rounded.Fullscreen, contentDescription = "পূর্ণ স্ক্রিন প্রিভিউ", tint = TealPrimary, modifier = Modifier.size(19.dp))
+                            }
+                        }
+                    }
+                }
+
+                // Overlay Slide-Up Compact Options Panel (floats over bottom portion of preview)
+                androidx.compose.animation.AnimatedVisibility(
+                    visible = openTab != null,
+                    enter = slideInVertically(tween(220)) { it } + fadeIn(tween(180)),
+                    exit = slideOutVertically(tween(180)) { it } + fadeOut(tween(140)),
+                    modifier = Modifier.align(Alignment.BottomCenter)
+                ) {
+                    val selectedTabIdx = openTab ?: 0
+                    val tabMeta = ADMIT_BOTTOM_TABS[selectedTabIdx]
+                    Surface(
+                        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.98f),
+                        border = BorderStroke(1.dp, SlateOutline),
+                        tonalElevation = 3.dp,
+                        shadowElevation = 12.dp,
+                        shape = RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(max = overlayMaxHeight)
+                            .testTag("admit_slide_panel")
+                    ) {
+                        Column(Modifier.fillMaxWidth()) {
+                            // Compact drag handle & title row
+                            Box(
+                                modifier = Modifier.fillMaxWidth().padding(top = 5.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .width(32.dp)
+                                        .height(3.dp)
+                                        .background(SlateOutline, RoundedCornerShape(999.dp))
+                                )
+                            }
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(start = 10.dp, end = 4.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween
                             ) {
                                 Text(
-                                    "নির্বাচিত শ্রেণি বা রোল রেঞ্জে কোনো শিক্ষার্থী নেই।",
-                                    fontSize = 13.sp,
-                                    color = SlateMuted
+                                    text = tabMeta.panelTitle,
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 12.sp,
+                                    color = TealDark
                                 )
-                                OutlinedButton(
-                                    onClick = { config = config.copy(extraBlankCards = config.safeCardsPerPage) },
-                                    shape = RoundedCornerShape(9.dp),
-                                    modifier = Modifier.heightIn(min = 48.dp)
+                                IconButton(
+                                    onClick = { openTab = null },
+                                    modifier = Modifier.size(36.dp).testTag("admit_panel_close_btn")
                                 ) {
-                                    Text("১ পৃষ্ঠা ফাঁকা প্রবেশপত্র তৈরি করুন", fontSize = 12.sp)
+                                    Icon(
+                                        Icons.Rounded.KeyboardArrowDown,
+                                        contentDescription = "প্যানেল বন্ধ করুন",
+                                        tint = SlateMuted,
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                }
+                            }
+                            HorizontalDivider(color = SlateOutline.copy(alpha = 0.55f))
+
+                            // Compact Scrollable Tab Body
+                            androidx.compose.runtime.key(selectedTabIdx) {
+                                Column(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .verticalScroll(rememberScrollState())
+                                        .padding(horizontal = 8.dp, vertical = 6.dp)
+                                ) {
+                                    when (selectedTabIdx) {
+                                        0 -> AdmitClassAndRollTab(
+                                            config = config,
+                                            settings = settings,
+                                            allowedClasses = allowedClasses,
+                                            countByClass = countByClass,
+                                            rollFromText = rollFromText,
+                                            rollToText = rollToText,
+                                            onSelectClass = { newCls ->
+                                                config = config.copy(
+                                                    selectedClass = newCls,
+                                                    examTimeLabel = AdmitCardLocalStore.loadExamTime(ctx, newCls, settings)
+                                                )
+                                                routineRows = AdmitCardLocalStore.loadRoutine(ctx, newCls, settings)
+                                                activeBaseId = null
+                                            },
+                                            onUpdateConfig = { config = it },
+                                            onRollFromChange = { digits ->
+                                                rollFromText = digits
+                                                config = config.copy(rollFrom = digits.toIntOrNull())
+                                            },
+                                            onRollToChange = { digits ->
+                                                rollToText = digits
+                                                config = config.copy(rollTo = digits.toIntOrNull())
+                                            }
+                                        )
+
+                                        1 -> AdmitCardRoutineEditor(
+                                            config = config,
+                                            settings = settings,
+                                            allowedClasses = allowedClasses,
+                                            baseRoutines = baseRoutines,
+                                            activeBaseId = activeBaseId,
+                                            classRoutineRows = routineRows,
+                                            onSelectBase = { baseId -> activeBaseId = baseId },
+                                            onSelectClass = { newCls ->
+                                                activeBaseId = null
+                                                config = config.copy(
+                                                    selectedClass = newCls,
+                                                    examTimeLabel = AdmitCardLocalStore.loadExamTime(ctx, newCls, settings)
+                                                )
+                                                routineRows = AdmitCardLocalStore.loadRoutine(ctx, newCls, settings)
+                                            },
+                                            onAddBaseRoutine = { newName ->
+                                                val sourceBase = baseRoutines.find { it.id == activeBaseId }
+                                                val seedRows = sourceBase?.rows ?: routineRows
+                                                val seedTime = sourceBase?.examTimeLabel ?: config.examTimeLabel
+                                                val created = BaseRoutineTemplate(
+                                                    id = "base_${System.currentTimeMillis()}",
+                                                    name = newName,
+                                                    examTimeLabel = seedTime,
+                                                    rows = seedRows.map { it.copy(id = UUID.randomUUID().toString()) }
+                                                )
+                                                val next = baseRoutines + created
+                                                baseRoutines = next
+                                                AdmitCardLocalStore.saveBaseRoutines(ctx, next)
+                                                activeBaseId = created.id
+                                            },
+                                            onRenameBaseRoutine = { baseId, newName ->
+                                                val next = baseRoutines.map { if (it.id == baseId) it.copy(name = newName) else it }
+                                                baseRoutines = next
+                                                AdmitCardLocalStore.saveBaseRoutines(ctx, next)
+                                            },
+                                            onDeleteBaseRoutine = { baseId ->
+                                                if (baseRoutines.size > 1) {
+                                                    val next = baseRoutines.filterNot { it.id == baseId }
+                                                    baseRoutines = next
+                                                    AdmitCardLocalStore.saveBaseRoutines(ctx, next)
+                                                    if (activeBaseId == baseId) {
+                                                        activeBaseId = next.firstOrNull()?.id
+                                                    }
+                                                }
+                                            },
+                                            onUpdateActiveExamTime = { newTime ->
+                                                val currentBaseId = activeBaseId
+                                                if (currentBaseId != null) {
+                                                    val next = baseRoutines.map {
+                                                        if (it.id == currentBaseId) it.copy(examTimeLabel = newTime) else it
+                                                    }
+                                                    baseRoutines = next
+                                                    AdmitCardLocalStore.saveBaseRoutines(ctx, next)
+                                                } else {
+                                                    config = config.copy(examTimeLabel = newTime)
+                                                    AdmitCardLocalStore.saveExamTime(ctx, config.selectedClass, newTime)
+                                                }
+                                            },
+                                            onUpdateActiveRows = { updated ->
+                                                val currentBaseId = activeBaseId
+                                                if (currentBaseId != null) {
+                                                    val next = baseRoutines.map {
+                                                        if (it.id == currentBaseId) it.copy(rows = updated) else it
+                                                    }
+                                                    baseRoutines = next
+                                                    AdmitCardLocalStore.saveBaseRoutines(ctx, next)
+                                                } else {
+                                                    routineRows = updated
+                                                    AdmitCardLocalStore.saveRoutine(ctx, config.selectedClass, updated)
+                                                }
+                                            },
+                                            onResetClassDefault = {
+                                                val reset = AdmitCardPlanner.defaultRoutineForClass(config.selectedClass, settings)
+                                                routineRows = reset
+                                                AdmitCardLocalStore.saveRoutine(ctx, config.selectedClass, reset)
+                                                Toast.makeText(ctx, "শ্রেণির মূল বিষয় লোড হয়েছে", Toast.LENGTH_SHORT).show()
+                                            },
+                                            onSaveActiveFeedback = {
+                                                val currentBase = baseRoutines.find { it.id == activeBaseId }
+                                                if (currentBase != null) {
+                                                    AdmitCardLocalStore.saveBaseRoutines(ctx, baseRoutines)
+                                                    Toast.makeText(ctx, "${currentBase.name} সংরক্ষিত হয়েছে", Toast.LENGTH_SHORT).show()
+                                                } else {
+                                                    AdmitCardLocalStore.saveRoutine(ctx, config.selectedClass, routineRows)
+                                                    AdmitCardLocalStore.saveExamTime(ctx, config.selectedClass, config.examTimeLabel)
+                                                    Toast.makeText(
+                                                        ctx,
+                                                        "${classShortBn(config.selectedClass, settings)} শ্রেণির রুটিন সংরক্ষিত হয়েছে",
+                                                        Toast.LENGTH_SHORT
+                                                    ).show()
+                                                }
+                                            },
+                                            onCopyToClasses = { targetClasses, matchClassSubjects, copyExamTime ->
+                                                val currentBase = baseRoutines.find { it.id == activeBaseId }
+                                                val sourceRows = currentBase?.rows ?: routineRows
+                                                val sourceTime = currentBase?.examTimeLabel ?: config.examTimeLabel
+                                                targetClasses.forEach { targetCls ->
+                                                    val resolved = AdmitCardPlanner.resolveRoutineForClass(
+                                                        baseRows = sourceRows,
+                                                        targetCls = targetCls,
+                                                        settings = settings,
+                                                        matchClassSubjects = matchClassSubjects
+                                                    )
+                                                    AdmitCardLocalStore.saveRoutine(ctx, targetCls, resolved)
+                                                    if (copyExamTime) {
+                                                        AdmitCardLocalStore.saveExamTime(ctx, targetCls, sourceTime)
+                                                    }
+                                                    if (targetCls == config.selectedClass) {
+                                                        routineRows = resolved
+                                                        if (copyExamTime) {
+                                                            config = config.copy(examTimeLabel = sourceTime)
+                                                        }
+                                                    }
+                                                }
+                                                Toast.makeText(
+                                                    ctx,
+                                                    "${bn(targetClasses.size.toString())}টি শ্রেণিতে রুটিন কপি হয়েছে",
+                                                    Toast.LENGTH_SHORT
+                                                ).show()
+                                            },
+                                            onUpdateConfig = { config = it }
+                                        )
+
+                                        2 -> AdmitSignatureAndInfoTab(
+                                            config = config,
+                                            settings = settings,
+                                            signatureBitmap = signatureBitmap,
+                                            onUpdateConfig = { config = it },
+                                            onPickSignatureImage = {
+                                                signaturePickerLauncher.launch(
+                                                    PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
+                                                )
+                                            },
+                                            onClearSignatureImage = {
+                                                AdmitCardLocalStore.clearSignature(ctx)
+                                                signatureBitmap = null
+                                            }
+                                        )
+
+                                        else -> AdmitLayoutAndStyleTab(
+                                            ctx = ctx,
+                                            config = config,
+                                            activeBnFontName = activeBnFontName,
+                                            activeEnFontName = activeEnFontName,
+                                            onUpdateConfig = { config = it }
+                                        )
+                                    }
                                 }
                             }
                         }
                     }
-                } else {
-                    HorizontalPager(
-                        state = pagerState,
-                        pageSpacing = 12.dp,
-                        modifier = Modifier
-                            .weight(1f)
-                            .fillMaxWidth()
-                            .testTag("admit_preview_pager")
-                    ) { pageIdx ->
-                        val pageSpec = pages[pageIdx]
-                        Box(
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .padding(horizontal = 4.dp)
-                                .pointerInput(pageIdx) {
-                                    detectTapGestures(onDoubleTap = { showFullscreen = true })
-                                },
-                            contentAlignment = Alignment.Center
-                        ) {
-                            AdmitCardRenderedPage(
-                                ctx = ctx,
-                                page = pageSpec,
-                                settings = settings,
-                                signatureBitmap = signatureBitmap,
-                                renderScale = 1.9f
-                            )
-                        }
-                    }
-
-                    // Compact Page Indicator & Gesture Hint Strip
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(top = 2.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.Center
-                    ) {
-                        if (pages.size > 1) {
-                            IconButton(
-                                onClick = {
-                                    scope.launch {
-                                        pagerState.animateScrollToPage((pagerState.currentPage - 1).coerceAtLeast(0))
-                                    }
-                                },
-                                enabled = pagerState.currentPage > 0,
-                                modifier = Modifier.size(48.dp).testTag("admit_prev_page_btn")
-                            ) {
-                                Icon(Icons.AutoMirrored.Rounded.KeyboardArrowLeft, contentDescription = "আগের পৃষ্ঠা")
-                            }
-                        }
-                        Text(
-                            text = "বামে/ডানে সোয়াইপ · ডাবল ট্যাপে ফুল স্ক্রিন",
-                            fontSize = 10.5.sp,
-                            color = SlateMuted,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier.padding(horizontal = 6.dp)
-                        )
-                        if (pages.size > 1) {
-                            IconButton(
-                                onClick = {
-                                    scope.launch {
-                                        pagerState.animateScrollToPage((pagerState.currentPage + 1).coerceAtMost(pages.lastIndex))
-                                    }
-                                },
-                                enabled = pagerState.currentPage < pages.lastIndex,
-                                modifier = Modifier.size(48.dp).testTag("admit_next_page_btn")
-                            ) {
-                                Icon(Icons.AutoMirrored.Rounded.KeyboardArrowRight, contentDescription = "পরের পৃষ্ঠা")
-                            }
-                        }
-                        IconButton(
-                            onClick = { showFullscreen = true },
-                            modifier = Modifier.size(48.dp).testTag("admit_card_fullscreen_btn")
-                        ) {
-                            Icon(Icons.Rounded.Fullscreen, contentDescription = "পূর্ণ স্ক্রিন প্রিভিউ", tint = TealPrimary)
-                        }
-                    }
                 }
             }
 
-            // 3. Slide-Up Compact Options Panel
-            AnimatedVisibility(
-                visible = openTab != null,
-                enter = slideInVertically(tween(220)) { it / 2 } + expandVertically(tween(220)) + fadeIn(tween(180)),
-                exit = slideOutVertically(tween(180)) { it / 2 } + shrinkVertically(tween(180)) + fadeOut(tween(140))
-            ) {
-                val selectedTabIdx = openTab ?: 0
-                val tabMeta = ADMIT_BOTTOM_TABS[selectedTabIdx]
-                Surface(
-                    color = MaterialTheme.colorScheme.surface,
-                    border = BorderStroke(1.dp, SlateOutline),
-                    tonalElevation = 2.dp,
-                    shadowElevation = 8.dp,
-                    shape = RoundedCornerShape(topStart = 18.dp, topEnd = 18.dp),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .heightIn(max = panelMaxHeight)
-                        .testTag("admit_slide_panel")
-                ) {
-                    Column(Modifier.fillMaxWidth()) {
-                        // Drag handle & compact panel header
-                        Box(
-                            modifier = Modifier.fillMaxWidth().padding(top = 6.dp),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Box(
-                                modifier = Modifier
-                                    .width(36.dp)
-                                    .height(4.dp)
-                                    .background(SlateOutline, RoundedCornerShape(999.dp))
-                            )
-                        }
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(start = 12.dp, end = 4.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.SpaceBetween
-                        ) {
-                            Text(
-                                text = tabMeta.panelTitle,
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 13.sp,
-                                color = TealDark
-                            )
-                            IconButton(
-                                onClick = { openTab = null },
-                                modifier = Modifier.size(48.dp).testTag("admit_panel_close_btn")
-                            ) {
-                                Icon(
-                                    Icons.Rounded.KeyboardArrowDown,
-                                    contentDescription = "প্যানেল বন্ধ করুন",
-                                    tint = SlateMuted
-                                )
-                            }
-                        }
-                        HorizontalDivider(color = SlateOutline.copy(alpha = 0.6f))
-
-                        // Compact Scrollable Tab Body
-                        androidx.compose.runtime.key(selectedTabIdx) {
-                            Column(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .verticalScroll(rememberScrollState())
-                                    .padding(horizontal = 10.dp, vertical = 8.dp)
-                            ) {
-                            when (selectedTabIdx) {
-                                0 -> AdmitClassAndRollTab(
-                                    config = config,
-                                    settings = settings,
-                                    allowedClasses = allowedClasses,
-                                    countByClass = countByClass,
-                                    rollFromText = rollFromText,
-                                    rollToText = rollToText,
-                                    onSelectClass = { newCls ->
-                                        config = config.copy(
-                                            selectedClass = newCls,
-                                            examTimeLabel = AdmitCardLocalStore.loadExamTime(ctx, newCls, settings)
-                                        )
-                                        routineRows = AdmitCardLocalStore.loadRoutine(ctx, newCls, settings)
-                                        activeBaseId = null
-                                    },
-                                    onUpdateConfig = { config = it },
-                                    onRollFromChange = { digits ->
-                                        rollFromText = digits
-                                        config = config.copy(rollFrom = digits.toIntOrNull())
-                                    },
-                                    onRollToChange = { digits ->
-                                        rollToText = digits
-                                        config = config.copy(rollTo = digits.toIntOrNull())
-                                    }
-                                )
-
-                                1 -> AdmitCardRoutineEditor(
-                                    config = config,
-                                    settings = settings,
-                                    allowedClasses = allowedClasses,
-                                    baseRoutines = baseRoutines,
-                                    activeBaseId = activeBaseId,
-                                    classRoutineRows = routineRows,
-                                    onSelectBase = { baseId -> activeBaseId = baseId },
-                                    onSelectClass = { newCls ->
-                                        activeBaseId = null
-                                        config = config.copy(
-                                            selectedClass = newCls,
-                                            examTimeLabel = AdmitCardLocalStore.loadExamTime(ctx, newCls, settings)
-                                        )
-                                        routineRows = AdmitCardLocalStore.loadRoutine(ctx, newCls, settings)
-                                    },
-                                    onAddBaseRoutine = { newName ->
-                                        val sourceBase = baseRoutines.find { it.id == activeBaseId }
-                                        val seedRows = sourceBase?.rows ?: routineRows
-                                        val seedTime = sourceBase?.examTimeLabel ?: config.examTimeLabel
-                                        val created = BaseRoutineTemplate(
-                                            id = "base_${System.currentTimeMillis()}",
-                                            name = newName,
-                                            examTimeLabel = seedTime,
-                                            rows = seedRows.map { it.copy(id = UUID.randomUUID().toString()) }
-                                        )
-                                        val next = baseRoutines + created
-                                        baseRoutines = next
-                                        AdmitCardLocalStore.saveBaseRoutines(ctx, next)
-                                        activeBaseId = created.id
-                                    },
-                                    onRenameBaseRoutine = { baseId, newName ->
-                                        val next = baseRoutines.map { if (it.id == baseId) it.copy(name = newName) else it }
-                                        baseRoutines = next
-                                        AdmitCardLocalStore.saveBaseRoutines(ctx, next)
-                                    },
-                                    onDeleteBaseRoutine = { baseId ->
-                                        if (baseRoutines.size > 1) {
-                                            val next = baseRoutines.filterNot { it.id == baseId }
-                                            baseRoutines = next
-                                            AdmitCardLocalStore.saveBaseRoutines(ctx, next)
-                                            if (activeBaseId == baseId) {
-                                                activeBaseId = next.firstOrNull()?.id
-                                            }
-                                        }
-                                    },
-                                    onUpdateActiveExamTime = { newTime ->
-                                        val currentBaseId = activeBaseId
-                                        if (currentBaseId != null) {
-                                            val next = baseRoutines.map {
-                                                if (it.id == currentBaseId) it.copy(examTimeLabel = newTime) else it
-                                            }
-                                            baseRoutines = next
-                                            AdmitCardLocalStore.saveBaseRoutines(ctx, next)
-                                        } else {
-                                            config = config.copy(examTimeLabel = newTime)
-                                            AdmitCardLocalStore.saveExamTime(ctx, config.selectedClass, newTime)
-                                        }
-                                    },
-                                    onUpdateActiveRows = { updated ->
-                                        val currentBaseId = activeBaseId
-                                        if (currentBaseId != null) {
-                                            val next = baseRoutines.map {
-                                                if (it.id == currentBaseId) it.copy(rows = updated) else it
-                                            }
-                                            baseRoutines = next
-                                            AdmitCardLocalStore.saveBaseRoutines(ctx, next)
-                                        } else {
-                                            routineRows = updated
-                                            AdmitCardLocalStore.saveRoutine(ctx, config.selectedClass, updated)
-                                        }
-                                    },
-                                    onResetClassDefault = {
-                                        val reset = AdmitCardPlanner.defaultRoutineForClass(config.selectedClass, settings)
-                                        routineRows = reset
-                                        AdmitCardLocalStore.saveRoutine(ctx, config.selectedClass, reset)
-                                        Toast.makeText(ctx, "শ্রেণির মূল বিষয় লোড হয়েছে", Toast.LENGTH_SHORT).show()
-                                    },
-                                    onSaveActiveFeedback = {
-                                        val currentBase = baseRoutines.find { it.id == activeBaseId }
-                                        if (currentBase != null) {
-                                            AdmitCardLocalStore.saveBaseRoutines(ctx, baseRoutines)
-                                            Toast.makeText(ctx, "${currentBase.name} সংরক্ষিত হয়েছে", Toast.LENGTH_SHORT).show()
-                                        } else {
-                                            AdmitCardLocalStore.saveRoutine(ctx, config.selectedClass, routineRows)
-                                            AdmitCardLocalStore.saveExamTime(ctx, config.selectedClass, config.examTimeLabel)
-                                            Toast.makeText(
-                                                ctx,
-                                                "${classShortBn(config.selectedClass, settings)} শ্রেণির রুটিন সংরক্ষিত হয়েছে",
-                                                Toast.LENGTH_SHORT
-                                            ).show()
-                                        }
-                                    },
-                                    onCopyToClasses = { targetClasses, matchClassSubjects, copyExamTime ->
-                                        val currentBase = baseRoutines.find { it.id == activeBaseId }
-                                        val sourceRows = currentBase?.rows ?: routineRows
-                                        val sourceTime = currentBase?.examTimeLabel ?: config.examTimeLabel
-                                        targetClasses.forEach { targetCls ->
-                                            val resolved = AdmitCardPlanner.resolveRoutineForClass(
-                                                baseRows = sourceRows,
-                                                targetCls = targetCls,
-                                                settings = settings,
-                                                matchClassSubjects = matchClassSubjects
-                                            )
-                                            AdmitCardLocalStore.saveRoutine(ctx, targetCls, resolved)
-                                            if (copyExamTime) {
-                                                AdmitCardLocalStore.saveExamTime(ctx, targetCls, sourceTime)
-                                            }
-                                            if (targetCls == config.selectedClass) {
-                                                routineRows = resolved
-                                                if (copyExamTime) {
-                                                    config = config.copy(examTimeLabel = sourceTime)
-                                                }
-                                            }
-                                        }
-                                        Toast.makeText(
-                                            ctx,
-                                            "${bn(targetClasses.size.toString())}টি শ্রেণিতে রুটিন কপি হয়েছে",
-                                            Toast.LENGTH_SHORT
-                                        ).show()
-                                    },
-                                    onUpdateConfig = { config = it }
-                                )
-
-                                2 -> AdmitSignatureAndInfoTab(
-                                    config = config,
-                                    settings = settings,
-                                    signatureBitmap = signatureBitmap,
-                                    onUpdateConfig = { config = it },
-                                    onPickSignatureImage = {
-                                        signaturePickerLauncher.launch(
-                                            PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
-                                        )
-                                    },
-                                    onClearSignatureImage = {
-                                        AdmitCardLocalStore.clearSignature(ctx)
-                                        signatureBitmap = null
-                                    }
-                                )
-
-                                else -> AdmitLayoutAndStyleTab(
-                                    ctx = ctx,
-                                    config = config,
-                                    activeBnFontName = activeBnFontName,
-                                    activeEnFontName = activeEnFontName,
-                                    onUpdateConfig = { config = it }
-                                )
-                            }
-                            }
-                        }
-                    }
-                }
-            }
-
-            // 4. Fixed Bottom 4-Tab Dock Bar
+            // 3. Compact Fixed Bottom 4-Tab Dock Bar
             Surface(
                 color = MaterialTheme.colorScheme.surface,
                 border = BorderStroke(1.dp, SlateOutline),
-                shape = RoundedCornerShape(topStart = 14.dp, topEnd = 14.dp),
+                shape = RoundedCornerShape(topStart = 12.dp, topEnd = 12.dp),
                 shadowElevation = 6.dp,
                 modifier = Modifier
                     .fillMaxWidth()
@@ -706,7 +711,7 @@ fun AdmitCardPdfScreen(
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 4.dp, vertical = 4.dp),
+                        .padding(horizontal = 4.dp, vertical = 3.dp),
                     horizontalArrangement = Arrangement.spacedBy(3.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
@@ -718,26 +723,26 @@ fun AdmitCardPdfScreen(
                             },
                             color = if (isSelected) TealSoft else Color.Transparent,
                             border = if (isSelected) BorderStroke(1.dp, TealPrimary.copy(alpha = 0.45f)) else null,
-                            shape = RoundedCornerShape(10.dp),
+                            shape = RoundedCornerShape(8.dp),
                             modifier = Modifier
                                 .weight(1f)
-                                .heightIn(min = 54.dp)
+                                .heightIn(min = 46.dp)
                                 .testTag("admit_bottom_tab_${tab.index}")
                         ) {
                             Column(
-                                modifier = Modifier.padding(horizontal = 2.dp, vertical = 6.dp),
+                                modifier = Modifier.padding(horizontal = 2.dp, vertical = 4.dp),
                                 horizontalAlignment = Alignment.CenterHorizontally,
-                                verticalArrangement = Arrangement.spacedBy(2.dp)
+                                verticalArrangement = Arrangement.spacedBy(1.dp)
                             ) {
                                 Icon(
                                     imageVector = if (isSelected) tab.activeIcon else tab.inactiveIcon,
                                     contentDescription = tab.label,
                                     tint = if (isSelected) TealDark else SlateMuted,
-                                    modifier = Modifier.size(19.dp)
+                                    modifier = Modifier.size(17.dp)
                                 )
                                 Text(
                                     text = tab.label,
-                                    fontSize = 10.sp,
+                                    fontSize = 9.5.sp,
                                     fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
                                     color = if (isSelected) TealDark else SlateMuted,
                                     maxLines = 1,

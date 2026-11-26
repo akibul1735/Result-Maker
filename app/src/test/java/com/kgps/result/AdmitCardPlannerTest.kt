@@ -152,4 +152,27 @@ class AdmitCardPlannerTest {
         val defaults = AdmitCardPlanner.defaultBaseRoutines(settings)
         assertEquals(2, defaults.size)
     }
+
+    @Test
+    fun typographyAndSpacingDefaults_clampSafely() {
+        val defaultCfg = AdmitCardConfig()
+        assertEquals(15.5f, defaultCfg.safeHeaderToInfoGapPt, 0.01f)
+        assertEquals(1.0f, defaultCfg.safeHeaderFontScale, 0.01f)
+        assertEquals(1.0f, defaultCfg.safeBadgeFontScale, 0.01f)
+        assertEquals(1.0f, defaultCfg.safeStudentInfoFontScale, 0.01f)
+        assertEquals(1.0f, defaultCfg.safeRoutineFontScale, 0.01f)
+        assertEquals(1.0f, defaultCfg.safeSignatureTitleFontScale, 0.01f)
+        assertTrue(defaultCfg.badgeBold)
+        assertTrue(defaultCfg.badgeUnderline)
+        assertTrue(defaultCfg.studentLabelBold)
+
+        val clampedLow = AdmitCardConfig(
+            headerToInfoGapPt = 0f,
+            headerFontScale = 0.2f,
+            routineFontScale = 3.0f
+        )
+        assertEquals(4f, clampedLow.safeHeaderToInfoGapPt, 0.01f)
+        assertEquals(0.75f, clampedLow.safeHeaderFontScale, 0.01f)
+        assertEquals(1.4f, clampedLow.safeRoutineFontScale, 0.01f)
+    }
 }

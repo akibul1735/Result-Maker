@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -22,9 +23,11 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Add
+import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.DeleteOutline
 import androidx.compose.material.icons.rounded.KeyboardArrowDown
 import androidx.compose.material.icons.rounded.Remove
@@ -33,13 +36,11 @@ import androidx.compose.material.icons.rounded.Upload
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
@@ -51,10 +52,13 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
@@ -77,16 +81,17 @@ import com.kgps.result.ui.theme.SlateSurfaceVariant
 import com.kgps.result.ui.theme.SlateText
 import com.kgps.result.ui.theme.TealDark
 import com.kgps.result.ui.theme.TealPrimary
-import com.kgps.result.ui.theme.appFilterChipBorder
-import com.kgps.result.ui.theme.appFilterChipColors
+import com.kgps.result.ui.theme.TealSoft
 import java.util.Locale
 import kotlin.math.abs
 import kotlin.math.roundToInt
 
 internal val ADMIT_MARGIN_INCH_OPTIONS = listOf(0.15f, 0.20f, 0.25f, 0.28f, 0.30f, 0.35f, 0.40f, 0.45f, 0.50f, 0.60f)
 internal val ADMIT_GAP_PT_OPTIONS = listOf(0f, 2f, 4f, 6f, 8f, 10f, 12f, 16f, 20f)
+internal val ADMIT_HEADER_INFO_GAP_OPTIONS = listOf(4f, 6f, 8f, 10f, 12f, 15.5f, 18f, 22f, 26f, 30f, 34f)
 internal val ADMIT_CORNER_RADIUS_OPTIONS = listOf(0f, 2f, 4f, 5f, 6f, 8f, 10f, 12f, 16f, 20f)
 internal val ADMIT_SIG_SCALE_OPTIONS = listOf(0.7f, 0.85f, 1.0f, 1.2f, 1.4f)
+internal val ADMIT_FONT_SCALE_OPTIONS = listOf(0.80f, 0.90f, 1.00f, 1.10f, 1.20f, 1.30f)
 
 internal fun formatAdmitInchesBn(inches: Float): String =
     bn(String.format(Locale.US, "%.2f", inches)) + "\""
@@ -101,6 +106,11 @@ internal fun formatAdmitPtBn(value: Float): String {
     return "${bn(raw)} pt"
 }
 
+internal fun formatAdmitScalePctBn(scale: Float): String {
+    val pct = (scale * 100f).roundToInt()
+    return "${bn(pct.toString())}%"
+}
+
 @Composable
 internal fun AdmitSectionGroupCard(
     title: String,
@@ -108,19 +118,19 @@ internal fun AdmitSectionGroupCard(
     content: @Composable ColumnScope.() -> Unit
 ) {
     Surface(
-        color = SlateBg.copy(alpha = 0.55f),
-        border = BorderStroke(1.dp, SlateOutline.copy(alpha = 0.8f)),
-        shape = RoundedCornerShape(11.dp),
+        color = SlateBg.copy(alpha = 0.65f),
+        border = BorderStroke(1.dp, SlateOutline.copy(alpha = 0.85f)),
+        shape = RoundedCornerShape(10.dp),
         modifier = modifier.fillMaxWidth()
     ) {
         Column(
-            modifier = Modifier.padding(horizontal = 9.dp, vertical = 7.dp),
-            verticalArrangement = Arrangement.spacedBy(6.dp)
+            modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
+            verticalArrangement = Arrangement.spacedBy(5.dp)
         ) {
             Text(
                 title,
-                fontSize = 10.5.sp,
-                fontWeight = FontWeight.SemiBold,
+                fontSize = 10.sp,
+                fontWeight = FontWeight.Bold,
                 color = TealDark
             )
             content()
@@ -140,12 +150,12 @@ internal fun <T> AdmitSegmentedOptionBar(
     Surface(
         color = SlateBg,
         border = BorderStroke(1.dp, SlateOutline),
-        shape = RoundedCornerShape(10.dp),
+        shape = RoundedCornerShape(8.dp),
         modifier = modifier.fillMaxWidth()
     ) {
         Row(
-            modifier = Modifier.fillMaxWidth().padding(3.dp),
-            horizontalArrangement = Arrangement.spacedBy(3.dp)
+            modifier = Modifier.fillMaxWidth().padding(2.dp),
+            horizontalArrangement = Arrangement.spacedBy(2.dp)
         ) {
             items.forEachIndexed { idx, (value, label) ->
                 val isSel = value == selected
@@ -166,19 +176,19 @@ internal fun <T> AdmitSegmentedOptionBar(
                     onClick = { onSelect(value) },
                     color = bg,
                     border = border,
-                    shape = RoundedCornerShape(8.dp),
+                    shape = RoundedCornerShape(6.dp),
                     modifier = Modifier
                         .weight(1f)
-                        .heightIn(min = 48.dp)
+                        .heightIn(min = 32.dp)
                         .testTag("${tagPrefix}_$idx")
                 ) {
                     Box(
                         contentAlignment = Alignment.Center,
-                        modifier = Modifier.padding(horizontal = 4.dp, vertical = 6.dp)
+                        modifier = Modifier.padding(horizontal = 4.dp, vertical = 4.dp)
                     ) {
                         Text(
                             label,
-                            fontSize = 11.sp,
+                            fontSize = 10.5.sp,
                             fontWeight = if (isSel) FontWeight.Bold else FontWeight.Medium,
                             color = fg,
                             maxLines = 1,
@@ -187,6 +197,49 @@ internal fun <T> AdmitSegmentedOptionBar(
                     }
                 }
             }
+        }
+    }
+}
+
+@Composable
+internal fun AdmitCompactTogglePill(
+    label: String,
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit,
+    modifier: Modifier = Modifier,
+    testTag: String = ""
+) {
+    Surface(
+        onClick = { onCheckedChange(!checked) },
+        color = if (checked) TealPrimary else MaterialTheme.colorScheme.surface,
+        border = BorderStroke(1.dp, if (checked) TealPrimary else SlateOutline),
+        shape = RoundedCornerShape(8.dp),
+        modifier = modifier
+            .heightIn(min = 36.dp)
+            .let { if (testTag.isNotEmpty()) it.testTag(testTag) else it }
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.Center,
+            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+        ) {
+            if (checked) {
+                Icon(
+                    Icons.Rounded.Check,
+                    contentDescription = null,
+                    tint = Color.White,
+                    modifier = Modifier.size(12.dp)
+                )
+                Spacer(Modifier.width(3.dp))
+            }
+            Text(
+                text = label,
+                fontSize = 10.5.sp,
+                fontWeight = if (checked) FontWeight.Bold else FontWeight.Medium,
+                color = if (checked) Color.White else SlateText,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
         }
     }
 }
@@ -212,27 +265,27 @@ internal fun <T> AdmitCompactPickerBox(
             enabled = enabled,
             color = MaterialTheme.colorScheme.surface,
             border = BorderStroke(1.dp, if (enabled) SlateOutline else SlateOutline.copy(alpha = 0.45f)),
-            shape = RoundedCornerShape(10.dp),
+            shape = RoundedCornerShape(8.dp),
             modifier = Modifier
                 .fillMaxWidth()
-                .heightIn(min = 48.dp)
+                .heightIn(min = 36.dp)
                 .let { if (testTag.isNotEmpty()) it.testTag(testTag) else it }
         ) {
             Row(
                 verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
+                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
             ) {
                 Column(Modifier.weight(1f)) {
                     Text(
                         label,
-                        fontSize = 9.5.sp,
+                        fontSize = 9.sp,
                         color = SlateMuted,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
                     Text(
                         valueText,
-                        fontSize = 12.sp,
+                        fontSize = 11.sp,
                         fontWeight = FontWeight.SemiBold,
                         color = if (enabled) SlateText else SlateMuted,
                         maxLines = 1,
@@ -243,7 +296,7 @@ internal fun <T> AdmitCompactPickerBox(
                     imageVector = if (isFontDropdown) Icons.Rounded.KeyboardArrowDown else Icons.Rounded.UnfoldMore,
                     contentDescription = label,
                     tint = SlateMuted,
-                    modifier = Modifier.size(16.dp)
+                    modifier = Modifier.size(14.dp)
                 )
             }
         }
@@ -256,6 +309,7 @@ internal fun <T> AdmitCompactPickerBox(
                         Text(
                             optionLabel(item),
                             fontFamily = family,
+                            fontSize = 12.5.sp,
                             fontWeight = if (isSel) FontWeight.Bold else FontWeight.Normal,
                             color = if (isSel) TealPrimary else SlateText
                         )
@@ -264,6 +318,67 @@ internal fun <T> AdmitCompactPickerBox(
                         onSelect(item)
                         expanded = false
                     }
+                )
+            }
+        }
+    }
+}
+
+@Composable
+internal fun AdmitCompactTextInput(
+    label: String,
+    value: String,
+    onValueChange: (String) -> Unit,
+    placeholder: String,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+    keyboardType: KeyboardType = KeyboardType.Text,
+    testTag: String = ""
+) {
+    Surface(
+        color = if (enabled) MaterialTheme.colorScheme.surface else SlateBg,
+        border = BorderStroke(1.dp, if (enabled) SlateOutline else SlateOutline.copy(alpha = 0.5f)),
+        shape = RoundedCornerShape(8.dp),
+        modifier = modifier
+            .fillMaxWidth()
+            .heightIn(min = 38.dp)
+    ) {
+        Column(
+            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+            verticalArrangement = Arrangement.spacedBy(1.dp)
+        ) {
+            Text(
+                text = label,
+                fontSize = 9.sp,
+                color = SlateMuted,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            Box(contentAlignment = Alignment.CenterStart) {
+                if (value.isEmpty()) {
+                    Text(
+                        text = placeholder,
+                        fontSize = 11.5.sp,
+                        color = SlateMuted.copy(alpha = 0.7f),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+                BasicTextField(
+                    value = value,
+                    onValueChange = onValueChange,
+                    enabled = enabled,
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = keyboardType),
+                    textStyle = TextStyle(
+                        fontSize = 11.5.sp,
+                        fontWeight = FontWeight.Medium,
+                        color = if (enabled) SlateText else SlateMuted
+                    ),
+                    cursorBrush = SolidColor(TealPrimary),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .let { if (testTag.isNotEmpty()) it.testTag(testTag) else it }
                 )
             }
         }
@@ -281,15 +396,15 @@ internal fun AdmitCompactSwitchRow(
     Row(
         modifier = modifier
             .fillMaxWidth()
-            .heightIn(min = 48.dp)
+            .heightIn(min = 34.dp)
             .clickable { onCheckedChange(!checked) }
-            .padding(horizontal = 2.dp),
+            .padding(horizontal = 2.dp, vertical = 1.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.SpaceBetween
     ) {
         Text(
             label,
-            fontSize = 12.sp,
+            fontSize = 11.sp,
             fontWeight = FontWeight.Medium,
             color = SlateText,
             modifier = Modifier.weight(1f)
@@ -302,7 +417,7 @@ internal fun AdmitCompactSwitchRow(
                 checkedTrackColor = TealPrimary,
                 uncheckedTrackColor = SlateSurfaceVariant
             ),
-            modifier = Modifier.testTag(testTag)
+            modifier = Modifier.scale(0.8f).testTag(testTag)
         )
     }
 }
@@ -320,25 +435,35 @@ internal fun AdmitClassAndRollTab(
     onRollFromChange: (String) -> Unit,
     onRollToChange: (String) -> Unit
 ) {
-    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
         AdmitSectionGroupCard(title = "শ্রেণি নির্বাচন") {
             FlowRow(
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
-                verticalArrangement = Arrangement.spacedBy(4.dp)
+                horizontalArrangement = Arrangement.spacedBy(5.dp),
+                verticalArrangement = Arrangement.spacedBy(5.dp)
             ) {
                 allowedClasses.forEach { c ->
                     val isSel = c == config.selectedClass
                     val cnt = countByClass[c] ?: 0
-                    FilterChip(
-                        selected = isSel,
+                    Surface(
                         onClick = { onSelectClass(c) },
-                        label = {
-                            Text("${classShortBn(c, settings)} (${bn(cnt.toString())})", fontSize = 11.5.sp)
-                        },
-                        colors = appFilterChipColors(),
-                        border = appFilterChipBorder(isSel),
-                        modifier = Modifier.heightIn(min = 48.dp).testTag("admit_card_cls_$c")
-                    )
+                        color = if (isSel) TealPrimary else MaterialTheme.colorScheme.surface,
+                        border = BorderStroke(1.dp, if (isSel) TealPrimary else SlateOutline),
+                        shape = RoundedCornerShape(7.dp),
+                        modifier = Modifier.heightIn(min = 30.dp).testTag("admit_card_cls_$c")
+                    ) {
+                        Box(
+                            contentAlignment = Alignment.Center,
+                            modifier = Modifier.padding(horizontal = 9.dp, vertical = 5.dp)
+                        ) {
+                            Text(
+                                "${classShortBn(c, settings)} (${bn(cnt.toString())})",
+                                fontSize = 11.sp,
+                                fontWeight = if (isSel) FontWeight.Bold else FontWeight.Medium,
+                                color = if (isSel) Color.White else SlateText,
+                                maxLines = 1
+                            )
+                        }
+                    }
                 }
             }
         }
@@ -360,47 +485,45 @@ internal fun AdmitClassAndRollTab(
                 tagPrefix = "admit_card_order"
             )
             Row(
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
                 modifier = Modifier.fillMaxWidth()
             ) {
-                OutlinedTextField(
+                AdmitCompactTextInput(
+                    label = "রোল থেকে",
                     value = rollFromText,
                     onValueChange = { raw ->
-                        val digits = fromBn(raw).filter { it.isDigit() }.take(4)
-                        onRollFromChange(digits)
+                        onRollFromChange(fromBn(raw).filter { it.isDigit() }.take(4))
                     },
-                    label = { Text("রোল থেকে", fontSize = 11.sp) },
-                    placeholder = { Text("সব", fontSize = 11.sp) },
-                    singleLine = true,
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                    modifier = Modifier.weight(1f).testTag("admit_card_roll_from")
+                    placeholder = "সব",
+                    keyboardType = KeyboardType.Number,
+                    modifier = Modifier.weight(1f),
+                    testTag = "admit_card_roll_from"
                 )
-                OutlinedTextField(
+                AdmitCompactTextInput(
+                    label = "রোল পর্যন্ত",
                     value = rollToText,
                     onValueChange = { raw ->
-                        val digits = fromBn(raw).filter { it.isDigit() }.take(4)
-                        onRollToChange(digits)
+                        onRollToChange(fromBn(raw).filter { it.isDigit() }.take(4))
                     },
-                    label = { Text("রোল পর্যন্ত", fontSize = 11.sp) },
-                    placeholder = { Text("সব", fontSize = 11.sp) },
-                    singleLine = true,
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                    modifier = Modifier.weight(1f).testTag("admit_card_roll_to")
+                    placeholder = "সব",
+                    keyboardType = KeyboardType.Number,
+                    modifier = Modifier.weight(1f),
+                    testTag = "admit_card_roll_to"
                 )
             }
             Surface(
                 color = MaterialTheme.colorScheme.surface,
                 border = BorderStroke(1.dp, SlateOutline),
-                shape = RoundedCornerShape(10.dp),
+                shape = RoundedCornerShape(8.dp),
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 2.dp)
+                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
                 ) {
                     Text(
                         "অতিরিক্ত ফাঁকা প্রবেশপত্র",
-                        fontSize = 12.sp,
+                        fontSize = 11.sp,
                         fontWeight = FontWeight.Medium,
                         color = SlateText,
                         modifier = Modifier.weight(1f)
@@ -412,16 +535,16 @@ internal fun AdmitClassAndRollTab(
                             }
                         },
                         enabled = config.extraBlankCards > 0,
-                        modifier = Modifier.size(48.dp).testTag("admit_card_blank_minus")
+                        modifier = Modifier.size(34.dp).testTag("admit_card_blank_minus")
                     ) {
-                        Icon(Icons.Rounded.Remove, contentDescription = "ফাঁকা প্রবেশপত্র কমান", modifier = Modifier.size(16.dp))
+                        Icon(Icons.Rounded.Remove, contentDescription = "ফাঁকা প্রবেশপত্র কমান", modifier = Modifier.size(15.dp))
                     }
                     Text(
                         bn(config.extraBlankCards.toString()),
-                        fontSize = 13.sp,
+                        fontSize = 12.sp,
                         fontWeight = FontWeight.Bold,
                         color = SlateText,
-                        modifier = Modifier.padding(horizontal = 4.dp)
+                        modifier = Modifier.padding(horizontal = 6.dp)
                     )
                     IconButton(
                         onClick = {
@@ -430,9 +553,9 @@ internal fun AdmitClassAndRollTab(
                             }
                         },
                         enabled = config.extraBlankCards < 40,
-                        modifier = Modifier.size(48.dp).testTag("admit_card_blank_plus")
+                        modifier = Modifier.size(34.dp).testTag("admit_card_blank_plus")
                     ) {
-                        Icon(Icons.Rounded.Add, contentDescription = "ফাঁকা প্রবেশপত্র বাড়ান", modifier = Modifier.size(16.dp))
+                        Icon(Icons.Rounded.Add, contentDescription = "ফাঁকা প্রবেশপত্র বাড়ান", modifier = Modifier.size(15.dp))
                     }
                 }
             }
@@ -449,64 +572,66 @@ internal fun AdmitSignatureAndInfoTab(
     onPickSignatureImage: () -> Unit,
     onClearSignatureImage: () -> Unit
 ) {
-    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
         AdmitSectionGroupCard(title = "প্রধান শিক্ষকের স্বাক্ষর") {
             Surface(
                 color = MaterialTheme.colorScheme.surface,
                 border = BorderStroke(1.dp, SlateOutline),
-                shape = RoundedCornerShape(10.dp),
+                shape = RoundedCornerShape(8.dp),
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Column(
-                    modifier = Modifier.padding(8.dp),
-                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                    modifier = Modifier.padding(7.dp),
+                    verticalArrangement = Arrangement.spacedBy(5.dp)
                 ) {
                     if (signatureBitmap != null) {
                         Box(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .height(64.dp)
-                                .background(Color.White, RoundedCornerShape(8.dp))
-                                .padding(4.dp),
+                                .height(48.dp)
+                                .background(Color.White, RoundedCornerShape(6.dp))
+                                .padding(3.dp),
                             contentAlignment = Alignment.Center
                         ) {
                             Image(
                                 bitmap = signatureBitmap.asImageBitmap(),
                                 contentDescription = "প্রধান শিক্ষকের স্বাক্ষরের ছবি",
                                 contentScale = ContentScale.Fit,
-                                modifier = Modifier.fillMaxWidth().height(52.dp)
+                                modifier = Modifier.fillMaxWidth().height(42.dp)
                             )
                         }
                     } else {
                         Text(
-                            "স্বাক্ষরের ছবি যুক্ত করা নেই (কার্ডে পরিষ্কার ফাঁকা স্বাক্ষর ঘর থাকবে)",
-                            fontSize = 11.sp,
+                            "স্বাক্ষরের ছবি যুক্ত নেই (ফাঁকা ঘর থাকবে)",
+                            fontSize = 10.5.sp,
                             color = SlateMuted
                         )
                     }
                     Row(
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         OutlinedButton(
                             onClick = onPickSignatureImage,
-                            shape = RoundedCornerShape(9.dp),
-                            modifier = Modifier.weight(1f).heightIn(min = 48.dp).testTag("admit_card_pick_sig_btn")
+                            shape = RoundedCornerShape(7.dp),
+                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 0.dp),
+                            modifier = Modifier.weight(1f).height(34.dp).testTag("admit_card_pick_sig_btn")
                         ) {
-                            Icon(Icons.Rounded.Upload, contentDescription = null, modifier = Modifier.size(16.dp))
-                            Spacer(Modifier.width(5.dp))
-                            Text(if (signatureBitmap == null) "গ্যালারি থেকে স্বাক্ষর" else "ছবি বদলান", fontSize = 11.5.sp)
+                            Icon(Icons.Rounded.Upload, contentDescription = null, modifier = Modifier.size(14.dp))
+                            Spacer(Modifier.width(4.dp))
+                            Text(if (signatureBitmap == null) "গ্যালারি থেকে স্বাক্ষর" else "ছবি বদলান", fontSize = 11.sp)
                         }
                         if (signatureBitmap != null) {
                             OutlinedButton(
                                 onClick = onClearSignatureImage,
-                                shape = RoundedCornerShape(9.dp),
+                                shape = RoundedCornerShape(7.dp),
+                                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 0.dp),
                                 border = BorderStroke(1.dp, RoseDanger.copy(alpha = 0.5f)),
-                                modifier = Modifier.heightIn(min = 48.dp).testTag("admit_card_clear_sig_btn")
+                                modifier = Modifier.height(34.dp).testTag("admit_card_clear_sig_btn")
                             ) {
-                                Icon(Icons.Rounded.DeleteOutline, contentDescription = "স্বাক্ষর মুছুন", tint = RoseDanger, modifier = Modifier.size(16.dp))
-                                Spacer(Modifier.width(4.dp))
-                                Text("মুছুন", fontSize = 11.5.sp, color = RoseDanger)
+                                Icon(Icons.Rounded.DeleteOutline, contentDescription = "স্বাক্ষর মুছুন", tint = RoseDanger, modifier = Modifier.size(14.dp))
+                                Spacer(Modifier.width(3.dp))
+                                Text("মুছুন", fontSize = 11.sp, color = RoseDanger)
                             }
                         }
                     }
@@ -514,30 +639,37 @@ internal fun AdmitSignatureAndInfoTab(
             }
 
             if (signatureBitmap != null) {
-                AdmitCompactSwitchRow(
-                    label = "স্বাক্ষরের ছবি দেখাও (বন্ধ করলে ফাঁকা ঘর)",
-                    checked = config.showSignatureImage,
-                    onCheckedChange = { onUpdateConfig(config.copy(showSignatureImage = it)) },
-                    testTag = "admit_card_show_sig_img_switch"
-                )
-                AdmitCompactPickerBox(
-                    label = "স্বাক্ষরের ছবির সাইজ",
-                    valueText = "${bn(String.format(Locale.US, "%.2g", config.safeSignatureScale))}×",
-                    options = ADMIT_SIG_SCALE_OPTIONS,
-                    selectedValue = config.safeSignatureScale,
-                    optionLabel = { "${bn(String.format(Locale.US, "%.2g", it))}×" },
-                    onSelect = { onUpdateConfig(config.copy(signatureScale = it)) },
-                    testTag = "admit_card_sig_scale_picker"
-                )
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    AdmitCompactTogglePill(
+                        label = "স্বাক্ষর ছবি",
+                        checked = config.showSignatureImage,
+                        onCheckedChange = { onUpdateConfig(config.copy(showSignatureImage = it)) },
+                        modifier = Modifier.weight(1f),
+                        testTag = "admit_card_show_sig_img_switch"
+                    )
+                    AdmitCompactPickerBox(
+                        label = "ছবির সাইজ",
+                        valueText = "${bn(String.format(Locale.US, "%.2g", config.safeSignatureScale))}×",
+                        options = ADMIT_SIG_SCALE_OPTIONS,
+                        selectedValue = config.safeSignatureScale,
+                        optionLabel = { "${bn(String.format(Locale.US, "%.2g", it))}×" },
+                        onSelect = { onUpdateConfig(config.copy(signatureScale = it)) },
+                        modifier = Modifier.weight(1f),
+                        testTag = "admit_card_sig_scale_picker"
+                    )
+                }
             }
 
-            OutlinedTextField(
+            AdmitCompactTextInput(
+                label = "স্বাক্ষর পদের নাম",
                 value = config.headTeacherTitle,
                 onValueChange = { onUpdateConfig(config.copy(headTeacherTitle = it)) },
-                label = { Text("স্বাক্ষর পদের নাম", fontSize = 11.sp) },
-                placeholder = { Text("প্রধান শিক্ষকের স্বাক্ষর", fontSize = 11.sp) },
-                singleLine = true,
-                modifier = Modifier.fillMaxWidth().testTag("admit_card_sig_title_input")
+                placeholder = "প্রধান শিক্ষকের স্বাক্ষর",
+                testTag = "admit_card_sig_title_input"
             )
         }
 
@@ -550,44 +682,40 @@ internal fun AdmitSignatureAndInfoTab(
             )
             HorizontalDivider(color = SlateOutline.copy(alpha = 0.4f))
             Row(
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
                 modifier = Modifier.fillMaxWidth()
             ) {
-                OutlinedTextField(
+                AdmitCompactTextInput(
+                    label = "কার্ড শিরোনাম",
                     value = config.badgeLabel,
                     onValueChange = { onUpdateConfig(config.copy(badgeLabel = it)) },
-                    label = { Text("কার্ড শিরোনাম", fontSize = 10.5.sp) },
-                    placeholder = { Text("প্রবেশপত্র", fontSize = 10.5.sp) },
-                    singleLine = true,
-                    modifier = Modifier.weight(0.85f).testTag("admit_card_badge_label_input")
+                    placeholder = "প্রবেশপত্র",
+                    modifier = Modifier.weight(0.85f),
+                    testTag = "admit_card_badge_label_input"
                 )
-                OutlinedTextField(
+                AdmitCompactTextInput(
+                    label = "পরীক্ষার শিরোনাম",
                     value = config.customExamTitle,
                     onValueChange = { onUpdateConfig(config.copy(customExamTitle = it)) },
-                    label = { Text("পরীক্ষার শিরোনাম", fontSize = 10.5.sp) },
-                    placeholder = {
-                        Text(AdmitCardPlanner.resolvedExamTitle(config.copy(customExamTitle = ""), settings), fontSize = 10.5.sp)
-                    },
-                    singleLine = true,
-                    modifier = Modifier.weight(1.15f).testTag("admit_card_exam_title_input")
+                    placeholder = AdmitCardPlanner.resolvedExamTitle(config.copy(customExamTitle = ""), settings),
+                    modifier = Modifier.weight(1.15f),
+                    testTag = "admit_card_exam_title_input"
                 )
             }
-            OutlinedTextField(
+            AdmitCompactTextInput(
+                label = "বিদ্যালয়ের নাম (ঐচ্ছিক)",
                 value = config.customSchoolName,
                 onValueChange = { onUpdateConfig(config.copy(customSchoolName = it)) },
-                label = { Text("বিদ্যালয়ের নাম (ঐচ্ছিক)", fontSize = 11.sp) },
-                placeholder = { Text(settings.school.ifBlank { "বিদ্যালয়ের নাম" }, fontSize = 11.sp) },
-                singleLine = true,
-                modifier = Modifier.fillMaxWidth().testTag("admit_card_school_name_input")
+                placeholder = settings.school.ifBlank { "বিদ্যালয়ের নাম" },
+                testTag = "admit_card_school_name_input"
             )
-            OutlinedTextField(
+            AdmitCompactTextInput(
+                label = "বিদ্যালয়ের ঠিকানা (ঐচ্ছিক)",
                 value = config.customSchoolAddress,
                 onValueChange = { onUpdateConfig(config.copy(customSchoolAddress = it)) },
                 enabled = config.showSchoolAddress,
-                label = { Text("বিদ্যালয়ের ঠিকানা (ঐচ্ছিক)", fontSize = 11.sp) },
-                placeholder = { Text(settings.schoolAddress.ifBlank { "ঠিকানা" }, fontSize = 11.sp) },
-                singleLine = true,
-                modifier = Modifier.fillMaxWidth().testTag("admit_card_school_addr_input")
+                placeholder = settings.schoolAddress.ifBlank { "ঠিকানা" },
+                testTag = "admit_card_school_addr_input"
             )
         }
     }

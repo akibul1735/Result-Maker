@@ -146,21 +146,21 @@ internal fun AdmitCardRoutineEditor(
                             onClick = { onSelectBase(base.id) },
                             color = if (isSel) AmberBg else MaterialTheme.colorScheme.surface,
                             border = BorderStroke(1.dp, if (isSel) AmberBorder else SlateOutline),
-                            shape = RoundedCornerShape(9.dp),
-                            modifier = Modifier.heightIn(min = 44.dp).testTag("admit_base_chip_${base.id}")
+                            shape = RoundedCornerShape(7.dp),
+                            modifier = Modifier.heightIn(min = 32.dp).testTag("admit_base_chip_${base.id}")
                         ) {
                             Row(
                                 verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(4.dp),
-                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
+                                horizontalArrangement = Arrangement.spacedBy(3.dp),
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
                             ) {
                                 if (isSel) {
-                                    Icon(Icons.Rounded.Check, contentDescription = null, tint = AmberNotice, modifier = Modifier.size(14.dp))
+                                    Icon(Icons.Rounded.Check, contentDescription = null, tint = AmberNotice, modifier = Modifier.size(12.dp))
                                 }
-                                Icon(Icons.Rounded.Star, contentDescription = null, tint = AmberNotice, modifier = Modifier.size(14.dp))
+                                Icon(Icons.Rounded.Star, contentDescription = null, tint = AmberNotice, modifier = Modifier.size(12.dp))
                                 Text(
                                     base.name,
-                                    fontSize = 11.5.sp,
+                                    fontSize = 10.5.sp,
                                     fontWeight = if (isSel) FontWeight.Bold else FontWeight.SemiBold,
                                     color = if (isSel) Color(0xFF78350F) else SlateText,
                                     maxLines = 1
@@ -173,16 +173,16 @@ internal fun AdmitCardRoutineEditor(
                         onClick = { showCreateBaseDialog = true },
                         color = SlateBg,
                         border = BorderStroke(1.dp, TealPrimary.copy(alpha = 0.45f)),
-                        shape = RoundedCornerShape(9.dp),
-                        modifier = Modifier.heightIn(min = 44.dp).testTag("admit_add_base_btn")
+                        shape = RoundedCornerShape(7.dp),
+                        modifier = Modifier.heightIn(min = 32.dp).testTag("admit_add_base_btn")
                     ) {
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(3.dp),
-                            modifier = Modifier.padding(horizontal = 9.dp, vertical = 6.dp)
+                            horizontalArrangement = Arrangement.spacedBy(2.dp),
+                            modifier = Modifier.padding(horizontal = 7.dp, vertical = 4.dp)
                         ) {
-                            Icon(Icons.Rounded.Add, contentDescription = null, tint = TealPrimary, modifier = Modifier.size(15.dp))
-                            Text("নতুন বেস", fontSize = 11.5.sp, fontWeight = FontWeight.SemiBold, color = TealPrimary)
+                            Icon(Icons.Rounded.Add, contentDescription = null, tint = TealPrimary, modifier = Modifier.size(13.dp))
+                            Text("নতুন বেস", fontSize = 10.5.sp, fontWeight = FontWeight.SemiBold, color = TealPrimary)
                         }
                     }
 
@@ -192,20 +192,20 @@ internal fun AdmitCardRoutineEditor(
                             onClick = { onSelectClass(c) },
                             color = if (isSel) TealSoft else MaterialTheme.colorScheme.surface,
                             border = BorderStroke(1.dp, if (isSel) TealPrimary else SlateOutline),
-                            shape = RoundedCornerShape(9.dp),
-                            modifier = Modifier.heightIn(min = 44.dp).testTag("admit_routine_cls_$c")
+                            shape = RoundedCornerShape(7.dp),
+                            modifier = Modifier.heightIn(min = 32.dp).testTag("admit_routine_cls_$c")
                         ) {
                             Row(
                                 verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(4.dp),
-                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
+                                horizontalArrangement = Arrangement.spacedBy(3.dp),
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
                             ) {
                                 if (isSel) {
-                                    Icon(Icons.Rounded.Check, contentDescription = null, tint = TealDark, modifier = Modifier.size(14.dp))
+                                    Icon(Icons.Rounded.Check, contentDescription = null, tint = TealDark, modifier = Modifier.size(12.dp))
                                 }
                                 Text(
                                     "${classShortBn(c, settings)} শ্রেণি",
-                                    fontSize = 11.5.sp,
+                                    fontSize = 10.5.sp,
                                     fontWeight = if (isSel) FontWeight.Bold else FontWeight.Medium,
                                     color = if (isSel) TealDark else SlateText
                                 )
@@ -271,31 +271,25 @@ internal fun AdmitCardRoutineEditor(
         Surface(
             color = MaterialTheme.colorScheme.surface,
             border = BorderStroke(1.dp, SlateOutline),
-            shape = RoundedCornerShape(12.dp),
+            shape = RoundedCornerShape(10.dp),
             modifier = Modifier.fillMaxWidth()
         ) {
             Column(
-                modifier = Modifier.padding(9.dp),
-                verticalArrangement = Arrangement.spacedBy(6.dp)
+                modifier = Modifier.padding(7.dp),
+                verticalArrangement = Arrangement.spacedBy(5.dp)
             ) {
-                OutlinedTextField(
+                AdmitCompactTextInput(
+                    label = if (isEditingBase) "পরীক্ষার সময় (BASE)" else "পরীক্ষার সময় (${classShortBn(config.selectedClass, settings)})",
                     value = activeExamTime,
                     onValueChange = onUpdateActiveExamTime,
-                    label = {
-                        Text(
-                            if (isEditingBase) "পরীক্ষার সময় (BASE)" else "পরীক্ষার সময় (${classShortBn(config.selectedClass, settings)})",
-                            fontSize = 11.sp
-                        )
-                    },
-                    placeholder = { Text("দুপুর ০১:০০-০৩:৩০ টা", fontSize = 11.sp) },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth().testTag("admit_card_exam_time_input")
+                    placeholder = "দুপুর ০১:০০-০৩:৩০ টা",
+                    testTag = "admit_card_exam_time_input"
                 )
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
                         .horizontalScroll(rememberScrollState()),
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    horizontalArrangement = Arrangement.spacedBy(5.dp)
                 ) {
                     AdmitCardPlanner.EXAM_TIME_PRESETS.forEach { preset ->
                         val isSel = activeExamTime.trim() == preset
@@ -303,16 +297,16 @@ internal fun AdmitCardRoutineEditor(
                             onClick = { onUpdateActiveExamTime(preset) },
                             color = if (isSel) TealSoft else SlateBg,
                             border = BorderStroke(1.dp, if (isSel) TealPrimary else SlateOutline),
-                            shape = RoundedCornerShape(8.dp),
-                            modifier = Modifier.heightIn(min = 40.dp)
+                            shape = RoundedCornerShape(7.dp),
+                            modifier = Modifier.heightIn(min = 30.dp)
                         ) {
                             Box(
                                 contentAlignment = Alignment.Center,
-                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
                             ) {
                                 Text(
                                     preset,
-                                    fontSize = 11.sp,
+                                    fontSize = 10.sp,
                                     fontWeight = if (isSel) FontWeight.Bold else FontWeight.Medium,
                                     color = if (isSel) TealDark else SlateText
                                 )
@@ -366,36 +360,38 @@ internal fun AdmitCardRoutineEditor(
         Surface(
             color = MaterialTheme.colorScheme.surface,
             border = BorderStroke(1.dp, SlateOutline),
-            shape = RoundedCornerShape(12.dp),
+            shape = RoundedCornerShape(10.dp),
             modifier = Modifier.fillMaxWidth()
         ) {
             Row(
-                modifier = Modifier.fillMaxWidth().padding(8.dp),
-                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                modifier = Modifier.fillMaxWidth().padding(6.dp),
+                horizontalArrangement = Arrangement.spacedBy(5.dp)
             ) {
                 OutlinedButton(
                     onClick = {
                         onUpdateActiveRows(activeRows + ExamRoutineEntry(date = "", day = "", subjects = listOf("")))
                     },
-                    shape = RoundedCornerShape(9.dp),
-                    modifier = Modifier.weight(1f).heightIn(min = 48.dp).testTag("admit_card_add_row_btn")
+                    shape = RoundedCornerShape(8.dp),
+                    contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 6.dp, vertical = 0.dp),
+                    modifier = Modifier.weight(1f).heightIn(min = 36.dp).testTag("admit_card_add_row_btn")
                 ) {
-                    Icon(Icons.Rounded.Add, contentDescription = null, modifier = Modifier.size(16.dp))
-                    Spacer(Modifier.width(3.dp))
-                    Text("নতুন দিন", fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Icon(Icons.Rounded.Add, contentDescription = null, modifier = Modifier.size(14.dp))
+                    Spacer(Modifier.width(2.dp))
+                    Text("নতুন দিন", fontSize = 10.5.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
 
                 Button(
                     onClick = onSaveActiveFeedback,
                     colors = ButtonDefaults.buttonColors(containerColor = TealPrimary),
-                    shape = RoundedCornerShape(9.dp),
-                    modifier = Modifier.weight(1f).heightIn(min = 48.dp).testTag("admit_card_save_routine_btn")
+                    shape = RoundedCornerShape(8.dp),
+                    contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 6.dp, vertical = 0.dp),
+                    modifier = Modifier.weight(1f).heightIn(min = 36.dp).testTag("admit_card_save_routine_btn")
                 ) {
-                    Icon(Icons.Rounded.Save, contentDescription = null, modifier = Modifier.size(15.dp))
-                    Spacer(Modifier.width(3.dp))
+                    Icon(Icons.Rounded.Save, contentDescription = null, modifier = Modifier.size(14.dp))
+                    Spacer(Modifier.width(2.dp))
                     Text(
                         if (isEditingBase) "বেস সেভ" else "শ্রেণি সেভ",
-                        fontSize = 11.sp,
+                        fontSize = 10.5.sp,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
@@ -403,12 +399,13 @@ internal fun AdmitCardRoutineEditor(
 
                 OutlinedButton(
                     onClick = { showCopyDialog = true },
-                    shape = RoundedCornerShape(9.dp),
-                    modifier = Modifier.weight(1.1f).heightIn(min = 48.dp).testTag("admit_card_copy_classes_btn")
+                    shape = RoundedCornerShape(8.dp),
+                    contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 6.dp, vertical = 0.dp),
+                    modifier = Modifier.weight(1.1f).heightIn(min = 36.dp).testTag("admit_card_copy_classes_btn")
                 ) {
-                    Icon(Icons.Rounded.ContentCopy, contentDescription = null, modifier = Modifier.size(15.dp))
-                    Spacer(Modifier.width(3.dp))
-                    Text("শ্রেণিতে কপি", fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Icon(Icons.Rounded.ContentCopy, contentDescription = null, modifier = Modifier.size(14.dp))
+                    Spacer(Modifier.width(2.dp))
+                    Text("শ্রেণিতে কপি", fontSize = 10.5.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
             }
         }
@@ -418,23 +415,20 @@ internal fun AdmitCardRoutineEditor(
             if (!isEditingBase) {
                 OutlinedButton(
                     onClick = onResetClassDefault,
-                    shape = RoundedCornerShape(9.dp),
-                    modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("admit_card_reset_routine_btn")
+                    shape = RoundedCornerShape(8.dp),
+                    contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 10.dp, vertical = 0.dp),
+                    modifier = Modifier.fillMaxWidth().heightIn(min = 34.dp).testTag("admit_card_reset_routine_btn")
                 ) {
-                    Icon(Icons.Rounded.RestartAlt, contentDescription = null, modifier = Modifier.size(16.dp))
-                    Spacer(Modifier.width(5.dp))
-                    Text("${classShortBn(config.selectedClass, settings)} শ্রেণির মূল বিষয়গুলো লোড করুন", fontSize = 11.5.sp)
+                    Icon(Icons.Rounded.RestartAlt, contentDescription = null, modifier = Modifier.size(14.dp))
+                    Spacer(Modifier.width(4.dp))
+                    Text("${classShortBn(config.selectedClass, settings)} শ্রেণির মূল বিষয় লোড করুন", fontSize = 10.5.sp)
                 }
             }
-            OutlinedTextField(
+            AdmitCompactTextInput(
+                label = "কাস্টম রুটিন শিরোনাম (ঐচ্ছিক)",
                 value = config.customRoutineTitle,
                 onValueChange = { onUpdateConfig(config.copy(customRoutineTitle = it)) },
-                label = { Text("কাস্টম রুটিন শিরোনাম (ঐচ্ছিক)", fontSize = 11.sp) },
-                placeholder = {
-                    Text(AdmitCardPlanner.resolvedRoutineTitle(config.copy(customRoutineTitle = ""), settings), fontSize = 11.sp)
-                },
-                singleLine = true,
-                modifier = Modifier.fillMaxWidth()
+                placeholder = AdmitCardPlanner.resolvedRoutineTitle(config.copy(customRoutineTitle = ""), settings)
             )
             AdmitCompactSwitchRow(
                 label = "রুটিনের নিচে ১টি ফাঁকা সারি দেখাও",

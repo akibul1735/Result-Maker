@@ -72,7 +72,21 @@ data class AdmitCardConfig(
     val includeBlankRoutineRow: Boolean = true,
     val showSignatureImage: Boolean = true,
     val signatureScale: Float = 1.0f,
-    val extraBlankCards: Int = 0
+    val extraBlankCards: Int = 0,
+    val headerToInfoGapPt: Float = 15.5f,
+    val headerFontScale: Float = 1.0f,
+    val headerBold: Boolean = false,
+    val badgeFontScale: Float = 1.0f,
+    val badgeBold: Boolean = true,
+    val badgeUnderline: Boolean = true,
+    val studentInfoFontScale: Float = 1.0f,
+    val studentLabelBold: Boolean = true,
+    val studentValueBold: Boolean = false,
+    val routineFontScale: Float = 1.0f,
+    val routineHeaderBold: Boolean = false,
+    val routineBodyBold: Boolean = false,
+    val signatureTitleFontScale: Float = 1.0f,
+    val signatureTitleBold: Boolean = false
 ) {
     val safeCardsPerPage: Int get() = cardsPerPage.coerceIn(2, 5)
     val safeMarginInches: Float get() = marginInches.coerceIn(0.15f, 0.85f)
@@ -80,6 +94,12 @@ data class AdmitCardConfig(
     val safeVerticalGapPt: Float get() = verticalGapPt.coerceIn(0f, 24f)
     val safeCornerRadiusPt: Float get() = cornerRadiusPt.coerceIn(0f, 24f)
     val safeSignatureScale: Float get() = signatureScale.coerceIn(0.6f, 1.5f)
+    val safeHeaderToInfoGapPt: Float get() = headerToInfoGapPt.coerceIn(4f, 36f)
+    val safeHeaderFontScale: Float get() = headerFontScale.coerceIn(0.75f, 1.4f)
+    val safeBadgeFontScale: Float get() = badgeFontScale.coerceIn(0.75f, 1.4f)
+    val safeStudentInfoFontScale: Float get() = studentInfoFontScale.coerceIn(0.75f, 1.4f)
+    val safeRoutineFontScale: Float get() = routineFontScale.coerceIn(0.75f, 1.4f)
+    val safeSignatureTitleFontScale: Float get() = signatureTitleFontScale.coerceIn(0.75f, 1.4f)
 }
 
 data class AdmitCardItem(

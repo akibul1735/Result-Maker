@@ -246,41 +246,49 @@ object AdmitCardPdfGen {
                 )
             }
 
-            // --- LEFT PANEL: Regular School Header, Bold-Underlined প্রবেশপত্র, Student Info, Head Teacher Signature ---
-            var curY = contentTop + (9.5f * heightScale).coerceIn(6.5f, 14f)
-            val headerStep = (11.6f * heightScale).coerceIn(8.2f, 16.5f)
+            // --- LEFT PANEL: School Header, প্রবেশপত্র Badge, Student Info, Head Teacher Signature ---
+            val hdrScale = cfg.safeHeaderFontScale
+            var curY = contentTop + (9.5f * heightScale * hdrScale.coerceAtMost(1.15f)).coerceIn(6.5f, 16f)
+            val headerStep = (11.6f * heightScale * hdrScale).coerceIn(8.0f, 21f)
 
             if (schoolName.isNotBlank()) {
-                val dp = PdfGen.dualPaint(ctx, 9.8f * heightScale, false, bnFont, enFont, 0xFF000000.toInt())
-                PdfGen.shrinkMixedToFit(dp, schoolName, leftW - 4f, step = 0.25f, minSize = 5.8f)
+                val dp = PdfGen.dualPaint(ctx, 9.8f * heightScale * hdrScale, cfg.headerBold, bnFont, enFont, 0xFF000000.toInt())
+                PdfGen.shrinkMixedToFit(dp, schoolName, leftW - 4f, step = 0.25f, minSize = 5.5f)
                 PdfGen.drawMixedText(c, schoolName, leftCenterX, curY, dp, Paint.Align.CENTER)
                 curY += headerStep
             }
             if (schoolAddress.isNotBlank()) {
-                val dp = PdfGen.dualPaint(ctx, 9.2f * heightScale, false, bnFont, enFont, 0xFF000000.toInt())
-                PdfGen.shrinkMixedToFit(dp, schoolAddress, leftW - 4f, step = 0.25f, minSize = 5.5f)
+                val dp = PdfGen.dualPaint(ctx, 9.2f * heightScale * hdrScale, cfg.headerBold, bnFont, enFont, 0xFF000000.toInt())
+                PdfGen.shrinkMixedToFit(dp, schoolAddress, leftW - 4f, step = 0.25f, minSize = 5.2f)
                 PdfGen.drawMixedText(c, schoolAddress, leftCenterX, curY, dp, Paint.Align.CENTER)
                 curY += headerStep + (1.2f * heightScale)
             }
             if (examTitle.isNotBlank()) {
-                val dp = PdfGen.dualPaint(ctx, 9.2f * heightScale, false, bnFont, enFont, 0xFF000000.toInt())
-                PdfGen.shrinkMixedToFit(dp, examTitle, leftW - 4f, step = 0.25f, minSize = 5.5f)
+                val dp = PdfGen.dualPaint(ctx, 9.2f * heightScale * hdrScale, cfg.headerBold, bnFont, enFont, 0xFF000000.toInt())
+                PdfGen.shrinkMixedToFit(dp, examTitle, leftW - 4f, step = 0.25f, minSize = 5.2f)
                 PdfGen.drawMixedText(c, examTitle, leftCenterX, curY, dp, Paint.Align.CENTER)
                 curY += headerStep + (2.5f * heightScale)
             }
 
-            // Bold underlined "প্রবেশপত্র"
-            val badgeDp = PdfGen.dualPaint(ctx, 9.8f * heightScale, true, bnFont, enFont, 0xFF000000.toInt()).apply {
-                bn.isUnderlineText = true
-                en.isUnderlineText = true
+            // "প্রবেশপত্র" title badge
+            val badgeDp = PdfGen.dualPaint(ctx, 9.8f * heightScale * cfg.safeBadgeFontScale, cfg.badgeBold, bnFont, enFont, 0xFF000000.toInt()).apply {
+                bn.isUnderlineText = cfg.badgeUnderline
+                en.isUnderlineText = cfg.badgeUnderline
             }
-            PdfGen.shrinkMixedToFit(badgeDp, badgeText, leftW - 8f, step = 0.2f, minSize = 6.2f)
+            PdfGen.shrinkMixedToFit(badgeDp, badgeText, leftW - 8f, step = 0.2f, minSize = 5.8f)
             PdfGen.drawMixedText(c, badgeText, leftCenterX, curY, badgeDp, Paint.Align.CENTER)
 
             // Reserve signature area at bottom-right of Left Panel (clean blank space when no image)
             val sigLabelText = cfg.headTeacherTitle.trim().ifBlank { "প্রধান শিক্ষকের স্বাক্ষর" }
-            val sigLabelDp = PdfGen.dualPaint(ctx, 8.6f * heightScale, false, bnFont, enFont, 0xFF000000.toInt())
-            PdfGen.shrinkMixedToFit(sigLabelDp, sigLabelText, leftW * 0.56f, step = 0.2f, minSize = 5.5f)
+            val sigLabelDp = PdfGen.dualPaint(
+                ctx,
+                8.6f * heightScale * cfg.safeSignatureTitleFontScale,
+                cfg.signatureTitleBold,
+                bnFont,
+                enFont,
+                0xFF000000.toInt()
+            )
+            PdfGen.shrinkMixedToFit(sigLabelDp, sigLabelText, leftW * 0.56f, step = 0.2f, minSize = 5.2f)
             val sigLabelY = contentBottom - (1.5f * heightScale)
             val sigAnchorX = leftEndX - (leftW * 0.26f)
             PdfGen.drawMixedText(c, sigLabelText, sigAnchorX, sigLabelY, sigLabelDp, Paint.Align.CENTER)
@@ -303,26 +311,31 @@ object AdmitCardPdfGen {
                 c.drawBitmap(signatureBitmap, null, dstRect, imgPaint)
             }
 
-            // Student details on left side: bold label prefix + regular value, comfortably spaced above bottom
-            val infoStartY = curY + (15.5f * heightScale).coerceIn(10f, 22f)
-            val infoEndY = (contentBottom - (34f * heightScale)).coerceAtLeast(infoStartY + 26f)
-            val infoStep = ((infoEndY - infoStartY) / 2f).coerceIn(12f, 20f)
+            // Student details on left side: configurable gap below headline, font size, and label/value boldness
+            val sigReserveTop = contentBottom - (28f * heightScale)
+            val rawInfoStartY = curY + (cfg.safeHeaderToInfoGapPt * heightScale)
+            val infoStartY = rawInfoStartY.coerceAtMost((sigReserveTop - 22f).coerceAtLeast(curY + 6f))
+            val infoEndY = (contentBottom - (32f * heightScale)).coerceAtLeast(infoStartY + 22f)
+            val infoStep = ((infoEndY - infoStartY) / 2f).coerceIn(10.5f, 20f)
             val infoLeftX = contentLeft + (if (showRoutine) 6f else 18f)
             val infoMaxW = if (showRoutine) (leftW - 10f) else (leftW - 36f)
 
             val nameVal = if (item.isBlank) "............................" else item.studentName
             val clsVal = classShortBn(item.cls, settings)
             val rollVal = AdmitCardPlanner.formatRoll(item.roll, cfg)
-            val labelSize = 9.5f * heightScale
+            val labelSize = 9.5f * heightScale * cfg.safeStudentInfoFontScale
 
             drawLabelValueLine(
-                ctx, c, "নাম : ", nameVal, infoLeftX, infoStartY, infoMaxW, labelSize, bnFont, enFont
+                ctx, c, "নাম : ", nameVal, infoLeftX, infoStartY, infoMaxW, labelSize,
+                cfg.studentLabelBold, cfg.studentValueBold, bnFont, enFont
             )
             drawLabelValueLine(
-                ctx, c, "শ্রেণি : ", clsVal, infoLeftX, infoStartY + infoStep, infoMaxW * 0.58f, labelSize, bnFont, enFont
+                ctx, c, "শ্রেণি : ", clsVal, infoLeftX, infoStartY + infoStep, infoMaxW * 0.58f, labelSize,
+                cfg.studentLabelBold, cfg.studentValueBold, bnFont, enFont
             )
             drawLabelValueLine(
-                ctx, c, "রোল : ", rollVal, infoLeftX, infoStartY + infoStep * 2f, infoMaxW * 0.58f, labelSize, bnFont, enFont
+                ctx, c, "রোল : ", rollVal, infoLeftX, infoStartY + infoStep * 2f, infoMaxW * 0.58f, labelSize,
+                cfg.studentLabelBold, cfg.studentValueBold, bnFont, enFont
             )
 
             // --- RIGHT PANEL: Clean White Exam Routine Table ---
@@ -352,21 +365,23 @@ object AdmitCardPdfGen {
                 val col1End = rLeft + colDateW
                 val col2End = col1End + colDayW
 
+                val rtScale = cfg.safeRoutineFontScale
+
                 // Row 1: Routine Title
                 drawCenteredTableCell(
                     ctx, c, routineTitle, rLeft, rTop, rW, titleRowH,
-                    8.5f * heightScale, false, bnFont, enFont
+                    8.5f * heightScale * rtScale, cfg.routineHeaderBold, bnFont, enFont
                 )
 
                 // Row 2-3: তারিখ (2-row span), বার (2-row span), Time / বিষয়
                 val hdrTopY = rTop + titleRowH
                 drawCenteredTableCell(
                     ctx, c, "তারিখ", rLeft, hdrTopY, colDateW, subHdrTotalH,
-                    8.3f * heightScale, false, bnFont, enFont
+                    8.3f * heightScale * rtScale, cfg.routineHeaderBold, bnFont, enFont
                 )
                 drawCenteredTableCell(
                     ctx, c, "বার", col1End, hdrTopY, colDayW, subHdrTotalH,
-                    8.3f * heightScale, false, bnFont, enFont
+                    8.3f * heightScale * rtScale, cfg.routineHeaderBold, bnFont, enFont
                 )
                 val timeStr = AdmitCardPlanner.formatDigits(
                     cfg.examTimeLabel.trim().ifBlank { "দুপুর ০১:০০-০৩:৩০ টা" },
@@ -374,15 +389,15 @@ object AdmitCardPdfGen {
                 )
                 drawCenteredTableCell(
                     ctx, c, timeStr, col2End, hdrTopY, colSubjW, subHdrRowH,
-                    8.0f * heightScale, false, bnFont, enFont
+                    8.0f * heightScale * rtScale, cfg.routineHeaderBold, bnFont, enFont
                 )
                 drawCenteredTableCell(
                     ctx, c, "বিষয়", col2End, hdrTopY + subHdrRowH, colSubjW, subHdrRowH,
-                    8.2f * heightScale, false, bnFont, enFont
+                    8.2f * heightScale * rtScale, cfg.routineHeaderBold, bnFont, enFont
                 )
 
                 // Data rows
-                val cellTextPt = min(8.3f * heightScale, (rowH * 0.65f)).coerceIn(5.4f, 10.5f)
+                val cellTextPt = min(8.3f * heightScale * rtScale, (rowH * 0.68f)).coerceIn(5.0f, 11.5f)
                 val bodyStartY = hdrTopY + subHdrTotalH
                 for (i in 0 until totalDataRows) {
                     val ry = bodyStartY + i * rowH
@@ -390,11 +405,11 @@ object AdmitCardPdfGen {
                     val dateTxt = entry?.date?.let { AdmitCardPlanner.formatDigits(it, cfg.numeralMode) }.orEmpty()
                     val dayTxt = entry?.day.orEmpty()
 
-                    drawCenteredTableCell(ctx, c, dateTxt, rLeft, ry, colDateW, rowH, cellTextPt, false, bnFont, enFont)
-                    drawCenteredTableCell(ctx, c, dayTxt, col1End, ry, colDayW, rowH, cellTextPt, false, bnFont, enFont)
+                    drawCenteredTableCell(ctx, c, dateTxt, rLeft, ry, colDateW, rowH, cellTextPt, cfg.routineBodyBold, bnFont, enFont)
+                    drawCenteredTableCell(ctx, c, dayTxt, col1End, ry, colDayW, rowH, cellTextPt, cfg.routineBodyBold, bnFont, enFont)
                     drawRoutineSubjectCell(
                         ctx, c, entry?.nonEmptySubjects ?: emptyList(),
-                        col2End, ry, colSubjW, rowH, cellTextPt, bnFont, enFont
+                        col2End, ry, colSubjW, rowH, cellTextPt, cfg.routineBodyBold, bnFont, enFont
                     )
                 }
 
@@ -413,13 +428,15 @@ object AdmitCardPdfGen {
         y: Float,
         maxW: Float,
         sizePt: Float,
+        labelBold: Boolean,
+        valueBold: Boolean,
         bnFont: String,
         enFont: String
     ) {
-        val labelDp = PdfGen.dualPaint(ctx, sizePt, true, bnFont, enFont, 0xFF000000.toInt())
-        val valueDp = PdfGen.dualPaint(ctx, sizePt, false, bnFont, enFont, 0xFF000000.toInt())
+        val labelDp = PdfGen.dualPaint(ctx, sizePt, labelBold, bnFont, enFont, 0xFF000000.toInt())
+        val valueDp = PdfGen.dualPaint(ctx, sizePt, valueBold, bnFont, enFont, 0xFF000000.toInt())
         var curSize = sizePt
-        val minSize = 5.6f
+        val minSize = 5.4f
         while (
             (PdfGen.measureMixedText(label, labelDp) + PdfGen.measureMixedText(value, valueDp)) > maxW &&
             curSize > minSize
@@ -442,16 +459,17 @@ object AdmitCardPdfGen {
         w: Float,
         h: Float,
         size: Float,
+        bold: Boolean,
         bnFont: String,
         enFont: String
     ) {
         val joined = subjects.joinToString(" / ")
         if (subjects.size <= 1) {
-            drawCenteredTableCell(ctx, c, joined, x, y, w, h, size, false, bnFont, enFont)
+            drawCenteredTableCell(ctx, c, joined, x, y, w, h, size, bold, bnFont, enFont)
             return
         }
         val availW = (w - 4f).coerceAtLeast(8f)
-        val probeDp = PdfGen.dualPaint(ctx, size, false, bnFont, enFont, 0xFF000000.toInt())
+        val probeDp = PdfGen.dualPaint(ctx, size, bold, bnFont, enFont, 0xFF000000.toInt())
         PdfGen.shrinkMixedToFit(probeDp, joined, availW, step = 0.2f, minSize = 4.6f)
         if (probeDp.textSize >= 6.4f || h < 14f) {
             c.drawRect(x, y, x + w, y + h, tableLinePaint)
@@ -462,10 +480,10 @@ object AdmitCardPdfGen {
             c.drawRect(x, y, x + w, y + h, tableLinePaint)
             val line1 = subjects.first()
             val line2 = subjects.drop(1).joinToString(" / ")
-            val lineSize = min(size * 0.85f, (h * 0.36f)).coerceIn(4.6f, 7.6f)
-            val dp1 = PdfGen.dualPaint(ctx, lineSize, false, bnFont, enFont, 0xFF000000.toInt())
+            val lineSize = min(size * 0.85f, (h * 0.36f)).coerceIn(4.6f, 8.2f)
+            val dp1 = PdfGen.dualPaint(ctx, lineSize, bold, bnFont, enFont, 0xFF000000.toInt())
             PdfGen.shrinkMixedToFit(dp1, line1, availW, step = 0.2f, minSize = 4.4f)
-            val dp2 = PdfGen.dualPaint(ctx, lineSize, false, bnFont, enFont, 0xFF000000.toInt())
+            val dp2 = PdfGen.dualPaint(ctx, lineSize, bold, bnFont, enFont, 0xFF000000.toInt())
             PdfGen.shrinkMixedToFit(dp2, line2, availW, step = 0.2f, minSize = 4.4f)
             val fm1 = dp1.bn.fontMetrics
             val fm2 = dp2.bn.fontMetrics
