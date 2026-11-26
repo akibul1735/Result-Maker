@@ -100,6 +100,10 @@ import com.kgps.result.SeatPlanRollOrder
 import com.kgps.result.Settings
 import com.kgps.result.Student
 import com.kgps.result.activeClassIds
+import com.kgps.result.ai.DirectGeminiAiRepository
+import com.kgps.result.ai.ExamRoutineNoticeExtractor
+import com.kgps.result.ai.ExtractedExamRoutineNotice
+import com.kgps.result.ai.GeminiApiConfig
 import com.kgps.result.bn
 import com.kgps.result.classShortBn
 import com.kgps.result.cloud.TeacherPermissions
@@ -184,6 +188,12 @@ fun AdmitCardPdfScreen(
     var isCustomPanelHeight by remember { mutableStateOf(false) }
     var previewViewportHeightPx by remember { mutableIntStateOf(0) }
 
+    val directAiRepository = remember(ctx) { DirectGeminiAiRepository(ctx.applicationContext) }
+    var aiRoutineBusy by remember { mutableStateOf(false) }
+    var aiRoutineError by remember { mutableStateOf<String?>(null) }
+    var aiEnhanceNotice by remember { mutableStateOf(true) }
+    var pendingAiNotice by remember { mutableStateOf<ExtractedExamRoutineNotice?>(null) }
+
     // Back button closes open compact panel first; otherwise exits screen
     if (onBack != null) {
         BackHandler(enabled = openTab == null) { onBack() }
@@ -247,6 +257,78 @@ fun AdmitCardPdfScreen(
                 addCategory(Intent.CATEGORY_OPENABLE)
             }
             runCatching { signatureIntentLauncher.launch(openDocFallback) }
+        }
+    }
+
+    fun processNoticeUriWithAi(uri: Uri?) {
+        if (uri == null || aiRoutineBusy) return
+        aiRoutineError = null
+        aiRoutineBusy = true
+        scope.launch {
+            try {
+                val bmp = ExamRoutineNoticeExtractor.decodeNoticeUriToBitmap(ctx, uri)
+                    ?: throw IllegalStateException("নির্বাচিত ছবি বা PDF পড়া যায়নি। আরেকটি স্পষ্ট ফাইল বেছে নিন।")
+                val extracted = ExamRoutineNoticeExtractor.extractFromBitmap(
+                    repository = directAiRepository,
+                    bitmap = bmp,
+                    allowedClasses = allowedClasses,
+                    settings = settings,
+                    documentEnhance = aiEnhanceNotice
+                )
+                pendingAiNotice = extracted
+            } catch (t: Throwable) {
+                aiRoutineError = t.message ?: "AI দিয়ে নোটিশ পড়া যায়নি। আবার চেষ্টা করুন।"
+            } finally {
+                aiRoutineBusy = false
+            }
+        }
+    }
+
+    val noticeUriLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        processNoticeUriWithAi(result.data?.data)
+    }
+
+    fun openNoticeImagePicker() {
+        val pickIntent = Intent(Intent.ACTION_PICK, MediaStore.Images.Media.EXTERNAL_CONTENT_URI).apply {
+            type = "image/*"
+        }
+        val chooser = Intent.createChooser(pickIntent, "নোটিশের ছবি বাছুন")
+        runCatching {
+            noticeUriLauncher.launch(chooser)
+        }.onFailure {
+            val fallback = Intent.createChooser(
+                Intent(Intent.ACTION_GET_CONTENT).apply {
+                    type = "image/*"
+                    addCategory(Intent.CATEGORY_OPENABLE)
+                },
+                "নোটিশের ছবি বাছুন"
+            )
+            runCatching { noticeUriLauncher.launch(fallback) }
+        }
+    }
+
+    fun openNoticeFileOrPdfPicker() {
+        val docIntent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+            addCategory(Intent.CATEGORY_OPENABLE)
+            type = "*/*"
+            putExtra(Intent.EXTRA_MIME_TYPES, arrayOf("image/*", "application/pdf"))
+            putExtra(Intent.EXTRA_LOCAL_ONLY, false)
+        }
+        val chooser = Intent.createChooser(docIntent, "PDF বা নোটিশ ফাইল বাছুন")
+        runCatching {
+            noticeUriLauncher.launch(chooser)
+        }.onFailure {
+            val fallback = Intent.createChooser(
+                Intent(Intent.ACTION_GET_CONTENT).apply {
+                    type = "*/*"
+                    addCategory(Intent.CATEGORY_OPENABLE)
+                    putExtra(Intent.EXTRA_MIME_TYPES, arrayOf("image/*", "application/pdf"))
+                },
+                "PDF বা নোটিশ ফাইল বাছুন"
+            )
+            runCatching { noticeUriLauncher.launch(fallback) }
         }
     }
 
@@ -771,7 +853,15 @@ fun AdmitCardPdfScreen(
                                                     Toast.LENGTH_SHORT
                                                 ).show()
                                             },
-                                            onUpdateConfig = { config = it }
+                                            onUpdateConfig = { config = it },
+                                            aiBusy = aiRoutineBusy,
+                                            aiError = aiRoutineError,
+                                            isAiConfigured = GeminiApiConfig.isConfigured(ctx),
+                                            documentEnhance = aiEnhanceNotice,
+                                            onToggleDocumentEnhance = { aiEnhanceNotice = it },
+                                            onPickNoticeImageForAi = ::openNoticeImagePicker,
+                                            onPickNoticeFileOrPdfForAi = ::openNoticeFileOrPdfPicker,
+                                            onDismissAiError = { aiRoutineError = null }
                                         )
 
                                         2 -> AdmitSignatureAndInfoTab(
@@ -875,6 +965,62 @@ fun AdmitCardPdfScreen(
                 }
             },
             onDismiss = { showFullscreen = false }
+        )
+    }
+
+    pendingAiNotice?.let { extracted ->
+        AdmitAiRoutinePreviewDialog(
+            notice = extracted,
+            settings = settings,
+            onDismiss = { pendingAiNotice = null },
+            onApply = { selection ->
+                var nextConfig = config
+                selection.applyTerm?.let { newTerm ->
+                    nextConfig = nextConfig.copy(term = newTerm)
+                }
+                selection.applyFootnote?.let { note ->
+                    nextConfig = nextConfig.copy(routineNote = note)
+                }
+
+                selection.classPlans.forEach { (cls, pair) ->
+                    val (examTime, rows) = pair
+                    AdmitCardLocalStore.saveRoutine(ctx, cls, rows)
+                    if (examTime.isNotBlank()) {
+                        AdmitCardLocalStore.saveExamTime(ctx, cls, examTime)
+                    }
+                    if (cls == nextConfig.selectedClass) {
+                        routineRows = rows
+                        if (examTime.isNotBlank()) {
+                            nextConfig = nextConfig.copy(examTimeLabel = examTime)
+                        }
+                        activeBaseId = null
+                    }
+                }
+
+                if (selection.saveAsBaseRoutines && selection.selectedGroupsForBase.isNotEmpty()) {
+                    val existing = baseRoutines.toMutableList()
+                    selection.selectedGroupsForBase.forEachIndexed { idx, grp ->
+                        val label = grp.classGroupLabel.ifBlank { "AI বেস ${bn((idx + 1).toString())}" }
+                        val created = BaseRoutineTemplate(
+                            id = "ai_base_${System.currentTimeMillis()}_$idx",
+                            name = "AI · $label",
+                            examTimeLabel = grp.examTime.ifBlank { nextConfig.examTimeLabel },
+                            rows = grp.rows.map { it.copy(id = UUID.randomUUID().toString()) }
+                        )
+                        existing.add(created)
+                    }
+                    baseRoutines = existing
+                    AdmitCardLocalStore.saveBaseRoutines(ctx, existing)
+                }
+
+                config = nextConfig
+                pendingAiNotice = null
+                Toast.makeText(
+                    ctx,
+                    "${bn(selection.classPlans.size.toString())}টি শ্রেণির রুটিন AI থেকে বসানো হয়েছে",
+                    Toast.LENGTH_SHORT
+                ).show()
+            }
         )
     }
 }

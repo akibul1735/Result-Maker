@@ -1549,6 +1549,21 @@ class DirectGeminiAiRepository(
         }
     }
 
+    internal suspend fun requestVisionJson(
+        bitmap: Bitmap,
+        prompt: String,
+        maxOutputTokens: Int = 4096,
+        documentEnhance: Boolean = true
+    ): Pair<String, String> {
+        val apiKey = requireApiKey()
+        val modelId = resolveModelId(null)
+        val encoded = withContext(Dispatchers.Default) {
+            VisionImageOptimizer.prepareForVisionUpload(bitmap, documentEnhance)
+        }
+        val payload = buildVisionJsonPayload(encoded.base64, prompt, maxOutputTokens = maxOutputTokens)
+        return callGenerateContentResilient(apiKey, modelId, payload)
+    }
+
     override suspend fun analyzeMarksheetImage(
         bitmap: Bitmap,
         teacherNote: String,

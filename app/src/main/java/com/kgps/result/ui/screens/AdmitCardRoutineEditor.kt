@@ -24,6 +24,7 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.AddCircleOutline
+import androidx.compose.material.icons.rounded.AutoAwesome
 import androidx.compose.material.icons.rounded.CalendarMonth
 import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.Close
@@ -31,6 +32,8 @@ import androidx.compose.material.icons.rounded.ContentCopy
 import androidx.compose.material.icons.rounded.DeleteOutline
 import androidx.compose.material.icons.rounded.Edit
 import androidx.compose.material.icons.rounded.KeyboardArrowDown
+import androidx.compose.material.icons.rounded.PhotoLibrary
+import androidx.compose.material.icons.rounded.PictureAsPdf
 import androidx.compose.material.icons.rounded.RestartAlt
 import androidx.compose.material.icons.rounded.Save
 import androidx.compose.material.icons.rounded.Star
@@ -42,6 +45,7 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
@@ -100,7 +104,15 @@ internal fun AdmitCardRoutineEditor(
     onResetClassDefault: () -> Unit,
     onSaveActiveFeedback: () -> Unit,
     onCopyToClasses: (targetClasses: List<Int>, matchClassSubjects: Boolean, copyExamTime: Boolean) -> Unit,
-    onUpdateConfig: (AdmitCardConfig) -> Unit
+    onUpdateConfig: (AdmitCardConfig) -> Unit,
+    aiBusy: Boolean = false,
+    aiError: String? = null,
+    isAiConfigured: Boolean = true,
+    documentEnhance: Boolean = true,
+    onToggleDocumentEnhance: (Boolean) -> Unit = {},
+    onPickNoticeImageForAi: () -> Unit = {},
+    onPickNoticeFileOrPdfForAi: () -> Unit = {},
+    onDismissAiError: () -> Unit = {}
 ) {
     val activeBase = remember(activeBaseId, baseRoutines) {
         if (activeBaseId == null) null else baseRoutines.find { it.id == activeBaseId }
@@ -124,6 +136,131 @@ internal fun AdmitCardRoutineEditor(
     var showCopyDialog by remember { mutableStateOf(false) }
 
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        // 0. Compact AI Routine Scanner from Official Notice (Image or PDF)
+        Surface(
+            color = TealSoft.copy(alpha = 0.55f),
+            border = BorderStroke(1.dp, TealPrimary.copy(alpha = 0.35f)),
+            shape = RoundedCornerShape(10.dp),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Column(
+                modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
+                verticalArrangement = Arrangement.spacedBy(5.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(5.dp)
+                ) {
+                    Icon(
+                        Icons.Rounded.AutoAwesome,
+                        contentDescription = null,
+                        tint = TealDark,
+                        modifier = Modifier.size(15.dp)
+                    )
+                    Text(
+                        text = "নোটিশ/ছবি থেকে AI রুটিন",
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = TealDark,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f)
+                    )
+                    AdmitCompactTogglePill(
+                        label = "স্পষ্ট মোড",
+                        checked = documentEnhance,
+                        onCheckedChange = onToggleDocumentEnhance,
+                        modifier = Modifier.heightIn(min = 26.dp),
+                        testTag = "admit_ai_enhance_pill"
+                    )
+                }
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(5.dp)
+                ) {
+                    Button(
+                        onClick = onPickNoticeImageForAi,
+                        enabled = !aiBusy,
+                        colors = ButtonDefaults.buttonColors(containerColor = TealPrimary),
+                        shape = RoundedCornerShape(7.dp),
+                        contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 8.dp, vertical = 0.dp),
+                        modifier = Modifier
+                            .weight(1f)
+                            .heightIn(min = 34.dp)
+                            .testTag("admit_ai_pick_image_btn")
+                    ) {
+                        Icon(Icons.Rounded.PhotoLibrary, contentDescription = null, modifier = Modifier.size(14.dp))
+                        Spacer(Modifier.width(4.dp))
+                        Text("গ্যালারি / ছবি", fontSize = 10.5.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
+                    }
+                    OutlinedButton(
+                        onClick = onPickNoticeFileOrPdfForAi,
+                        enabled = !aiBusy,
+                        shape = RoundedCornerShape(7.dp),
+                        contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 8.dp, vertical = 0.dp),
+                        modifier = Modifier
+                            .weight(1f)
+                            .heightIn(min = 34.dp)
+                            .testTag("admit_ai_pick_pdf_btn")
+                    ) {
+                        Icon(Icons.Rounded.PictureAsPdf, contentDescription = null, tint = TealDark, modifier = Modifier.size(14.dp))
+                        Spacer(Modifier.width(4.dp))
+                        Text("PDF / ফাইল", fontSize = 10.5.sp, fontWeight = FontWeight.SemiBold, color = TealDark, maxLines = 1)
+                    }
+                }
+
+                if (aiBusy) {
+                    LinearProgressIndicator(
+                        color = TealPrimary,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    Text(
+                        text = "AI নোটিশের টেবিল ও তারিখ পর্যবেক্ষণ করছে...",
+                        fontSize = 9.5.sp,
+                        color = TealDark
+                    )
+                } else if (!isAiConfigured) {
+                    Text(
+                        text = "ব্যবহারের আগে সেটিংস → Gemini AI অংশে API Key ও মডেল যুক্ত করুন",
+                        fontSize = 9.5.sp,
+                        color = AmberNotice
+                    )
+                }
+
+                if (!aiError.isNullOrBlank()) {
+                    Surface(
+                        color = Color(0xFFFFF1F2),
+                        border = BorderStroke(1.dp, RoseDanger.copy(alpha = 0.4f)),
+                        shape = RoundedCornerShape(7.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 7.dp, vertical = 5.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            Text(
+                                text = aiError,
+                                fontSize = 9.5.sp,
+                                color = RoseDanger,
+                                modifier = Modifier.weight(1f)
+                            )
+                            Box(
+                                contentAlignment = Alignment.Center,
+                                modifier = Modifier
+                                    .size(22.dp)
+                                    .clickable(onClick = onDismissAiError)
+                            ) {
+                                Icon(Icons.Rounded.Close, contentDescription = "বন্ধ করুন", tint = RoseDanger, modifier = Modifier.size(14.dp))
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
         // 1. Top Horizontal Selector Strip: Base Routines + New Base + Class Chips
         Surface(
             color = MaterialTheme.colorScheme.surface,
