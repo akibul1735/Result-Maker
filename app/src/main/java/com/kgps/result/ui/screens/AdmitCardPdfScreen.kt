@@ -17,7 +17,10 @@ import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
-import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.calculatePan
+import androidx.compose.foundation.gestures.calculateZoom
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -47,6 +50,7 @@ import androidx.compose.material.icons.outlined.Draw
 import androidx.compose.material.icons.outlined.EventNote
 import androidx.compose.material.icons.outlined.Groups
 import androidx.compose.material.icons.outlined.Tune
+import androidx.compose.material.icons.rounded.AutoAwesome
 import androidx.compose.material.icons.rounded.Badge
 import androidx.compose.material.icons.rounded.Download
 import androidx.compose.material.icons.rounded.Draw
@@ -54,11 +58,16 @@ import androidx.compose.material.icons.rounded.EventNote
 import androidx.compose.material.icons.rounded.Fullscreen
 import androidx.compose.material.icons.rounded.Groups
 import androidx.compose.material.icons.rounded.KeyboardArrowDown
+import androidx.compose.material.icons.rounded.PhotoLibrary
+import androidx.compose.material.icons.rounded.PictureAsPdf
 import androidx.compose.material.icons.rounded.Print
 import androidx.compose.material.icons.rounded.RestartAlt
 import androidx.compose.material.icons.rounded.Tune
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -78,7 +87,10 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
@@ -87,8 +99,10 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import kotlin.math.abs
 import com.kgps.result.AdmitCardConfig
 import com.kgps.result.AdmitCardLocalStore
 import com.kgps.result.AdmitCardPageSpec
@@ -171,7 +185,18 @@ fun AdmitCardPdfScreen(
         )
     }
 
-    var config by remember(defaultConfig) { mutableStateOf(defaultConfig) }
+    var config by remember(defaultConfig) {
+        val loaded = AdmitCardLocalStore.loadConfig(ctx, defaultConfig)
+        mutableStateOf(
+            loaded.copy(
+                selectedClass = defaultConfig.selectedClass,
+                examTimeLabel = AdmitCardLocalStore.loadExamTime(ctx, defaultConfig.selectedClass, settings)
+            )
+        )
+    }
+    LaunchedEffect(config) {
+        AdmitCardLocalStore.saveConfig(ctx, config)
+    }
     var routineRows by remember(defaultConfig.selectedClass) {
         mutableStateOf(AdmitCardLocalStore.loadRoutine(ctx, defaultConfig.selectedClass, settings))
     }
@@ -187,6 +212,10 @@ fun AdmitCardPdfScreen(
     var panelHeightFraction by remember { mutableFloatStateOf(0.48f) }
     var isCustomPanelHeight by remember { mutableStateOf(false) }
     var previewViewportHeightPx by remember { mutableIntStateOf(0) }
+    var previewZoomScale by remember { mutableFloatStateOf(1f) }
+    var previewPanOffset by remember { mutableStateOf(Offset.Zero) }
+    var previewPageBoxSize by remember { mutableStateOf(IntSize.Zero) }
+    var topAiMenuOpen by remember { mutableStateOf(false) }
 
     val directAiRepository = remember(ctx) { DirectGeminiAiRepository(ctx.applicationContext) }
     var aiRoutineBusy by remember { mutableStateOf(false) }
@@ -194,12 +223,16 @@ fun AdmitCardPdfScreen(
     var aiEnhanceNotice by remember { mutableStateOf(true) }
     var pendingAiNotice by remember { mutableStateOf<ExtractedExamRoutineNotice?>(null) }
 
-    // Back button closes open compact panel first; otherwise exits screen
+    // Back priority: zoomed preview resets first -> open panel closes -> exit screen
     if (onBack != null) {
-        BackHandler(enabled = openTab == null) { onBack() }
+        BackHandler(enabled = !showFullscreen && openTab == null && previewZoomScale <= 1.02f) { onBack() }
     }
-    BackHandler(enabled = openTab != null) {
+    BackHandler(enabled = !showFullscreen && openTab != null && previewZoomScale <= 1.02f) {
         openTab = null
+    }
+    BackHandler(enabled = !showFullscreen && previewZoomScale > 1.02f) {
+        previewZoomScale = 1f
+        previewPanOffset = Offset.Zero
     }
 
     fun handlePickedSignatureUri(uri: Uri?) {
@@ -419,10 +452,55 @@ fun AdmitCardPdfScreen(
                             overflow = TextOverflow.Ellipsis
                         )
                     }
+                    Box {
+                        IconButton(
+                            onClick = { if (!aiRoutineBusy) topAiMenuOpen = true },
+                            enabled = !aiRoutineBusy,
+                            modifier = Modifier.size(38.dp).testTag("admit_top_ai_scan_btn")
+                        ) {
+                            if (aiRoutineBusy) {
+                                CircularProgressIndicator(
+                                    color = TealPrimary,
+                                    strokeWidth = 2.dp,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                            } else {
+                                Icon(
+                                    Icons.Rounded.AutoAwesome,
+                                    contentDescription = "AI নোটিশ স্ক্যান",
+                                    tint = TealPrimary,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
+                        }
+                        DropdownMenu(
+                            expanded = topAiMenuOpen,
+                            onDismissRequest = { topAiMenuOpen = false }
+                        ) {
+                            DropdownMenuItem(
+                                leadingIcon = { Icon(Icons.Rounded.PhotoLibrary, contentDescription = null, modifier = Modifier.size(17.dp)) },
+                                text = { Text("নোটিশের ছবি থেকে AI রুটিন", fontSize = 12.sp) },
+                                onClick = {
+                                    topAiMenuOpen = false
+                                    openNoticeImagePicker()
+                                }
+                            )
+                            DropdownMenuItem(
+                                leadingIcon = { Icon(Icons.Rounded.PictureAsPdf, contentDescription = null, modifier = Modifier.size(17.dp)) },
+                                text = { Text("PDF / ফাইল থেকে AI রুটিন", fontSize = 12.sp) },
+                                onClick = {
+                                    topAiMenuOpen = false
+                                    openNoticeFileOrPdfPicker()
+                                }
+                            )
+                        }
+                    }
                     IconButton(
                         onClick = {
                             val resetTime = AdmitCardPlanner.defaultExamTimeForClass(defaultConfig.selectedClass, settings)
-                            config = defaultConfig.copy(examTimeLabel = resetTime)
+                            val resetCfg = defaultConfig.copy(examTimeLabel = resetTime)
+                            config = resetCfg
+                            AdmitCardLocalStore.saveConfig(ctx, resetCfg)
                             AdmitCardLocalStore.saveExamTime(ctx, defaultConfig.selectedClass, resetTime)
                             val resetRoutine = AdmitCardPlanner.defaultRoutineForClass(defaultConfig.selectedClass, settings)
                             routineRows = resetRoutine
@@ -430,8 +508,10 @@ fun AdmitCardPdfScreen(
                             activeBaseId = null
                             rollFromText = ""
                             rollToText = ""
+                            previewZoomScale = 1f
+                            previewPanOffset = Offset.Zero
                         },
-                        modifier = Modifier.size(40.dp).testTag("admit_card_reset_btn")
+                        modifier = Modifier.size(38.dp).testTag("admit_card_reset_btn")
                     ) {
                         Icon(
                             Icons.Rounded.RestartAlt,
@@ -443,7 +523,7 @@ fun AdmitCardPdfScreen(
                     IconButton(
                         onClick = { onPrint(pages, signatureBitmap, "প্রবেশপত্র") },
                         enabled = pages.isNotEmpty(),
-                        modifier = Modifier.size(40.dp).testTag("admit_card_print_btn")
+                        modifier = Modifier.size(38.dp).testTag("admit_card_print_btn")
                     ) {
                         Icon(
                             Icons.Rounded.Print,
@@ -457,8 +537,8 @@ fun AdmitCardPdfScreen(
                         enabled = pages.isNotEmpty(),
                         colors = ButtonDefaults.buttonColors(containerColor = TealPrimary),
                         shape = RoundedCornerShape(8.dp),
-                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 0.dp),
-                        modifier = Modifier.height(36.dp).testTag("admit_card_export_btn")
+                        contentPadding = PaddingValues(horizontal = 9.dp, vertical = 0.dp),
+                        modifier = Modifier.height(34.dp).testTag("admit_card_export_btn")
                     ) {
                         Icon(Icons.Rounded.Download, contentDescription = null, modifier = Modifier.size(15.dp))
                         Spacer(Modifier.width(3.dp))
@@ -512,6 +592,7 @@ fun AdmitCardPdfScreen(
                     } else {
                         HorizontalPager(
                             state = pagerState,
+                            userScrollEnabled = previewZoomScale <= 1.02f,
                             pageSpacing = 12.dp,
                             modifier = Modifier
                                 .weight(1f)
@@ -522,9 +603,60 @@ fun AdmitCardPdfScreen(
                             Box(
                                 modifier = Modifier
                                     .fillMaxSize()
+                                    .clipToBounds()
+                                    .onSizeChanged { previewPageBoxSize = it }
                                     .padding(horizontal = 4.dp)
                                     .pointerInput(pageIdx) {
-                                        detectTapGestures(onDoubleTap = { showFullscreen = true })
+                                        val touchSlop = viewConfiguration.touchSlop
+                                        awaitEachGesture {
+                                            val firstDown = awaitFirstDown(requireUnconsumed = false)
+                                            var wasMultiTouch = false
+                                            var movedBeyondSlop = false
+                                            var upTimeMillis = firstDown.uptimeMillis
+                                            var lastPointerWasUp = false
+                                            do {
+                                                val event = awaitPointerEvent()
+                                                val pointerCount = event.changes.count { it.pressed }
+                                                if (pointerCount >= 2) wasMultiTouch = true
+                                                event.changes.firstOrNull { it.id == firstDown.id }?.let { ch ->
+                                                    if ((ch.position - firstDown.position).getDistance() > touchSlop) {
+                                                        movedBeyondSlop = true
+                                                    }
+                                                    if (!ch.pressed) {
+                                                        upTimeMillis = ch.uptimeMillis
+                                                        lastPointerWasUp = true
+                                                    }
+                                                }
+                                                val zoomChange = event.calculateZoom()
+                                                val panChange = event.calculatePan()
+                                                if (pointerCount >= 2 || previewZoomScale > 1.02f) {
+                                                    val nextScale = (previewZoomScale * zoomChange).coerceIn(1f, 4.5f)
+                                                    if (nextScale <= 1.02f) {
+                                                        previewZoomScale = 1f
+                                                        previewPanOffset = Offset.Zero
+                                                    } else {
+                                                        previewZoomScale = nextScale
+                                                        val w = previewPageBoxSize.width.toFloat().coerceAtLeast(1f)
+                                                        val h = previewPageBoxSize.height.toFloat().coerceAtLeast(1f)
+                                                        val maxX = (w * (nextScale - 1f)) / 2f + w * 0.15f
+                                                        val maxY = (h * (nextScale - 1f)) / 2f + h * 0.48f
+                                                        val nextOff = previewPanOffset + panChange
+                                                        previewPanOffset = Offset(
+                                                            x = nextOff.x.coerceIn(-maxX, maxX),
+                                                            y = nextOff.y.coerceIn(-maxY, maxY)
+                                                        )
+                                                    }
+                                                    if (pointerCount >= 2 || abs(zoomChange - 1f) > 0.01f || movedBeyondSlop) {
+                                                        event.changes.forEach { it.consume() }
+                                                    }
+                                                }
+                                            } while (event.changes.any { it.pressed })
+
+                                            val tapDuration = upTimeMillis - firstDown.uptimeMillis
+                                            if (!wasMultiTouch && !movedBeyondSlop && lastPointerWasUp && tapDuration < 450L) {
+                                                showFullscreen = true
+                                            }
+                                        }
                                     },
                                 contentAlignment = Alignment.Center
                             ) {
@@ -533,8 +665,36 @@ fun AdmitCardPdfScreen(
                                     page = pageSpec,
                                     settings = settings,
                                     signatureBitmap = signatureBitmap,
-                                    renderScale = 1.9f
+                                    renderScale = 2.4f,
+                                    modifier = Modifier.graphicsLayer(
+                                        scaleX = previewZoomScale,
+                                        scaleY = previewZoomScale,
+                                        translationX = previewPanOffset.x,
+                                        translationY = previewPanOffset.y
+                                    )
                                 )
+                                if (previewZoomScale > 1.02f) {
+                                    Surface(
+                                        onClick = {
+                                            previewZoomScale = 1f
+                                            previewPanOffset = Offset.Zero
+                                        },
+                                        color = Color(0xCC0F172A),
+                                        shape = RoundedCornerShape(999.dp),
+                                        modifier = Modifier
+                                            .align(Alignment.TopEnd)
+                                            .padding(8.dp)
+                                            .testTag("admit_zoom_reset_pill")
+                                    ) {
+                                        Text(
+                                            text = "${bn(String.format(java.util.Locale.US, "%.1f", previewZoomScale))}× · রিসেট",
+                                            color = Color.White,
+                                            fontSize = 10.sp,
+                                            fontWeight = FontWeight.SemiBold,
+                                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                                        )
+                                    }
+                                }
                             }
                         }
 
@@ -560,7 +720,7 @@ fun AdmitCardPdfScreen(
                                 }
                             }
                             Text(
-                                text = "বামে/ডানে সোয়াইপ · ডাবল ট্যাপে ফুল স্ক্রিন",
+                                text = "ট্যাপে ফুল স্ক্রিন · ২ আঙুলে জুম · সোয়াইপে পৃষ্ঠা",
                                 fontSize = 10.sp,
                                 color = SlateMuted,
                                 maxLines = 1,

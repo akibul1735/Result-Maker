@@ -348,29 +348,41 @@ object AdmitCardPdfGen {
 
             val sigAreaTop = (contentBottom - (38f * heightScale)).coerceAtLeast(curY + 8f)
             if (cfg.showSignatureImage && signatureBitmap != null && sigAreaBottom > sigAreaTop + 6f) {
-                val maxSigW = (leftW * 0.44f) * cfg.safeSignatureScale
-                val maxSigH = (sigAreaBottom - sigAreaTop) * cfg.safeSignatureScale
+                val maxAllowedW = (leftW * 0.62f).coerceAtLeast(20f)
+                val maxAllowedH = (sigAreaBottom - (curY + 6f)).coerceAtLeast(10f)
+                val maxSigW = min(maxAllowedW, (leftW * 0.44f) * cfg.safeSignatureScale)
+                val maxSigH = min(maxAllowedH, (sigAreaBottom - sigAreaTop) * cfg.safeSignatureScale)
                 val bmpScale = min(maxSigW / signatureBitmap.width, maxSigH / signatureBitmap.height)
                 val drawW = (signatureBitmap.width * bmpScale).coerceAtLeast(10f)
                 val drawH = (signatureBitmap.height * bmpScale).coerceAtLeast(6f)
+                val halfW = drawW / 2f
+                val clampedCenterX = sigAnchorX.coerceIn(
+                    contentLeft + 2f + halfW,
+                    (leftEndX - 2f - halfW).coerceAtLeast(contentLeft + 2f + halfW)
+                )
                 val dstRect = RectF(
-                    sigAnchorX - drawW / 2f,
+                    clampedCenterX - halfW,
                     sigAreaBottom - drawH,
-                    sigAnchorX + drawW / 2f,
+                    clampedCenterX + halfW,
                     sigAreaBottom
                 )
                 val imgPaint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
                 c.drawBitmap(signatureBitmap, null, dstRect, imgPaint)
             }
 
-            // Student details on left side: configurable gap below headline, Word pt font size, and label/value boldness
+            // Student details on left side: configurable gap below headline, horizontal slide offset, Word pt font size, and boldness
             val sigReserveTop = contentBottom - (28f * heightScale)
             val rawInfoStartY = curY + (cfg.safeHeaderToInfoGapPt * heightScale)
             val infoStartY = rawInfoStartY.coerceAtMost((sigReserveTop - 22f).coerceAtLeast(curY + 6f))
             val infoEndY = (contentBottom - (32f * heightScale)).coerceAtLeast(infoStartY + 22f)
-            val infoStep = ((infoEndY - infoStartY) / 2f).coerceIn(10.5f, 20f)
-            val infoLeftX = contentLeft + (if (showRoutine) 6f else 18f)
-            val infoMaxW = if (showRoutine) (leftW - 10f) else (leftW - 36f)
+            val infoStep = ((infoEndY - infoStartY) / 2f).coerceIn(10.5f, 24f)
+            val baseInfoLeftX = contentLeft + (if (showRoutine) 6f else 18f)
+            val maxSlideRight = if (showRoutine) (leftW * 0.48f) else (leftW * 0.65f)
+            val infoLeftX = (baseInfoLeftX + (cfg.safeStudentInfoOffsetXPt * heightScale)).coerceIn(
+                contentLeft + 2f,
+                (leftEndX - 48f).coerceAtLeast(contentLeft + 2f).coerceAtMost(baseInfoLeftX + maxSlideRight)
+            )
+            val infoMaxW = (leftEndX - infoLeftX - 4f).coerceAtLeast(36f)
 
             val nameVal = if (item.isBlank) "............................" else item.studentName
             val clsVal = classShortBn(item.cls, settings)
@@ -382,11 +394,11 @@ object AdmitCardPdfGen {
                 cfg.studentLabelBold, cfg.studentValueBold, bnFont, enFont
             )
             drawLabelValueLine(
-                ctx, c, "শ্রেণি : ", clsVal, infoLeftX, infoStartY + infoStep, infoMaxW * 0.58f, labelSize,
+                ctx, c, "শ্রেণি : ", clsVal, infoLeftX, infoStartY + infoStep, infoMaxW, labelSize,
                 cfg.studentLabelBold, cfg.studentValueBold, bnFont, enFont
             )
             drawLabelValueLine(
-                ctx, c, "রোল : ", rollVal, infoLeftX, infoStartY + infoStep * 2f, infoMaxW * 0.58f, labelSize,
+                ctx, c, "রোল : ", rollVal, infoLeftX, infoStartY + infoStep * 2f, infoMaxW, labelSize,
                 cfg.studentLabelBold, cfg.studentValueBold, bnFont, enFont
             )
 
@@ -452,7 +464,7 @@ object AdmitCardPdfGen {
                 )
 
                 // Data rows
-                val cellTextPt = min(rtBodyPt, (rowH * 0.68f)).coerceIn(5.0f, 12.0f)
+                val cellTextPt = min(rtBodyPt, (rowH * 0.72f)).coerceIn(4.5f, 18.0f)
                 val bodyStartY = hdrTopY + subHdrTotalH
                 for (i in 0 until totalDataRows) {
                     val ry = bodyStartY + i * rowH

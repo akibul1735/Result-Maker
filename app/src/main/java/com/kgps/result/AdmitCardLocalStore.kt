@@ -17,6 +17,7 @@ object AdmitCardLocalStore {
     private const val PREFS_NAME = "admit_card_prefs"
     private const val SIGNATURE_FILE = "admit_head_signature.png"
     private const val BASE_ROUTINES_KEY = "base_routines_v1"
+    private const val CONFIG_KEY = "admit_card_config_v1"
 
     private fun parseRoutineArray(arr: JSONArray): List<ExamRoutineEntry> = buildList {
         for (i in 0 until arr.length()) {
@@ -94,6 +95,117 @@ object AdmitCardLocalStore {
             .edit()
             .putString("exam_time_cls_$cls", examTime)
             .apply()
+    }
+
+    fun saveConfig(ctx: Context, cfg: AdmitCardConfig) {
+        val obj = JSONObject().apply {
+            put("rollOrder", cfg.rollOrder.name)
+            put("term", cfg.term)
+            put("cardsPerPage", cfg.cardsPerPage)
+            put("marginInches", cfg.marginInches.toDouble())
+            put("verticalGapPt", cfg.verticalGapPt.toDouble())
+            put("bnFontId", cfg.bnFontId)
+            put("enFontId", cfg.enFontId)
+            put("borderStyle", cfg.borderStyle.name)
+            put("dashStyle", cfg.dashStyle.name)
+            put("borderWeight", cfg.borderWeight.name)
+            put("cornerRadiusPt", cfg.cornerRadiusPt.toDouble())
+            put("showCutLines", cfg.showCutLines)
+            put("showCenterDivider", cfg.showCenterDivider)
+            put("padRollTwoDigits", cfg.padRollTwoDigits)
+            put("numeralMode", cfg.numeralMode.name)
+            put("customSchoolName", cfg.customSchoolName)
+            put("customSchoolAddress", cfg.customSchoolAddress)
+            put("showSchoolAddress", cfg.showSchoolAddress)
+            put("customExamTitle", cfg.customExamTitle)
+            put("badgeLabel", cfg.badgeLabel)
+            put("customRoutineTitle", cfg.customRoutineTitle)
+            put("headTeacherTitle", cfg.headTeacherTitle)
+            put("showSignatureLine", cfg.showSignatureLine)
+            put("showRoutineTable", cfg.showRoutineTable)
+            put("includeBlankRoutineRow", cfg.includeBlankRoutineRow)
+            put("routineNote", cfg.routineNote)
+            put("showSignatureImage", cfg.showSignatureImage)
+            put("signatureScale", cfg.signatureScale.toDouble())
+            put("headerToInfoGapPt", cfg.headerToInfoGapPt.toDouble())
+            put("studentInfoOffsetXPt", cfg.studentInfoOffsetXPt.toDouble())
+            put("schoolFontPt", cfg.schoolFontPt.toDouble())
+            put("headerMetaFontPt", cfg.headerMetaFontPt.toDouble())
+            put("headerBold", cfg.headerBold)
+            put("badgeFontPt", cfg.badgeFontPt.toDouble())
+            put("badgeBold", cfg.badgeBold)
+            put("badgeUnderline", cfg.badgeUnderline)
+            put("studentInfoFontPt", cfg.studentInfoFontPt.toDouble())
+            put("studentLabelBold", cfg.studentLabelBold)
+            put("studentValueBold", cfg.studentValueBold)
+            put("routineHeaderFontPt", cfg.routineHeaderFontPt.toDouble())
+            put("routineHeaderBold", cfg.routineHeaderBold)
+            put("routineBodyFontPt", cfg.routineBodyFontPt.toDouble())
+            put("routineBodyBold", cfg.routineBodyBold)
+            put("signatureTitleFontPt", cfg.signatureTitleFontPt.toDouble())
+            put("signatureTitleBold", cfg.signatureTitleBold)
+        }
+        ctx.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            .edit()
+            .putString(CONFIG_KEY, obj.toString())
+            .apply()
+    }
+
+    fun loadConfig(ctx: Context, fallback: AdmitCardConfig): AdmitCardConfig {
+        val prefs = ctx.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        val raw = prefs.getString(CONFIG_KEY, null) ?: return fallback
+        return try {
+            val o = JSONObject(raw)
+            fallback.copy(
+                rollOrder = runCatching { SeatPlanRollOrder.valueOf(o.optString("rollOrder")) }.getOrDefault(fallback.rollOrder),
+                term = o.optInt("term", fallback.term).coerceIn(1, 3),
+                cardsPerPage = o.optInt("cardsPerPage", fallback.cardsPerPage).coerceIn(1, 6),
+                marginInches = o.optDouble("marginInches", fallback.marginInches.toDouble()).toFloat(),
+                verticalGapPt = o.optDouble("verticalGapPt", fallback.verticalGapPt.toDouble()).toFloat(),
+                bnFontId = o.optString("bnFontId", fallback.bnFontId).ifBlank { fallback.bnFontId },
+                enFontId = o.optString("enFontId", fallback.enFontId).ifBlank { fallback.enFontId },
+                borderStyle = runCatching { AdmitBorderStyle.valueOf(o.optString("borderStyle")) }.getOrDefault(fallback.borderStyle),
+                dashStyle = runCatching { AdmitDashStyle.valueOf(o.optString("dashStyle")) }.getOrDefault(fallback.dashStyle),
+                borderWeight = runCatching { SeatPlanBorderWeight.valueOf(o.optString("borderWeight")) }.getOrDefault(fallback.borderWeight),
+                cornerRadiusPt = o.optDouble("cornerRadiusPt", fallback.cornerRadiusPt.toDouble()).toFloat(),
+                showCutLines = o.optBoolean("showCutLines", fallback.showCutLines),
+                showCenterDivider = o.optBoolean("showCenterDivider", fallback.showCenterDivider),
+                padRollTwoDigits = o.optBoolean("padRollTwoDigits", fallback.padRollTwoDigits),
+                numeralMode = runCatching { SeatPlanNumeralMode.valueOf(o.optString("numeralMode")) }.getOrDefault(fallback.numeralMode),
+                customSchoolName = o.optString("customSchoolName", fallback.customSchoolName),
+                customSchoolAddress = o.optString("customSchoolAddress", fallback.customSchoolAddress),
+                showSchoolAddress = o.optBoolean("showSchoolAddress", fallback.showSchoolAddress),
+                customExamTitle = o.optString("customExamTitle", fallback.customExamTitle),
+                badgeLabel = o.optString("badgeLabel", fallback.badgeLabel),
+                customRoutineTitle = o.optString("customRoutineTitle", fallback.customRoutineTitle),
+                headTeacherTitle = o.optString("headTeacherTitle", fallback.headTeacherTitle),
+                showSignatureLine = o.optBoolean("showSignatureLine", fallback.showSignatureLine),
+                showRoutineTable = o.optBoolean("showRoutineTable", fallback.showRoutineTable),
+                includeBlankRoutineRow = o.optBoolean("includeBlankRoutineRow", fallback.includeBlankRoutineRow),
+                routineNote = o.optString("routineNote", fallback.routineNote),
+                showSignatureImage = o.optBoolean("showSignatureImage", fallback.showSignatureImage),
+                signatureScale = o.optDouble("signatureScale", fallback.signatureScale.toDouble()).toFloat(),
+                headerToInfoGapPt = o.optDouble("headerToInfoGapPt", fallback.headerToInfoGapPt.toDouble()).toFloat(),
+                studentInfoOffsetXPt = o.optDouble("studentInfoOffsetXPt", fallback.studentInfoOffsetXPt.toDouble()).toFloat(),
+                schoolFontPt = o.optDouble("schoolFontPt", fallback.schoolFontPt.toDouble()).toFloat(),
+                headerMetaFontPt = o.optDouble("headerMetaFontPt", fallback.headerMetaFontPt.toDouble()).toFloat(),
+                headerBold = o.optBoolean("headerBold", fallback.headerBold),
+                badgeFontPt = o.optDouble("badgeFontPt", fallback.badgeFontPt.toDouble()).toFloat(),
+                badgeBold = o.optBoolean("badgeBold", fallback.badgeBold),
+                badgeUnderline = o.optBoolean("badgeUnderline", fallback.badgeUnderline),
+                studentInfoFontPt = o.optDouble("studentInfoFontPt", fallback.studentInfoFontPt.toDouble()).toFloat(),
+                studentLabelBold = o.optBoolean("studentLabelBold", fallback.studentLabelBold),
+                studentValueBold = o.optBoolean("studentValueBold", fallback.studentValueBold),
+                routineHeaderFontPt = o.optDouble("routineHeaderFontPt", fallback.routineHeaderFontPt.toDouble()).toFloat(),
+                routineHeaderBold = o.optBoolean("routineHeaderBold", fallback.routineHeaderBold),
+                routineBodyFontPt = o.optDouble("routineBodyFontPt", fallback.routineBodyFontPt.toDouble()).toFloat(),
+                routineBodyBold = o.optBoolean("routineBodyBold", fallback.routineBodyBold),
+                signatureTitleFontPt = o.optDouble("signatureTitleFontPt", fallback.signatureTitleFontPt.toDouble()).toFloat(),
+                signatureTitleBold = o.optBoolean("signatureTitleBold", fallback.signatureTitleBold)
+            )
+        } catch (_: Exception) {
+            fallback
+        }
     }
 
     fun loadBaseRoutines(ctx: Context, settings: Settings): List<BaseRoutineTemplate> {

@@ -173,14 +173,33 @@ class AdmitCardPlannerTest {
         assertTrue(defaultCfg.studentLabelBold)
 
         val clamped = AdmitCardConfig(
-            headerToInfoGapPt = 0f,
-            verticalGapPt = 40f,
+            cardsPerPage = 9,
+            headerToInfoGapPt = -5f,
+            verticalGapPt = 90f,
             schoolFontPt = 2f,
-            routineBodyFontPt = 30f
+            routineBodyFontPt = 30f,
+            studentInfoOffsetXPt = 180f,
+            signatureScale = 4f,
+            marginInches = 2f,
+            cornerRadiusPt = 50f
         )
-        assertEquals(4f, clamped.safeHeaderToInfoGapPt, 0.01f)
-        assertEquals(28f, clamped.safeVerticalGapPt, 0.01f)
-        assertEquals(6f, clamped.safeSchoolFontPt, 0.01f)
-        assertEquals(16f, clamped.safeRoutineBodyFontPt, 0.01f)
+        assertEquals(6, clamped.safeCardsPerPage)
+        assertEquals(0f, clamped.safeHeaderToInfoGapPt, 0.01f)
+        assertEquals(64f, clamped.safeVerticalGapPt, 0.01f)
+        assertEquals(5f, clamped.safeSchoolFontPt, 0.01f)
+        assertEquals(20f, clamped.safeRoutineBodyFontPt, 0.01f)
+        assertEquals(110f, clamped.safeStudentInfoOffsetXPt, 0.01f)
+        assertEquals(2.5f, clamped.safeSignatureScale, 0.01f)
+        assertEquals(1.25f, clamped.safeMarginInches, 0.01f)
+        assertEquals(36f, clamped.safeCornerRadiusPt, 0.01f)
+
+        val lowerClamped = AdmitCardConfig(
+            studentInfoOffsetXPt = -30f,
+            signatureScale = 0.1f,
+            marginInches = 0.01f
+        )
+        assertEquals(-8f, lowerClamped.safeStudentInfoOffsetXPt, 0.01f)
+        assertEquals(0.35f, lowerClamped.safeSignatureScale, 0.01f)
+        assertEquals(0.08f, lowerClamped.safeMarginInches, 0.01f)
     }
 }

@@ -3,16 +3,24 @@
 package com.kgps.result.ui.screens
 
 import android.content.Context
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Slider
+import androidx.compose.material3.SliderDefaults
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -28,7 +36,11 @@ import com.kgps.result.SeatPlanNumeralMode
 import com.kgps.result.bn
 import com.kgps.result.ui.theme.SlateMuted
 import com.kgps.result.ui.theme.SlateOutline
+import com.kgps.result.ui.theme.TealDark
+import com.kgps.result.ui.theme.TealPrimary
+import com.kgps.result.ui.theme.TealSoft
 import kotlin.math.abs
+import kotlin.math.roundToInt
 
 @Composable
 internal fun AdmitLayoutAndStyleTab(
@@ -42,7 +54,7 @@ internal fun AdmitLayoutAndStyleTab(
         // 1. Page, Vertical Gap, Header-Info Gap & Fonts
         AdmitSectionGroupCard(title = "১. পৃষ্ঠা, ভার্টিক্যাল গ্যাপ ও ফন্ট") {
             AdmitSegmentedOptionBar(
-                items = listOf(2, 3, 4, 5).map { it to "${bn(it.toString())}টি/পৃষ্ঠা" },
+                items = listOf(1, 2, 3, 4, 5, 6).map { it to "${bn(it.toString())}টি" },
                 selected = config.safeCardsPerPage,
                 onSelect = { onUpdateConfig(config.copy(cardsPerPage = it)) },
                 tagPrefix = "admit_card_per_page"
@@ -190,7 +202,7 @@ internal fun AdmitLayoutAndStyleTab(
             }
         }
 
-        // 3. Student Info Typography (নাম, শ্রেণি, রোল)
+        // 3. Student Info Typography & Horizontal Slide (নাম, শ্রেণি, রোল)
         AdmitSectionGroupCard(title = "৩. শিক্ষার্থীর তথ্য (নাম, শ্রেণি, রোল)") {
             Row(
                 horizontalArrangement = Arrangement.spacedBy(5.dp),
@@ -222,6 +234,53 @@ internal fun AdmitLayoutAndStyleTab(
                     testTag = "admit_info_value_bold_toggle"
                 )
             }
+            HorizontalDivider(color = SlateOutline.copy(alpha = 0.35f))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Text(
+                    text = "বামে / ডানে স্লাইড: ${formatAdmitPtBn(config.safeStudentInfoOffsetXPt)}",
+                    fontSize = 9.8.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = SlateMuted
+                )
+                if (abs(config.safeStudentInfoOffsetXPt) >= 0.5f) {
+                    Surface(
+                        onClick = { onUpdateConfig(config.copy(studentInfoOffsetXPt = 0f)) },
+                        color = TealSoft,
+                        border = BorderStroke(1.dp, TealPrimary.copy(alpha = 0.35f)),
+                        shape = RoundedCornerShape(6.dp),
+                        modifier = Modifier.testTag("admit_info_slide_reset_btn")
+                    ) {
+                        Text(
+                            text = "মাঝে/ডিফল্ট",
+                            fontSize = 9.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = TealDark,
+                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                        )
+                    }
+                }
+            }
+            Slider(
+                value = config.safeStudentInfoOffsetXPt,
+                onValueChange = { raw ->
+                    val snapped = (raw * 2f).roundToInt() / 2f
+                    onUpdateConfig(config.copy(studentInfoOffsetXPt = snapped))
+                },
+                valueRange = -8f..110f,
+                colors = SliderDefaults.colors(
+                    thumbColor = TealPrimary,
+                    activeTrackColor = TealPrimary,
+                    inactiveTrackColor = SlateOutline
+                ),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(28.dp)
+                    .testTag("admit_info_slide_x_slider")
+            )
         }
 
         // 4. Routine Table & Signature Title Typography (Word pt)

@@ -86,12 +86,12 @@ import java.util.Locale
 import kotlin.math.abs
 import kotlin.math.roundToInt
 
-internal val ADMIT_MARGIN_INCH_OPTIONS = listOf(0.15f, 0.20f, 0.25f, 0.28f, 0.30f, 0.35f, 0.40f, 0.45f, 0.50f, 0.60f)
-internal val ADMIT_GAP_PT_OPTIONS = listOf(0f, 2f, 4f, 6f, 8f, 10f, 12f, 14f, 16f, 20f, 24f)
-internal val ADMIT_HEADER_INFO_GAP_OPTIONS = listOf(4f, 6f, 8f, 10f, 12f, 15.5f, 18f, 22f, 26f, 30f, 34f)
-internal val ADMIT_CORNER_RADIUS_OPTIONS = listOf(0f, 2f, 4f, 5f, 6f, 8f, 10f, 12f, 16f, 20f)
-internal val ADMIT_SIG_SCALE_OPTIONS = listOf(0.7f, 0.85f, 1.0f, 1.2f, 1.4f)
-internal val ADMIT_WORD_PT_OPTIONS = listOf(6.5f, 7f, 7.5f, 8f, 8.5f, 9f, 9.5f, 10f, 10.5f, 11f, 11.5f, 12f, 13f, 14f, 16f)
+internal val ADMIT_MARGIN_INCH_OPTIONS = listOf(0.08f, 0.12f, 0.15f, 0.20f, 0.25f, 0.28f, 0.35f, 0.45f, 0.60f, 0.75f, 1.00f, 1.25f)
+internal val ADMIT_GAP_PT_OPTIONS = listOf(0f, 2f, 4f, 6f, 8f, 10f, 12f, 16f, 20f, 24f, 28f, 32f, 40f, 48f, 56f, 64f)
+internal val ADMIT_HEADER_INFO_GAP_OPTIONS = listOf(0f, 4f, 8f, 12f, 15.5f, 20f, 24f, 30f, 36f, 44f, 52f, 64f)
+internal val ADMIT_CORNER_RADIUS_OPTIONS = listOf(0f, 2f, 4f, 5f, 6f, 8f, 10f, 12f, 16f, 20f, 24f, 28f, 32f, 36f)
+internal val ADMIT_SIG_SCALE_OPTIONS = listOf(0.4f, 0.55f, 0.7f, 0.85f, 1.0f, 1.2f, 1.4f, 1.65f, 1.9f, 2.2f, 2.5f)
+internal val ADMIT_WORD_PT_OPTIONS = listOf(5f, 5.5f, 6f, 6.5f, 7f, 7.5f, 8f, 8.5f, 9f, 9.5f, 10f, 10.5f, 11f, 11.5f, 12f, 13f, 14f, 15f, 16f, 18f, 20f, 22f, 24f)
 
 internal fun formatAdmitInchesBn(inches: Float): String =
     bn(String.format(Locale.US, "%.2f", inches)) + "\""
@@ -534,11 +534,11 @@ internal fun AdmitClassAndRollTab(
                     )
                     IconButton(
                         onClick = {
-                            if (config.extraBlankCards < 40) {
+                            if (config.extraBlankCards < 100) {
                                 onUpdateConfig(config.copy(extraBlankCards = config.extraBlankCards + 1))
                             }
                         },
-                        enabled = config.extraBlankCards < 40,
+                        enabled = config.extraBlankCards < 100,
                         modifier = Modifier.size(34.dp).testTag("admit_card_blank_plus")
                     ) {
                         Icon(Icons.Rounded.Add, contentDescription = "ফাঁকা প্রবেশপত্র বাড়ান", modifier = Modifier.size(15.dp))

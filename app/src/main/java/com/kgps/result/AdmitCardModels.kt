@@ -94,6 +94,7 @@ data class AdmitCardConfig(
     val signatureScale: Float = 1.0f,
     val extraBlankCards: Int = 0,
     val headerToInfoGapPt: Float = 15.5f,
+    val studentInfoOffsetXPt: Float = 0f,
     val schoolFontPt: Float = 10.0f,
     val headerMetaFontPt: Float = 9.0f,
     val headerBold: Boolean = false,
@@ -110,20 +111,21 @@ data class AdmitCardConfig(
     val signatureTitleFontPt: Float = 8.5f,
     val signatureTitleBold: Boolean = false
 ) {
-    val safeCardsPerPage: Int get() = cardsPerPage.coerceIn(2, 5)
-    val safeMarginInches: Float get() = marginInches.coerceIn(0.15f, 0.85f)
+    val safeCardsPerPage: Int get() = cardsPerPage.coerceIn(1, 6)
+    val safeMarginInches: Float get() = marginInches.coerceIn(0.08f, 1.25f)
     val safeMarginPt: Float get() = safeMarginInches * 72f
-    val safeVerticalGapPt: Float get() = verticalGapPt.coerceIn(0f, 28f)
-    val safeCornerRadiusPt: Float get() = cornerRadiusPt.coerceIn(0f, 24f)
-    val safeSignatureScale: Float get() = signatureScale.coerceIn(0.6f, 1.5f)
-    val safeHeaderToInfoGapPt: Float get() = headerToInfoGapPt.coerceIn(4f, 36f)
-    val safeSchoolFontPt: Float get() = schoolFontPt.coerceIn(6f, 18f)
-    val safeHeaderMetaFontPt: Float get() = headerMetaFontPt.coerceIn(6f, 16f)
-    val safeBadgeFontPt: Float get() = badgeFontPt.coerceIn(6f, 18f)
-    val safeStudentInfoFontPt: Float get() = studentInfoFontPt.coerceIn(6f, 18f)
-    val safeRoutineHeaderFontPt: Float get() = routineHeaderFontPt.coerceIn(5.5f, 16f)
-    val safeRoutineBodyFontPt: Float get() = routineBodyFontPt.coerceIn(5.5f, 16f)
-    val safeSignatureTitleFontPt: Float get() = signatureTitleFontPt.coerceIn(5.5f, 16f)
+    val safeVerticalGapPt: Float get() = verticalGapPt.coerceIn(0f, 64f)
+    val safeCornerRadiusPt: Float get() = cornerRadiusPt.coerceIn(0f, 36f)
+    val safeSignatureScale: Float get() = signatureScale.coerceIn(0.35f, 2.5f)
+    val safeHeaderToInfoGapPt: Float get() = headerToInfoGapPt.coerceIn(0f, 64f)
+    val safeStudentInfoOffsetXPt: Float get() = studentInfoOffsetXPt.coerceIn(-8f, 110f)
+    val safeSchoolFontPt: Float get() = schoolFontPt.coerceIn(5f, 24f)
+    val safeHeaderMetaFontPt: Float get() = headerMetaFontPt.coerceIn(5f, 24f)
+    val safeBadgeFontPt: Float get() = badgeFontPt.coerceIn(5f, 24f)
+    val safeStudentInfoFontPt: Float get() = studentInfoFontPt.coerceIn(5f, 24f)
+    val safeRoutineHeaderFontPt: Float get() = routineHeaderFontPt.coerceIn(4.5f, 20f)
+    val safeRoutineBodyFontPt: Float get() = routineBodyFontPt.coerceIn(4.5f, 20f)
+    val safeSignatureTitleFontPt: Float get() = signatureTitleFontPt.coerceIn(4.5f, 20f)
 }
 
 data class AdmitCardItem(
