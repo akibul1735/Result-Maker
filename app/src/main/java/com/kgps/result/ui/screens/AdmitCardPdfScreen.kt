@@ -154,8 +154,8 @@ fun AdmitCardPdfScreen(
             rollOrder = SeatPlanRollOrder.DESCENDING,
             term = 3,
             cardsPerPage = 4,
-            marginInches = 0.35f,
-            verticalGapPt = 8f,
+            marginInches = 0.28f,
+            verticalGapPt = 10f,
             bnFontId = "kalpurush",
             enFontId = settings.pdfEnglishFont.ifBlank { "times_new_roman" },
             examTimeLabel = AdmitCardLocalStore.loadExamTime(ctx)

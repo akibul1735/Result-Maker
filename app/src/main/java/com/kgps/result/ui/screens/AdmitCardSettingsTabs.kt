@@ -96,9 +96,9 @@ import java.util.Locale
 import kotlin.math.abs
 import kotlin.math.roundToInt
 
-internal val ADMIT_MARGIN_INCH_OPTIONS = listOf(0.15f, 0.20f, 0.25f, 0.30f, 0.35f, 0.40f, 0.45f, 0.50f, 0.60f)
+internal val ADMIT_MARGIN_INCH_OPTIONS = listOf(0.15f, 0.20f, 0.25f, 0.28f, 0.30f, 0.35f, 0.40f, 0.45f, 0.50f, 0.60f)
 internal val ADMIT_GAP_PT_OPTIONS = listOf(0f, 2f, 4f, 6f, 8f, 10f, 12f, 16f, 20f)
-internal val ADMIT_CORNER_RADIUS_OPTIONS = listOf(0f, 2f, 4f, 6f, 8f, 10f, 12f, 16f, 20f)
+internal val ADMIT_CORNER_RADIUS_OPTIONS = listOf(0f, 2f, 4f, 5f, 6f, 8f, 10f, 12f, 16f, 20f)
 internal val ADMIT_SIG_SCALE_OPTIONS = listOf(0.7f, 0.85f, 1.0f, 1.2f, 1.4f)
 
 internal fun formatAdmitInchesBn(inches: Float): String =
@@ -513,6 +513,11 @@ internal fun AdmitRoutineAndSignatureTab(
                     Text("শ্রেণির মূল বিষয়", fontSize = 11.5.sp)
                 }
             }
+            Text(
+                "টিপস: DD/MM/YYYY তারিখ লিখলে বাংলা বার স্বয়ংক্রিয়ভাবে বসবে",
+                fontSize = 10.5.sp,
+                color = SlateMuted
+            )
 
             // Quick-add missing subjects from class curriculum (e.g. PE, Art, Music)
             val classSubjects = remember(config.selectedClass, settings) {
@@ -827,7 +832,7 @@ internal fun AdmitLayoutAndStyleTab(
                     valueText = formatAdmitInchesBn(config.safeMarginInches),
                     options = ADMIT_MARGIN_INCH_OPTIONS,
                     selectedValue = config.safeMarginInches,
-                    optionLabel = { formatAdmitInchesBn(it) + if (abs(it - 0.35f) < 0.01f) " (ডিফল্ট)" else "" },
+                    optionLabel = { formatAdmitInchesBn(it) + if (abs(it - 0.28f) < 0.01f) " (ডিফল্ট)" else "" },
                     onSelect = { onUpdateConfig(config.copy(marginInches = it)) },
                     modifier = Modifier.weight(1f),
                     testTag = "admit_card_margin_picker"
@@ -926,6 +931,13 @@ internal fun AdmitLayoutAndStyleTab(
                 checked = config.showCutLines,
                 onCheckedChange = { onUpdateConfig(config.copy(showCutLines = it)) },
                 testTag = "admit_card_opt_cut_lines"
+            )
+            HorizontalDivider(color = SlateOutline.copy(alpha = 0.4f))
+            AdmitCompactSwitchRow(
+                label = "মাঝে লম্বা ড্যাশড বিভাজক",
+                checked = config.showCenterDivider,
+                onCheckedChange = { onUpdateConfig(config.copy(showCenterDivider = it)) },
+                testTag = "admit_card_opt_center_divider"
             )
             HorizontalDivider(color = SlateOutline.copy(alpha = 0.4f))
             AdmitCompactSwitchRow(

@@ -104,6 +104,8 @@ class AdmitCardPlannerTest {
         assertEquals("০৪", AdmitCardPlanner.formatRoll(4, cfg))
         assertEquals("14", AdmitCardPlanner.formatRoll(14, cfg.copy(numeralMode = SeatPlanNumeralMode.ENGLISH)))
         assertEquals("........", AdmitCardPlanner.formatRoll(null, cfg))
+        assertEquals(SeatPlanBorderStyle.DASHED, cfg.borderStyle)
+        assertTrue(cfg.showCenterDivider)
         assertEquals("৩য় প্রান্তিক মূল্যায়ন - ২০২৬", AdmitCardPlanner.resolvedExamTitle(cfg, settings))
         assertEquals("৩য় প্রান্তিক মূল্যায়ন - ২০২৬ এর রুটিন", AdmitCardPlanner.resolvedRoutineTitle(cfg, settings))
     }
