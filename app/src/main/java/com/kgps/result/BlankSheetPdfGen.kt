@@ -472,12 +472,13 @@ object BlankSheetPdfGen {
         }
         val bodyAvailH = max(80f, tableBottomLimit - tableTop - tableHeaderH)
 
-        val capacity = page.rowsPerPageCapacity.coerceIn(5, 50)
+        val capacity = page.rowsPerPageCapacity.coerceIn(5, 80)
         val displayRows = page.rows.take(capacity)
         val rowCount = displayRows.size.coerceAtLeast(1)
+        val minRowFloor = if (capacity > 38) 9.5f else 16f
         val rowH = min(
             bodyAvailH / rowCount.toFloat(),
-            max(16f, min(38f, bodyAvailH / capacity.toFloat()))
+            max(minRowFloor, min(38f, bodyAvailH / capacity.toFloat()))
         )
 
         val totalWeight = cols.sumOf { it.widthWeight.toDouble() }.toFloat().coerceAtLeast(1f)
@@ -606,8 +607,11 @@ object BlankSheetPdfGen {
             rowH >= 28f -> 9.8f
             rowH >= 22f -> 9.0f
             rowH >= 18f -> 8.2f
-            else -> 7.4f
+            rowH >= 14f -> 7.4f
+            rowH >= 11f -> 6.5f
+            else -> 5.6f
         }
+        val minCellFont = if (rowH < 14f) 4.2f else 5.2f
 
         displayRows.forEachIndexed { rIdx, row ->
             if (rIdx % 2 == 1) {
@@ -635,7 +639,7 @@ object BlankSheetPdfGen {
                     )
                     val padX = if (col.align == BlankColAlign.LEFT) 5f else 3f
                     val availW = max(8f, w - padX * 2f)
-                    PdfGen.shrinkMixedToFit(cp, cellValue, availW, step = 0.3f, minSize = 5.2f)
+                    PdfGen.shrinkMixedToFit(cp, cellValue, availW, step = 0.3f, minSize = minCellFont)
                     val textBaseline = curY + (rowH + cp.textSize * 0.72f) / 2f
                     if (col.align == BlankColAlign.LEFT) {
                         PdfGen.drawMixedText(c, cellValue, cx + padX, textBaseline, cp, Paint.Align.LEFT)

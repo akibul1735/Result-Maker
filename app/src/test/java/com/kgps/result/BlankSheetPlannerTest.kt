@@ -212,4 +212,97 @@ class BlankSheetPlannerTest {
         assertEquals("22", pages[1].rows[1].rollText)
         assertEquals("", pages[1].rows[2].rollText)
     }
+
+    @Test
+    fun autoFitClassInOneTwoOrThreePagesSplitsRowsEvenly() {
+        val thirtySeven = (1..37).map { r ->
+            Student(id = "s-$r", cls = 4, roll = r, name = "শিক্ষার্থী $r")
+        }
+        val twoPagePages = BlankSheetPlanner.buildPages(
+            students = thirtySeven,
+            settings = Settings(),
+            config = BlankSheetConfig(
+                selectedClass = 4,
+                subjectKey = "BAN",
+                term = 1,
+                rowFitMode = BlankSheetRowFitMode.AUTO_FIT_PAGES,
+                autoFitPageCount = 2
+            ),
+            allowedClassIds = listOf(4)
+        )
+        assertEquals(2, twoPagePages.size)
+        assertEquals(listOf(19, 18), twoPagePages.map { it.rows.size })
+        assertEquals(19, twoPagePages[0].rowsPerPageCapacity)
+
+        val threePagePages = BlankSheetPlanner.buildPages(
+            students = thirtySeven,
+            settings = Settings(),
+            config = BlankSheetConfig(
+                selectedClass = 4,
+                subjectKey = "BAN",
+                term = 1,
+                rowFitMode = BlankSheetRowFitMode.AUTO_FIT_PAGES,
+                autoFitPageCount = 3
+            ),
+            allowedClassIds = listOf(4)
+        )
+        assertEquals(3, threePagePages.size)
+        assertEquals(listOf(13, 12, 12), threePagePages.map { it.rows.size })
+        assertEquals(13, threePagePages[0].rowsPerPageCapacity)
+
+        val sixtyStudents = (1..60).map { r ->
+            Student(id = "big-$r", cls = 5, roll = r, name = "শিক্ষার্থী $r")
+        }
+        val onePagePages = BlankSheetPlanner.buildPages(
+            students = sixtyStudents,
+            settings = Settings(),
+            config = BlankSheetConfig(
+                selectedClass = 5,
+                subjectKey = "BAN",
+                term = 1,
+                rowFitMode = BlankSheetRowFitMode.AUTO_FIT_PAGES,
+                autoFitPageCount = 1
+            ),
+            allowedClassIds = listOf(5)
+        )
+        assertEquals(1, onePagePages.size)
+        assertEquals(60, onePagePages[0].rows.size)
+        assertEquals(60, onePagePages[0].rowsPerPageCapacity)
+    }
+
+    @Test
+    fun independentQrAndBottomCodeTogglesPreserveTemplateId() {
+        val students = sampleStudents()
+        val withBoth = BlankSheetPlanner.buildPages(
+            students = students,
+            settings = Settings(),
+            config = BlankSheetConfig(selectedClass = 1, includeQrCode = true, includeBarcode = true),
+            allowedClassIds = listOf(1)
+        ).first()
+        val topOffOnly = BlankSheetPlanner.buildPages(
+            students = students,
+            settings = Settings(),
+            config = BlankSheetConfig(selectedClass = 1, includeQrCode = false, includeBarcode = true),
+            allowedClassIds = listOf(1)
+        ).first()
+        val bottomOffOnly = BlankSheetPlanner.buildPages(
+            students = students,
+            settings = Settings(),
+            config = BlankSheetConfig(selectedClass = 1, includeQrCode = true, includeBarcode = false),
+            allowedClassIds = listOf(1)
+        ).first()
+
+        assertTrue(withBoth.qrPayload.isNotBlank() && withBoth.thinQrPayload.isNotBlank())
+        assertTrue(withBoth.barcodeText.isNotBlank() && withBoth.bottomThinQrPayload.isNotBlank())
+
+        assertEquals("", topOffOnly.qrPayload)
+        assertEquals("", topOffOnly.thinQrPayload)
+        assertTrue(topOffOnly.barcodeText.isNotBlank())
+        assertEquals(withBoth.templateId, topOffOnly.templateId)
+
+        assertTrue(bottomOffOnly.qrPayload.isNotBlank())
+        assertEquals("", bottomOffOnly.barcodeText)
+        assertEquals("", bottomOffOnly.bottomThinQrPayload)
+        assertEquals(withBoth.templateId, bottomOffOnly.templateId)
+    }
 }

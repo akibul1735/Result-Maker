@@ -26,6 +26,11 @@ enum class BlankBottomCodeStyle(val labelBn: String) {
     CODE_128("নিচে বারকোড")
 }
 
+enum class BlankSheetRowFitMode(val labelBn: String) {
+    FIXED_ROWS("নির্দিষ্ট সারি"),
+    AUTO_FIT_PAGES("অটোফিট পেজ")
+}
+
 data class BlankSheetColumn(
     val id: String,
     val titleBn: String,
@@ -465,7 +470,9 @@ data class BlankSheetConfig(
     val workingDaysByTerm: Map<Int, String> = emptyMap(),
     val includeQrCode: Boolean = true,
     val includeBarcode: Boolean = true,
-    val bottomCodeStyle: BlankBottomCodeStyle = BlankBottomCodeStyle.THIN_QR
+    val bottomCodeStyle: BlankBottomCodeStyle = BlankBottomCodeStyle.THIN_QR,
+    val rowFitMode: BlankSheetRowFitMode = BlankSheetRowFitMode.FIXED_ROWS,
+    val autoFitPageCount: Int = 2
 )
 
 data class BlankSheetRow(
@@ -516,7 +523,8 @@ object BlankSheetPlanner {
         allowedClassIds: List<Int>
     ): List<BlankSheetPageSpec> {
         val safeCols = config.columns.ifEmpty { BlankSheetCatalog.DEFAULT_COLUMNS }
-        val perPage = config.rowsPerPage.coerceIn(5, 50)
+        val fixedPerPage = config.rowsPerPage.coerceIn(5, 50)
+        val autoTargetPages = config.autoFitPageCount.coerceIn(1, 3)
         val extraBlank = config.extraBlankRowsPerClass.coerceIn(0, 20)
         val isThreeTermMarks = BlankSheetCatalog.isThreeTermMarksActive(safeCols)
         val isThreeTermTraits = BlankSheetCatalog.isThreeTermAttendanceTraitsActive(safeCols)
@@ -564,6 +572,7 @@ object BlankSheetPlanner {
             val totalStudentsInClass: Int,
             val classPageIndex: Int,
             val classTotalPages: Int,
+            val rowsPerPageCapacity: Int,
             val rows: List<BlankSheetRow>
         )
 
@@ -592,20 +601,37 @@ object BlankSheetPlanner {
                 mappedRows.add(BlankSheetRow(rollText = "", nameText = "", isStudentRow = false))
             }
 
-            if (mappedRows.isEmpty()) {
-                repeat(perPage) {
-                    mappedRows.add(BlankSheetRow(rollText = "", nameText = "", isStudentRow = false))
-                }
-            } else if (config.fillRemainingPageRows) {
-                val remainder = mappedRows.size % perPage
-                if (remainder != 0) {
-                    repeat(perPage - remainder) {
+            val classPerPage: Int
+            val chunks: List<List<BlankSheetRow>>
+            if (config.rowFitMode == BlankSheetRowFitMode.AUTO_FIT_PAGES) {
+                if (mappedRows.isEmpty()) {
+                    repeat(fixedPerPage * autoTargetPages) {
                         mappedRows.add(BlankSheetRow(rollText = "", nameText = "", isStudentRow = false))
                     }
                 }
+                val (balancedCap, balancedChunks) = partitionBalancedPages(
+                    rows = mappedRows,
+                    targetPages = autoTargetPages,
+                    fillRemaining = config.fillRemainingPageRows
+                )
+                classPerPage = balancedCap
+                chunks = balancedChunks
+            } else {
+                classPerPage = fixedPerPage
+                if (mappedRows.isEmpty()) {
+                    repeat(fixedPerPage) {
+                        mappedRows.add(BlankSheetRow(rollText = "", nameText = "", isStudentRow = false))
+                    }
+                } else if (config.fillRemainingPageRows) {
+                    val remainder = mappedRows.size % fixedPerPage
+                    if (remainder != 0) {
+                        repeat(fixedPerPage - remainder) {
+                            mappedRows.add(BlankSheetRow(rollText = "", nameText = "", isStudentRow = false))
+                        }
+                    }
+                }
+                chunks = mappedRows.chunked(fixedPerPage)
             }
-
-            val chunks = mappedRows.chunked(perPage)
 
             val subjectPairs: List<Pair<String?, String>> = when {
                 isClassLevelTraitsOnly -> listOf(null to "উপস্থিতি ও গুণাবলি")
@@ -625,6 +651,7 @@ object BlankSheetPlanner {
                             totalStudentsInClass = clsStudents.size,
                             classPageIndex = idx + 1,
                             classTotalPages = chunks.size,
+                            rowsPerPageCapacity = classPerPage,
                             rows = chunk
                         )
                     )
@@ -646,7 +673,7 @@ object BlankSheetPlanner {
                 globalPageNumber = idx + 1,
                 totalPages = totalPages,
                 totalStudentsInClass = raw.totalStudentsInClass,
-                rowsPerPageCapacity = perPage,
+                rowsPerPageCapacity = raw.rowsPerPageCapacity,
                 rows = raw.rows,
                 columns = safeCols,
                 showSubjectMaxInHeader = if (isClassLevelTraitsOnly) false else config.showSubjectMaxInHeader,
@@ -682,5 +709,37 @@ object BlankSheetPlanner {
                 } else ""
             )
         }
+    }
+
+    /**
+     * মোট সারিকে নির্ধারিত ১..৩টি পেজের মধ্যে সমানভাবে ভাগ করে।
+     * যেমন ৩৭টি সারি ২ পেজে দিলে ১৯ + ১৮, ৩ পেজে দিলে ১৩ + ১২ + ১২ হয়।
+     */
+    fun partitionBalancedPages(
+        rows: List<BlankSheetRow>,
+        targetPages: Int,
+        fillRemaining: Boolean = false
+    ): Pair<Int, List<List<BlankSheetRow>>> {
+        val safeTarget = targetPages.coerceIn(1, 3)
+        if (rows.isEmpty()) return 5 to emptyList()
+        val effectivePages = minOf(safeTarget, rows.size).coerceAtLeast(1)
+        val baseSize = rows.size / effectivePages
+        val remainder = rows.size % effectivePages
+        val maxPageSize = (baseSize + if (remainder > 0) 1 else 0).coerceIn(5, 80)
+
+        val pages = mutableListOf<List<BlankSheetRow>>()
+        var cursor = 0
+        for (p in 0 until effectivePages) {
+            val count = baseSize + if (p < remainder) 1 else 0
+            val slice = rows.subList(cursor, cursor + count).toMutableList()
+            cursor += count
+            if (fillRemaining) {
+                while (slice.size < maxPageSize) {
+                    slice.add(BlankSheetRow(rollText = "", nameText = "", isStudentRow = false))
+                }
+            }
+            pages.add(slice)
+        }
+        return maxPageSize to pages
     }
 }
