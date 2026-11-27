@@ -122,6 +122,8 @@ object AdmitCardLocalStore {
             put("customRoutineTitle", cfg.customRoutineTitle)
             put("headTeacherTitle", cfg.headTeacherTitle)
             put("showSignatureLine", cfg.showSignatureLine)
+            put("signatureLabelToLineGapPt", cfg.signatureLabelToLineGapPt.toDouble())
+            put("signatureLineToImageGapPt", cfg.signatureLineToImageGapPt.toDouble())
             put("showRoutineTable", cfg.showRoutineTable)
             put("includeBlankRoutineRow", cfg.includeBlankRoutineRow)
             put("routineNote", cfg.routineNote)
@@ -180,6 +182,8 @@ object AdmitCardLocalStore {
                 customRoutineTitle = o.optString("customRoutineTitle", fallback.customRoutineTitle),
                 headTeacherTitle = o.optString("headTeacherTitle", fallback.headTeacherTitle),
                 showSignatureLine = o.optBoolean("showSignatureLine", fallback.showSignatureLine),
+                signatureLabelToLineGapPt = o.optDouble("signatureLabelToLineGapPt", fallback.signatureLabelToLineGapPt.toDouble()).toFloat(),
+                signatureLineToImageGapPt = o.optDouble("signatureLineToImageGapPt", fallback.signatureLineToImageGapPt.toDouble()).toFloat(),
                 showRoutineTable = o.optBoolean("showRoutineTable", fallback.showRoutineTable),
                 includeBlankRoutineRow = o.optBoolean("includeBlankRoutineRow", fallback.includeBlankRoutineRow),
                 routineNote = o.optString("routineNote", fallback.routineNote),

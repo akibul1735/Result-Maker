@@ -37,6 +37,7 @@ import androidx.compose.material.icons.rounded.PictureAsPdf
 import androidx.compose.material.icons.rounded.RestartAlt
 import androidx.compose.material.icons.rounded.Save
 import androidx.compose.material.icons.rounded.Star
+import androidx.compose.material.icons.rounded.Tune
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -552,8 +553,14 @@ internal fun AdmitCardRoutineEditor(
             }
         }
 
-        // Extra helper controls (Load class curriculum default, Custom routine title, Bottom blank row switch)
-        AdmitSectionGroupCard(title = "রুটিন অপশন") {
+        // Extra helper controls (Load class curriculum default, Custom routine title, Note, Bottom blank row)
+        AdmitCollapsibleGroupCard(
+            title = "রুটিন অপশন ও নোটস",
+            summary = if (config.routineNote.isNotBlank()) "নোটস যুক্ত" else "শিরোনাম · নোটস · ফাঁকা সারি",
+            icon = Icons.Rounded.Tune,
+            initiallyExpanded = false,
+            testTag = "admit_grp_routine_options"
+        ) {
             if (!isEditingBase) {
                 OutlinedButton(
                     onClick = onResetClassDefault,

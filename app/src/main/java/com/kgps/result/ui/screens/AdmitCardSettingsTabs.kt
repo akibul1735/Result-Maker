@@ -3,6 +3,8 @@
 package com.kgps.result.ui.screens
 
 import android.graphics.Bitmap
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -27,12 +29,15 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Add
+import androidx.compose.material.icons.rounded.Badge
 import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.DeleteOutline
+import androidx.compose.material.icons.rounded.Draw
 import androidx.compose.material.icons.rounded.FolderOpen
 import androidx.compose.material.icons.rounded.KeyboardArrowDown
 import androidx.compose.material.icons.rounded.PhotoLibrary
 import androidx.compose.material.icons.rounded.Remove
+import androidx.compose.material.icons.rounded.School
 import androidx.compose.material.icons.rounded.UnfoldMore
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -45,6 +50,8 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.Slider
+import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
@@ -54,13 +61,16 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.TextStyle
@@ -86,6 +96,7 @@ import com.kgps.result.ui.theme.SlateSurfaceVariant
 import com.kgps.result.ui.theme.SlateText
 import com.kgps.result.ui.theme.TealDark
 import com.kgps.result.ui.theme.TealPrimary
+import com.kgps.result.ui.theme.TealSoft
 import java.util.Locale
 import kotlin.math.abs
 import kotlin.math.roundToInt
@@ -134,6 +145,157 @@ internal fun AdmitSectionGroupCard(
             )
             content()
         }
+    }
+}
+
+@Composable
+internal fun AdmitCollapsibleGroupCard(
+    title: String,
+    summary: String = "",
+    icon: ImageVector? = null,
+    initiallyExpanded: Boolean = false,
+    modifier: Modifier = Modifier,
+    testTag: String = "",
+    content: @Composable ColumnScope.() -> Unit
+) {
+    var expanded by rememberSaveable(title) { mutableStateOf(initiallyExpanded) }
+    val chevronRotation by animateFloatAsState(
+        targetValue = if (expanded) 180f else 0f,
+        label = "admit_grp_chevron"
+    )
+    Surface(
+        color = if (expanded) SlateBg.copy(alpha = 0.72f) else MaterialTheme.colorScheme.surface,
+        border = BorderStroke(
+            1.dp,
+            if (expanded) TealPrimary.copy(alpha = 0.35f) else SlateOutline.copy(alpha = 0.85f)
+        ),
+        shape = RoundedCornerShape(10.dp),
+        modifier = modifier.fillMaxWidth()
+    ) {
+        Column(modifier = Modifier.fillMaxWidth()) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(7.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(min = 42.dp)
+                    .clickable { expanded = !expanded }
+                    .let { if (testTag.isNotEmpty()) it.testTag(testTag) else it }
+                    .padding(horizontal = 9.dp, vertical = 6.dp)
+            ) {
+                if (icon != null) {
+                    Surface(
+                        color = if (expanded) TealPrimary.copy(alpha = 0.14f) else TealSoft.copy(alpha = 0.7f),
+                        shape = RoundedCornerShape(7.dp)
+                    ) {
+                        Icon(
+                            imageVector = icon,
+                            contentDescription = null,
+                            tint = TealDark,
+                            modifier = Modifier.padding(5.dp).size(14.dp)
+                        )
+                    }
+                }
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = title,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = TealDark,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    if (summary.isNotBlank()) {
+                        Text(
+                            text = summary,
+                            fontSize = 9.2.sp,
+                            color = SlateMuted,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                }
+                Icon(
+                    imageVector = Icons.Rounded.KeyboardArrowDown,
+                    contentDescription = if (expanded) "সঙ্কুচিত করুন" else "বিস্তারিত দেখুন",
+                    tint = if (expanded) TealDark else SlateMuted,
+                    modifier = Modifier.size(18.dp).rotate(chevronRotation)
+                )
+            }
+            AnimatedVisibility(visible = expanded) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(start = 8.dp, end = 8.dp, bottom = 8.dp),
+                    verticalArrangement = Arrangement.spacedBy(5.dp)
+                ) {
+                    HorizontalDivider(color = SlateOutline.copy(alpha = 0.45f))
+                    content()
+                }
+            }
+        }
+    }
+}
+
+@Composable
+internal fun AdmitCompactSliderControl(
+    label: String,
+    value: Float,
+    defaultValue: Float,
+    valueRange: ClosedFloatingPointRange<Float>,
+    onValueChange: (Float) -> Unit,
+    sliderTestTag: String = "",
+    resetTestTag: String = "",
+    resetLabel: String = "ডিফল্ট",
+    valueFormatter: (Float) -> String = { formatAdmitPtBn(it) }
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(1.dp)) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Text(
+                text = "$label: ${valueFormatter(value)}",
+                fontSize = 9.8.sp,
+                fontWeight = FontWeight.SemiBold,
+                color = SlateMuted
+            )
+            if (abs(value - defaultValue) >= 0.4f) {
+                Surface(
+                    onClick = { onValueChange(defaultValue) },
+                    color = TealSoft,
+                    border = BorderStroke(1.dp, TealPrimary.copy(alpha = 0.35f)),
+                    shape = RoundedCornerShape(6.dp),
+                    modifier = if (resetTestTag.isNotEmpty()) Modifier.testTag(resetTestTag) else Modifier
+                ) {
+                    Text(
+                        text = resetLabel,
+                        fontSize = 9.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = TealDark,
+                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                    )
+                }
+            }
+        }
+        Slider(
+            value = value.coerceIn(valueRange.start, valueRange.endInclusive),
+            onValueChange = { raw ->
+                val snapped = (raw * 2f).roundToInt() / 2f
+                onValueChange(snapped.coerceIn(valueRange.start, valueRange.endInclusive))
+            },
+            valueRange = valueRange,
+            colors = SliderDefaults.colors(
+                thumbColor = TealPrimary,
+                activeTrackColor = TealPrimary,
+                inactiveTrackColor = SlateOutline
+            ),
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(26.dp)
+                .let { if (sliderTestTag.isNotEmpty()) it.testTag(sliderTestTag) else it }
+        )
     }
 }
 
@@ -565,8 +727,23 @@ internal fun AdmitSignatureAndInfoTab(
 ) {
     var showClearSigConfirm by remember { mutableStateOf(false) }
 
+    val sigSummary = buildString {
+        append(if (signatureBitmap != null) "স্বাক্ষর যুক্ত" else "ফাঁকা স্বাক্ষর")
+        append(" · ")
+        append(if (config.showSignatureLine) "লাইন চালু" else "লাইন বন্ধ")
+    }
+    val titleSummary = "${termNameBn(config.term)} · ${config.badgeLabel.trim().ifBlank { "প্রবেশপত্র" }}"
+    val schoolSummary = AdmitCardPlanner.resolvedSchoolName(config, settings)
+
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        AdmitSectionGroupCard(title = "প্রধান শিক্ষকের স্বাক্ষর") {
+        // 1. Signature Image, Line, Manual Gaps & Signatory Title
+        AdmitCollapsibleGroupCard(
+            title = "প্রধান শিক্ষকের স্বাক্ষর ও গ্যাপ",
+            summary = sigSummary,
+            icon = Icons.Rounded.Draw,
+            initiallyExpanded = true,
+            testTag = "admit_grp_signature"
+        ) {
             Surface(
                 color = MaterialTheme.colorScheme.surface,
                 border = BorderStroke(1.dp, SlateOutline),
@@ -672,6 +849,46 @@ internal fun AdmitSignatureAndInfoTab(
                 }
             }
 
+            if (config.showSignatureLine || signatureBitmap != null) {
+                Surface(
+                    color = MaterialTheme.colorScheme.surface,
+                    border = BorderStroke(1.dp, SlateOutline.copy(alpha = 0.8f)),
+                    shape = RoundedCornerShape(8.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        if (config.showSignatureLine) {
+                            AdmitCompactSliderControl(
+                                label = "লেখা → লাইন গ্যাপ",
+                                value = config.safeSignatureLabelToLineGapPt,
+                                defaultValue = 4.2f,
+                                valueRange = 0f..24f,
+                                onValueChange = { onUpdateConfig(config.copy(signatureLabelToLineGapPt = it)) },
+                                sliderTestTag = "admit_sig_label_line_gap_slider",
+                                resetTestTag = "admit_sig_label_line_gap_reset"
+                            )
+                        }
+                        if (config.showSignatureLine && signatureBitmap != null) {
+                            HorizontalDivider(color = SlateOutline.copy(alpha = 0.35f))
+                        }
+                        if (signatureBitmap != null || config.showSignatureLine) {
+                            AdmitCompactSliderControl(
+                                label = if (config.showSignatureLine) "লাইন → স্বাক্ষর গ্যাপ" else "লেখা → স্বাক্ষর গ্যাপ",
+                                value = config.safeSignatureLineToImageGapPt,
+                                defaultValue = 4.8f,
+                                valueRange = 0f..24f,
+                                onValueChange = { onUpdateConfig(config.copy(signatureLineToImageGapPt = it)) },
+                                sliderTestTag = "admit_sig_line_img_gap_slider",
+                                resetTestTag = "admit_sig_line_img_gap_reset"
+                            )
+                        }
+                    }
+                }
+            }
+
             AdmitCompactTextInput(
                 label = "স্বাক্ষর পদের নাম",
                 value = config.headTeacherTitle,
@@ -681,7 +898,14 @@ internal fun AdmitSignatureAndInfoTab(
             )
         }
 
-        AdmitSectionGroupCard(title = "বিদ্যালয় ও কার্ড শিরোনাম") {
+        // 2. Term & Card/Exam Titles
+        AdmitCollapsibleGroupCard(
+            title = "মূল্যায়ন ও কার্ড শিরোনাম",
+            summary = titleSummary,
+            icon = Icons.Rounded.Badge,
+            initiallyExpanded = false,
+            testTag = "admit_grp_titles"
+        ) {
             Text(
                 "প্রান্তিক মূল্যায়ন",
                 fontSize = 9.5.sp,
@@ -694,13 +918,6 @@ internal fun AdmitSignatureAndInfoTab(
                 onSelect = { onUpdateConfig(config.copy(term = it)) },
                 tagPrefix = "admit_card_term"
             )
-            AdmitCompactSwitchRow(
-                label = "বিদ্যালয়ের ঠিকানা দেখাও",
-                checked = config.showSchoolAddress,
-                onCheckedChange = { onUpdateConfig(config.copy(showSchoolAddress = it)) },
-                testTag = "admit_card_opt_show_address"
-            )
-            HorizontalDivider(color = SlateOutline.copy(alpha = 0.4f))
             Row(
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
                 modifier = Modifier.fillMaxWidth()
@@ -722,6 +939,23 @@ internal fun AdmitSignatureAndInfoTab(
                     testTag = "admit_card_exam_title_input"
                 )
             }
+        }
+
+        // 3. School Name & Address
+        AdmitCollapsibleGroupCard(
+            title = "বিদ্যালয়ের নাম ও ঠিকানা",
+            summary = schoolSummary,
+            icon = Icons.Rounded.School,
+            initiallyExpanded = false,
+            testTag = "admit_grp_school"
+        ) {
+            AdmitCompactSwitchRow(
+                label = "বিদ্যালয়ের ঠিকানা দেখাও",
+                checked = config.showSchoolAddress,
+                onCheckedChange = { onUpdateConfig(config.copy(showSchoolAddress = it)) },
+                testTag = "admit_card_opt_show_address"
+            )
+            HorizontalDivider(color = SlateOutline.copy(alpha = 0.4f))
             AdmitCompactTextInput(
                 label = "বিদ্যালয়ের নাম (ঐচ্ছিক)",
                 value = config.customSchoolName,

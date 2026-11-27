@@ -87,6 +87,8 @@ data class AdmitCardConfig(
     val examTimeLabel: String = "দুপুর ০১:০০-০৩:৩০ টা",
     val headTeacherTitle: String = "প্রধান শিক্ষকের স্বাক্ষর",
     val showSignatureLine: Boolean = false,
+    val signatureLabelToLineGapPt: Float = 4.2f,
+    val signatureLineToImageGapPt: Float = 4.8f,
     val showRoutineTable: Boolean = true,
     val includeBlankRoutineRow: Boolean = false,
     val routineNote: String = "",
@@ -117,6 +119,8 @@ data class AdmitCardConfig(
     val safeVerticalGapPt: Float get() = verticalGapPt.coerceIn(0f, 64f)
     val safeCornerRadiusPt: Float get() = cornerRadiusPt.coerceIn(0f, 36f)
     val safeSignatureScale: Float get() = signatureScale.coerceIn(0.35f, 2.5f)
+    val safeSignatureLabelToLineGapPt: Float get() = signatureLabelToLineGapPt.coerceIn(0f, 24f)
+    val safeSignatureLineToImageGapPt: Float get() = signatureLineToImageGapPt.coerceIn(0f, 24f)
     val safeHeaderToInfoGapPt: Float get() = headerToInfoGapPt.coerceIn(0f, 64f)
     val safeStudentInfoOffsetXPt: Float get() = studentInfoOffsetXPt.coerceIn(-8f, 110f)
     val safeSchoolFontPt: Float get() = schoolFontPt.coerceIn(5f, 24f)

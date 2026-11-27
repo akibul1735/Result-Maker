@@ -341,7 +341,7 @@ object AdmitCardPdfGen {
             val sigTextTopY = sigLabelY + sigFm.ascent // ascent is negative; actual top edge of Bengali glyphs/matra
 
             val sigAreaBottom = if (cfg.showSignatureLine) {
-                val labelToLineGap = (4.2f * heightScale).coerceIn(3.2f, 6.5f)
+                val labelToLineGap = cfg.safeSignatureLabelToLineGapPt * heightScale
                 val sigLineY = sigTextTopY - labelToLineGap
                 val lineHalfW = sigHalfTextW.coerceAtLeast(10f)
                 val linePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -350,15 +350,15 @@ object AdmitCardPdfGen {
                     strokeWidth = 0.65f
                 }
                 c.drawLine(sigAnchorX - lineHalfW, sigLineY, sigAnchorX + lineHalfW, sigLineY, linePaint)
-                val lineToSignGap = (4.8f * heightScale).coerceIn(3.6f, 7.5f)
+                val lineToSignGap = cfg.safeSignatureLineToImageGapPt * heightScale
                 sigLineY - lineToSignGap
             } else {
-                val labelToSignGap = (4.5f * heightScale).coerceIn(3.4f, 7.0f)
+                val labelToSignGap = cfg.safeSignatureLineToImageGapPt * heightScale
                 sigTextTopY - labelToSignGap
             }
 
-            val preferredSigTop = (contentBottom - (46f * heightScale)).coerceAtLeast(curY + 8f)
-            val sigAreaTop = min(preferredSigTop, (sigAreaBottom - 14f * heightScale).coerceAtLeast(curY + 6f))
+            val sigBoxHeight = 28f * heightScale
+            val sigAreaTop = (sigAreaBottom - sigBoxHeight).coerceAtLeast(curY + 8f)
             if (cfg.showSignatureImage && signatureBitmap != null && sigAreaBottom > sigAreaTop + 6f) {
                 val maxAllowedW = (leftW * 0.62f).coerceAtLeast(20f)
                 val maxAllowedH = (sigAreaBottom - (curY + 6f)).coerceAtLeast(8f)

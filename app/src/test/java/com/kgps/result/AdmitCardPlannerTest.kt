@@ -168,6 +168,8 @@ class AdmitCardPlannerTest {
         assertEquals(false, defaultCfg.includeBlankRoutineRow)
         assertEquals(false, defaultCfg.showSignatureLine)
         assertEquals("", defaultCfg.routineNote)
+        assertEquals(4.2f, defaultCfg.safeSignatureLabelToLineGapPt, 0.01f)
+        assertEquals(4.8f, defaultCfg.safeSignatureLineToImageGapPt, 0.01f)
         assertTrue(defaultCfg.badgeBold)
         assertTrue(defaultCfg.badgeUnderline)
         assertTrue(defaultCfg.studentLabelBold)
@@ -181,7 +183,9 @@ class AdmitCardPlannerTest {
             studentInfoOffsetXPt = 180f,
             signatureScale = 4f,
             marginInches = 2f,
-            cornerRadiusPt = 50f
+            cornerRadiusPt = 50f,
+            signatureLabelToLineGapPt = 40f,
+            signatureLineToImageGapPt = 35f
         )
         assertEquals(6, clamped.safeCardsPerPage)
         assertEquals(0f, clamped.safeHeaderToInfoGapPt, 0.01f)
@@ -192,15 +196,21 @@ class AdmitCardPlannerTest {
         assertEquals(2.5f, clamped.safeSignatureScale, 0.01f)
         assertEquals(1.25f, clamped.safeMarginInches, 0.01f)
         assertEquals(36f, clamped.safeCornerRadiusPt, 0.01f)
+        assertEquals(24f, clamped.safeSignatureLabelToLineGapPt, 0.01f)
+        assertEquals(24f, clamped.safeSignatureLineToImageGapPt, 0.01f)
 
         val lowerClamped = AdmitCardConfig(
             studentInfoOffsetXPt = -30f,
             signatureScale = 0.1f,
-            marginInches = 0.01f
+            marginInches = 0.01f,
+            signatureLabelToLineGapPt = -4f,
+            signatureLineToImageGapPt = -2f
         )
         assertEquals(-8f, lowerClamped.safeStudentInfoOffsetXPt, 0.01f)
         assertEquals(0.35f, lowerClamped.safeSignatureScale, 0.01f)
         assertEquals(0.08f, lowerClamped.safeMarginInches, 0.01f)
+        assertEquals(0f, lowerClamped.safeSignatureLabelToLineGapPt, 0.01f)
+        assertEquals(0f, lowerClamped.safeSignatureLineToImageGapPt, 0.01f)
     }
 
     @Test

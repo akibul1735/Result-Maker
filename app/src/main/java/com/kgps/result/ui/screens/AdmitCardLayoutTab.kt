@@ -3,24 +3,21 @@
 package com.kgps.result.ui.screens
 
 import android.content.Context
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.BorderAll
+import androidx.compose.material.icons.rounded.FormatSize
+import androidx.compose.material.icons.rounded.Tune
+import androidx.compose.material.icons.rounded.ViewAgenda
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.Slider
-import androidx.compose.material3.SliderDefaults
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -36,11 +33,7 @@ import com.kgps.result.SeatPlanNumeralMode
 import com.kgps.result.bn
 import com.kgps.result.ui.theme.SlateMuted
 import com.kgps.result.ui.theme.SlateOutline
-import com.kgps.result.ui.theme.TealDark
-import com.kgps.result.ui.theme.TealPrimary
-import com.kgps.result.ui.theme.TealSoft
 import kotlin.math.abs
-import kotlin.math.roundToInt
 
 @Composable
 internal fun AdmitLayoutAndStyleTab(
@@ -50,9 +43,27 @@ internal fun AdmitLayoutAndStyleTab(
     activeEnFontName: String,
     onUpdateConfig: (AdmitCardConfig) -> Unit
 ) {
+    val pageSummary = "${bn(config.safeCardsPerPage.toString())} কার্ড/পৃষ্ঠা · $activeBnFontName"
+    val typoSummary = "হেডার ${formatAdmitPtBn(config.safeSchoolFontPt)} · তথ্য ${formatAdmitPtBn(config.safeStudentInfoFontPt)} · রুটিন ${formatAdmitPtBn(config.safeRoutineBodyFontPt)}"
+    val positionSummary = buildString {
+        append(if (config.numeralMode == SeatPlanNumeralMode.BENGALI) "বাংলা সংখ্যা" else "ইংরেজি সংখ্যা")
+        append(if (config.showRoutineTable) " · রুটিন চালু" else " · রুটিন বন্ধ")
+    }
+    val borderSummary = if (config.borderStyle == AdmitBorderStyle.NONE) {
+        "বর্ডার নেই"
+    } else {
+        "${config.borderStyle.labelBn} · ${config.borderWeight.labelBn}"
+    }
+
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        // 1. Page, Vertical Gap, Header-Info Gap & Fonts
-        AdmitSectionGroupCard(title = "১. পৃষ্ঠা, ভার্টিক্যাল গ্যাপ ও ফন্ট") {
+        // 1. Page Layout, Margins, Gaps & Font Families
+        AdmitCollapsibleGroupCard(
+            title = "১. পৃষ্ঠা, মাপ ও ফন্ট",
+            summary = pageSummary,
+            icon = Icons.Rounded.ViewAgenda,
+            initiallyExpanded = true,
+            testTag = "admit_grp_page_font"
+        ) {
             AdmitSegmentedOptionBar(
                 items = listOf(1, 2, 3, 4, 5, 6).map { it to "${bn(it.toString())}টি" },
                 selected = config.safeCardsPerPage,
@@ -133,8 +144,15 @@ internal fun AdmitLayoutAndStyleTab(
             }
         }
 
-        // 2. Header & Headline Badge Typography (Word pt)
-        AdmitSectionGroupCard(title = "২. উপরের হেডার ও প্রবেশপত্র শিরোনাম (pt)") {
+        // 2. All Word-Point Font Sizes & Boldness
+        AdmitCollapsibleGroupCard(
+            title = "২. লেখার সাইজ ও বোল্ড (pt)",
+            summary = typoSummary,
+            icon = Icons.Rounded.FormatSize,
+            initiallyExpanded = false,
+            testTag = "admit_grp_typography"
+        ) {
+            Text("হেডার ও শিরোনাম", fontSize = 9.5.sp, fontWeight = FontWeight.SemiBold, color = SlateMuted)
             Row(
                 horizontalArrangement = Arrangement.spacedBy(5.dp),
                 verticalAlignment = Alignment.CenterVertically,
@@ -168,8 +186,6 @@ internal fun AdmitLayoutAndStyleTab(
                     testTag = "admit_header_bold_toggle"
                 )
             }
-
-            HorizontalDivider(color = SlateOutline.copy(alpha = 0.35f))
             Row(
                 horizontalArrangement = Arrangement.spacedBy(5.dp),
                 verticalAlignment = Alignment.CenterVertically,
@@ -200,10 +216,9 @@ internal fun AdmitLayoutAndStyleTab(
                     testTag = "admit_badge_underline_toggle"
                 )
             }
-        }
 
-        // 3. Student Info Typography & Horizontal Slide (নাম, শ্রেণি, রোল)
-        AdmitSectionGroupCard(title = "৩. শিক্ষার্থীর তথ্য (নাম, শ্রেণি, রোল)") {
+            HorizontalDivider(color = SlateOutline.copy(alpha = 0.35f))
+            Text("শিক্ষার্থীর তথ্য (নাম, শ্রেণি, রোল)", fontSize = 9.5.sp, fontWeight = FontWeight.SemiBold, color = SlateMuted)
             Row(
                 horizontalArrangement = Arrangement.spacedBy(5.dp),
                 verticalAlignment = Alignment.CenterVertically,
@@ -234,57 +249,9 @@ internal fun AdmitLayoutAndStyleTab(
                     testTag = "admit_info_value_bold_toggle"
                 )
             }
-            HorizontalDivider(color = SlateOutline.copy(alpha = 0.35f))
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                Text(
-                    text = "বামে / ডানে স্লাইড: ${formatAdmitPtBn(config.safeStudentInfoOffsetXPt)}",
-                    fontSize = 9.8.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    color = SlateMuted
-                )
-                if (abs(config.safeStudentInfoOffsetXPt) >= 0.5f) {
-                    Surface(
-                        onClick = { onUpdateConfig(config.copy(studentInfoOffsetXPt = 0f)) },
-                        color = TealSoft,
-                        border = BorderStroke(1.dp, TealPrimary.copy(alpha = 0.35f)),
-                        shape = RoundedCornerShape(6.dp),
-                        modifier = Modifier.testTag("admit_info_slide_reset_btn")
-                    ) {
-                        Text(
-                            text = "মাঝে/ডিফল্ট",
-                            fontSize = 9.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = TealDark,
-                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
-                        )
-                    }
-                }
-            }
-            Slider(
-                value = config.safeStudentInfoOffsetXPt,
-                onValueChange = { raw ->
-                    val snapped = (raw * 2f).roundToInt() / 2f
-                    onUpdateConfig(config.copy(studentInfoOffsetXPt = snapped))
-                },
-                valueRange = -8f..110f,
-                colors = SliderDefaults.colors(
-                    thumbColor = TealPrimary,
-                    activeTrackColor = TealPrimary,
-                    inactiveTrackColor = SlateOutline
-                ),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(28.dp)
-                    .testTag("admit_info_slide_x_slider")
-            )
-        }
 
-        // 4. Routine Table & Signature Title Typography (Word pt)
-        AdmitSectionGroupCard(title = "৪. রুটিন টেবিল ও স্বাক্ষর পদবি (pt)") {
+            HorizontalDivider(color = SlateOutline.copy(alpha = 0.35f))
+            Text("রুটিন টেবিল ও স্বাক্ষর পদবি", fontSize = 9.5.sp, fontWeight = FontWeight.SemiBold, color = SlateMuted)
             Row(
                 horizontalArrangement = Arrangement.spacedBy(5.dp),
                 verticalAlignment = Alignment.CenterVertically,
@@ -331,7 +298,6 @@ internal fun AdmitLayoutAndStyleTab(
                     testTag = "admit_routine_body_bold_toggle"
                 )
             }
-            HorizontalDivider(color = SlateOutline.copy(alpha = 0.35f))
             Row(
                 horizontalArrangement = Arrangement.spacedBy(5.dp),
                 verticalAlignment = Alignment.CenterVertically,
@@ -357,8 +323,59 @@ internal fun AdmitLayoutAndStyleTab(
             }
         }
 
-        // 5. Border Styles, Dash Styles & Options
-        AdmitSectionGroupCard(title = "৫. বর্ডার, ড্যাশ স্টাইল ও অন্যান্য") {
+        // 3. Position Slider & Display Toggles
+        AdmitCollapsibleGroupCard(
+            title = "৩. অবস্থান ও প্রদর্শন",
+            summary = positionSummary,
+            icon = Icons.Rounded.Tune,
+            initiallyExpanded = false,
+            testTag = "admit_grp_position"
+        ) {
+            AdmitCompactSliderControl(
+                label = "নাম/শ্রেণি/রোল বামে-ডানে স্লাইড",
+                value = config.safeStudentInfoOffsetXPt,
+                defaultValue = 0f,
+                valueRange = -8f..110f,
+                onValueChange = { onUpdateConfig(config.copy(studentInfoOffsetXPt = it)) },
+                sliderTestTag = "admit_info_slide_x_slider",
+                resetTestTag = "admit_info_slide_reset_btn",
+                resetLabel = "মাঝে/ডিফল্ট"
+            )
+            HorizontalDivider(color = SlateOutline.copy(alpha = 0.35f))
+            AdmitCompactSwitchRow(
+                label = "সংখ্যা বাংলা (০১/১২/২০২৬)",
+                checked = config.numeralMode == SeatPlanNumeralMode.BENGALI,
+                onCheckedChange = { bnOn ->
+                    onUpdateConfig(
+                        config.copy(numeralMode = if (bnOn) SeatPlanNumeralMode.BENGALI else SeatPlanNumeralMode.ENGLISH)
+                    )
+                },
+                testTag = "admit_card_opt_bn_num"
+            )
+            HorizontalDivider(color = SlateOutline.copy(alpha = 0.35f))
+            AdmitCompactSwitchRow(
+                label = "০১ রোল (২ ডিজিট)",
+                checked = config.padRollTwoDigits,
+                onCheckedChange = { onUpdateConfig(config.copy(padRollTwoDigits = it)) },
+                testTag = "admit_card_opt_pad_roll"
+            )
+            HorizontalDivider(color = SlateOutline.copy(alpha = 0.35f))
+            AdmitCompactSwitchRow(
+                label = "ডান পাশে পরীক্ষার রুটিন টেবিল দেখাও",
+                checked = config.showRoutineTable,
+                onCheckedChange = { onUpdateConfig(config.copy(showRoutineTable = it)) },
+                testTag = "admit_card_opt_show_routine"
+            )
+        }
+
+        // 4. Borders, Dash Style & Cut Guides
+        AdmitCollapsibleGroupCard(
+            title = "৪. বর্ডার ও কাটার দাগ",
+            summary = borderSummary,
+            icon = Icons.Rounded.BorderAll,
+            initiallyExpanded = false,
+            testTag = "admit_grp_borders"
+        ) {
             Row(
                 horizontalArrangement = Arrangement.spacedBy(5.dp),
                 modifier = Modifier.fillMaxWidth()
@@ -416,16 +433,6 @@ internal fun AdmitLayoutAndStyleTab(
                     )
                 }
             }
-            AdmitCompactSwitchRow(
-                label = "সংখ্যা বাংলা (০১/১২/২০২৬)",
-                checked = config.numeralMode == SeatPlanNumeralMode.BENGALI,
-                onCheckedChange = { bnOn ->
-                    onUpdateConfig(
-                        config.copy(numeralMode = if (bnOn) SeatPlanNumeralMode.BENGALI else SeatPlanNumeralMode.ENGLISH)
-                    )
-                },
-                testTag = "admit_card_opt_bn_num"
-            )
             HorizontalDivider(color = SlateOutline.copy(alpha = 0.35f))
             AdmitCompactSwitchRow(
                 label = "কার্ডের মাঝে কাটার দাগ",
@@ -439,20 +446,6 @@ internal fun AdmitLayoutAndStyleTab(
                 checked = config.showCenterDivider,
                 onCheckedChange = { onUpdateConfig(config.copy(showCenterDivider = it)) },
                 testTag = "admit_card_opt_center_divider"
-            )
-            HorizontalDivider(color = SlateOutline.copy(alpha = 0.35f))
-            AdmitCompactSwitchRow(
-                label = "০১ রোল (২ ডিজিট)",
-                checked = config.padRollTwoDigits,
-                onCheckedChange = { onUpdateConfig(config.copy(padRollTwoDigits = it)) },
-                testTag = "admit_card_opt_pad_roll"
-            )
-            HorizontalDivider(color = SlateOutline.copy(alpha = 0.35f))
-            AdmitCompactSwitchRow(
-                label = "ডান পাশে পরীক্ষার রুটিন টেবিল দেখাও",
-                checked = config.showRoutineTable,
-                onCheckedChange = { onUpdateConfig(config.copy(showRoutineTable = it)) },
-                testTag = "admit_card_opt_show_routine"
             )
         }
     }
