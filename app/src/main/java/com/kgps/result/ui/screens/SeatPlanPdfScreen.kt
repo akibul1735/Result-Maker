@@ -53,6 +53,8 @@ import androidx.compose.material.icons.rounded.Groups
 import androidx.compose.material.icons.rounded.KeyboardArrowDown
 import androidx.compose.material.icons.rounded.Print
 import androidx.compose.material.icons.rounded.RestartAlt
+import android.widget.Toast
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -63,6 +65,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -101,6 +104,7 @@ import com.kgps.result.Student
 import com.kgps.result.activeClassIds
 import com.kgps.result.bn
 import com.kgps.result.cloud.TeacherPermissions
+import com.kgps.result.ui.theme.RoseDanger
 import com.kgps.result.ui.theme.SlateMuted
 import com.kgps.result.ui.theme.SlateOutline
 import com.kgps.result.ui.theme.SlateText
@@ -191,6 +195,8 @@ fun SeatPlanPdfScreen(
     var rollFromText by remember { mutableStateOf("") }
     var rollToText by remember { mutableStateOf("") }
     var showFullscreen by remember { mutableStateOf(false) }
+    var showResetConfirm by remember { mutableStateOf(false) }
+    var pendingExportAction by remember { mutableStateOf<AdmitExportAction?>(null) }
     var panelHeightFraction by remember { mutableFloatStateOf(0.48f) }
     var isCustomPanelHeight by remember { mutableStateOf(false) }
     var previewViewportHeightPx by remember { mutableIntStateOf(0) }
@@ -308,14 +314,7 @@ fun SeatPlanPdfScreen(
                         )
                     }
                     IconButton(
-                        onClick = {
-                            config = defaultConfig
-                            SeatPlanLocalStore.saveConfig(ctx, defaultConfig)
-                            rollFromText = ""
-                            rollToText = ""
-                            previewZoomScale = 1f
-                            previewPanOffset = Offset.Zero
-                        },
+                        onClick = { showResetConfirm = true },
                         modifier = Modifier.size(38.dp).testTag("seat_plan_reset_btn")
                     ) {
                         Icon(
@@ -326,20 +325,20 @@ fun SeatPlanPdfScreen(
                         )
                     }
                     IconButton(
-                        onClick = { onPrint(pages, "আসন বিন্যাস") },
-                        enabled = pages.isNotEmpty(),
+                        onClick = { pendingExportAction = AdmitExportAction.PRINT },
+                        enabled = allowedClasses.isNotEmpty(),
                         modifier = Modifier.size(38.dp).testTag("seat_plan_print_btn")
                     ) {
                         Icon(
                             Icons.Rounded.Print,
                             contentDescription = "প্রিন্ট করুন",
-                            tint = if (pages.isNotEmpty()) TealPrimary else SlateMuted.copy(alpha = 0.45f),
+                            tint = if (allowedClasses.isNotEmpty()) TealPrimary else SlateMuted.copy(alpha = 0.45f),
                             modifier = Modifier.size(18.dp)
                         )
                     }
                     Button(
-                        onClick = { onExportPdf(pages, exportName) },
-                        enabled = pages.isNotEmpty(),
+                        onClick = { pendingExportAction = AdmitExportAction.PDF },
+                        enabled = allowedClasses.isNotEmpty(),
                         colors = ButtonDefaults.buttonColors(containerColor = TealPrimary),
                         shape = RoundedCornerShape(8.dp),
                         contentPadding = PaddingValues(horizontal = 9.dp, vertical = 0.dp),
@@ -786,6 +785,67 @@ fun SeatPlanPdfScreen(
                 }
             },
             onDismiss = { showFullscreen = false }
+        )
+    }
+
+    pendingExportAction?.let { exportAction ->
+        SeatPlanMultiClassExportDialog(
+            action = exportAction,
+            allowedClasses = allowedClasses,
+            countByClass = countByClass,
+            settings = settings,
+            students = students,
+            config = config,
+            onDismiss = { pendingExportAction = null },
+            onConfirm = { updatedCfg, exportPages, fileNameOrJob ->
+                config = updatedCfg
+                pendingExportAction = null
+                if (exportAction == AdmitExportAction.PDF) {
+                    onExportPdf(exportPages, fileNameOrJob)
+                } else {
+                    onPrint(exportPages, fileNameOrJob)
+                }
+            }
+        )
+    }
+
+    if (showResetConfirm) {
+        AlertDialog(
+            onDismissRequest = { showResetConfirm = false },
+            title = { Text("ডিফল্ট সেটিংস রিসেট করবেন?", fontWeight = FontWeight.Bold, fontSize = 15.5.sp) },
+            text = {
+                Text(
+                    "আসন বিন্যাসের ফন্ট, সাইজ, বর্ডার, কলাম-সারি ও অবস্থান সেটিংস ডিফল্ট অবস্থায় ফিরে যাবে।",
+                    fontSize = 13.sp,
+                    color = SlateText
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        showResetConfirm = false
+                        config = defaultConfig
+                        SeatPlanLocalStore.saveConfig(ctx, defaultConfig)
+                        rollFromText = ""
+                        rollToText = ""
+                        previewZoomScale = 1f
+                        previewPanOffset = Offset.Zero
+                        Toast.makeText(ctx, "আসন বিন্যাসের সেটিংস রিসেট হয়েছে", Toast.LENGTH_SHORT).show()
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = RoseDanger),
+                    modifier = Modifier.heightIn(min = 48.dp).testTag("seat_plan_reset_confirm_btn")
+                ) {
+                    Text("রিসেট করুন", color = Color.White)
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = { showResetConfirm = false },
+                    modifier = Modifier.heightIn(min = 48.dp)
+                ) {
+                    Text("বাতিল")
+                }
+            }
         )
     }
 }

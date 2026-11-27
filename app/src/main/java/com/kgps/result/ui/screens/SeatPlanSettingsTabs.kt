@@ -457,6 +457,16 @@ internal fun SeatPlanLayoutAndBorderTab(
                     testTag = "seat_plan_vgap_picker"
                 )
             }
+            HorizontalDivider(color = SlateOutline.copy(alpha = 0.35f))
+            AdmitCompactSliderControl(
+                label = "নাম, শ্রেণি ও রোল (মার্জিন ↔ ভেতরে)",
+                value = config.safeInfoHorizontalInsetPt,
+                defaultValue = 14.5f,
+                valueRange = 4f..42f,
+                onValueChange = { onUpdateConfig(config.copy(infoHorizontalInsetPt = it)) },
+                sliderTestTag = "seat_plan_info_inset_slider",
+                resetTestTag = "seat_plan_info_inset_reset"
+            )
         }
 
         AdmitCollapsibleGroupCard(

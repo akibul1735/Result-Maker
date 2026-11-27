@@ -1,4 +1,8 @@
-@file:OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
+@file:OptIn(
+    ExperimentalMaterial3Api::class,
+    ExperimentalLayoutApi::class,
+    ExperimentalFoundationApi::class
+)
 
 package com.kgps.result.ui.screens
 
@@ -10,7 +14,9 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.calculatePan
@@ -41,10 +47,10 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.KeyboardArrowLeft
 import androidx.compose.material.icons.automirrored.rounded.KeyboardArrowRight
 import androidx.compose.material.icons.outlined.MenuBook
-import androidx.compose.material.icons.outlined.QrCode2
 import androidx.compose.material.icons.outlined.ViewAgenda
 import androidx.compose.material.icons.outlined.ViewColumn
 import androidx.compose.material.icons.rounded.AutoAwesome
+import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.Download
 import androidx.compose.material.icons.rounded.Fullscreen
 import androidx.compose.material.icons.rounded.KeyboardArrowDown
@@ -54,8 +60,11 @@ import androidx.compose.material.icons.rounded.QrCode2
 import androidx.compose.material.icons.rounded.TableChart
 import androidx.compose.material.icons.rounded.ViewAgenda
 import androidx.compose.material.icons.rounded.ViewColumn
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -63,7 +72,9 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
@@ -74,16 +85,21 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.platform.LocalViewConfiguration
+import androidx.compose.ui.platform.ViewConfiguration
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
@@ -91,6 +107,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.kgps.result.BlankBottomCodeStyle
 import com.kgps.result.BlankNumeralStyle
 import com.kgps.result.BlankSheetCatalog
 import com.kgps.result.BlankSheetConfig
@@ -107,6 +124,7 @@ import com.kgps.result.classNameBn
 import com.kgps.result.classShortBn
 import com.kgps.result.cloud.TeacherPermissions
 import com.kgps.result.termNameBn
+import com.kgps.result.ui.theme.RoseDanger
 import com.kgps.result.ui.theme.SlateMuted
 import com.kgps.result.ui.theme.SlateOutline
 import com.kgps.result.ui.theme.SlateText
@@ -127,9 +145,8 @@ private data class BlankSheetBottomTabItem(
 
 private val BLANK_SHEET_BOTTOM_TABS = listOf(
     BlankSheetBottomTabItem(0, "শ্রেণি ও বিষয়", "শ্রেণি, বিষয় ও মূল্যায়ন", Icons.Rounded.MenuBook, Icons.Outlined.MenuBook),
-    BlankSheetBottomTabItem(1, "কলাম ও ফর্ম", "টেমপ্লেট ও কলাম বিন্যাস", Icons.Rounded.ViewColumn, Icons.Outlined.ViewColumn),
-    BlankSheetBottomTabItem(2, "সারি ও পেজ", "সারি নির্ধারণ ও অটোফিট পেজ", Icons.Rounded.ViewAgenda, Icons.Outlined.ViewAgenda),
-    BlankSheetBottomTabItem(3, "QR ও অপশন", "QR, বারকোড ও ফর্ম অপশন", Icons.Rounded.QrCode2, Icons.Outlined.QrCode2)
+    BlankSheetBottomTabItem(1, "কলাম ও ফর্ম", "টেমপ্লেট, কলাম প্রস্থ ও সাব-কলাম", Icons.Rounded.ViewColumn, Icons.Outlined.ViewColumn),
+    BlankSheetBottomTabItem(2, "সারি ও অপশন", "সারি, অটোফিট, QR ও অপশন", Icons.Rounded.ViewAgenda, Icons.Outlined.ViewAgenda)
 )
 
 @Composable
@@ -157,6 +174,7 @@ fun BlankSheetPdfScreen(
         val initCls = if (initialClass in allowedClasses) initialClass else allowedClasses.firstOrNull()
         BlankSheetConfig(
             selectedClass = initCls,
+            selectedClasses = if (initCls != null) listOf(initCls) else emptyList(),
             subjectKey = "BAN",
             term = 1,
             columns = BlankSheetCatalog.DEFAULT_COLUMNS,
@@ -168,14 +186,31 @@ fun BlankSheetPdfScreen(
 
     var config by remember(defaultConfig) {
         val loaded = BlankSheetLocalStore.loadConfig(ctx, defaultConfig)
-        mutableStateOf(loaded.copy(selectedClass = defaultConfig.selectedClass))
+        mutableStateOf(
+            loaded.copy(
+                selectedClass = defaultConfig.selectedClass,
+                selectedClasses = defaultConfig.selectedClasses
+            )
+        )
     }
     LaunchedEffect(config) {
         BlankSheetLocalStore.saveConfig(ctx, config)
     }
 
+    var lastEnabledTopQr by remember { mutableStateOf(config.includeQrCode) }
+    var lastEnabledBottomCode by remember { mutableStateOf(config.includeBarcode) }
+    LaunchedEffect(config.includeQrCode, config.includeBarcode) {
+        if (config.includeQrCode || config.includeBarcode) {
+            lastEnabledTopQr = config.includeQrCode
+            lastEnabledBottomCode = config.includeBarcode
+        }
+    }
+
     var openTab by remember { mutableStateOf<Int?>(null) }
     var showFullscreen by remember { mutableStateOf(false) }
+    var pendingExportAction by remember { mutableStateOf<AdmitExportAction?>(null) }
+    var showResetConfirm by remember { mutableStateOf(false) }
+    var qrMenuExpanded by remember { mutableStateOf(false) }
     var panelHeightFraction by remember { mutableFloatStateOf(0.50f) }
     var isCustomPanelHeight by remember { mutableStateOf(false) }
     var previewViewportHeightPx by remember { mutableIntStateOf(0) }
@@ -249,13 +284,16 @@ fun BlankSheetPdfScreen(
             else -> emptyList()
         }
     }
-    val commonWorkingDays = remember(students, config.selectedClass) {
-        BlankSheetCatalog.resolveCommonWorkingDaysByTerm(students, config.selectedClass)
+    val commonWorkingDays = remember(students, config.primarySelectedClass) {
+        BlankSheetCatalog.resolveCommonWorkingDaysByTerm(students, config.primarySelectedClass)
     }
 
-    val selectedClassLabel = remember(config.selectedClass, settings) {
-        val c = config.selectedClass
-        if (c == null) "সব শ্রেণি" else "${classNameBn(c, settings)} শ্রেণি"
+    val selectedClassLabel = remember(config.selectedClass, config.selectedClasses, settings) {
+        when {
+            config.selectedClasses.size > 1 -> "${bn(config.selectedClasses.size.toString())}টি শ্রেণি"
+            config.primarySelectedClass != null -> "${classNameBn(config.primarySelectedClass!!, settings)} শ্রেণি"
+            else -> "সব শ্রেণি"
+        }
     }
 
     val selectedSubjectLabel = remember(config.subjectKey, config.customSubjectTitle, isClassLevelTraitsOnly) {
@@ -280,24 +318,13 @@ fun BlankSheetPdfScreen(
         }
     }
 
-    val exportFileName = remember(config, selectedSubjectLabel, isClassLevelTraitsOnly, isThreeTermTraits) {
-        val clsPart = if (config.selectedClass == null) "সব-শ্রেণি" else "শ্রেণি-${config.selectedClass}"
-        val subPart = when {
-            isClassLevelTraitsOnly && isThreeTermTraits -> "৩-প্রান্তিক-উপস্থিতি-গুণাবলি"
-            isClassLevelTraitsOnly -> "উপস্থিতি-গুণাবলি"
-            config.subjectKey == BlankSheetCatalog.ALL_SUBJECTS_KEY -> "সব-বিষয়"
-            else -> selectedSubjectLabel.replace(" ", "-")
-        }
-        "ফাঁকা-শিট-$clsPart-$subPart.pdf"
-    }
-
-    val printJobName = remember(selectedClassLabel, selectedSubjectLabel) {
-        "BlankSheet_${selectedClassLabel}_$selectedSubjectLabel"
-    }
-
     val activePage = pages.getOrNull(pagerState.currentPage)
     val summaryLine = buildString {
-        val clsShort = config.selectedClass?.let { classShortBn(it, settings) } ?: "সব শ্রেণি"
+        val clsShort = when {
+            config.selectedClasses.size > 1 -> "${bn(config.selectedClasses.size.toString())} শ্রেণি"
+            config.primarySelectedClass != null -> classShortBn(config.primarySelectedClass!!, settings)
+            else -> "সব শ্রেণি"
+        }
         append(clsShort)
         append(" · ")
         append(activePage?.subjectTitleBn?.ifBlank { selectedSubjectLabel } ?: selectedSubjectLabel)
@@ -308,7 +335,7 @@ fun BlankSheetPdfScreen(
             append("${bn(config.rowsPerPage.toString())} সারি/পেজ")
         }
         append(" · ")
-        append(if (config.includeQrCode) "QR চালু" else "QR বন্ধ")
+        append(if (config.includeQrCode || config.includeBarcode) "QR চালু" else "QR বন্ধ")
     }
 
     val density = LocalDensity.current
@@ -360,29 +387,137 @@ fun BlankSheetPdfScreen(
                         )
                     }
 
-                    // Quick Top QR On/Off Toggle
-                    Surface(
-                        onClick = {
-                            val nextQr = !config.includeQrCode
-                            config = config.copy(includeQrCode = nextQr)
-                            Toast.makeText(
-                                ctx,
-                                if (nextQr) "মূল QR কোড চালু করা হয়েছে" else "মূল QR কোড বন্ধ করা হয়েছে",
-                                Toast.LENGTH_SHORT
-                            ).show()
-                        },
-                        color = if (config.includeQrCode) TealSoft else Color.Transparent,
-                        border = if (config.includeQrCode) BorderStroke(1.dp, TealPrimary.copy(alpha = 0.4f)) else null,
-                        shape = RoundedCornerShape(8.dp),
-                        modifier = Modifier.size(38.dp).testTag("blank_quick_qr_btn")
-                    ) {
-                        Box(contentAlignment = Alignment.Center) {
-                            Icon(
-                                Icons.Rounded.QrCode2,
-                                contentDescription = if (config.includeQrCode) "QR কোড বন্ধ করুন" else "QR কোড চালু করুন",
-                                tint = if (config.includeQrCode) TealPrimary else SlateMuted,
-                                modifier = Modifier.size(18.dp)
+                    // Quick QR On/Off Tap + Light Long-Press Options Menu
+                    val haptic = LocalHapticFeedback.current
+                    val baseViewConfig = LocalViewConfiguration.current
+                    val lightLongPressConfig = remember(baseViewConfig) {
+                        object : ViewConfiguration by baseViewConfig {
+                            override val longPressTimeoutMillis: Long get() = 260L
+                        }
+                    }
+                    val anyQrEnabled = config.includeQrCode || config.includeBarcode
+                    Box {
+                        CompositionLocalProvider(LocalViewConfiguration provides lightLongPressConfig) {
+                            Surface(
+                                color = if (anyQrEnabled) TealSoft else Color.Transparent,
+                                border = if (anyQrEnabled) BorderStroke(1.dp, TealPrimary.copy(alpha = 0.4f)) else null,
+                                shape = RoundedCornerShape(8.dp),
+                                modifier = Modifier
+                                    .size(38.dp)
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .combinedClickable(
+                                        onClick = {
+                                            if (anyQrEnabled) {
+                                                lastEnabledTopQr = config.includeQrCode
+                                                lastEnabledBottomCode = config.includeBarcode
+                                                config = config.copy(includeQrCode = false, includeBarcode = false)
+                                                Toast.makeText(
+                                                    ctx,
+                                                    "চালু থাকা QR/কোড বন্ধ হয়েছে (চাপ দিয়ে রাখলে অপশন)",
+                                                    Toast.LENGTH_SHORT
+                                                ).show()
+                                            } else {
+                                                val restoreTop = if (lastEnabledTopQr || lastEnabledBottomCode) {
+                                                    lastEnabledTopQr
+                                                } else {
+                                                    true
+                                                }
+                                                val restoreBottom = lastEnabledBottomCode
+                                                config = config.copy(
+                                                    includeQrCode = restoreTop,
+                                                    includeBarcode = restoreBottom
+                                                )
+                                                Toast.makeText(
+                                                    ctx,
+                                                    "QR/কোড চালু করা হয়েছে",
+                                                    Toast.LENGTH_SHORT
+                                                ).show()
+                                            }
+                                        },
+                                        onLongClick = {
+                                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                            qrMenuExpanded = true
+                                        }
+                                    )
+                                    .testTag("blank_quick_qr_btn")
+                            ) {
+                                Box(contentAlignment = Alignment.Center) {
+                                    Icon(
+                                        Icons.Rounded.QrCode2,
+                                        contentDescription = if (anyQrEnabled) "QR কোড বন্ধ/অপশন" else "QR কোড চালু/অপশন",
+                                        tint = if (anyQrEnabled) TealPrimary else SlateMuted,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                }
+                            }
+                        }
+
+                        DropdownMenu(
+                            expanded = qrMenuExpanded,
+                            onDismissRequest = { qrMenuExpanded = false }
+                        ) {
+                            DropdownMenuItem(
+                                text = {
+                                    Text(
+                                        "উপরের স্মার্ট QR",
+                                        fontSize = 12.5.sp,
+                                        fontWeight = if (config.includeQrCode) FontWeight.Bold else FontWeight.Normal,
+                                        color = if (config.includeQrCode) TealDark else SlateText
+                                    )
+                                },
+                                trailingIcon = {
+                                    if (config.includeQrCode) {
+                                        Icon(Icons.Rounded.Check, contentDescription = null, tint = TealPrimary, modifier = Modifier.size(16.dp))
+                                    }
+                                },
+                                onClick = {
+                                    config = config.copy(includeQrCode = !config.includeQrCode)
+                                }
                             )
+                            DropdownMenuItem(
+                                text = {
+                                    Text(
+                                        "নিচের কোড (${config.bottomCodeStyle.labelBn})",
+                                        fontSize = 12.5.sp,
+                                        fontWeight = if (config.includeBarcode) FontWeight.Bold else FontWeight.Normal,
+                                        color = if (config.includeBarcode) TealDark else SlateText
+                                    )
+                                },
+                                trailingIcon = {
+                                    if (config.includeBarcode) {
+                                        Icon(Icons.Rounded.Check, contentDescription = null, tint = TealPrimary, modifier = Modifier.size(16.dp))
+                                    }
+                                },
+                                onClick = {
+                                    config = config.copy(includeBarcode = !config.includeBarcode)
+                                }
+                            )
+                            if (config.includeBarcode) {
+                                HorizontalDivider(color = SlateOutline.copy(alpha = 0.4f))
+                                DropdownMenuItem(
+                                    text = {
+                                        val nextStyle = if (config.bottomCodeStyle == BlankBottomCodeStyle.THIN_QR) {
+                                            BlankBottomCodeStyle.CODE_128
+                                        } else {
+                                            BlankBottomCodeStyle.THIN_QR
+                                        }
+                                        Text(
+                                            "স্টাইল বদলান: ${nextStyle.labelBn}",
+                                            fontSize = 11.5.sp,
+                                            color = TealPrimary,
+                                            fontWeight = FontWeight.Medium
+                                        )
+                                    },
+                                    onClick = {
+                                        val nextStyle = if (config.bottomCodeStyle == BlankBottomCodeStyle.THIN_QR) {
+                                            BlankBottomCodeStyle.CODE_128
+                                        } else {
+                                            BlankBottomCodeStyle.THIN_QR
+                                        }
+                                        config = config.copy(bottomCodeStyle = nextStyle)
+                                    }
+                                )
+                            }
                         }
                     }
 
@@ -408,21 +543,21 @@ fun BlankSheetPdfScreen(
                     }
 
                     IconButton(
-                        onClick = { onPrint(pages, config.orientation, printJobName) },
-                        enabled = pages.isNotEmpty(),
+                        onClick = { pendingExportAction = AdmitExportAction.PRINT },
+                        enabled = allowedClasses.isNotEmpty(),
                         modifier = Modifier.size(38.dp).testTag("blank_sheet_print_btn")
                     ) {
                         Icon(
                             Icons.Rounded.Print,
                             contentDescription = "প্রিন্ট করুন",
-                            tint = if (pages.isNotEmpty()) TealPrimary else SlateMuted.copy(alpha = 0.45f),
+                            tint = if (allowedClasses.isNotEmpty()) TealPrimary else SlateMuted.copy(alpha = 0.45f),
                             modifier = Modifier.size(18.dp)
                         )
                     }
 
                     Button(
-                        onClick = { onExportPdf(pages, config.orientation, exportFileName) },
-                        enabled = pages.isNotEmpty(),
+                        onClick = { pendingExportAction = AdmitExportAction.PDF },
+                        enabled = allowedClasses.isNotEmpty(),
                         colors = ButtonDefaults.buttonColors(containerColor = TealPrimary),
                         shape = RoundedCornerShape(8.dp),
                         contentPadding = PaddingValues(horizontal = 9.dp, vertical = 0.dp),
@@ -769,29 +904,17 @@ fun BlankSheetPdfScreen(
                                             }
                                         )
 
-                                        2 -> BlankSheetRowsAndPageTab(
+                                        else -> BlankSheetRowsAndOptionsTab(
                                             config = config,
                                             students = students,
                                             settings = settings,
-                                            onUpdateConfig = { config = it },
-                                            onResetPageIndex = {
-                                                scope.launch { pagerState.scrollToPage(0) }
-                                            }
-                                        )
-
-                                        else -> BlankSheetQrAndOptionsTab(
-                                            config = config,
                                             sharedWorkingDaysTerms = sharedWorkingDaysTerms,
                                             commonWorkingDays = commonWorkingDays,
                                             onUpdateConfig = { config = it },
-                                            onResetAll = {
-                                                config = defaultConfig
-                                                BlankSheetLocalStore.saveConfig(ctx, defaultConfig)
-                                                previewZoomScale = 1f
-                                                previewPanOffset = Offset.Zero
+                                            onResetPageIndex = {
                                                 scope.launch { pagerState.scrollToPage(0) }
-                                                Toast.makeText(ctx, "ফাঁকা সিট সেটিংস রিসেট হয়েছে", Toast.LENGTH_SHORT).show()
-                                            }
+                                            },
+                                            onRequestReset = { showResetConfirm = true }
                                         )
                                     }
                                 }
@@ -801,7 +924,7 @@ fun BlankSheetPdfScreen(
                 }
             }
 
-            // 3. Compact Fixed Bottom 4-Tab Dock Bar
+            // 3. Compact Fixed Bottom 3-Tab Dock Bar
             Surface(
                 color = MaterialTheme.colorScheme.surface,
                 border = BorderStroke(1.dp, SlateOutline),
@@ -874,6 +997,72 @@ fun BlankSheetPdfScreen(
                 }
             },
             onDismiss = { showFullscreen = false }
+        )
+    }
+
+    pendingExportAction?.let { exportAction ->
+        BlankSheetMultiClassExportDialog(
+            action = exportAction,
+            allowedClasses = allowedClasses,
+            countByClass = countByClass,
+            settings = settings,
+            students = students,
+            config = config,
+            subjectSummaryLabel = selectedSubjectLabel,
+            onDismiss = { pendingExportAction = null },
+            onConfirm = { chosenClasses, exportPages, fileNameOrJob ->
+                pendingExportAction = null
+                if (chosenClasses.isNotEmpty()) {
+                    config = config.copy(
+                        selectedClass = chosenClasses.first(),
+                        selectedClasses = chosenClasses
+                    )
+                }
+                if (exportAction == AdmitExportAction.PDF) {
+                    onExportPdf(exportPages, config.orientation, fileNameOrJob)
+                } else {
+                    onPrint(exportPages, config.orientation, fileNameOrJob)
+                }
+            }
+        )
+    }
+
+    if (showResetConfirm) {
+        AlertDialog(
+            onDismissRequest = { showResetConfirm = false },
+            title = { Text("ডিফল্ট সেটিংস রিসেট করবেন?", fontWeight = FontWeight.Bold, fontSize = 15.5.sp) },
+            text = {
+                Text(
+                    "ফাঁকা শিটের কলাম, সারি, অটোফিট ও QR/বারকোড সেটিংস ডিফল্ট অবস্থায় ফিরে যাবে।",
+                    fontSize = 13.sp,
+                    color = SlateText
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        showResetConfirm = false
+                        config = defaultConfig
+                        BlankSheetLocalStore.saveConfig(ctx, defaultConfig)
+                        previewZoomScale = 1f
+                        previewPanOffset = Offset.Zero
+                        scope.launch { pagerState.scrollToPage(0) }
+                        Toast.makeText(ctx, "ফাঁকা সিট সেটিংস রিসেট হয়েছে", Toast.LENGTH_SHORT).show()
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = RoseDanger),
+                    modifier = Modifier.heightIn(min = 48.dp).testTag("blank_sheet_reset_confirm_btn")
+                ) {
+                    Text("রিসেট করুন", color = Color.White)
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = { showResetConfirm = false },
+                    modifier = Modifier.heightIn(min = 48.dp)
+                ) {
+                    Text("বাতিল")
+                }
+            }
         )
     }
 }

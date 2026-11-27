@@ -72,7 +72,25 @@ object BlankSheetLocalStore {
                     if (id.isBlank()) continue
                     val catalogCol = BlankSheetCatalog.byId(id)
                     if (catalogCol != null && !cObj.optBoolean("isCustom", false)) {
-                        restoredCols.add(catalogCol)
+                        val savedWeight = cObj.optDouble("widthWeight", catalogCol.widthWeight.toDouble())
+                            .toFloat()
+                            .coerceIn(0.4f, 4.0f)
+                        val savedTitle = cObj.optString("titleBn").takeIf { it.isNotBlank() } ?: catalogCol.titleBn
+                        val savedGroup = if (cObj.has("groupBn")) {
+                            cObj.optString("groupBn").takeIf { it.isNotBlank() }
+                        } else {
+                            catalogCol.groupBn
+                        }
+                        val savedPicker = cObj.optString("pickerLabelBn").takeIf { it.isNotBlank() }
+                            ?: catalogCol.pickerLabelBn
+                        restoredCols.add(
+                            catalogCol.copy(
+                                titleBn = savedTitle,
+                                widthWeight = savedWeight,
+                                groupBn = savedGroup,
+                                pickerLabelBn = savedPicker
+                            )
+                        )
                     } else {
                         val title = cObj.optString("titleBn")
                         if (title.isNotBlank()) {
@@ -80,7 +98,7 @@ object BlankSheetLocalStore {
                                 BlankSheetColumn(
                                     id = id,
                                     titleBn = title,
-                                    widthWeight = cObj.optDouble("widthWeight", 1.0).toFloat().coerceIn(0.4f, 3.5f),
+                                    widthWeight = cObj.optDouble("widthWeight", 1.0).toFloat().coerceIn(0.4f, 4.0f),
                                     fillWith = runCatching { BlankColFill.valueOf(cObj.optString("fillWith")) }
                                         .getOrDefault(BlankColFill.NONE),
                                     align = runCatching { BlankColAlign.valueOf(cObj.optString("align")) }

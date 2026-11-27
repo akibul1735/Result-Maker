@@ -227,9 +227,11 @@ object SeatPlanPdfGen {
                     }
                 }
 
-                val padX = (14.5f * widthScale).coerceIn(7f, 22f)
-                val innerLeft = cardRect.left + padX
-                val innerRight = cardRect.right - padX
+                val headerPadX = (14.5f * widthScale).coerceIn(7f, 22f)
+                val headerInnerW = (cardW - 2f * headerPadX).coerceAtLeast(30f)
+                val infoPadX = (cfg.safeInfoHorizontalInsetPt * widthScale).coerceIn(3f, cardW * 0.28f)
+                val innerLeft = cardRect.left + infoPadX
+                val innerRight = cardRect.right - infoPadX
                 val innerW = (innerRight - innerLeft).coerceAtLeast(30f)
                 val centerX = cardRect.centerX()
 
@@ -253,7 +255,7 @@ object SeatPlanPdfGen {
                         enFontId = enFont,
                         textColor = 0xFF000000.toInt()
                     )
-                    PdfGen.shrinkMixedToFit(dp, entry.text, innerW, step = 0.25f, minSize = 5.5f)
+                    PdfGen.shrinkMixedToFit(dp, entry.text, headerInnerW, step = 0.25f, minSize = 5.5f)
                     PdfGen.drawMixedText(c, entry.text, centerX, curY, dp, Paint.Align.CENTER)
                     curY += lineStep
                 }

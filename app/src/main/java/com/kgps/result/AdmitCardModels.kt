@@ -61,6 +61,7 @@ data class BaseRoutineTemplate(
 
 data class AdmitCardConfig(
     val selectedClass: Int = 5,
+    val selectedClasses: List<Int> = emptyList(),
     val rollOrder: SeatPlanRollOrder = SeatPlanRollOrder.DESCENDING,
     val rollFrom: Int? = null,
     val rollTo: Int? = null,
@@ -113,6 +114,8 @@ data class AdmitCardConfig(
     val signatureTitleFontPt: Float = 8.5f,
     val signatureTitleBold: Boolean = false
 ) {
+    val resolvedSelectedClasses: List<Int>
+        get() = if (selectedClasses.isNotEmpty()) selectedClasses.distinct() else listOf(selectedClass)
     val safeCardsPerPage: Int get() = cardsPerPage.coerceIn(1, 6)
     val safeMarginInches: Float get() = marginInches.coerceIn(0.08f, 1.25f)
     val safeMarginPt: Float get() = safeMarginInches * 72f

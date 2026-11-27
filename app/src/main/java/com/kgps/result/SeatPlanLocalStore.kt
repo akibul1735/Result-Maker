@@ -41,6 +41,7 @@ object SeatPlanLocalStore {
             put("showCutLines", cfg.showCutLines)
             put("padRollTwoDigits", cfg.padRollTwoDigits)
             put("numeralMode", cfg.numeralMode.name)
+            put("infoHorizontalInsetPt", cfg.infoHorizontalInsetPt.toDouble())
         }
         ctx.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
             .edit()
@@ -85,7 +86,8 @@ object SeatPlanLocalStore {
                 cornerRadiusPt = o.optDouble("cornerRadiusPt", fallback.cornerRadiusPt.toDouble()).toFloat(),
                 showCutLines = o.optBoolean("showCutLines", fallback.showCutLines),
                 padRollTwoDigits = o.optBoolean("padRollTwoDigits", fallback.padRollTwoDigits),
-                numeralMode = runCatching { SeatPlanNumeralMode.valueOf(o.optString("numeralMode")) }.getOrDefault(fallback.numeralMode)
+                numeralMode = runCatching { SeatPlanNumeralMode.valueOf(o.optString("numeralMode")) }.getOrDefault(fallback.numeralMode),
+                infoHorizontalInsetPt = o.optDouble("infoHorizontalInsetPt", fallback.infoHorizontalInsetPt.toDouble()).toFloat()
             )
         } catch (_: Exception) {
             fallback

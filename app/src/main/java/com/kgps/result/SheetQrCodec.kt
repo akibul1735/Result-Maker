@@ -185,7 +185,12 @@ object SheetQrCodec {
         val encodedColIds = page.columns.map { col ->
             if (col.isCustom || col.id.startsWith("CUSTOM_")) {
                 val idx = customTitles.size
-                customTitles.add(col.titleBn.trim().take(28))
+                val fullTitle = if (!col.groupBn.isNullOrBlank()) {
+                    "${col.groupBn.trim()}-${col.titleBn.trim()}"
+                } else {
+                    col.titleBn.trim()
+                }
+                customTitles.add(fullTitle.take(28))
                 "CUS:$idx"
             } else {
                 col.id

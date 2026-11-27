@@ -63,6 +63,7 @@ import androidx.compose.material.icons.rounded.PictureAsPdf
 import androidx.compose.material.icons.rounded.Print
 import androidx.compose.material.icons.rounded.RestartAlt
 import androidx.compose.material.icons.rounded.Tune
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -76,6 +77,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -121,6 +123,7 @@ import com.kgps.result.ai.GeminiApiConfig
 import com.kgps.result.bn
 import com.kgps.result.classShortBn
 import com.kgps.result.cloud.TeacherPermissions
+import com.kgps.result.ui.theme.RoseDanger
 import com.kgps.result.ui.theme.SlateMuted
 import com.kgps.result.ui.theme.SlateOutline
 import com.kgps.result.ui.theme.SlateText
@@ -174,6 +177,7 @@ fun AdmitCardPdfScreen(
         }
         AdmitCardConfig(
             selectedClass = defaultCls,
+            selectedClasses = listOf(defaultCls),
             rollOrder = SeatPlanRollOrder.DESCENDING,
             term = 3,
             cardsPerPage = 4,
@@ -190,6 +194,7 @@ fun AdmitCardPdfScreen(
         mutableStateOf(
             loaded.copy(
                 selectedClass = defaultConfig.selectedClass,
+                selectedClasses = defaultConfig.selectedClasses,
                 examTimeLabel = AdmitCardLocalStore.loadExamTime(ctx, defaultConfig.selectedClass, settings)
             )
         )
@@ -209,6 +214,7 @@ fun AdmitCardPdfScreen(
     var rollFromText by remember { mutableStateOf("") }
     var rollToText by remember { mutableStateOf("") }
     var showFullscreen by remember { mutableStateOf(false) }
+    var showResetConfirm by remember { mutableStateOf(false) }
     var panelHeightFraction by remember { mutableFloatStateOf(0.48f) }
     var isCustomPanelHeight by remember { mutableStateOf(false) }
     var previewViewportHeightPx by remember { mutableIntStateOf(0) }
@@ -369,14 +375,39 @@ fun AdmitCardPdfScreen(
         }
     }
 
-    val pages = remember(students, settings, config, routineRows, allowedClasses) {
-        AdmitCardPlanner.buildPages(
-            students = students,
-            settings = settings,
-            config = config,
-            routineRows = routineRows,
-            allowedClassIds = allowedClasses
-        )
+    val resolvedTabClasses = remember(config.selectedClass, config.selectedClasses, allowedClasses) {
+        val valid = config.resolvedSelectedClasses.filter { it in allowedClasses }
+        if (valid.isNotEmpty()) valid else listOfNotNull(allowedClasses.firstOrNull())
+    }
+
+    val pages = remember(students, settings, config, routineRows, resolvedTabClasses, allowedClasses) {
+        if (resolvedTabClasses.size <= 1) {
+            val singleCls = resolvedTabClasses.firstOrNull() ?: config.selectedClass
+            val singleCfg = if (singleCls == config.selectedClass) config else config.copy(selectedClass = singleCls)
+            AdmitCardPlanner.buildPages(
+                students = students,
+                settings = settings,
+                config = singleCfg,
+                routineRows = if (singleCls == config.selectedClass) routineRows else AdmitCardLocalStore.loadRoutine(ctx, singleCls, settings),
+                allowedClassIds = allowedClasses
+            )
+        } else {
+            AdmitCardPlanner.buildMultiClassPages(
+                students = students,
+                settings = settings,
+                baseConfig = config,
+                selectedClasses = resolvedTabClasses,
+                routineProvider = { c ->
+                    if (c == config.selectedClass) routineRows
+                    else AdmitCardLocalStore.loadRoutine(ctx, c, settings)
+                },
+                examTimeProvider = { c ->
+                    if (c == config.selectedClass) config.examTimeLabel
+                    else AdmitCardLocalStore.loadExamTime(ctx, c, settings)
+                },
+                allowedClassIds = allowedClasses
+            )
+        }
     }
 
     val totalCardCount = remember(pages) { pages.sumOf { it.items.size } }
@@ -402,7 +433,11 @@ fun AdmitCardPdfScreen(
     }
 
     val summaryLine = buildString {
-        append("${classShortBn(config.selectedClass, settings)} শ্রেণি")
+        if (resolvedTabClasses.size > 1) {
+            append("${bn(resolvedTabClasses.size.toString())}টি শ্রেণি")
+        } else {
+            append("${classShortBn(config.selectedClass, settings)} শ্রেণি")
+        }
         append(" · ${bn(config.safeCardsPerPage.toString())} কার্ড/পৃষ্ঠা")
         append(" · ${bn(totalCardCount.toString())} জন")
     }
@@ -499,21 +534,7 @@ fun AdmitCardPdfScreen(
                         }
                     }
                     IconButton(
-                        onClick = {
-                            val resetTime = AdmitCardPlanner.defaultExamTimeForClass(defaultConfig.selectedClass, settings)
-                            val resetCfg = defaultConfig.copy(examTimeLabel = resetTime)
-                            config = resetCfg
-                            AdmitCardLocalStore.saveConfig(ctx, resetCfg)
-                            AdmitCardLocalStore.saveExamTime(ctx, defaultConfig.selectedClass, resetTime)
-                            val resetRoutine = AdmitCardPlanner.defaultRoutineForClass(defaultConfig.selectedClass, settings)
-                            routineRows = resetRoutine
-                            AdmitCardLocalStore.saveRoutine(ctx, defaultConfig.selectedClass, resetRoutine)
-                            activeBaseId = null
-                            rollFromText = ""
-                            rollToText = ""
-                            previewZoomScale = 1f
-                            previewPanOffset = Offset.Zero
-                        },
+                        onClick = { showResetConfirm = true },
                         modifier = Modifier.size(38.dp).testTag("admit_card_reset_btn")
                     ) {
                         Icon(
@@ -876,16 +897,15 @@ fun AdmitCardPdfScreen(
                                             countByClass = countByClass,
                                             rollFromText = rollFromText,
                                             rollToText = rollToText,
-                                            onSelectClass = { newCls ->
+                                            onSelectClasses = { chosenList, primaryCls ->
                                                 config = config.copy(
-                                                    selectedClass = newCls,
-                                                    examTimeLabel = AdmitCardLocalStore.loadExamTime(ctx, newCls, settings)
+                                                    selectedClass = primaryCls,
+                                                    selectedClasses = chosenList,
+                                                    examTimeLabel = AdmitCardLocalStore.loadExamTime(ctx, primaryCls, settings)
                                                 )
-                                                routineRows = AdmitCardLocalStore.loadRoutine(ctx, newCls, settings)
+                                                routineRows = AdmitCardLocalStore.loadRoutine(ctx, primaryCls, settings)
                                                 activeBaseId = null
-                                                if (selectedExportClasses.size <= 1) {
-                                                    selectedExportClasses = setOf(newCls)
-                                                }
+                                                selectedExportClasses = chosenList.toSet()
                                             },
                                             onUpdateConfig = { config = it },
                                             onRollFromChange = { digits ->
@@ -908,14 +928,18 @@ fun AdmitCardPdfScreen(
                                             onSelectBase = { baseId -> activeBaseId = baseId },
                                             onSelectClass = { newCls ->
                                                 activeBaseId = null
+                                                val keptMulti = if (resolvedTabClasses.size > 1) {
+                                                    (resolvedTabClasses + newCls).distinct().sortedBy { allowedClasses.indexOf(it) }
+                                                } else {
+                                                    listOf(newCls)
+                                                }
                                                 config = config.copy(
                                                     selectedClass = newCls,
+                                                    selectedClasses = keptMulti,
                                                     examTimeLabel = AdmitCardLocalStore.loadExamTime(ctx, newCls, settings)
                                                 )
                                                 routineRows = AdmitCardLocalStore.loadRoutine(ctx, newCls, settings)
-                                                if (selectedExportClasses.size <= 1) {
-                                                    selectedExportClasses = setOf(newCls)
-                                                }
+                                                selectedExportClasses = keptMulti.toSet()
                                             },
                                             onAddBaseRoutine = { newName ->
                                                 val sourceBase = baseRoutines.find { it.id == activeBaseId }
@@ -1219,6 +1243,57 @@ fun AdmitCardPdfScreen(
                     onExportPdf(combinedPages, signatureBitmap, fileNameOrJob)
                 } else {
                     onPrint(combinedPages, signatureBitmap, fileNameOrJob)
+                }
+            }
+        )
+    }
+
+    if (showResetConfirm) {
+        AlertDialog(
+            onDismissRequest = { showResetConfirm = false },
+            title = { Text("ডিফল্ট সেটিংস রিসেট করবেন?", fontWeight = FontWeight.Bold, fontSize = 15.5.sp) },
+            text = {
+                Text(
+                    "প্রবেশপত্রের ফন্ট, সাইজ, বর্ডার, গ্যাপ এবং বর্তমান শ্রেণির রুটিন ডিফল্ট অবস্থায় ফিরে যাবে।",
+                    fontSize = 13.sp,
+                    color = SlateText
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        showResetConfirm = false
+                        val resetTime = AdmitCardPlanner.defaultExamTimeForClass(defaultConfig.selectedClass, settings)
+                        val resetCfg = defaultConfig.copy(
+                            examTimeLabel = resetTime,
+                            selectedClasses = listOf(defaultConfig.selectedClass)
+                        )
+                        config = resetCfg
+                        AdmitCardLocalStore.saveConfig(ctx, resetCfg)
+                        AdmitCardLocalStore.saveExamTime(ctx, defaultConfig.selectedClass, resetTime)
+                        val resetRoutine = AdmitCardPlanner.defaultRoutineForClass(defaultConfig.selectedClass, settings)
+                        routineRows = resetRoutine
+                        AdmitCardLocalStore.saveRoutine(ctx, defaultConfig.selectedClass, resetRoutine)
+                        selectedExportClasses = setOf(defaultConfig.selectedClass)
+                        activeBaseId = null
+                        rollFromText = ""
+                        rollToText = ""
+                        previewZoomScale = 1f
+                        previewPanOffset = Offset.Zero
+                        Toast.makeText(ctx, "প্রবেশপত্রের সেটিংস রিসেট হয়েছে", Toast.LENGTH_SHORT).show()
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = RoseDanger),
+                    modifier = Modifier.heightIn(min = 48.dp).testTag("admit_reset_confirm_btn")
+                ) {
+                    Text("রিসেট করুন", color = Color.White)
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = { showResetConfirm = false },
+                    modifier = Modifier.heightIn(min = 48.dp)
+                ) {
+                    Text("বাতিল")
                 }
             }
         )

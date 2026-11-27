@@ -591,22 +591,70 @@ internal fun AdmitClassAndRollTab(
     countByClass: Map<Int, Int>,
     rollFromText: String,
     rollToText: String,
-    onSelectClass: (Int) -> Unit,
+    onSelectClasses: (selectedClasses: List<Int>, primaryClass: Int) -> Unit,
     onUpdateConfig: (AdmitCardConfig) -> Unit,
     onRollFromChange: (String) -> Unit,
     onRollToChange: (String) -> Unit
 ) {
+    val selectedList = remember(config.selectedClass, config.selectedClasses, allowedClasses) {
+        val valid = config.resolvedSelectedClasses.filter { it in allowedClasses }
+        if (valid.isNotEmpty()) valid else listOfNotNull(allowedClasses.firstOrNull())
+    }
+    val allSelected = allowedClasses.isNotEmpty() && allowedClasses.all { it in selectedList }
+
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        AdmitSectionGroupCard(title = "শ্রেণি নির্বাচন") {
+        AdmitSectionGroupCard(title = "শ্রেণি নির্বাচন (একাধিক বাছাই করা যাবে)") {
             FlowRow(
                 horizontalArrangement = Arrangement.spacedBy(5.dp),
                 verticalArrangement = Arrangement.spacedBy(5.dp)
             ) {
+                if (allowedClasses.size > 1) {
+                    Surface(
+                        onClick = {
+                            if (allSelected) {
+                                val keep = config.selectedClass.takeIf { it in allowedClasses } ?: allowedClasses.first()
+                                onSelectClasses(listOf(keep), keep)
+                            } else {
+                                val primary = config.selectedClass.takeIf { it in allowedClasses } ?: allowedClasses.first()
+                                onSelectClasses(allowedClasses, primary)
+                            }
+                        },
+                        color = if (allSelected) TealPrimary else MaterialTheme.colorScheme.surface,
+                        border = BorderStroke(1.dp, if (allSelected) TealPrimary else SlateOutline),
+                        shape = RoundedCornerShape(7.dp),
+                        modifier = Modifier.heightIn(min = 30.dp).testTag("admit_card_cls_all")
+                    ) {
+                        Box(
+                            contentAlignment = Alignment.Center,
+                            modifier = Modifier.padding(horizontal = 9.dp, vertical = 5.dp)
+                        ) {
+                            Text(
+                                "সব",
+                                fontSize = 11.sp,
+                                fontWeight = if (allSelected) FontWeight.Bold else FontWeight.Medium,
+                                color = if (allSelected) Color.White else SlateText
+                            )
+                        }
+                    }
+                }
                 allowedClasses.forEach { c ->
-                    val isSel = c == config.selectedClass
+                    val isSel = c in selectedList
                     val cnt = countByClass[c] ?: 0
                     Surface(
-                        onClick = { onSelectClass(c) },
+                        onClick = {
+                            if (isSel) {
+                                if (selectedList.size > 1) {
+                                    val reduced = selectedList - c
+                                    val nextPrimary = if (config.selectedClass in reduced) config.selectedClass else reduced.first()
+                                    onSelectClasses(reduced, nextPrimary)
+                                } else {
+                                    onSelectClasses(listOf(c), c)
+                                }
+                            } else {
+                                val next = (selectedList + c).distinct().sortedBy { allowedClasses.indexOf(it) }
+                                onSelectClasses(next, c)
+                            }
+                        },
                         color = if (isSel) TealPrimary else MaterialTheme.colorScheme.surface,
                         border = BorderStroke(1.dp, if (isSel) TealPrimary else SlateOutline),
                         shape = RoundedCornerShape(7.dp),
@@ -626,6 +674,14 @@ internal fun AdmitClassAndRollTab(
                         }
                     }
                 }
+            }
+            if (selectedList.size > 1) {
+                Text(
+                    text = "${bn(selectedList.size.toString())}টি শ্রেণি নির্বাচিত · প্রিভিউ ও PDF-এ একসাথে থাকবে",
+                    fontSize = 9.5.sp,
+                    color = TealDark,
+                    fontWeight = FontWeight.Medium
+                )
             }
         }
 

@@ -148,6 +148,7 @@ class SeatPlanPlannerTest {
         assertFalse(def.boldClassRoll)
         assertEquals(18f, def.safeCornerRadiusPt, 0.01f)
         assertEquals(SeatPlanBorderStyle.SOLID, def.borderStyle)
+        assertEquals(14.5f, def.safeInfoHorizontalInsetPt, 0.01f)
 
         val extreme = SeatPlanConfig(
             marginInches = 5.0f,
@@ -157,7 +158,8 @@ class SeatPlanPlannerTest {
             headerMetaFontPt = 3f,
             studentNameFontPt = 25f,
             classRollFontPt = 2f,
-            cornerRadiusPt = 99f
+            cornerRadiusPt = 99f,
+            infoHorizontalInsetPt = 80f
         )
         assertEquals(1.00f, extreme.safeMarginInches, 0.0001f)
         assertEquals(72f, extreme.safeMarginPt, 0.01f)
@@ -168,5 +170,7 @@ class SeatPlanPlannerTest {
         assertEquals(17.0f, extreme.safeStudentNameFontPt, 0.01f)
         assertEquals(7.0f, extreme.safeClassRollFontPt, 0.01f)
         assertEquals(28f, extreme.safeCornerRadiusPt, 0.01f)
+        assertEquals(42f, extreme.safeInfoHorizontalInsetPt, 0.01f)
+        assertEquals(4f, SeatPlanConfig(infoHorizontalInsetPt = -5f).safeInfoHorizontalInsetPt, 0.01f)
     }
 }

@@ -305,4 +305,51 @@ class BlankSheetPlannerTest {
         assertEquals("", bottomOffOnly.bottomThinQrPayload)
         assertEquals(withBoth.templateId, bottomOffOnly.templateId)
     }
+
+    @Test
+    fun multiClassSelectionAndGroupedSubColumnsEncodeAndPlanCorrectly() {
+        val groupedCols = listOf(
+            BlankSheetCatalog.byId("ROLL")!!.copy(widthWeight = 0.75f),
+            BlankSheetCatalog.byId("NAME")!!.copy(widthWeight = 3.0f),
+            BlankSheetColumn(
+                id = "CUSTOM_SUB_1",
+                titleBn = "১ম",
+                widthWeight = 0.85f,
+                isCustom = true,
+                groupBn = "মৌখিক",
+                pickerLabelBn = "মৌখিক-১ম"
+            ),
+            BlankSheetColumn(
+                id = "CUSTOM_SUB_2",
+                titleBn = "২য়",
+                widthWeight = 0.85f,
+                isCustom = true,
+                groupBn = "মৌখিক",
+                pickerLabelBn = "মৌখিক-২য়"
+            )
+        )
+        val cfg = BlankSheetConfig(
+            selectedClass = 1,
+            selectedClasses = listOf(1, 3),
+            subjectKey = "BAN",
+            term = 1,
+            columns = groupedCols,
+            rowsPerPage = 20
+        )
+        val pages = BlankSheetPlanner.buildPages(
+            students = sampleStudents(),
+            settings = Settings(),
+            config = cfg,
+            allowedClassIds = listOf(1, 2, 3, 4, 5)
+        )
+
+        // Class 1 (12 students -> 1 page) + Class 3 (25 students -> 2 pages) = 3 pages; Class 2 excluded
+        assertEquals(3, pages.size)
+        assertEquals(listOf(1, 3, 3), pages.map { it.cls })
+        assertEquals(listOf("১ম", "৩য়", "৩য়"), pages.map { it.classTitleBn })
+        assertEquals(3.0f, pages.first().columns[1].widthWeight, 0.01f)
+        assertEquals("মৌখিক", pages.first().columns[2].groupBn)
+        assertEquals("মৌখিক", pages.first().columns[3].groupBn)
+        assertTrue(pages.first().qrPayload.isNotBlank())
+    }
 }

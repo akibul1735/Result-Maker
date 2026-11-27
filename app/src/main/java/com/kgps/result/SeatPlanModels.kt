@@ -71,7 +71,8 @@ data class SeatPlanConfig(
     val showCutLines: Boolean = true,
     val padRollTwoDigits: Boolean = true,
     val numeralMode: SeatPlanNumeralMode = SeatPlanNumeralMode.BENGALI,
-    val extraBlankSlips: Int = 0
+    val extraBlankSlips: Int = 0,
+    val infoHorizontalInsetPt: Float = 14.5f
 ) {
     val safeColumns: Int get() = columns.coerceIn(1, 3)
     val safeRows: Int get() = rows.coerceIn(3, 10)
@@ -85,6 +86,7 @@ data class SeatPlanConfig(
     val safeStudentNameFontPt: Float get() = studentNameFontPt.coerceIn(7.5f, 17.0f)
     val safeClassRollFontPt: Float get() = classRollFontPt.coerceIn(7.0f, 16.0f)
     val safeCornerRadiusPt: Float get() = cornerRadiusPt.coerceIn(0f, 28f)
+    val safeInfoHorizontalInsetPt: Float get() = infoHorizontalInsetPt.coerceIn(4f, 42f)
 }
 
 data class SeatPlanSlip(

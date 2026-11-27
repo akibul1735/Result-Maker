@@ -39,7 +39,9 @@ import androidx.compose.material.icons.rounded.TableChart
 import androidx.compose.material.icons.rounded.Tune
 import androidx.compose.material.icons.rounded.ViewAgenda
 import androidx.compose.material.icons.rounded.ViewColumn
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -50,6 +52,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -65,6 +68,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.kgps.result.BlankBottomCodeStyle
+import com.kgps.result.BlankColAlign
+import com.kgps.result.BlankColFill
 import com.kgps.result.BlankNumeralStyle
 import com.kgps.result.BlankSheetCatalog
 import com.kgps.result.BlankSheetColumn
@@ -88,6 +93,8 @@ import com.kgps.result.ui.theme.TealContainer
 import com.kgps.result.ui.theme.TealDark
 import com.kgps.result.ui.theme.TealPrimary
 import com.kgps.result.ui.theme.TealSoft
+import java.util.Locale
+import kotlin.math.roundToInt
 
 @Composable
 internal fun BlankSheetClassSubjectTab(
@@ -104,12 +111,33 @@ internal fun BlankSheetClassSubjectTab(
     onResetPageIndex: () -> Unit
 ) {
     val allCount = countByClass.values.sum()
-    val classSummary = config.selectedClass?.let { "${classShortBn(it, settings)} (${bn((countByClass[it] ?: 0).toString())})" }
-        ?: "সব শ্রেণি (${bn(allCount.toString())})"
+    val activeClasses = remember(config.selectedClasses, allowedClasses) {
+        config.selectedClasses.filter { it in allowedClasses }.distinct()
+    }
+    val isAllMode = activeClasses.isEmpty() && config.selectedClass == null
+    val selectedSet = remember(activeClasses, config.selectedClass, isAllMode) {
+        when {
+            isAllMode -> emptySet()
+            activeClasses.isNotEmpty() -> activeClasses.toSet()
+            config.selectedClass != null -> setOf(config.selectedClass)
+            else -> emptySet()
+        }
+    }
+    val classSummary = when {
+        isAllMode -> "সব শ্রেণি (${bn(allCount.toString())})"
+        selectedSet.size > 1 -> "${bn(selectedSet.size.toString())}টি শ্রেণি · ${
+            allowedClasses.filter { it in selectedSet }.joinToString(", ") { classShortBn(it, settings) }
+        }"
+        else -> {
+            val single = selectedSet.firstOrNull()
+            if (single != null) "${classShortBn(single, settings)} (${bn((countByClass[single] ?: 0).toString())})"
+            else "সব শ্রেণি (${bn(allCount.toString())})"
+        }
+    }
 
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
         AdmitCollapsibleGroupCard(
-            title = "১. শ্রেণি নির্বাচন",
+            title = "১. শ্রেণি নির্বাচন (মাল্টি-সিলেক্ট)",
             summary = classSummary,
             icon = Icons.Rounded.MenuBook,
             initiallyExpanded = true,
@@ -119,10 +147,10 @@ internal fun BlankSheetClassSubjectTab(
                 horizontalArrangement = Arrangement.spacedBy(5.dp),
                 verticalArrangement = Arrangement.spacedBy(5.dp)
             ) {
-                val allSel = config.selectedClass == null
+                val allSel = isAllMode
                 Surface(
                     onClick = {
-                        onUpdateConfig(config.copy(selectedClass = null))
+                        onUpdateConfig(config.copy(selectedClass = null, selectedClasses = emptyList()))
                         onResetPageIndex()
                     },
                     color = if (allSel) TealPrimary else MaterialTheme.colorScheme.surface,
@@ -143,11 +171,22 @@ internal fun BlankSheetClassSubjectTab(
                     }
                 }
                 allowedClasses.forEach { c ->
-                    val isSel = config.selectedClass == c
+                    val isSel = c in selectedSet
                     val cnt = countByClass[c] ?: 0
                     Surface(
                         onClick = {
-                            onUpdateConfig(config.copy(selectedClass = c))
+                            val toggled = if (isSel) selectedSet - c else selectedSet + c
+                            val ordered = allowedClasses.filter { it in toggled }
+                            if (ordered.isEmpty()) {
+                                onUpdateConfig(config.copy(selectedClass = null, selectedClasses = emptyList()))
+                            } else {
+                                onUpdateConfig(
+                                    config.copy(
+                                        selectedClass = ordered.first(),
+                                        selectedClasses = ordered
+                                    )
+                                )
+                            }
                             onResetPageIndex()
                         },
                         color = if (isSel) TealPrimary else MaterialTheme.colorScheme.surface,
@@ -170,6 +209,15 @@ internal fun BlankSheetClassSubjectTab(
                     }
                 }
             }
+            Text(
+                text = if (selectedSet.size > 1) {
+                    "একাধিক শ্রেণি সক্রিয় (${bn(selectedSet.size.toString())}টি) — সবগুলো প্রিভিউ ও PDF-এ আসবে"
+                } else {
+                    "ট্যাপ করে এক বা একাধিক শ্রেণি বাছুন; সব শ্রেণির জন্য 'সব শ্রেণি' চাপুন"
+                },
+                fontSize = 9.2.sp,
+                color = if (selectedSet.size > 1) TealDark else SlateMuted
+            )
         }
 
         AdmitCollapsibleGroupCard(
@@ -303,6 +351,15 @@ internal fun BlankSheetColumnsTab(
     var showCustomColumnInput by remember { mutableStateOf(false) }
     var customColText by remember { mutableStateOf("") }
     var focusedColId by remember { mutableStateOf<String?>(null) }
+    var subColTargetId by remember { mutableStateOf<String?>(null) }
+    var groupTitleInput by remember { mutableStateOf("") }
+    var firstSubTitleInput by remember { mutableStateOf("") }
+    var newSubNamesInput by remember { mutableStateOf("") }
+
+    val focusedIndex = remember(config.columns, focusedColId) {
+        config.columns.indexOfFirst { it.id == focusedColId }
+    }
+    val focusedCol = config.columns.getOrNull(focusedIndex)
 
     val activePresetLabel = remember(config.columns, isThreeTermMarks, isThreeTermTraits) {
         BlankSheetPreset.entries.find { preset ->
@@ -400,7 +457,7 @@ internal fun BlankSheetColumnsTab(
         }
 
         AdmitCollapsibleGroupCard(
-            title = "২. কলাম বাছাই, যোগ ও ক্রম",
+            title = "২. কলাম, প্রস্থ ও সাব-কলাম",
             summary = "${bn(config.columns.size.toString())}টি কলাম সক্রিয়",
             icon = Icons.Rounded.ViewColumn,
             initiallyExpanded = true,
@@ -424,7 +481,7 @@ internal fun BlankSheetColumnsTab(
                                 insertBlankColumnInOrder(config.columns, catalogCol)
                             }
                             onUpdateConfig(config.copy(columns = updated))
-                            if (!isAdded) focusedColId = null
+                            if (isAdded && focusedColId == catalogCol.id) focusedColId = null
                         },
                         shape = RoundedCornerShape(6.dp),
                         color = if (isAdded) TealPrimary else MaterialTheme.colorScheme.surface,
@@ -487,6 +544,7 @@ internal fun BlankSheetColumnsTab(
                             if (clean.isNotEmpty()) {
                                 val newCol = BlankSheetCatalog.createCustomColumn(clean)
                                 onUpdateConfig(config.copy(columns = config.columns + newCol))
+                                focusedColId = newCol.id
                                 customColText = ""
                                 showCustomColumnInput = false
                             }
@@ -503,7 +561,7 @@ internal fun BlankSheetColumnsTab(
 
             HorizontalDivider(color = SlateOutline.copy(alpha = 0.35f))
             Text(
-                "কলামের ক্রম (বামে/ডানে সরাতে ট্যাপ করুন):",
+                "কলামের ক্রম, প্রস্থ ও সাব-কলাম (বিস্তারিত বদলাতে কলামে ট্যাপ করুন):",
                 fontSize = 9.5.sp,
                 color = SlateMuted
             )
@@ -519,82 +577,324 @@ internal fun BlankSheetColumnsTab(
                     Surface(
                         onClick = { focusedColId = if (isFocused) null else col.id },
                         shape = RoundedCornerShape(6.dp),
-                        color = if (isFocused) TealContainer else MaterialTheme.colorScheme.surface,
-                        border = BorderStroke(1.dp, if (isFocused) TealPrimary else SlateOutline)
+                        color = if (isFocused) TealPrimary else MaterialTheme.colorScheme.surface,
+                        border = BorderStroke(1.dp, if (isFocused) TealPrimary else SlateOutline),
+                        modifier = Modifier.testTag("blank_col_order_chip_$idx")
+                    ) {
+                        Text(
+                            "${bn((idx + 1).toString())}.${col.pickerLabelBn}",
+                            fontSize = 10.sp,
+                            fontWeight = if (isFocused) FontWeight.Bold else FontWeight.Medium,
+                            color = if (isFocused) Color.White else SlateText,
+                            maxLines = 1,
+                            modifier = Modifier.padding(horizontal = 7.dp, vertical = 5.dp)
+                        )
+                    }
+                }
+            }
+
+            if (focusedCol != null && focusedIndex in config.columns.indices) {
+                val defaultWeight = BlankSheetCatalog.byId(focusedCol.id)?.widthWeight ?: 1.0f
+                Surface(
+                    color = TealSoft.copy(alpha = 0.45f),
+                    border = BorderStroke(1.dp, TealPrimary.copy(alpha = 0.4f)),
+                    shape = RoundedCornerShape(8.dp),
+                    modifier = Modifier.fillMaxWidth().testTag("blank_focused_col_editor")
+                ) {
+                    Column(
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
+                        verticalArrangement = Arrangement.spacedBy(5.dp)
                     ) {
                         Row(
+                            modifier = Modifier.fillMaxWidth(),
                             verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(3.dp),
-                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 4.dp)
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
                         ) {
-                            Text(
-                                "${bn((idx + 1).toString())}.${col.pickerLabelBn}",
-                                fontSize = 10.sp,
-                                fontWeight = if (isFocused) FontWeight.Bold else FontWeight.Medium,
-                                color = if (isFocused) TealDark else SlateText
-                            )
-                            if (isFocused) {
-                                if (idx > 0) {
-                                    Icon(
-                                        Icons.AutoMirrored.Rounded.KeyboardArrowLeft,
-                                        contentDescription = "বামে সরান",
-                                        tint = TealPrimary,
-                                        modifier = Modifier
-                                            .size(18.dp)
-                                            .clickable {
-                                                val list = config.columns.toMutableList()
-                                                val item = list.removeAt(idx)
-                                                list.add(idx - 1, item)
-                                                onUpdateConfig(config.copy(columns = list))
-                                            }
-                                    )
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = if (!focusedCol.groupBn.isNullOrBlank()) {
+                                        "${focusedCol.groupBn} › ${focusedCol.titleBn}"
+                                    } else {
+                                        focusedCol.titleBn
+                                    },
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = TealDark,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                                Text(
+                                    text = "বাকি কলামগুলো অটো-ফিট হবে",
+                                    fontSize = 8.5.sp,
+                                    color = SlateMuted
+                                )
+                            }
+                            if (focusedIndex > 0) {
+                                Surface(
+                                    onClick = {
+                                        val list = config.columns.toMutableList()
+                                        val item = list.removeAt(focusedIndex)
+                                        list.add(focusedIndex - 1, item)
+                                        onUpdateConfig(config.copy(columns = list))
+                                    },
+                                    shape = RoundedCornerShape(6.dp),
+                                    color = MaterialTheme.colorScheme.surface,
+                                    border = BorderStroke(1.dp, SlateOutline),
+                                    modifier = Modifier.size(30.dp).testTag("blank_col_move_left_btn")
+                                ) {
+                                    Box(contentAlignment = Alignment.Center) {
+                                        Icon(
+                                            Icons.AutoMirrored.Rounded.KeyboardArrowLeft,
+                                            contentDescription = "বামে সরান",
+                                            tint = TealPrimary,
+                                            modifier = Modifier.size(18.dp)
+                                        )
+                                    }
                                 }
-                                if (idx < config.columns.lastIndex) {
-                                    Icon(
-                                        Icons.AutoMirrored.Rounded.KeyboardArrowRight,
-                                        contentDescription = "ডানে সরান",
-                                        tint = TealPrimary,
-                                        modifier = Modifier
-                                            .size(18.dp)
-                                            .clickable {
-                                                val list = config.columns.toMutableList()
-                                                val item = list.removeAt(idx)
-                                                list.add(idx + 1, item)
-                                                onUpdateConfig(config.copy(columns = list))
-                                            }
-                                    )
+                            }
+                            if (focusedIndex < config.columns.lastIndex) {
+                                Surface(
+                                    onClick = {
+                                        val list = config.columns.toMutableList()
+                                        val item = list.removeAt(focusedIndex)
+                                        list.add(focusedIndex + 1, item)
+                                        onUpdateConfig(config.copy(columns = list))
+                                    },
+                                    shape = RoundedCornerShape(6.dp),
+                                    color = MaterialTheme.colorScheme.surface,
+                                    border = BorderStroke(1.dp, SlateOutline),
+                                    modifier = Modifier.size(30.dp).testTag("blank_col_move_right_btn")
+                                ) {
+                                    Box(contentAlignment = Alignment.Center) {
+                                        Icon(
+                                            Icons.AutoMirrored.Rounded.KeyboardArrowRight,
+                                            contentDescription = "ডানে সরান",
+                                            tint = TealPrimary,
+                                            modifier = Modifier.size(18.dp)
+                                        )
+                                    }
                                 }
-                                if (config.columns.size > 1) {
-                                    Icon(
-                                        Icons.Rounded.Close,
-                                        contentDescription = "বাদ দিন",
-                                        tint = MaterialTheme.colorScheme.error,
-                                        modifier = Modifier
-                                            .size(16.dp)
-                                            .clickable {
-                                                onUpdateConfig(
-                                                    config.copy(columns = config.columns.filterNot { it.id == col.id })
-                                                )
-                                                focusedColId = null
-                                            }
-                                    )
+                            }
+                            Surface(
+                                onClick = {
+                                    subColTargetId = focusedCol.id
+                                    groupTitleInput = focusedCol.groupBn?.takeIf { it.isNotBlank() } ?: focusedCol.titleBn
+                                    firstSubTitleInput = if (focusedCol.groupBn.isNullOrBlank()) focusedCol.titleBn else ""
+                                    newSubNamesInput = ""
+                                },
+                                shape = RoundedCornerShape(6.dp),
+                                color = MaterialTheme.colorScheme.surface,
+                                border = BorderStroke(1.dp, TealPrimary.copy(alpha = 0.65f)),
+                                modifier = Modifier.height(30.dp).testTag("blank_col_add_sub_btn")
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(2.dp),
+                                    modifier = Modifier.padding(horizontal = 7.dp)
+                                ) {
+                                    Icon(Icons.Rounded.Add, contentDescription = null, tint = TealPrimary, modifier = Modifier.size(13.dp))
+                                    Text("সাব", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = TealDark)
+                                }
+                            }
+                            if (config.columns.size > 1) {
+                                Surface(
+                                    onClick = {
+                                        onUpdateConfig(
+                                            config.copy(columns = config.columns.filterNot { it.id == focusedCol.id })
+                                        )
+                                        focusedColId = null
+                                    },
+                                    shape = RoundedCornerShape(6.dp),
+                                    color = MaterialTheme.colorScheme.surface,
+                                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.55f)),
+                                    modifier = Modifier.size(30.dp).testTag("blank_col_remove_btn")
+                                ) {
+                                    Box(contentAlignment = Alignment.Center) {
+                                        Icon(
+                                            Icons.Rounded.Close,
+                                            contentDescription = "কলাম বাদ দিন",
+                                            tint = MaterialTheme.colorScheme.error,
+                                            modifier = Modifier.size(16.dp)
+                                        )
+                                    }
                                 }
                             }
                         }
+
+                        AdmitCompactSliderControl(
+                            label = "কলামের দৈর্ঘ্য / প্রস্থ (অটো-ফিট)",
+                            value = focusedCol.widthWeight.coerceIn(0.5f, 4.0f),
+                            defaultValue = defaultWeight.coerceIn(0.5f, 4.0f),
+                            valueRange = 0.5f..4.0f,
+                            onValueChange = { raw ->
+                                val snapped = ((raw * 4f).roundToInt() / 4f).coerceIn(0.5f, 4.0f)
+                                val updated = config.columns.map { c ->
+                                    if (c.id == focusedCol.id) c.copy(widthWeight = snapped) else c
+                                }
+                                onUpdateConfig(config.copy(columns = updated))
+                            },
+                            sliderTestTag = "blank_col_width_slider",
+                            resetTestTag = "blank_col_width_reset",
+                            valueFormatter = { w ->
+                                val raw = String.format(Locale.US, "%.2f", w).trimEnd('0').trimEnd('.')
+                                "${bn(raw)}×"
+                            }
+                        )
                     }
                 }
             }
         }
     }
+
+    val subTarget = remember(subColTargetId, config.columns) {
+        config.columns.find { it.id == subColTargetId }
+    }
+    if (subTarget != null) {
+        val wasUngrouped = subTarget.groupBn.isNullOrBlank()
+        AlertDialog(
+            onDismissRequest = { subColTargetId = null },
+            title = {
+                Text(
+                    "সাব-কলাম যোগ করুন",
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 15.sp
+                )
+            },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(7.dp)) {
+                    AdmitCompactTextInput(
+                        label = "মূল / গ্রুপ শিরোনাম",
+                        value = groupTitleInput,
+                        onValueChange = { groupTitleInput = it },
+                        placeholder = "যেমন: ${subTarget.titleBn}",
+                        modifier = Modifier.fillMaxWidth().testTag("blank_subcol_group_input")
+                    )
+                    if (wasUngrouped) {
+                        AdmitCompactTextInput(
+                            label = "বর্তমান কলামের সাব-নাম",
+                            value = firstSubTitleInput,
+                            onValueChange = { firstSubTitleInput = it },
+                            placeholder = "যেমন: ১ম / লিখিত",
+                            modifier = Modifier.fillMaxWidth().testTag("blank_subcol_first_input")
+                        )
+                    }
+                    AdmitCompactTextInput(
+                        label = "নতুন সাব-কলাম (কমা দিয়ে একাধিক)",
+                        value = newSubNamesInput,
+                        onValueChange = { newSubNamesInput = it },
+                        placeholder = "যেমন: ২য় অথবা ক, খ",
+                        modifier = Modifier.fillMaxWidth().testTag("blank_subcol_new_input")
+                    )
+                    FlowRow(
+                        horizontalArrangement = Arrangement.spacedBy(5.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        listOf(
+                            Triple("১ম / ২য়", "১ম", "২য়"),
+                            Triple("লিখিত / মৌখিক", "লিখিত", "মৌখিক"),
+                            Triple("ক / খ", "ক", "খ")
+                        ).forEach { (chipLabel, p1, p2) ->
+                            Surface(
+                                onClick = {
+                                    if (wasUngrouped) {
+                                        firstSubTitleInput = p1
+                                        newSubNamesInput = p2
+                                    } else {
+                                        newSubNamesInput = "$p1, $p2"
+                                    }
+                                },
+                                shape = RoundedCornerShape(6.dp),
+                                color = TealSoft,
+                                border = BorderStroke(1.dp, TealContainer)
+                            ) {
+                                Text(
+                                    chipLabel,
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = TealDark,
+                                    modifier = Modifier.padding(horizontal = 7.dp, vertical = 4.dp)
+                                )
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        val grpName = groupTitleInput.trim().ifBlank { subTarget.titleBn }
+                        val newNames = newSubNamesInput
+                            .split(',', '،', '/')
+                            .map { it.trim() }
+                            .filter { it.isNotEmpty() }
+                        val updatedList = config.columns.toMutableList()
+                        val targetPos = updatedList.indexOfFirst { it.id == subTarget.id }
+                        if (targetPos >= 0 && newNames.isNotEmpty()) {
+                            val currentTarget = updatedList[targetPos]
+                            val firstSub = if (wasUngrouped) {
+                                firstSubTitleInput.trim().ifBlank { currentTarget.titleBn }
+                            } else {
+                                currentTarget.titleBn
+                            }
+                            updatedList[targetPos] = currentTarget.copy(
+                                titleBn = firstSub,
+                                groupBn = grpName,
+                                pickerLabelBn = "$grpName-$firstSub"
+                            )
+                            var insertAfter = targetPos
+                            while (insertAfter + 1 < updatedList.size &&
+                                updatedList[insertAfter + 1].groupBn?.trim() == grpName
+                            ) {
+                                insertAfter++
+                            }
+                            val baseNano = System.nanoTime()
+                            val created = newNames.mapIndexed { idx, sName ->
+                                BlankSheetColumn(
+                                    id = "CUSTOM_${baseNano}_$idx",
+                                    titleBn = sName,
+                                    widthWeight = 0.85f,
+                                    fillWith = BlankColFill.NONE,
+                                    align = BlankColAlign.CENTER,
+                                    compKey = null,
+                                    isCustom = true,
+                                    groupBn = grpName,
+                                    pickerLabelBn = "$grpName-$sName"
+                                )
+                            }
+                            updatedList.addAll(insertAfter + 1, created)
+                            onUpdateConfig(config.copy(columns = updatedList))
+                        }
+                        subColTargetId = null
+                    },
+                    enabled = newSubNamesInput.trim().isNotEmpty(),
+                    colors = ButtonDefaults.buttonColors(containerColor = TealPrimary),
+                    modifier = Modifier.heightIn(min = 48.dp).testTag("blank_subcol_confirm_btn")
+                ) {
+                    Text("যোগ করুন")
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = { subColTargetId = null },
+                    modifier = Modifier.heightIn(min = 48.dp)
+                ) {
+                    Text("বাতিল")
+                }
+            }
+        )
+    }
 }
 
 @Composable
-internal fun BlankSheetRowsAndPageTab(
+internal fun BlankSheetRowsAndOptionsTab(
     config: BlankSheetConfig,
     students: List<Student>,
     settings: Settings,
+    sharedWorkingDaysTerms: List<Int>,
+    commonWorkingDays: Map<Int, String>,
     onUpdateConfig: (BlankSheetConfig) -> Unit,
-    onResetPageIndex: () -> Unit
+    onResetPageIndex: () -> Unit,
+    onRequestReset: () -> Unit
 ) {
     var rowsMenuOpen by remember { mutableStateOf(false) }
 
@@ -607,26 +907,38 @@ internal fun BlankSheetRowsAndPageTab(
     val previewSplitHint = remember(config, students, settings) {
         if (config.rowFitMode != BlankSheetRowFitMode.AUTO_FIT_PAGES) return@remember null
         val targetPages = config.autoFitPageCount.coerceIn(1, 3)
-        val selCls = config.selectedClass
-        if (selCls == null) {
-            "সব শ্রেণির প্রতিটিকে সমানভাবে ${bn(targetPages.toString())} পেজে ভাগ করে সাজাবে"
-        } else {
-            val stuCount = students.count { it.cls == selCls }
-            val totalRows = stuCount + config.extraBlankRowsPerClass.coerceIn(0, 20)
-            if (totalRows <= 0) {
-                "${classShortBn(selCls, settings)} শ্রেণি: ${bn(targetPages.toString())} পেজে ফাঁকা ফর্ম"
-            } else {
-                val dummyRows = List(totalRows) { BlankSheetRow("", "", true) }
-                val (_, chunks) = BlankSheetPlanner.partitionBalancedPages(
-                    rows = dummyRows,
-                    targetPages = targetPages,
-                    fillRemaining = false
-                )
-                val breakdown = chunks.joinToString(" + ") { bn(it.size.toString()) }
-                val densityWarn = if (chunks.any { it.size > 45 }) " (ঘন সারি — লেখা অটো-ছোট হবে)" else ""
-                "${classShortBn(selCls, settings)}: ${bn(totalRows.toString())} সারি → $breakdown সারি/পেজ$densityWarn"
+        val selCls = config.primarySelectedClass
+        when {
+            config.selectedClasses.size > 1 ->
+                "নির্বাচিত ${bn(config.selectedClasses.size.toString())}টি শ্রেণির প্রতিটিকে সমানভাবে ${bn(targetPages.toString())} পেজে ভাগ করে সাজাবে"
+            selCls == null ->
+                "সব শ্রেণির প্রতিটিকে সমানভাবে ${bn(targetPages.toString())} পেজে ভাগ করে সাজাবে"
+            else -> {
+                val stuCount = students.count { it.cls == selCls }
+                val totalRows = stuCount + config.extraBlankRowsPerClass.coerceIn(0, 20)
+                if (totalRows <= 0) {
+                    "${classShortBn(selCls, settings)} শ্রেণি: ${bn(targetPages.toString())} পেজে ফাঁকা ফর্ম"
+                } else {
+                    val dummyRows = List(totalRows) { BlankSheetRow("", "", true) }
+                    val (_, chunks) = BlankSheetPlanner.partitionBalancedPages(
+                        rows = dummyRows,
+                        targetPages = targetPages,
+                        fillRemaining = false
+                    )
+                    val breakdown = chunks.joinToString(" + ") { bn(it.size.toString()) }
+                    val densityWarn = if (chunks.any { it.size > 45 }) " (ঘন সারি — লেখা অটো-ছোট হবে)" else ""
+                    "${classShortBn(selCls, settings)}: ${bn(totalRows.toString())} সারি → $breakdown সারি/পেজ$densityWarn"
+                }
             }
         }
+    }
+
+    val qrSummary = buildString {
+        append(if (config.includeQrCode) "মূল QR: চালু" else "মূল QR: বন্ধ")
+        append(" · ")
+        append(
+            if (config.includeBarcode) config.bottomCodeStyle.labelBn else "নিচের কোড: বন্ধ"
+        )
     }
 
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -827,31 +1139,12 @@ internal fun BlankSheetRowsAndPageTab(
                 testTag = "blank_fill_remaining_switch"
             )
         }
-    }
-}
 
-@Composable
-internal fun BlankSheetQrAndOptionsTab(
-    config: BlankSheetConfig,
-    sharedWorkingDaysTerms: List<Int>,
-    commonWorkingDays: Map<Int, String>,
-    onUpdateConfig: (BlankSheetConfig) -> Unit,
-    onResetAll: () -> Unit
-) {
-    val qrSummary = buildString {
-        append(if (config.includeQrCode) "মূল QR: চালু" else "মূল QR: বন্ধ")
-        append(" · ")
-        append(
-            if (config.includeBarcode) config.bottomCodeStyle.labelBn else "নিচের কোড: বন্ধ"
-        )
-    }
-
-    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
         AdmitCollapsibleGroupCard(
-            title = "১. QR ও বারকোড নিয়ন্ত্রণ",
+            title = "৩. QR ও বারকোড নিয়ন্ত্রণ",
             summary = qrSummary,
             icon = Icons.Rounded.QrCode2,
-            initiallyExpanded = true,
+            initiallyExpanded = false,
             testTag = "blank_grp_qr"
         ) {
             AdmitCompactSwitchRow(
@@ -882,10 +1175,10 @@ internal fun BlankSheetQrAndOptionsTab(
         }
 
         AdmitCollapsibleGroupCard(
-            title = "২. ডাটা, হেডার ও কার্যদিবস",
+            title = "৪. ডাটা, হেডার, কার্যদিবস ও রিসেট",
             summary = if (config.autoFillRollAndName) "রোল-নাম অটো" else "সম্পূর্ণ ফাঁকা",
             icon = Icons.Rounded.Settings,
-            initiallyExpanded = true,
+            initiallyExpanded = false,
             testTag = "blank_grp_data_opts"
         ) {
             AdmitCompactSwitchRow(
@@ -993,7 +1286,7 @@ internal fun BlankSheetQrAndOptionsTab(
 
             HorizontalDivider(color = SlateOutline.copy(alpha = 0.35f))
             OutlinedButton(
-                onClick = onResetAll,
+                onClick = onRequestReset,
                 shape = RoundedCornerShape(8.dp),
                 border = BorderStroke(1.dp, SlateOutline),
                 modifier = Modifier.fillMaxWidth().heightIn(min = 38.dp).testTag("blank_sheet_reset_btn")

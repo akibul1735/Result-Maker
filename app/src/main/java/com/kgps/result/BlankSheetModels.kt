@@ -375,8 +375,13 @@ object BlankSheetCatalog {
         val hasMarks = cols.any { it.compKey != null }
         val hasSingleTraits = hasSingleTermTraitColumns(cols) && !is3TTraits && !hasMarks
         val hasAttSingle = (cols.any { it.id == "ATT" } || hasSingleTraits) && !is3TTraits && !hasMarks
-        val clsLabel = config.selectedClass?.let { "${classNameBn(it, settings)} শ্রেণি ($it)" }
-            ?: "ছবির উপরের ব্যানার অনুযায়ী শ্রেণি (${allowedClassIds.joinToString("/")})"
+        val primaryCls = config.primarySelectedClass
+        val clsLabel = when {
+            config.selectedClasses.size > 1 ->
+                "নির্বাচিত শ্রেণি (${config.selectedClasses.joinToString(", ") { classNameBn(it, settings) }})"
+            primaryCls != null -> "${classNameBn(primaryCls, settings)} শ্রেণি ($primaryCls)"
+            else -> "ছবির উপরের ব্যানার অনুযায়ী শ্রেণি (${allowedClassIds.joinToString("/")})"
+        }
         val termNum = if (config.term in 1..3) config.term else 1
         val subName = subjectTitleFor(config.subjectKey, config.customSubjectTitle).ifBlank { "ছবি অনুযায়ী" }
         val subKeyLabel = config.subjectKey?.takeIf { it != ALL_SUBJECTS_KEY } ?: "AUTO"
@@ -424,7 +429,10 @@ object BlankSheetCatalog {
                 "T3_ACT" -> headers.add("৩য় প্রান্তিক - সহপাঠক্রমিক")
                 "T3_DISC" -> headers.add("৩য় প্রান্তিক - শৃঙ্খলাবোধ")
                 "T3_COND" -> headers.add("৩য় প্রান্তিক - আচরণ")
-                else -> if (col.isCustom) headers.add(col.titleBn)
+                else -> if (col.isCustom) {
+                    val lbl = if (!col.groupBn.isNullOrBlank()) "${col.groupBn} - ${col.titleBn}" else col.titleBn
+                    headers.add(lbl)
+                }
             }
         }
 
@@ -435,7 +443,7 @@ object BlankSheetCatalog {
             appendLine("আমি একটি প্রাথমিক বিদ্যালয়ের পূরণকৃত নম্বর/উপস্থিতি ফর্মের ছবি/PDF দিচ্ছি। ছবির সব সারির তথ্য হুবহু পড়ে কেবল একটি ```csv কোড ব্লকের ভেতরে CSV দিন।")
             appendLine("তথ্য: শ্রেণি: $clsLabel | বিষয়: $effectiveSubLabel | প্রান্তিক: ${if (is3TMarks || is3TTraits) "৩ প্রান্তিক" else termNameBn(termNum)}")
             appendLine("নিয়ম:")
-            appendLine("১) প্রথম সারিতে মেটা-তথ্য হিসেবে লিখুন: শ্রেণি: ${config.selectedClass ?: "<ছবি থেকে>"}, বিষয়: $effectiveMetaSub, প্রান্তিক: ${if (is3TMarks || is3TTraits) "৩ প্রান্তিক" else termNameBn(termNum)}")
+            appendLine("১) প্রথম সারিতে মেটা-তথ্য হিসেবে লিখুন: শ্রেণি: ${primaryCls ?: "<ছবি থেকে>"}, বিষয়: $effectiveMetaSub, প্রান্তিক: ${if (is3TMarks || is3TTraits) "৩ প্রান্তিক" else termNameBn(termNum)}")
             if (is3TTraits || hasAttSingle) {
                 appendLine("২) ছবির উপরে 'মোট কার্যদিবস' লেখা থাকলে দ্বিতীয় সারিতে 'মোট কার্যদিবস — ১ম প্রান্তিক: <দিন> দিন ...' লিখুন। গুণাবলির (সক্রিয়তা/সহপাঠ, শৃঙ্খলা, আচরণ) ঘরে কেবল ক (উত্তম), খ (সন্তোষজনক) বা গ (উন্নতি প্রয়োজন) দিন।")
             }
@@ -454,6 +462,7 @@ object BlankSheetCatalog {
 
 data class BlankSheetConfig(
     val selectedClass: Int? = null, // null = সব শ্রেণি
+    val selectedClasses: List<Int> = emptyList(), // non-empty overrides selectedClass with multi-class list
     val subjectKey: String? = "BAN", // BlankSheetCatalog.ALL_SUBJECTS_KEY = সব বিষয়
     val customSubjectTitle: String = "",
     val term: Int = 1, // 1..3, 0 = বার্ষিক, -1 = কাস্টম/ফাঁকা
@@ -473,7 +482,23 @@ data class BlankSheetConfig(
     val bottomCodeStyle: BlankBottomCodeStyle = BlankBottomCodeStyle.THIN_QR,
     val rowFitMode: BlankSheetRowFitMode = BlankSheetRowFitMode.FIXED_ROWS,
     val autoFitPageCount: Int = 2
-)
+) {
+    val primarySelectedClass: Int?
+        get() = when {
+            selectedClasses.size == 1 -> selectedClasses.first()
+            selectedClasses.size > 1 -> null
+            else -> selectedClass
+        }
+
+    fun resolvedClasses(allowedClassIds: List<Int>): List<Int> = when {
+        selectedClasses.isNotEmpty() -> {
+            val valid = allowedClassIds.filter { it in selectedClasses }
+            valid.ifEmpty { selectedClasses.distinct() }
+        }
+        selectedClass != null -> listOf(selectedClass)
+        else -> emptyList()
+    }
+}
 
 data class BlankSheetRow(
     val rollText: String,
@@ -549,16 +574,22 @@ object BlankSheetPlanner {
         val isAllSubjects = config.subjectKey == BlankSheetCatalog.ALL_SUBJECTS_KEY && !isClassLevelTraitsOnly
 
         val effectiveAllowed = allowedClassIds.distinct().sorted()
-        val targetClasses = if (config.selectedClass != null) {
-            listOf(config.selectedClass)
-        } else {
-            val classesWithStudents = students
-                .map { it.cls }
-                .filter { effectiveAllowed.isEmpty() || it in effectiveAllowed }
-                .distinct()
-                .sorted()
-            if (classesWithStudents.isNotEmpty()) classesWithStudents
-            else effectiveAllowed.ifEmpty { activeClassIds(settings) }
+        val isAllClassesMode = config.selectedClasses.isEmpty() && config.selectedClass == null
+        val targetClasses = when {
+            config.selectedClasses.isNotEmpty() -> {
+                val filtered = effectiveAllowed.filter { it in config.selectedClasses }
+                filtered.ifEmpty { config.selectedClasses.distinct().sorted() }
+            }
+            config.selectedClass != null -> listOf(config.selectedClass)
+            else -> {
+                val classesWithStudents = students
+                    .map { it.cls }
+                    .filter { effectiveAllowed.isEmpty() || it in effectiveAllowed }
+                    .distinct()
+                    .sorted()
+                if (classesWithStudents.isNotEmpty()) classesWithStudents
+                else effectiveAllowed.ifEmpty { activeClassIds(settings) }
+            }
         }
 
         val sortedByClass = students.groupBy { it.cls }.mapValues { (_, list) ->
@@ -581,7 +612,7 @@ object BlankSheetPlanner {
         targetClasses.forEach { cls ->
             val clsStudents = sortedByClass[cls].orEmpty()
             // When exporting All Classes, skip completely empty classes unless no class has any students
-            if (config.selectedClass == null && clsStudents.isEmpty() && students.any { effectiveAllowed.isEmpty() || it.cls in effectiveAllowed }) {
+            if (isAllClassesMode && clsStudents.isEmpty() && students.any { effectiveAllowed.isEmpty() || it.cls in effectiveAllowed }) {
                 return@forEach
             }
 
