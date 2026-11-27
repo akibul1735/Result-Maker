@@ -46,20 +46,17 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.KeyboardArrowLeft
 import androidx.compose.material.icons.automirrored.rounded.KeyboardArrowRight
-import androidx.compose.material.icons.outlined.MenuBook
-import androidx.compose.material.icons.outlined.ViewAgenda
-import androidx.compose.material.icons.outlined.ViewColumn
 import androidx.compose.material.icons.rounded.AutoAwesome
 import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.Download
 import androidx.compose.material.icons.rounded.Fullscreen
 import androidx.compose.material.icons.rounded.KeyboardArrowDown
-import androidx.compose.material.icons.rounded.MenuBook
+import androidx.compose.material.icons.rounded.KeyboardArrowUp
 import androidx.compose.material.icons.rounded.Print
 import androidx.compose.material.icons.rounded.QrCode2
+import androidx.compose.material.icons.rounded.RestartAlt
 import androidx.compose.material.icons.rounded.TableChart
-import androidx.compose.material.icons.rounded.ViewAgenda
-import androidx.compose.material.icons.rounded.ViewColumn
+import androidx.compose.material.icons.rounded.Tune
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -90,7 +87,6 @@ import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
@@ -134,20 +130,6 @@ import com.kgps.result.ui.theme.TealSoft
 import kotlinx.coroutines.launch
 import java.util.Locale
 import kotlin.math.abs
-
-private data class BlankSheetBottomTabItem(
-    val index: Int,
-    val label: String,
-    val panelTitle: String,
-    val activeIcon: ImageVector,
-    val inactiveIcon: ImageVector
-)
-
-private val BLANK_SHEET_BOTTOM_TABS = listOf(
-    BlankSheetBottomTabItem(0, "শ্রেণি ও বিষয়", "শ্রেণি, বিষয় ও মূল্যায়ন", Icons.Rounded.MenuBook, Icons.Outlined.MenuBook),
-    BlankSheetBottomTabItem(1, "কলাম ও ফর্ম", "টেমপ্লেট, কলাম প্রস্থ ও সাব-কলাম", Icons.Rounded.ViewColumn, Icons.Outlined.ViewColumn),
-    BlankSheetBottomTabItem(2, "সারি ও অপশন", "সারি, অটোফিট, QR ও অপশন", Icons.Rounded.ViewAgenda, Icons.Outlined.ViewAgenda)
-)
 
 @Composable
 fun BlankSheetPdfScreen(
@@ -206,7 +188,7 @@ fun BlankSheetPdfScreen(
         }
     }
 
-    var openTab by remember { mutableStateOf<Int?>(null) }
+    var settingsExpanded by remember { mutableStateOf(false) }
     var showFullscreen by remember { mutableStateOf(false) }
     var pendingExportAction by remember { mutableStateOf<AdmitExportAction?>(null) }
     var showResetConfirm by remember { mutableStateOf(false) }
@@ -220,10 +202,10 @@ fun BlankSheetPdfScreen(
 
     // Back priority: zoomed preview resets first -> open panel closes -> exit screen
     if (onBack != null) {
-        BackHandler(enabled = !showFullscreen && openTab == null && previewZoomScale <= 1.02f) { onBack() }
+        BackHandler(enabled = !showFullscreen && !settingsExpanded && previewZoomScale <= 1.02f) { onBack() }
     }
-    BackHandler(enabled = !showFullscreen && openTab != null && previewZoomScale <= 1.02f) {
-        openTab = null
+    BackHandler(enabled = !showFullscreen && settingsExpanded && previewZoomScale <= 1.02f) {
+        settingsExpanded = false
     }
     BackHandler(enabled = !showFullscreen && previewZoomScale > 1.02f) {
         previewZoomScale = 1f
@@ -764,13 +746,11 @@ fun BlankSheetPdfScreen(
 
                 // Overlay Slide-Up Compact Options Panel (floats over bottom portion of preview)
                 androidx.compose.animation.AnimatedVisibility(
-                    visible = openTab != null,
+                    visible = settingsExpanded,
                     enter = slideInVertically(tween(220)) { it } + fadeIn(tween(180)),
                     exit = slideOutVertically(tween(180)) { it } + fadeOut(tween(140)),
                     modifier = Modifier.align(Alignment.BottomCenter)
                 ) {
-                    val selectedTabIdx = openTab ?: 0
-                    val tabMeta = BLANK_SHEET_BOTTOM_TABS[selectedTabIdx]
                     Surface(
                         color = MaterialTheme.colorScheme.surface.copy(alpha = 0.98f),
                         border = BorderStroke(1.dp, SlateOutline),
@@ -808,14 +788,14 @@ fun BlankSheetPdfScreen(
                                             },
                                             onDragEnd = {
                                                 if (panelHeightFraction < 0.24f) {
-                                                    openTab = null
+                                                    settingsExpanded = false
                                                     panelHeightFraction = 0.50f
                                                     isCustomPanelHeight = false
                                                 }
                                             },
                                             onDragCancel = {
                                                 if (panelHeightFraction < 0.24f) {
-                                                    openTab = null
+                                                    settingsExpanded = false
                                                     panelHeightFraction = 0.50f
                                                     isCustomPanelHeight = false
                                                 }
@@ -843,7 +823,7 @@ fun BlankSheetPdfScreen(
                                 ) {
                                     Column(Modifier.weight(1f)) {
                                         Text(
-                                            text = tabMeta.panelTitle,
+                                            text = "ফাঁকা শিট সেটিংস",
                                             fontWeight = FontWeight.Bold,
                                             fontSize = 12.sp,
                                             color = TealDark
@@ -855,8 +835,19 @@ fun BlankSheetPdfScreen(
                                         )
                                     }
                                     IconButton(
-                                        onClick = { openTab = null },
-                                        modifier = Modifier.size(36.dp).testTag("blank_panel_close_btn")
+                                        onClick = { showResetConfirm = true },
+                                        modifier = Modifier.size(48.dp).testTag("blank_panel_reset_btn")
+                                    ) {
+                                        Icon(
+                                            Icons.Rounded.RestartAlt,
+                                            contentDescription = "ডিফল্ট সেটিংস রিসেট",
+                                            tint = SlateMuted,
+                                            modifier = Modifier.size(18.dp)
+                                        )
+                                    }
+                                    IconButton(
+                                        onClick = { settingsExpanded = false },
+                                        modifier = Modifier.size(48.dp).testTag("blank_panel_close_btn")
                                     ) {
                                         Icon(
                                             Icons.Rounded.KeyboardArrowDown,
@@ -869,111 +860,121 @@ fun BlankSheetPdfScreen(
                             }
                             HorizontalDivider(color = SlateOutline.copy(alpha = 0.55f))
 
-                            // Compact Scrollable Tab Body
-                            androidx.compose.runtime.key(selectedTabIdx) {
-                                Column(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .verticalScroll(rememberScrollState())
-                                        .padding(horizontal = 8.dp, vertical = 6.dp)
-                                ) {
-                                    when (selectedTabIdx) {
-                                        0 -> BlankSheetClassSubjectTab(
-                                            config = config,
-                                            settings = settings,
-                                            allowedClasses = allowedClasses,
-                                            countByClass = countByClass,
-                                            isThreeTermMarks = isThreeTermMarks,
-                                            isThreeTermTraits = isThreeTermTraits,
-                                            isClassLevelTraitsOnly = isClassLevelTraitsOnly,
-                                            selectedSubjectLabel = selectedSubjectLabel,
-                                            selectedTermLabel = selectedTermLabel,
-                                            onUpdateConfig = { config = it },
-                                            onResetPageIndex = {
-                                                scope.launch { pagerState.scrollToPage(0) }
-                                            }
-                                        )
-
-                                        1 -> BlankSheetColumnsTab(
-                                            config = config,
-                                            isThreeTermMarks = isThreeTermMarks,
-                                            hasThreeTermTotal = hasThreeTermTotal,
-                                            isThreeTermTraits = isThreeTermTraits,
-                                            onUpdateConfig = { config = it },
-                                            onResetPageIndex = {
-                                                scope.launch { pagerState.scrollToPage(0) }
-                                            }
-                                        )
-
-                                        else -> BlankSheetRowsAndOptionsTab(
-                                            config = config,
-                                            students = students,
-                                            settings = settings,
-                                            sharedWorkingDaysTerms = sharedWorkingDaysTerms,
-                                            commonWorkingDays = commonWorkingDays,
-                                            onUpdateConfig = { config = it },
-                                            onResetPageIndex = {
-                                                scope.launch { pagerState.scrollToPage(0) }
-                                            },
-                                            onRequestReset = { showResetConfirm = true }
-                                        )
-                                    }
-                                }
+                            // Unified Compact Scrollable Settings Body
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .verticalScroll(rememberScrollState())
+                                    .padding(horizontal = 8.dp, vertical = 6.dp)
+                            ) {
+                                BlankSheetUnifiedSettingsPanel(
+                                    config = config,
+                                    students = students,
+                                    settings = settings,
+                                    allowedClasses = allowedClasses,
+                                    countByClass = countByClass,
+                                    isThreeTermMarks = isThreeTermMarks,
+                                    hasThreeTermTotal = hasThreeTermTotal,
+                                    isThreeTermTraits = isThreeTermTraits,
+                                    isClassLevelTraitsOnly = isClassLevelTraitsOnly,
+                                    selectedSubjectLabel = selectedSubjectLabel,
+                                    selectedTermLabel = selectedTermLabel,
+                                    sharedWorkingDaysTerms = sharedWorkingDaysTerms,
+                                    commonWorkingDays = commonWorkingDays,
+                                    onUpdateConfig = { config = it },
+                                    onResetPageIndex = {
+                                        scope.launch { pagerState.scrollToPage(0) }
+                                    },
+                                    onRequestReset = { showResetConfirm = true }
+                                )
                             }
                         }
                     }
                 }
             }
 
-            // 3. Compact Fixed Bottom 3-Tab Dock Bar
+            // 3. Single Compact Bottom Settings Toggle Tab/Bar
             Surface(
                 color = MaterialTheme.colorScheme.surface,
-                border = BorderStroke(1.dp, SlateOutline),
+                border = BorderStroke(
+                    1.dp,
+                    if (settingsExpanded) TealPrimary.copy(alpha = 0.45f) else SlateOutline
+                ),
                 shape = RoundedCornerShape(topStart = 12.dp, topEnd = 12.dp),
                 shadowElevation = 6.dp,
                 modifier = Modifier
                     .fillMaxWidth()
                     .navigationBarsPadding()
             ) {
-                Row(
+                Surface(
+                    onClick = { settingsExpanded = !settingsExpanded },
+                    color = if (settingsExpanded) TealSoft.copy(alpha = 0.65f) else Color.Transparent,
+                    shape = RoundedCornerShape(topStart = 12.dp, topEnd = 12.dp),
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 4.dp, vertical = 3.dp),
-                    horizontalArrangement = Arrangement.spacedBy(3.dp),
-                    verticalAlignment = Alignment.CenterVertically
+                        .heightIn(min = 48.dp)
+                        .testTag("blank_bottom_tab_0")
                 ) {
-                    BLANK_SHEET_BOTTOM_TABS.forEach { tab ->
-                        val isSelected = openTab == tab.index
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 10.dp, vertical = 5.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
                         Surface(
-                            onClick = {
-                                openTab = if (isSelected) null else tab.index
-                            },
-                            color = if (isSelected) TealSoft else Color.Transparent,
-                            border = if (isSelected) BorderStroke(1.dp, TealPrimary.copy(alpha = 0.45f)) else null,
-                            shape = RoundedCornerShape(8.dp),
-                            modifier = Modifier
-                                .weight(1f)
-                                .heightIn(min = 46.dp)
-                                .testTag("blank_bottom_tab_${tab.index}")
+                            color = if (settingsExpanded) TealPrimary else TealSoft,
+                            shape = RoundedCornerShape(8.dp)
                         ) {
-                            Column(
-                                modifier = Modifier.padding(horizontal = 2.dp, vertical = 4.dp),
-                                horizontalAlignment = Alignment.CenterHorizontally,
-                                verticalArrangement = Arrangement.spacedBy(1.dp)
+                            Icon(
+                                imageVector = Icons.Rounded.Tune,
+                                contentDescription = null,
+                                tint = if (settingsExpanded) Color.White else TealDark,
+                                modifier = Modifier.padding(6.dp).size(17.dp)
+                            )
+                        }
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "ফাঁকা শিট সেটিংস",
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = if (settingsExpanded) TealDark else SlateText,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                            Text(
+                                text = summaryLine,
+                                fontSize = 9.5.sp,
+                                color = SlateMuted,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                        Surface(
+                            color = if (settingsExpanded) Color.White else TealSoft,
+                            border = BorderStroke(1.dp, TealPrimary.copy(alpha = 0.35f)),
+                            shape = RoundedCornerShape(8.dp)
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(2.dp),
+                                modifier = Modifier.padding(horizontal = 7.dp, vertical = 4.dp)
                             ) {
-                                Icon(
-                                    imageVector = if (isSelected) tab.activeIcon else tab.inactiveIcon,
-                                    contentDescription = tab.label,
-                                    tint = if (isSelected) TealDark else SlateMuted,
-                                    modifier = Modifier.size(17.dp)
-                                )
                                 Text(
-                                    text = tab.label,
-                                    fontSize = 9.5.sp,
-                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-                                    color = if (isSelected) TealDark else SlateMuted,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
+                                    text = if (settingsExpanded) "বন্ধ" else "সেটিংস",
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = TealDark
+                                )
+                                Icon(
+                                    imageVector = if (settingsExpanded) {
+                                        Icons.Rounded.KeyboardArrowDown
+                                    } else {
+                                        Icons.Rounded.KeyboardArrowUp
+                                    },
+                                    contentDescription = if (settingsExpanded) "সেটিংস বন্ধ করুন" else "সেটিংস খুলুন",
+                                    tint = TealDark,
+                                    modifier = Modifier.size(16.dp)
                                 )
                             }
                         }
