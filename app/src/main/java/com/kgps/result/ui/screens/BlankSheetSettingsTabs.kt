@@ -5,7 +5,6 @@ package com.kgps.result.ui.screens
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -30,12 +29,11 @@ import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.ArrowDropDown
 import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.Close
-import androidx.compose.material.icons.rounded.MenuBook
-import androidx.compose.material.icons.rounded.QrCode2
+import androidx.compose.material.icons.rounded.KeyboardArrowDown
+import androidx.compose.material.icons.rounded.KeyboardArrowUp
 import androidx.compose.material.icons.rounded.Remove
 import androidx.compose.material.icons.rounded.RestartAlt
-import androidx.compose.material.icons.rounded.ViewAgenda
-import androidx.compose.material.icons.rounded.ViewColumn
+import androidx.compose.material.icons.rounded.Tune
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -112,6 +110,7 @@ internal fun BlankSheetUnifiedSettingsPanel(
     onResetPageIndex: () -> Unit,
     onRequestReset: () -> Unit
 ) {
+    var showMoreOptions by remember { mutableStateOf(false) }
     val allCount = countByClass.values.sum()
     val activeClasses = remember(config.selectedClasses, allowedClasses) {
         config.selectedClasses.filter { it in allowedClasses }.distinct()
@@ -125,169 +124,197 @@ internal fun BlankSheetUnifiedSettingsPanel(
             else -> emptySet()
         }
     }
-    val classSummary = when {
-        isAllMode -> "সব শ্রেণি (${bn(allCount.toString())})"
-        selectedSet.size > 1 -> "${bn(selectedSet.size.toString())}টি শ্রেণি · ${
-            allowedClasses.filter { it in selectedSet }.joinToString(", ") { classShortBn(it, settings) }
-        }"
-        else -> {
-            val single = selectedSet.firstOrNull()
-            if (single != null) "${classShortBn(single, settings)} (${bn((countByClass[single] ?: 0).toString())})"
-            else "সব শ্রেণি (${bn(allCount.toString())})"
-        }
-    }
 
-    val activePresetLabel = remember(config.columns, isThreeTermMarks, isThreeTermTraits) {
-        BlankSheetPreset.entries.find { preset ->
-            when (preset) {
-                BlankSheetPreset.THREE_TERM_MARKS -> isThreeTermMarks
-                BlankSheetPreset.THREE_TERM_ATTENDANCE_TRAITS -> isThreeTermTraits && !isThreeTermMarks
-                else -> config.columns.map { it.id } == preset.columnIds
-            }
-        }?.labelBn ?: "কাস্টম"
-    }
-
-    val rowModeSummary = buildString {
-        append(config.orientation.labelBn)
-        append(" · ")
-        if (config.rowFitMode == BlankSheetRowFitMode.AUTO_FIT_PAGES) {
-            append("অটোফিট (${bn(config.autoFitPageCount.coerceIn(1, 3).toString())} পেজ)")
-        } else {
-            append("${bn(config.rowsPerPage.toString())} সারি/পেজ")
-        }
+    val moreSummary = buildString {
+        append(config.numeralStyle.shortLabelBn)
         if (config.extraBlankRowsPerClass > 0) {
-            append(" · +${bn(config.extraBlankRowsPerClass.toString())}")
+            append(" · +${bn(config.extraBlankRowsPerClass.toString())} সারি")
         }
-    }
-
-    val qrSummary = buildString {
-        append(if (config.includeQrCode) "মূল QR: চালু" else "মূল QR: বন্ধ")
         append(" · ")
-        append(if (config.includeBarcode) config.bottomCodeStyle.labelBn else "নিচের কোড: বন্ধ")
+        append(if (config.includeQrCode || config.includeBarcode) "QR চালু" else "QR বন্ধ")
         append(" · ")
-        append(if (config.autoFillRollAndName) "রোল-নাম অটো" else "ফাঁকা")
+        append(if (config.autoFillRollAndName) "অটো-ফিল" else "ফাঁকা")
     }
 
     Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
-        // Group 1: Class, Subject, Term & Numeral Style (initially expanded)
-        AdmitCollapsibleGroupCard(
-            title = "১. শ্রেণি, বিষয় ও প্রান্তিক",
-            summary = "$classSummary · $selectedSubjectLabel · $selectedTermLabel · ${config.numeralStyle.shortLabelBn}",
-            icon = Icons.Rounded.MenuBook,
-            initiallyExpanded = true,
-            testTag = "blank_grp_class_subject"
+        // 1. Single-row horizontal swipeable Multi-Class chips
+        BlankSheetClassSwipeRow(
+            config = config,
+            settings = settings,
+            allowedClasses = allowedClasses,
+            countByClass = countByClass,
+            allCount = allCount,
+            isAllMode = isAllMode,
+            selectedSet = selectedSet,
+            onUpdateConfig = onUpdateConfig,
+            onResetPageIndex = onResetPageIndex
+        )
+
+        // 2. Subject & Term side-by-side
+        BlankSheetSubjectTermRow(
+            config = config,
+            isThreeTermMarks = isThreeTermMarks,
+            isThreeTermTraits = isThreeTermTraits,
+            isClassLevelTraitsOnly = isClassLevelTraitsOnly,
+            selectedSubjectLabel = selectedSubjectLabel,
+            selectedTermLabel = selectedTermLabel,
+            onUpdateConfig = onUpdateConfig,
+            onResetPageIndex = onResetPageIndex
+        )
+
+        // 3. Paper Orientation + Row Mode / Count (compact)
+        BlankSheetPaperAndRowsCompact(
+            config = config,
+            students = students,
+            settings = settings,
+            onUpdateConfig = onUpdateConfig,
+            onResetPageIndex = onResetPageIndex
+        )
+
+        // 4. Form Presets + Active Column Order/Width/Sub-column (each on 1 swipeable row)
+        BlankSheetPresetsAndColumnsCompact(
+            config = config,
+            isThreeTermMarks = isThreeTermMarks,
+            hasThreeTermTotal = hasThreeTermTotal,
+            onUpdateConfig = onUpdateConfig,
+            onResetPageIndex = onResetPageIndex
+        )
+
+        // 5. "More" toggle button for less-frequently used settings
+        Surface(
+            onClick = { showMoreOptions = !showMoreOptions },
+            color = if (showMoreOptions) TealSoft else SlateBg.copy(alpha = 0.75f),
+            border = BorderStroke(
+                1.dp,
+                if (showMoreOptions) TealPrimary.copy(alpha = 0.45f) else SlateOutline
+            ),
+            shape = RoundedCornerShape(8.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(min = 38.dp)
+                .testTag("blank_more_options_btn")
         ) {
-            BlankSheetClassSubjectSection(
-                config = config,
-                settings = settings,
-                allowedClasses = allowedClasses,
-                countByClass = countByClass,
-                isAllMode = isAllMode,
-                selectedSet = selectedSet,
-                isThreeTermMarks = isThreeTermMarks,
-                isThreeTermTraits = isThreeTermTraits,
-                isClassLevelTraitsOnly = isClassLevelTraitsOnly,
-                selectedSubjectLabel = selectedSubjectLabel,
-                selectedTermLabel = selectedTermLabel,
-                onUpdateConfig = onUpdateConfig,
-                onResetPageIndex = onResetPageIndex
-            )
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 9.dp, vertical = 5.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Rounded.Tune,
+                    contentDescription = null,
+                    tint = TealDark,
+                    modifier = Modifier.size(15.dp)
+                )
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = "আরও অপশন (More)",
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = TealDark
+                    )
+                    if (!showMoreOptions) {
+                        Text(
+                            text = moreSummary,
+                            fontSize = 9.sp,
+                            color = SlateMuted,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                }
+                Text(
+                    text = if (showMoreOptions) "কম" else "খুলুন",
+                    fontSize = 10.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = TealDark
+                )
+                Icon(
+                    imageVector = if (showMoreOptions) {
+                        Icons.Rounded.KeyboardArrowUp
+                    } else {
+                        Icons.Rounded.KeyboardArrowDown
+                    },
+                    contentDescription = if (showMoreOptions) "কম দেখুন" else "আরও অপশন দেখুন",
+                    tint = TealDark,
+                    modifier = Modifier.size(18.dp)
+                )
+            }
         }
 
-        // Group 2: Form Presets, Columns, Widths & Sub-columns
-        AdmitCollapsibleGroupCard(
-            title = "২. ফর্ম প্রিসেট ও কলাম",
-            summary = "$activePresetLabel · ${bn(config.columns.size.toString())}টি কলাম",
-            icon = Icons.Rounded.ViewColumn,
-            initiallyExpanded = false,
-            testTag = "blank_grp_columns"
-        ) {
-            BlankSheetColumnsSection(
-                config = config,
-                isThreeTermMarks = isThreeTermMarks,
-                hasThreeTermTotal = hasThreeTermTotal,
-                onUpdateConfig = onUpdateConfig,
-                onResetPageIndex = onResetPageIndex
-            )
-        }
-
-        // Group 3: Paper Orientation, Rows, Auto-fit & Extra Blank Rows
-        AdmitCollapsibleGroupCard(
-            title = "৩. কাগজ, সারি ও অটোফিট",
-            summary = rowModeSummary,
-            icon = Icons.Rounded.ViewAgenda,
-            initiallyExpanded = false,
-            testTag = "blank_grp_rows_fit"
-        ) {
-            BlankSheetRowsAndFitSection(
-                config = config,
-                students = students,
-                settings = settings,
-                onUpdateConfig = onUpdateConfig,
-                onResetPageIndex = onResetPageIndex
-            )
-        }
-
-        // Group 4: QR, Data Autofill, Working Days & Reset
-        AdmitCollapsibleGroupCard(
-            title = "৪. QR, ডাটা, কার্যদিবস ও রিসেট",
-            summary = qrSummary,
-            icon = Icons.Rounded.QrCode2,
-            initiallyExpanded = false,
-            testTag = "blank_grp_qr_data"
-        ) {
-            BlankSheetQrAndOptionsSection(
-                config = config,
-                sharedWorkingDaysTerms = sharedWorkingDaysTerms,
-                commonWorkingDays = commonWorkingDays,
-                onUpdateConfig = onUpdateConfig,
-                onRequestReset = onRequestReset
-            )
+        // 6. Collapsible Secondary / Less-Used Options
+        AnimatedVisibility(visible = showMoreOptions) {
+            Surface(
+                color = SlateBg.copy(alpha = 0.55f),
+                border = BorderStroke(1.dp, SlateOutline.copy(alpha = 0.8f)),
+                shape = RoundedCornerShape(9.dp),
+                modifier = Modifier.fillMaxWidth().testTag("blank_more_options_container")
+            ) {
+                Column(
+                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 7.dp),
+                    verticalArrangement = Arrangement.spacedBy(5.dp)
+                ) {
+                    BlankSheetMoreOptionsSection(
+                        config = config,
+                        sharedWorkingDaysTerms = sharedWorkingDaysTerms,
+                        commonWorkingDays = commonWorkingDays,
+                        onUpdateConfig = onUpdateConfig,
+                        onResetPageIndex = onResetPageIndex,
+                        onRequestReset = onRequestReset
+                    )
+                }
+            }
         }
     }
 }
 
 @Composable
-private fun BlankSheetClassSubjectSection(
+private fun BlankSheetClassSwipeRow(
     config: BlankSheetConfig,
     settings: Settings,
     allowedClasses: List<Int>,
     countByClass: Map<Int, Int>,
+    allCount: Int,
     isAllMode: Boolean,
     selectedSet: Set<Int>,
-    isThreeTermMarks: Boolean,
-    isThreeTermTraits: Boolean,
-    isClassLevelTraitsOnly: Boolean,
-    selectedSubjectLabel: String,
-    selectedTermLabel: String,
     onUpdateConfig: (BlankSheetConfig) -> Unit,
     onResetPageIndex: () -> Unit
 ) {
-    val allCount = countByClass.values.sum()
-    FlowRow(
-        horizontalArrangement = Arrangement.spacedBy(4.dp),
-        verticalArrangement = Arrangement.spacedBy(4.dp)
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .horizontalScroll(rememberScrollState()),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(4.dp)
     ) {
-        val allSel = isAllMode
+        Text(
+            text = "শ্রেণি:",
+            fontSize = 9.5.sp,
+            fontWeight = FontWeight.SemiBold,
+            color = SlateMuted,
+            modifier = Modifier.padding(end = 2.dp)
+        )
         Surface(
             onClick = {
                 onUpdateConfig(config.copy(selectedClass = null, selectedClasses = emptyList()))
                 onResetPageIndex()
             },
-            color = if (allSel) TealPrimary else MaterialTheme.colorScheme.surface,
-            border = BorderStroke(1.dp, if (allSel) TealPrimary else SlateOutline),
+            color = if (isAllMode) TealPrimary else MaterialTheme.colorScheme.surface,
+            border = BorderStroke(1.dp, if (isAllMode) TealPrimary else SlateOutline),
             shape = RoundedCornerShape(7.dp),
-            modifier = Modifier.heightIn(min = 30.dp).testTag("blank_class_all_chip")
+            modifier = Modifier.heightIn(min = 28.dp).testTag("blank_class_all_chip")
         ) {
             Box(
                 contentAlignment = Alignment.Center,
-                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                modifier = Modifier.padding(horizontal = 7.dp, vertical = 4.dp)
             ) {
                 Text(
                     "সব (${bn(allCount.toString())})",
-                    fontSize = 10.5.sp,
-                    fontWeight = if (allSel) FontWeight.Bold else FontWeight.Medium,
-                    color = if (allSel) Color.White else SlateText
+                    fontSize = 10.sp,
+                    fontWeight = if (isAllMode) FontWeight.Bold else FontWeight.Medium,
+                    color = if (isAllMode) Color.White else SlateText,
+                    maxLines = 1
                 )
             }
         }
@@ -313,15 +340,15 @@ private fun BlankSheetClassSubjectSection(
                 color = if (isSel) TealPrimary else MaterialTheme.colorScheme.surface,
                 border = BorderStroke(1.dp, if (isSel) TealPrimary else SlateOutline),
                 shape = RoundedCornerShape(7.dp),
-                modifier = Modifier.heightIn(min = 30.dp).testTag("blank_class_chip_$c")
+                modifier = Modifier.heightIn(min = 28.dp).testTag("blank_class_chip_$c")
             ) {
                 Box(
                     contentAlignment = Alignment.Center,
-                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                    modifier = Modifier.padding(horizontal = 7.dp, vertical = 4.dp)
                 ) {
                     Text(
                         "${classShortBn(c, settings)} (${bn(cnt.toString())})",
-                        fontSize = 10.5.sp,
+                        fontSize = 10.sp,
                         fontWeight = if (isSel) FontWeight.Bold else FontWeight.Medium,
                         color = if (isSel) Color.White else SlateText,
                         maxLines = 1
@@ -330,14 +357,19 @@ private fun BlankSheetClassSubjectSection(
             }
         }
     }
-    if (selectedSet.size > 1) {
-        Text(
-            text = "একাধিক শ্রেণি সক্রিয় (${bn(selectedSet.size.toString())}টি) — সবগুলো প্রিভিউ ও PDF-এ আসবে",
-            fontSize = 9.sp,
-            color = TealDark
-        )
-    }
+}
 
+@Composable
+private fun BlankSheetSubjectTermRow(
+    config: BlankSheetConfig,
+    isThreeTermMarks: Boolean,
+    isThreeTermTraits: Boolean,
+    isClassLevelTraitsOnly: Boolean,
+    selectedSubjectLabel: String,
+    selectedTermLabel: String,
+    onUpdateConfig: (BlankSheetConfig) -> Unit,
+    onResetPageIndex: () -> Unit
+) {
     Row(
         horizontalArrangement = Arrangement.spacedBy(5.dp),
         modifier = Modifier.fillMaxWidth()
@@ -430,20 +462,209 @@ private fun BlankSheetClassSubjectSection(
             }
         }
     }
-
-    AdmitSegmentedOptionBar(
-        items = listOf(
-            BlankNumeralStyle.BENGALI to "বাংলা অঙ্ক (১২৩)",
-            BlankNumeralStyle.ENGLISH to "English (123)"
-        ),
-        selected = config.numeralStyle,
-        onSelect = { onUpdateConfig(config.copy(numeralStyle = it)) },
-        tagPrefix = "blank_num"
-    )
 }
 
 @Composable
-private fun BlankSheetColumnsSection(
+private fun BlankSheetPaperAndRowsCompact(
+    config: BlankSheetConfig,
+    students: List<Student>,
+    settings: Settings,
+    onUpdateConfig: (BlankSheetConfig) -> Unit,
+    onResetPageIndex: () -> Unit
+) {
+    var rowsMenuOpen by remember { mutableStateOf(false) }
+
+    val previewSplitHint = remember(config, students, settings) {
+        if (config.rowFitMode != BlankSheetRowFitMode.AUTO_FIT_PAGES) return@remember null
+        val targetPages = config.autoFitPageCount.coerceIn(1, 3)
+        val selCls = config.primarySelectedClass
+        when {
+            config.selectedClasses.size > 1 ->
+                "নির্বাচিত ${bn(config.selectedClasses.size.toString())} শ্রেণির প্রতিটি ${bn(targetPages.toString())} পেজে সমান ভাগ"
+            selCls == null ->
+                "সব শ্রেণির প্রতিটি সমানভাবে ${bn(targetPages.toString())} পেজে ভাগ"
+            else -> {
+                val stuCount = students.count { it.cls == selCls }
+                val totalRows = stuCount + config.extraBlankRowsPerClass.coerceIn(0, 20)
+                if (totalRows <= 0) {
+                    "${classShortBn(selCls, settings)}: ${bn(targetPages.toString())} পেজে ফাঁকা ফর্ম"
+                } else {
+                    val dummyRows = List(totalRows) { BlankSheetRow("", "", true) }
+                    val (_, chunks) = BlankSheetPlanner.partitionBalancedPages(
+                        rows = dummyRows,
+                        targetPages = targetPages,
+                        fillRemaining = false
+                    )
+                    val breakdown = chunks.joinToString("+") { bn(it.size.toString()) }
+                    val densityWarn = if (chunks.any { it.size > 45 }) " (ঘন সারি)" else ""
+                    "${classShortBn(selCls, settings)}: ${bn(totalRows.toString())} সারি → $breakdown/পেজ$densityWarn"
+                }
+            }
+        }
+    }
+
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(5.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        AdmitSegmentedOptionBar(
+            items = listOf(
+                BlankSheetOrientation.PORTRAIT to "খাড়া A4",
+                BlankSheetOrientation.LANDSCAPE to "আড়াআড়ি"
+            ),
+            selected = config.orientation,
+            onSelect = { onUpdateConfig(config.copy(orientation = it)) },
+            modifier = Modifier.weight(0.95f),
+            tagPrefix = "blank_ori"
+        )
+        AdmitSegmentedOptionBar(
+            items = BlankSheetRowFitMode.entries.map {
+                it to if (it == BlankSheetRowFitMode.FIXED_ROWS) "নির্দিষ্ট সারি" else "অটোফিট"
+            },
+            selected = config.rowFitMode,
+            onSelect = { mode ->
+                onUpdateConfig(config.copy(rowFitMode = mode))
+                onResetPageIndex()
+            },
+            modifier = Modifier.weight(1.05f),
+            tagPrefix = "blank_row_mode"
+        )
+    }
+
+    if (config.rowFitMode == BlankSheetRowFitMode.FIXED_ROWS) {
+        Surface(
+            color = MaterialTheme.colorScheme.surface,
+            border = BorderStroke(1.dp, SlateOutline),
+            shape = RoundedCornerShape(8.dp),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+            ) {
+                Text(
+                    "প্রতি পেজে সারি",
+                    fontSize = 10.5.sp,
+                    fontWeight = FontWeight.Medium,
+                    color = SlateText,
+                    modifier = Modifier.weight(1f)
+                )
+                Surface(
+                    onClick = {
+                        onUpdateConfig(
+                            config.copy(rowsPerPage = (config.rowsPerPage - 1).coerceAtLeast(5))
+                        )
+                        onResetPageIndex()
+                    },
+                    shape = RoundedCornerShape(6.dp),
+                    color = SlateBg,
+                    border = BorderStroke(1.dp, SlateOutline),
+                    modifier = Modifier.size(30.dp).testTag("blank_rows_dec_btn")
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(Icons.Rounded.Remove, contentDescription = "কমান", modifier = Modifier.size(15.dp), tint = SlateText)
+                    }
+                }
+                Box {
+                    Surface(
+                        onClick = { rowsMenuOpen = true },
+                        color = TealSoft,
+                        border = BorderStroke(1.dp, TealPrimary.copy(alpha = 0.45f)),
+                        shape = RoundedCornerShape(6.dp),
+                        modifier = Modifier
+                            .padding(horizontal = 5.dp)
+                            .height(30.dp)
+                            .testTag("blank_rows_value_pill")
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.padding(horizontal = 8.dp)
+                        ) {
+                            Text(
+                                "${bn(config.rowsPerPage.toString())} জন",
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = TealDark
+                            )
+                            Icon(Icons.Rounded.ArrowDropDown, contentDescription = null, tint = TealPrimary, modifier = Modifier.size(15.dp))
+                        }
+                    }
+                    DropdownMenu(
+                        expanded = rowsMenuOpen,
+                        onDismissRequest = { rowsMenuOpen = false }
+                    ) {
+                        listOf(10, 15, 20, 25, 30, 35, 40, 45, 50).forEach { count ->
+                            val isSel = config.rowsPerPage == count
+                            DropdownMenuItem(
+                                modifier = Modifier.background(if (isSel) TealContainer else Color.Transparent),
+                                text = {
+                                    Text(
+                                        "প্রতি পেজে ${bn(count.toString())} জন",
+                                        fontWeight = if (isSel) FontWeight.Bold else FontWeight.Normal,
+                                        color = if (isSel) TealDark else SlateText
+                                    )
+                                },
+                                onClick = {
+                                    rowsMenuOpen = false
+                                    onUpdateConfig(config.copy(rowsPerPage = count))
+                                    onResetPageIndex()
+                                }
+                            )
+                        }
+                    }
+                }
+                Surface(
+                    onClick = {
+                        onUpdateConfig(
+                            config.copy(rowsPerPage = (config.rowsPerPage + 1).coerceAtMost(50))
+                        )
+                        onResetPageIndex()
+                    },
+                    shape = RoundedCornerShape(6.dp),
+                    color = SlateBg,
+                    border = BorderStroke(1.dp, SlateOutline),
+                    modifier = Modifier.size(30.dp).testTag("blank_rows_inc_btn")
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(Icons.Rounded.Add, contentDescription = "বাড়ান", modifier = Modifier.size(15.dp), tint = SlateText)
+                    }
+                }
+            }
+        }
+    } else {
+        AdmitSegmentedOptionBar(
+            items = listOf(
+                1 to "১ পেজে ফিট",
+                2 to "২ পেজে ফিট",
+                3 to "৩ পেজে ফিট"
+            ),
+            selected = config.autoFitPageCount.coerceIn(1, 3),
+            onSelect = { pagesTarget ->
+                onUpdateConfig(config.copy(autoFitPageCount = pagesTarget))
+                onResetPageIndex()
+            },
+            useLightActivePill = true,
+            tagPrefix = "blank_autofit_pages"
+        )
+        previewSplitHint?.let { hint ->
+            Text(
+                text = hint,
+                fontSize = 9.5.sp,
+                fontWeight = FontWeight.SemiBold,
+                color = TealDark,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(TealSoft, RoundedCornerShape(6.dp))
+                    .padding(horizontal = 7.dp, vertical = 4.dp)
+                    .testTag("blank_autofit_summary_badge")
+            )
+        }
+    }
+}
+
+@Composable
+private fun BlankSheetPresetsAndColumnsCompact(
     config: BlankSheetConfig,
     isThreeTermMarks: Boolean,
     hasThreeTermTotal: Boolean,
@@ -463,11 +684,21 @@ private fun BlankSheetColumnsSection(
     }
     val focusedCol = config.columns.getOrNull(focusedIndex)
 
-    Text("ফর্ম টেমপ্লেট (প্রিসেট)", fontSize = 9.5.sp, fontWeight = FontWeight.Medium, color = SlateMuted)
-    FlowRow(
-        horizontalArrangement = Arrangement.spacedBy(4.dp),
-        verticalArrangement = Arrangement.spacedBy(4.dp)
+    // Single-row swipeable Form Presets
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .horizontalScroll(rememberScrollState()),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(4.dp)
     ) {
+        Text(
+            text = "ফর্ম:",
+            fontSize = 9.5.sp,
+            fontWeight = FontWeight.SemiBold,
+            color = SlateMuted,
+            modifier = Modifier.padding(end = 2.dp)
+        )
         BlankSheetPreset.entries.forEach { preset ->
             val isExact = when (preset) {
                 BlankSheetPreset.THREE_TERM_MARKS -> isThreeTermMarks
@@ -490,7 +721,7 @@ private fun BlankSheetColumnsSection(
                 shape = RoundedCornerShape(7.dp),
                 color = if (isExact) TealPrimary else MaterialTheme.colorScheme.surface,
                 border = BorderStroke(1.dp, if (isExact) TealPrimary else SlateOutline),
-                modifier = Modifier.heightIn(min = 30.dp).testTag("blank_preset_${preset.name.lowercase()}")
+                modifier = Modifier.heightIn(min = 28.dp).testTag("blank_preset_${preset.name.lowercase()}")
             ) {
                 Box(
                     contentAlignment = Alignment.Center,
@@ -500,7 +731,8 @@ private fun BlankSheetColumnsSection(
                         preset.labelBn,
                         fontSize = 10.sp,
                         fontWeight = if (isExact) FontWeight.Bold else FontWeight.Medium,
-                        color = if (isExact) Color.White else SlateText
+                        color = if (isExact) Color.White else SlateText,
+                        maxLines = 1
                     )
                 }
             }
@@ -519,7 +751,7 @@ private fun BlankSheetColumnsSection(
             modifier = Modifier.fillMaxWidth().testTag("blank_3term_total_toggle")
         ) {
             Row(
-                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(6.dp)
             ) {
@@ -529,7 +761,7 @@ private fun BlankSheetColumnsSection(
                         val nextCols = BlankSheetCatalog.toggleThreeTermTotals(config.columns, checked)
                         onUpdateConfig(config.copy(columns = nextCols))
                     },
-                    modifier = Modifier.size(26.dp)
+                    modifier = Modifier.size(24.dp)
                 )
                 Text(
                     "প্রতি প্রান্তিকে ঐচ্ছিক 'মোট' কলাম যোগ করুন",
@@ -541,16 +773,24 @@ private fun BlankSheetColumnsSection(
         }
     }
 
-    HorizontalDivider(color = SlateOutline.copy(alpha = 0.35f))
-    Text("কলাম চালু/বন্ধ ও কাস্টম কলাম", fontSize = 9.5.sp, fontWeight = FontWeight.Medium, color = SlateMuted)
-
+    // Single-row swipeable Column Toggles (+ Custom Column)
     val pickerColumns = remember(config.columns) {
         BlankSheetCatalog.pickerColumnsFor(config.columns)
     }
-    FlowRow(
-        horizontalArrangement = Arrangement.spacedBy(4.dp),
-        verticalArrangement = Arrangement.spacedBy(4.dp)
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .horizontalScroll(rememberScrollState()),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(4.dp)
     ) {
+        Text(
+            text = "কলাম:",
+            fontSize = 9.5.sp,
+            fontWeight = FontWeight.SemiBold,
+            color = SlateMuted,
+            modifier = Modifier.padding(end = 2.dp)
+        )
         pickerColumns.forEach { catalogCol ->
             val isAdded = config.columns.any { it.id == catalogCol.id }
             Surface(
@@ -567,19 +807,19 @@ private fun BlankSheetColumnsSection(
                 shape = RoundedCornerShape(6.dp),
                 color = if (isAdded) TealPrimary else MaterialTheme.colorScheme.surface,
                 border = BorderStroke(1.dp, if (isAdded) TealPrimary else SlateOutline),
-                modifier = Modifier.testTag("blank_col_toggle_${catalogCol.id}")
+                modifier = Modifier.heightIn(min = 27.dp).testTag("blank_col_toggle_${catalogCol.id}")
             ) {
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(3.dp),
+                    horizontalArrangement = Arrangement.spacedBy(2.dp),
                     modifier = Modifier.padding(horizontal = 6.dp, vertical = 4.dp)
                 ) {
                     if (isAdded) {
-                        Icon(Icons.Rounded.Check, contentDescription = null, tint = Color.White, modifier = Modifier.size(11.dp))
+                        Icon(Icons.Rounded.Check, contentDescription = null, tint = Color.White, modifier = Modifier.size(10.dp))
                     }
                     Text(
                         catalogCol.pickerLabelBn,
-                        fontSize = 10.sp,
+                        fontSize = 9.8.sp,
                         fontWeight = if (isAdded) FontWeight.Bold else FontWeight.Medium,
                         color = if (isAdded) Color.White else SlateText,
                         maxLines = 1
@@ -593,7 +833,7 @@ private fun BlankSheetColumnsSection(
             shape = RoundedCornerShape(6.dp),
             color = if (showCustomColumnInput) TealContainer else MaterialTheme.colorScheme.surface,
             border = BorderStroke(1.dp, TealPrimary),
-            modifier = Modifier.testTag("blank_toggle_custom_col_btn")
+            modifier = Modifier.heightIn(min = 27.dp).testTag("blank_toggle_custom_col_btn")
         ) {
             Row(
                 verticalAlignment = Alignment.CenterVertically,
@@ -601,7 +841,7 @@ private fun BlankSheetColumnsSection(
                 horizontalArrangement = Arrangement.spacedBy(2.dp)
             ) {
                 Icon(Icons.Rounded.Add, contentDescription = null, tint = TealPrimary, modifier = Modifier.size(12.dp))
-                Text("কাস্টম কলাম", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = TealPrimary)
+                Text("কাস্টম", fontSize = 9.8.sp, fontWeight = FontWeight.Bold, color = TealPrimary, maxLines = 1)
             }
         }
     }
@@ -640,12 +880,7 @@ private fun BlankSheetColumnsSection(
         }
     }
 
-    HorizontalDivider(color = SlateOutline.copy(alpha = 0.35f))
-    Text(
-        "কলামের ক্রম, প্রস্থ ও সাব-কলাম (বদল করতে কলামে ট্যাপ করুন):",
-        fontSize = 9.2.sp,
-        color = SlateMuted
-    )
+    // Single-row swipeable Column Order / Width / Sub-column selector
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -653,22 +888,29 @@ private fun BlankSheetColumnsSection(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(4.dp)
     ) {
+        Text(
+            text = "প্রস্থ/ক্রম:",
+            fontSize = 9.5.sp,
+            fontWeight = FontWeight.SemiBold,
+            color = SlateMuted,
+            modifier = Modifier.padding(end = 2.dp)
+        )
         config.columns.forEachIndexed { idx, col ->
             val isFocused = focusedColId == col.id
             Surface(
                 onClick = { focusedColId = if (isFocused) null else col.id },
                 shape = RoundedCornerShape(6.dp),
-                color = if (isFocused) TealPrimary else MaterialTheme.colorScheme.surface,
+                color = if (isFocused) TealPrimary else SlateBg,
                 border = BorderStroke(1.dp, if (isFocused) TealPrimary else SlateOutline),
-                modifier = Modifier.testTag("blank_col_order_chip_$idx")
+                modifier = Modifier.heightIn(min = 26.dp).testTag("blank_col_order_chip_$idx")
             ) {
                 Text(
                     "${bn((idx + 1).toString())}.${col.pickerLabelBn}",
-                    fontSize = 10.sp,
+                    fontSize = 9.5.sp,
                     fontWeight = if (isFocused) FontWeight.Bold else FontWeight.Medium,
                     color = if (isFocused) Color.White else SlateText,
                     maxLines = 1,
-                    modifier = Modifier.padding(horizontal = 7.dp, vertical = 4.dp)
+                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp)
                 )
             }
         }
@@ -965,231 +1207,78 @@ private fun BlankSheetColumnsSection(
 }
 
 @Composable
-private fun BlankSheetRowsAndFitSection(
+private fun BlankSheetMoreOptionsSection(
     config: BlankSheetConfig,
-    students: List<Student>,
-    settings: Settings,
+    sharedWorkingDaysTerms: List<Int>,
+    commonWorkingDays: Map<Int, String>,
     onUpdateConfig: (BlankSheetConfig) -> Unit,
-    onResetPageIndex: () -> Unit
+    onResetPageIndex: () -> Unit,
+    onRequestReset: () -> Unit
 ) {
-    var rowsMenuOpen by remember { mutableStateOf(false) }
-
-    val previewSplitHint = remember(config, students, settings) {
-        if (config.rowFitMode != BlankSheetRowFitMode.AUTO_FIT_PAGES) return@remember null
-        val targetPages = config.autoFitPageCount.coerceIn(1, 3)
-        val selCls = config.primarySelectedClass
-        when {
-            config.selectedClasses.size > 1 ->
-                "নির্বাচিত ${bn(config.selectedClasses.size.toString())}টি শ্রেণির প্রতিটিকে সমানভাবে ${bn(targetPages.toString())} পেজে ভাগ করে সাজাবে"
-            selCls == null ->
-                "সব শ্রেণির প্রতিটিকে সমানভাবে ${bn(targetPages.toString())} পেজে ভাগ করে সাজাবে"
-            else -> {
-                val stuCount = students.count { it.cls == selCls }
-                val totalRows = stuCount + config.extraBlankRowsPerClass.coerceIn(0, 20)
-                if (totalRows <= 0) {
-                    "${classShortBn(selCls, settings)} শ্রেণি: ${bn(targetPages.toString())} পেজে ফাঁকা ফর্ম"
-                } else {
-                    val dummyRows = List(totalRows) { BlankSheetRow("", "", true) }
-                    val (_, chunks) = BlankSheetPlanner.partitionBalancedPages(
-                        rows = dummyRows,
-                        targetPages = targetPages,
-                        fillRemaining = false
-                    )
-                    val breakdown = chunks.joinToString(" + ") { bn(it.size.toString()) }
-                    val densityWarn = if (chunks.any { it.size > 45 }) " (ঘন সারি — লেখা অটো-ছোট হবে)" else ""
-                    "${classShortBn(selCls, settings)}: ${bn(totalRows.toString())} সারি → $breakdown সারি/পেজ$densityWarn"
-                }
-            }
-        }
-    }
-
     AdmitSegmentedOptionBar(
         items = listOf(
-            BlankSheetOrientation.PORTRAIT to "খাড়া A4",
-            BlankSheetOrientation.LANDSCAPE to "আড়াআড়ি A4"
+            BlankNumeralStyle.BENGALI to "বাংলা অঙ্ক (১২৩)",
+            BlankNumeralStyle.ENGLISH to "English (123)"
         ),
-        selected = config.orientation,
-        onSelect = { onUpdateConfig(config.copy(orientation = it)) },
-        tagPrefix = "blank_ori"
+        selected = config.numeralStyle,
+        onSelect = { onUpdateConfig(config.copy(numeralStyle = it)) },
+        tagPrefix = "blank_num"
     )
 
-    AdmitSegmentedOptionBar(
-        items = BlankSheetRowFitMode.entries.map { it to it.labelBn },
-        selected = config.rowFitMode,
-        onSelect = { mode ->
-            onUpdateConfig(config.copy(rowFitMode = mode))
-            onResetPageIndex()
-        },
-        tagPrefix = "blank_row_mode"
-    )
-
-    if (config.rowFitMode == BlankSheetRowFitMode.FIXED_ROWS) {
-        Surface(
-            color = MaterialTheme.colorScheme.surface,
-            border = BorderStroke(1.dp, SlateOutline),
-            shape = RoundedCornerShape(8.dp),
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
-            ) {
-                Text(
-                    "প্রতি পেজে সারি সংখ্যা",
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.Medium,
-                    color = SlateText,
-                    modifier = Modifier.weight(1f)
-                )
-                Surface(
-                    onClick = {
-                        onUpdateConfig(
-                            config.copy(rowsPerPage = (config.rowsPerPage - 1).coerceAtLeast(5))
-                        )
-                        onResetPageIndex()
-                    },
-                    shape = RoundedCornerShape(6.dp),
-                    color = SlateBg,
-                    border = BorderStroke(1.dp, SlateOutline),
-                    modifier = Modifier.size(32.dp).testTag("blank_rows_dec_btn")
-                ) {
-                    Box(contentAlignment = Alignment.Center) {
-                        Icon(Icons.Rounded.Remove, contentDescription = "কমান", modifier = Modifier.size(16.dp), tint = SlateText)
-                    }
-                }
-                Box {
-                    Surface(
-                        onClick = { rowsMenuOpen = true },
-                        color = TealSoft,
-                        border = BorderStroke(1.dp, TealPrimary.copy(alpha = 0.45f)),
-                        shape = RoundedCornerShape(6.dp),
-                        modifier = Modifier
-                            .padding(horizontal = 6.dp)
-                            .height(32.dp)
-                            .testTag("blank_rows_value_pill")
-                    ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier.padding(horizontal = 9.dp)
-                        ) {
-                            Text(
-                                "${bn(config.rowsPerPage.toString())} জন",
-                                fontSize = 11.5.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = TealDark
-                            )
-                            Icon(Icons.Rounded.ArrowDropDown, contentDescription = null, tint = TealPrimary, modifier = Modifier.size(16.dp))
-                        }
-                    }
-                    DropdownMenu(
-                        expanded = rowsMenuOpen,
-                        onDismissRequest = { rowsMenuOpen = false }
-                    ) {
-                        listOf(10, 15, 20, 25, 30, 35, 40, 45, 50).forEach { count ->
-                            val isSel = config.rowsPerPage == count
-                            DropdownMenuItem(
-                                modifier = Modifier.background(if (isSel) TealContainer else Color.Transparent),
-                                text = {
-                                    Text(
-                                        "প্রতি পেজে ${bn(count.toString())} জন",
-                                        fontWeight = if (isSel) FontWeight.Bold else FontWeight.Normal,
-                                        color = if (isSel) TealDark else SlateText
-                                    )
-                                },
-                                onClick = {
-                                    rowsMenuOpen = false
-                                    onUpdateConfig(config.copy(rowsPerPage = count))
-                                    onResetPageIndex()
-                                }
-                            )
-                        }
-                    }
-                }
-                Surface(
-                    onClick = {
-                        onUpdateConfig(
-                            config.copy(rowsPerPage = (config.rowsPerPage + 1).coerceAtMost(50))
-                        )
-                        onResetPageIndex()
-                    },
-                    shape = RoundedCornerShape(6.dp),
-                    color = SlateBg,
-                    border = BorderStroke(1.dp, SlateOutline),
-                    modifier = Modifier.size(32.dp).testTag("blank_rows_inc_btn")
-                ) {
-                    Box(contentAlignment = Alignment.Center) {
-                        Icon(Icons.Rounded.Add, contentDescription = "বাড়ান", modifier = Modifier.size(16.dp), tint = SlateText)
-                    }
-                }
-            }
-        }
-    } else {
-        AdmitSegmentedOptionBar(
-            items = listOf(
-                1 to "১ পেজে ফিট",
-                2 to "২ পেজে ফিট",
-                3 to "৩ পেজে ফিট"
-            ),
-            selected = config.autoFitPageCount.coerceIn(1, 3),
-            onSelect = { pagesTarget ->
-                onUpdateConfig(config.copy(autoFitPageCount = pagesTarget))
-                onResetPageIndex()
-            },
-            useLightActivePill = true,
-            tagPrefix = "blank_autofit_pages"
+    // Single-row Extra Blank Rows selector
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .horizontalScroll(rememberScrollState()),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(5.dp)
+    ) {
+        Text(
+            "অতিরিক্ত সারি:",
+            fontSize = 10.sp,
+            fontWeight = FontWeight.Medium,
+            color = SlateMuted
         )
-        previewSplitHint?.let { hint ->
+        listOf(0 to "নেই", 2 to "+২", 5 to "+৫", 10 to "+১০").forEachIndexed { idx, (extra, label) ->
+            val isSel = config.extraBlankRowsPerClass == extra
             Surface(
-                color = TealSoft,
-                border = BorderStroke(1.dp, TealContainer),
-                shape = RoundedCornerShape(7.dp),
-                modifier = Modifier.fillMaxWidth().testTag("blank_autofit_summary_badge")
+                onClick = {
+                    onUpdateConfig(config.copy(extraBlankRowsPerClass = extra))
+                    onResetPageIndex()
+                },
+                shape = RoundedCornerShape(6.dp),
+                color = if (isSel) TealPrimary else MaterialTheme.colorScheme.surface,
+                border = BorderStroke(1.dp, if (isSel) TealPrimary else SlateOutline),
+                modifier = Modifier.heightIn(min = 28.dp).testTag("blank_extra_rows_$idx")
             ) {
-                Text(
-                    text = hint,
-                    fontSize = 10.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    color = TealDark,
-                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp)
-                )
+                Box(
+                    contentAlignment = Alignment.Center,
+                    modifier = Modifier.padding(horizontal = 9.dp, vertical = 4.dp)
+                ) {
+                    Text(
+                        label,
+                        fontSize = 10.sp,
+                        fontWeight = if (isSel) FontWeight.Bold else FontWeight.Medium,
+                        color = if (isSel) Color.White else SlateText
+                    )
+                }
             }
         }
     }
 
-    HorizontalDivider(color = SlateOutline.copy(alpha = 0.35f))
-    Text("শ্রেণি শেষে অতিরিক্ত ফাঁকা সারি", fontSize = 9.5.sp, fontWeight = FontWeight.Medium, color = SlateMuted)
-    AdmitSegmentedOptionBar(
-        items = listOf(0 to "নেই", 2 to "+২", 5 to "+৫", 10 to "+১০"),
-        selected = config.extraBlankRowsPerClass,
-        onSelect = { extra ->
-            onUpdateConfig(config.copy(extraBlankRowsPerClass = extra))
-            onResetPageIndex()
-        },
-        tagPrefix = "blank_extra_rows"
-    )
     AdmitCompactSwitchRow(
         label = "পেজের বাকি অংশ ফাঁকা সারি দিয়ে পূর্ণ করো",
         checked = config.fillRemainingPageRows,
         onCheckedChange = { onUpdateConfig(config.copy(fillRemainingPageRows = it)) },
         testTag = "blank_fill_remaining_switch"
     )
-}
-
-@Composable
-private fun BlankSheetQrAndOptionsSection(
-    config: BlankSheetConfig,
-    sharedWorkingDaysTerms: List<Int>,
-    commonWorkingDays: Map<Int, String>,
-    onUpdateConfig: (BlankSheetConfig) -> Unit,
-    onRequestReset: () -> Unit
-) {
+    HorizontalDivider(color = SlateOutline.copy(alpha = 0.35f))
     AdmitCompactSwitchRow(
         label = "উপরের স্মার্ট QR কোড (বাম ও ডান কোণায়)",
         checked = config.includeQrCode,
         onCheckedChange = { onUpdateConfig(config.copy(includeQrCode = it)) },
         testTag = "blank_sheet_qr_toggle"
     )
-    HorizontalDivider(color = SlateOutline.copy(alpha = 0.35f))
     AdmitCompactSwitchRow(
         label = "নিচের কোড (ছোট QR / বারকোড)",
         checked = config.includeBarcode,
@@ -1216,7 +1305,6 @@ private fun BlankSheetQrAndOptionsSection(
         onCheckedChange = { onUpdateConfig(config.copy(autoFillRollAndName = it)) },
         testTag = "blank_autofill_switch"
     )
-    HorizontalDivider(color = SlateOutline.copy(alpha = 0.35f))
     AdmitCompactSwitchRow(
         label = "কলাম হেডারে সর্বোচ্চ নম্বর দেখাও",
         checked = config.showSubjectMaxInHeader,
