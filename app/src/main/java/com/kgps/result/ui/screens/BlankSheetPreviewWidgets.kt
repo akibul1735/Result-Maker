@@ -122,7 +122,8 @@ internal fun BlankSheetRenderedPage(
     settings: Settings,
     orientation: BlankSheetOrientation,
     renderScale: Float,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    pageAlignment: Alignment = Alignment.Center
 ) {
     val bmp by produceState<Bitmap?>(
         initialValue = null,
@@ -149,7 +150,7 @@ internal fun BlankSheetRenderedPage(
 
     BoxWithConstraints(
         modifier = modifier.fillMaxSize(),
-        contentAlignment = Alignment.Center
+        contentAlignment = pageAlignment
     ) {
         val availableRatio = if (maxHeight.value > 0f) maxWidth.value / maxHeight.value else targetRatio
         val paperModifier = if (availableRatio > targetRatio) {

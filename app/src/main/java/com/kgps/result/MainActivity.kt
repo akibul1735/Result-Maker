@@ -35,10 +35,12 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -1204,7 +1206,7 @@ fun ResultMakerWorkspace(
                                         .filter { it.cls in allowedCls }
                                         .sortedWith(compareBy({ it.cls }, { it.roll }))
                                     Column(
-                                        modifier = Modifier.fillMaxSize().padding(horizontal = 8.dp, vertical = 4.dp),
+                                        modifier = Modifier.fillMaxSize().padding(horizontal = 6.dp),
                                         horizontalAlignment = Alignment.CenterHorizontally
                                     ) {
                                         Box(Modifier.widthIn(max = 920.dp).fillMaxSize()) {
@@ -1279,7 +1281,7 @@ fun ResultMakerWorkspace(
                                         .filter { it.cls in allowedCls }
                                         .sortedWith(compareBy({ it.cls }, { it.roll }))
                                     Column(
-                                        modifier = Modifier.fillMaxSize().padding(horizontal = 8.dp, vertical = 4.dp),
+                                        modifier = Modifier.fillMaxSize().padding(horizontal = 6.dp),
                                         horizontalAlignment = Alignment.CenterHorizontally
                                     ) {
                                         Box(Modifier.widthIn(max = 920.dp).fillMaxSize()) {
@@ -1810,21 +1812,51 @@ private fun ResultMakerTopBar(
     val isAdmin = activeSchool.isAdmin(currentUserId)
     val isSecondary = secondaryTitle != null
 
+    if (isSecondary) {
+        Surface(
+            color = MaterialTheme.colorScheme.surface,
+            tonalElevation = 1.dp,
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Column {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .statusBarsPadding()
+                        .height(46.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    IconButton(
+                        onClick = onBackFromSecondary,
+                        modifier = Modifier.size(48.dp).testTag(secondaryBackTag)
+                    ) {
+                        Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "ফিরে যান", tint = SlateText)
+                    }
+                    Text(
+                        secondaryTitle ?: "",
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 15.5.sp,
+                        color = SlateText,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier
+                            .weight(1f)
+                            .padding(end = 12.dp)
+                            .testTag("top_bar_title")
+                    )
+                }
+                HorizontalDivider(color = SlateOutline.copy(alpha = 0.45f), thickness = 0.75.dp)
+            }
+        }
+        return
+    }
+
     TopAppBar(
         colors = TopAppBarDefaults.topAppBarColors(
             containerColor = MaterialTheme.colorScheme.surface,
             titleContentColor = SlateText
         ),
-        navigationIcon = {
-            if (isSecondary) {
-                IconButton(
-                    onClick = onBackFromSecondary,
-                    modifier = Modifier.size(48.dp).testTag(secondaryBackTag)
-                ) {
-                    Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "ফিরে যান")
-                }
-            }
-        },
+        navigationIcon = {},
         title = {
             Column {
                 Row(

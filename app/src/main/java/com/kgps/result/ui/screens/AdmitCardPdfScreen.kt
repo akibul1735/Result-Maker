@@ -457,11 +457,11 @@ fun AdmitCardPdfScreen(
             Surface(
                 color = MaterialTheme.colorScheme.surface,
                 border = BorderStroke(1.dp, SlateOutline),
-                shape = RoundedCornerShape(10.dp),
-                modifier = Modifier.fillMaxWidth().padding(top = 3.dp)
+                shape = RoundedCornerShape(9.dp),
+                modifier = Modifier.fillMaxWidth()
             ) {
                 Row(
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 7.dp, vertical = 3.dp),
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 7.dp, vertical = 2.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(3.dp)
                 ) {
@@ -582,7 +582,7 @@ fun AdmitCardPdfScreen(
                 Column(
                     modifier = Modifier
                         .fillMaxSize()
-                        .padding(vertical = 5.dp),
+                        .padding(top = 1.dp, bottom = 2.dp),
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
                     if (pages.isEmpty()) {
@@ -682,7 +682,7 @@ fun AdmitCardPdfScreen(
                                             }
                                         }
                                     },
-                                contentAlignment = Alignment.Center
+                                contentAlignment = Alignment.TopCenter
                             ) {
                                 AdmitCardRenderedPage(
                                     ctx = ctx,
@@ -690,6 +690,7 @@ fun AdmitCardPdfScreen(
                                     settings = settings,
                                     signatureBitmap = signatureBitmap,
                                     renderScale = 2.4f,
+                                    pageAlignment = Alignment.TopCenter,
                                     modifier = Modifier.graphicsLayer(
                                         scaleX = previewZoomScale,
                                         scaleY = previewZoomScale,

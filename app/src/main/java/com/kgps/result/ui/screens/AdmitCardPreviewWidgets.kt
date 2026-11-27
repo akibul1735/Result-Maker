@@ -90,7 +90,8 @@ internal fun AdmitCardRenderedPage(
     settings: Settings,
     signatureBitmap: Bitmap?,
     renderScale: Float,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    pageAlignment: Alignment = Alignment.Center
 ) {
     val bmp by produceState<Bitmap?>(
         initialValue = null,
@@ -111,7 +112,7 @@ internal fun AdmitCardRenderedPage(
 
     BoxWithConstraints(
         modifier = modifier.fillMaxSize(),
-        contentAlignment = Alignment.Center
+        contentAlignment = pageAlignment
     ) {
         val availableRatio = if (maxHeight.value > 0f) maxWidth.value / maxHeight.value else A4_ASPECT_RATIO
         val paperModifier = if (availableRatio > A4_ASPECT_RATIO) {
