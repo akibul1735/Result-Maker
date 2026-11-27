@@ -74,6 +74,7 @@ import com.kgps.result.BlankSheetPlanner
 import com.kgps.result.BlankSheetPreset
 import com.kgps.result.BlankSheetRow
 import com.kgps.result.BlankSheetRowFitMode
+import com.kgps.result.BlankSubjectOption
 import com.kgps.result.Settings
 import com.kgps.result.Student
 import com.kgps.result.bn
@@ -154,6 +155,7 @@ internal fun BlankSheetUnifiedSettingsPanel(
         BlankSheetSubjectTermRow(
             config = config,
             isThreeTermMarks = isThreeTermMarks,
+            hasThreeTermTotal = hasThreeTermTotal,
             isThreeTermTraits = isThreeTermTraits,
             isClassLevelTraitsOnly = isClassLevelTraitsOnly,
             selectedSubjectLabel = selectedSubjectLabel,
@@ -359,10 +361,14 @@ private fun BlankSheetClassSwipeRow(
     }
 }
 
+private const val BLANK_TRAITS_MODE_KEY = "__TRAITS_MODE__"
+private const val BLANK_THREE_TERM_SENTINEL = -2
+
 @Composable
 private fun BlankSheetSubjectTermRow(
     config: BlankSheetConfig,
     isThreeTermMarks: Boolean,
+    hasThreeTermTotal: Boolean,
     isThreeTermTraits: Boolean,
     isClassLevelTraitsOnly: Boolean,
     selectedSubjectLabel: String,
@@ -370,66 +376,130 @@ private fun BlankSheetSubjectTermRow(
     onUpdateConfig: (BlankSheetConfig) -> Unit,
     onResetPageIndex: () -> Unit
 ) {
+    val traitsOption = remember { BlankSubjectOption(BLANK_TRAITS_MODE_KEY, "উপস্থিতি ও গুণাবলি") }
+    val subjectPickerOptions = remember(traitsOption) {
+        BlankSheetCatalog.SUBJECT_OPTIONS + traitsOption
+    }
+    val selectedSubjectOption = remember(isClassLevelTraitsOnly, config.subjectKey, traitsOption) {
+        if (isClassLevelTraitsOnly) {
+            traitsOption
+        } else {
+            BlankSheetCatalog.SUBJECT_OPTIONS.find { it.key == config.subjectKey }
+                ?: BlankSheetCatalog.SUBJECT_OPTIONS.last()
+        }
+    }
+
     Row(
         horizontalArrangement = Arrangement.spacedBy(5.dp),
         modifier = Modifier.fillMaxWidth()
     ) {
-        if (isClassLevelTraitsOnly) {
-            Surface(
-                color = TealSoft,
-                border = BorderStroke(1.dp, TealPrimary.copy(alpha = 0.45f)),
-                shape = RoundedCornerShape(8.dp),
-                modifier = Modifier.weight(1.1f).heightIn(min = 42.dp)
-            ) {
-                Column(
-                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-                    verticalArrangement = Arrangement.Center
-                ) {
-                    Text("ধরন", fontSize = 8.5.sp, color = SlateMuted)
-                    Text(
-                        "উপস্থিতি ও গুণাবলি",
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        color = TealDark,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                }
-            }
-        } else {
-            AdmitCompactPickerBox(
-                label = "বিষয়",
-                valueText = selectedSubjectLabel,
-                options = BlankSheetCatalog.SUBJECT_OPTIONS,
-                selectedValue = BlankSheetCatalog.SUBJECT_OPTIONS.find { it.key == config.subjectKey }
-                    ?: BlankSheetCatalog.SUBJECT_OPTIONS.last(),
-                optionLabel = { it.labelBn },
-                onSelect = { opt ->
-                    onUpdateConfig(config.copy(subjectKey = opt.key))
+        AdmitCompactPickerBox(
+            label = if (isClassLevelTraitsOnly) "ধরন / বিষয়" else "বিষয়",
+            valueText = selectedSubjectLabel,
+            options = subjectPickerOptions,
+            selectedValue = selectedSubjectOption,
+            optionLabel = { it.labelBn },
+            onSelect = { opt ->
+                if (opt.key == BLANK_TRAITS_MODE_KEY) {
+                    if (!isClassLevelTraitsOnly) {
+                        val targetPreset = if (isThreeTermMarks) {
+                            BlankSheetPreset.THREE_TERM_ATTENDANCE_TRAITS
+                        } else {
+                            BlankSheetPreset.SINGLE_TERM_ATTENDANCE_TRAITS
+                        }
+                        val cols = BlankSheetCatalog.presetColumns(targetPreset)
+                        val nextOri = if (cols.size >= 9) BlankSheetOrientation.LANDSCAPE else BlankSheetOrientation.PORTRAIT
+                        onUpdateConfig(config.copy(columns = cols, orientation = nextOri))
+                        onResetPageIndex()
+                    }
+                } else {
+                    if (isClassLevelTraitsOnly) {
+                        val targetPreset = if (isThreeTermTraits) {
+                            BlankSheetPreset.THREE_TERM_MARKS
+                        } else {
+                            BlankSheetPreset.FULL_MARKS
+                        }
+                        val cols = BlankSheetCatalog.presetColumns(targetPreset)
+                        val nextOri = if (cols.size >= 9) BlankSheetOrientation.LANDSCAPE else BlankSheetOrientation.PORTRAIT
+                        onUpdateConfig(
+                            config.copy(
+                                subjectKey = opt.key,
+                                columns = cols,
+                                orientation = nextOri
+                            )
+                        )
+                    } else {
+                        onUpdateConfig(config.copy(subjectKey = opt.key))
+                    }
                     onResetPageIndex()
-                },
-                modifier = Modifier.weight(1.1f),
-                testTag = "blank_subject_dropdown"
-            )
-        }
+                }
+            },
+            modifier = Modifier.weight(1.1f),
+            testTag = "blank_subject_dropdown"
+        )
 
         val termOptions = listOf(
+            BLANK_THREE_TERM_SENTINEL to "৩ প্রান্তিক (একসাথে)",
             1 to termNameBn(1),
             2 to termNameBn(2),
             3 to termNameBn(3),
             0 to "বার্ষিক মূল্যায়ন",
             -1 to "কাস্টম / শিরোনামহীন"
         )
+        val activeTermSelection = if (isThreeTermMarks || isThreeTermTraits) {
+            BLANK_THREE_TERM_SENTINEL
+        } else {
+            config.term
+        }
         AdmitCompactPickerBox(
             label = "প্রান্তিক / পরীক্ষা",
             valueText = selectedTermLabel,
             options = termOptions.map { it.first },
-            selectedValue = config.term,
+            selectedValue = activeTermSelection,
             optionLabel = { tVal -> termOptions.find { it.first == tVal }?.second ?: "" },
             onSelect = { tVal ->
-                onUpdateConfig(config.copy(term = tVal))
+                if (tVal == BLANK_THREE_TERM_SENTINEL) {
+                    if (!isThreeTermMarks && !isThreeTermTraits) {
+                        val cols = if (isClassLevelTraitsOnly) {
+                            BlankSheetCatalog.presetColumns(BlankSheetPreset.THREE_TERM_ATTENDANCE_TRAITS)
+                        } else {
+                            BlankSheetCatalog.threeTermMarksColumns(hasThreeTermTotal)
+                        }
+                        val nextOri = if (cols.size >= 9) BlankSheetOrientation.LANDSCAPE else BlankSheetOrientation.PORTRAIT
+                        onUpdateConfig(config.copy(columns = cols, orientation = nextOri))
+                        onResetPageIndex()
+                    }
+                } else {
+                    when {
+                        isThreeTermTraits -> {
+                            val cols = BlankSheetCatalog.presetColumns(BlankSheetPreset.SINGLE_TERM_ATTENDANCE_TRAITS)
+                            onUpdateConfig(
+                                config.copy(
+                                    term = tVal,
+                                    columns = cols,
+                                    orientation = BlankSheetOrientation.PORTRAIT
+                                )
+                            )
+                            onResetPageIndex()
+                        }
+                        isThreeTermMarks -> {
+                            val cols = BlankSheetCatalog.presetColumns(BlankSheetPreset.FULL_MARKS)
+                            onUpdateConfig(
+                                config.copy(
+                                    term = tVal,
+                                    columns = cols,
+                                    orientation = BlankSheetOrientation.LANDSCAPE
+                                )
+                            )
+                            onResetPageIndex()
+                        }
+                        else -> {
+                            onUpdateConfig(config.copy(term = tVal))
+                        }
+                    }
+                }
             },
-            enabled = !isThreeTermMarks && !isThreeTermTraits,
+            enabled = true,
             modifier = Modifier.weight(0.95f),
             testTag = "blank_term_dropdown"
         )

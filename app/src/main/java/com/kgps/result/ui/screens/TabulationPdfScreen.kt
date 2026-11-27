@@ -45,6 +45,7 @@ import androidx.compose.material.icons.rounded.Print
 import androidx.compose.material.icons.rounded.RestartAlt
 import androidx.compose.material.icons.rounded.TableView
 import androidx.compose.material.icons.rounded.UnfoldMore
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -64,6 +65,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -112,6 +114,7 @@ import com.kgps.result.activeClassIds
 import com.kgps.result.bn
 import com.kgps.result.classShortBn
 import com.kgps.result.cloud.TeacherPermissions
+import com.kgps.result.ui.theme.RoseDanger
 import com.kgps.result.ui.theme.SlateBg
 import com.kgps.result.ui.theme.SlateMuted
 import com.kgps.result.ui.theme.SlateOutline
@@ -401,6 +404,7 @@ fun TabulationPdfScreen(
     var setupExpanded by remember { mutableStateOf(true) }
     var activeSetupTab by remember { mutableIntStateOf(0) } // 0=শ্রেণি ও প্রান্তিক, 1=পৃষ্ঠা ও কলাম, 2=ফন্ট ও স্টাইল
     var showFullscreen by remember { mutableStateOf(false) }
+    var showResetConfirm by remember { mutableStateOf(false) }
 
     val pages = remember(students, settings, config, allowedClasses) {
         TabulationPlanner.buildPages(
@@ -517,7 +521,7 @@ fun TabulationPdfScreen(
                         )
                     }
                     IconButton(
-                        onClick = { config = defaultConfig },
+                        onClick = { showResetConfirm = true },
                         modifier = Modifier.size(48.dp).testTag("tabulation_reset_btn")
                     ) {
                         Icon(
@@ -1054,5 +1058,41 @@ fun TabulationPdfScreen(
                 }
             }
         }
+    }
+
+    if (showResetConfirm) {
+        AlertDialog(
+            onDismissRequest = { showResetConfirm = false },
+            title = { Text("ডিফল্ট সেটিংস রিসেট করবেন?", fontWeight = FontWeight.Bold, fontSize = 15.5.sp) },
+            text = {
+                Text(
+                    "ফলাফল টেবিলের কলাম, পৃষ্ঠা, মার্জিন ও ফন্ট সেটিংস ডিফল্ট অবস্থায় ফিরে যাবে।",
+                    fontSize = 13.sp,
+                    color = SlateText
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        showResetConfirm = false
+                        config = defaultConfig
+                        zoomScale = 1f
+                        panOffset = Offset.Zero
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = RoseDanger),
+                    modifier = Modifier.heightIn(min = 48.dp).testTag("tabulation_reset_confirm_btn")
+                ) {
+                    Text("রিসেট করুন", color = Color.White)
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = { showResetConfirm = false },
+                    modifier = Modifier.heightIn(min = 48.dp)
+                ) {
+                    Text("বাতিল")
+                }
+            }
+        )
     }
 }
