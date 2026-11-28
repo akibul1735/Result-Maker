@@ -1,5 +1,6 @@
 package com.kgps.result
 
+import android.graphics.Bitmap
 import java.util.Calendar
 
 enum class TestimonialType(
@@ -53,6 +54,44 @@ enum class TestimonialBorderStyle(val labelBn: String) {
     NONE("বর্ডার নেই")
 }
 
+enum class TestimonialSideDesignMode(val labelBn: String) {
+    FOUR_CORNERS("৪ কোণায় ডিজাইন"),
+    FULL_FRAME("পুরো ফ্রেম/বর্ডার")
+}
+
+enum class TestimonialAssetSlot(
+    val fileName: String,
+    val labelBn: String,
+    val stripWhiteBackground: Boolean,
+    val maxDimensionPx: Int
+) {
+    LEFT_LOGO("testimonial_left_logo.png", "বাম লোগো (সিল)", false, 640),
+    RIGHT_LOGO("testimonial_right_logo.png", "ডান লোগো (DPE/বিদ্যালয়)", false, 640),
+    WATERMARK("testimonial_watermark.png", "জলছাপ লোগো", true, 960),
+    SIDE_ORNAMENT("testimonial_side_ornament.png", "পাশের / কর্নার ডিজাইন", true, 1200)
+}
+
+data class TestimonialCustomAssets(
+    val leftLogo: Bitmap? = null,
+    val rightLogo: Bitmap? = null,
+    val watermarkLogo: Bitmap? = null,
+    val sideOrnament: Bitmap? = null
+) {
+    fun bitmapFor(slot: TestimonialAssetSlot): Bitmap? = when (slot) {
+        TestimonialAssetSlot.LEFT_LOGO -> leftLogo
+        TestimonialAssetSlot.RIGHT_LOGO -> rightLogo
+        TestimonialAssetSlot.WATERMARK -> watermarkLogo
+        TestimonialAssetSlot.SIDE_ORNAMENT -> sideOrnament
+    }
+
+    fun withUpdated(slot: TestimonialAssetSlot, bmp: Bitmap?): TestimonialCustomAssets = when (slot) {
+        TestimonialAssetSlot.LEFT_LOGO -> copy(leftLogo = bmp)
+        TestimonialAssetSlot.RIGHT_LOGO -> copy(rightLogo = bmp)
+        TestimonialAssetSlot.WATERMARK -> copy(watermarkLogo = bmp)
+        TestimonialAssetSlot.SIDE_ORNAMENT -> copy(sideOrnament = bmp)
+    }
+}
+
 enum class TestimonialSerialMode(val labelBn: String) {
     AUTO_INCREMENT("ক্রমিক নম্বর"),
     BASE_PLUS_ROLL("Prefix + রোল"),
@@ -92,6 +131,11 @@ data class TestimonialConfig(
     val showWatermark: Boolean = true,
     val showCounterfoil: Boolean = true,
     val borderStyle: TestimonialBorderStyle = TestimonialBorderStyle.ORNAMENTAL_CLASSIC,
+    val sideDesignMode: TestimonialSideDesignMode = TestimonialSideDesignMode.FOUR_CORNERS,
+    val sideDesignSizePt: Float = 88f,
+    val logoSizePt: Float = 52f,
+    val watermarkAlpha: Float = 0.11f,
+    val watermarkUseRightLogo: Boolean = true,
     val serialMode: TestimonialSerialMode = TestimonialSerialMode.BASE_PLUS_ROLL,
     val serialStartOrPrefix: String = "২০২৬৫",
     val padRollTwoDigits: Boolean = true,
@@ -111,6 +155,9 @@ data class TestimonialConfig(
     val safeMarginInches: Float get() = marginInches.coerceIn(0.14f, 0.75f)
     val safeMarginPt: Float get() = safeMarginInches * 72f
     val safeSignatureScale: Float get() = signatureScale.coerceIn(0.35f, 2.5f)
+    val safeSideDesignSizePt: Float get() = sideDesignSizePt.coerceIn(48f, 160f)
+    val safeLogoSizePt: Float get() = logoSizePt.coerceIn(34f, 76f)
+    val safeWatermarkAlpha: Float get() = watermarkAlpha.coerceIn(0.04f, 0.28f)
 }
 
 data class TestimonialItem(

@@ -63,6 +63,7 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import com.kgps.result.Settings
 import com.kgps.result.Student
+import com.kgps.result.TestimonialCustomAssets
 import com.kgps.result.TestimonialPageSpec
 import com.kgps.result.TestimonialPdfGen
 import com.kgps.result.bn
@@ -82,15 +83,16 @@ internal fun TestimonialRenderedPage(
     settings: Settings,
     students: List<Student>,
     signatureBitmap: Bitmap?,
+    customAssets: TestimonialCustomAssets = TestimonialCustomAssets(),
     renderScale: Float,
     modifier: Modifier = Modifier,
     pageAlignment: Alignment = Alignment.Center
 ) {
     val bmp by produceState<Bitmap?>(
         initialValue = null,
-        key1 = page,
+        key1 = Triple(page, signatureBitmap, customAssets),
         key2 = settings,
-        key3 = signatureBitmap
+        key3 = students
     ) {
         value = withContext(Dispatchers.Default) {
             TestimonialPdfGen.renderPageBitmap(
@@ -99,6 +101,7 @@ internal fun TestimonialRenderedPage(
                 settings = settings,
                 students = students,
                 signatureBitmap = signatureBitmap,
+                customAssets = customAssets,
                 scale = renderScale
             )
         }
@@ -147,6 +150,7 @@ internal fun TestimonialFullscreenDialog(
     settings: Settings,
     students: List<Student>,
     signatureBitmap: Bitmap?,
+    customAssets: TestimonialCustomAssets = TestimonialCustomAssets(),
     onPageChanged: (Int) -> Unit,
     onDismiss: () -> Unit
 ) {
@@ -233,6 +237,7 @@ internal fun TestimonialFullscreenDialog(
                             settings = settings,
                             students = students,
                             signatureBitmap = signatureBitmap,
+                            customAssets = customAssets,
                             renderScale = 2.2f,
                             modifier = Modifier.graphicsLayer(
                                 scaleX = fsScale,

@@ -1,8 +1,16 @@
 package com.kgps.result
 
 import android.content.Context
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.graphics.Color
+import android.net.Uri
 import org.json.JSONArray
 import org.json.JSONObject
+import java.io.File
+import java.io.FileOutputStream
+import kotlin.math.max
+import kotlin.math.min
 
 object TestimonialLocalStore {
     private const val PREFS_NAME = "testimonial_maker_prefs"
@@ -37,6 +45,11 @@ object TestimonialLocalStore {
             put("showWatermark", cfg.showWatermark)
             put("showCounterfoil", cfg.showCounterfoil)
             put("borderStyle", cfg.borderStyle.name)
+            put("sideDesignMode", cfg.sideDesignMode.name)
+            put("sideDesignSizePt", cfg.sideDesignSizePt.toDouble())
+            put("logoSizePt", cfg.logoSizePt.toDouble())
+            put("watermarkAlpha", cfg.watermarkAlpha.toDouble())
+            put("watermarkUseRightLogo", cfg.watermarkUseRightLogo)
             put("serialMode", cfg.serialMode.name)
             put("serialStartOrPrefix", cfg.serialStartOrPrefix)
             put("padRollTwoDigits", cfg.padRollTwoDigits)
@@ -105,6 +118,12 @@ object TestimonialLocalStore {
                 showCounterfoil = o.optBoolean("showCounterfoil", fallback.showCounterfoil),
                 borderStyle = runCatching { TestimonialBorderStyle.valueOf(o.optString("borderStyle")) }
                     .getOrDefault(fallback.borderStyle),
+                sideDesignMode = runCatching { TestimonialSideDesignMode.valueOf(o.optString("sideDesignMode")) }
+                    .getOrDefault(fallback.sideDesignMode),
+                sideDesignSizePt = o.optDouble("sideDesignSizePt", fallback.sideDesignSizePt.toDouble()).toFloat().coerceIn(48f, 160f),
+                logoSizePt = o.optDouble("logoSizePt", fallback.logoSizePt.toDouble()).toFloat().coerceIn(34f, 76f),
+                watermarkAlpha = o.optDouble("watermarkAlpha", fallback.watermarkAlpha.toDouble()).toFloat().coerceIn(0.04f, 0.28f),
+                watermarkUseRightLogo = o.optBoolean("watermarkUseRightLogo", fallback.watermarkUseRightLogo),
                 serialMode = runCatching { TestimonialSerialMode.valueOf(o.optString("serialMode")) }
                     .getOrDefault(fallback.serialMode),
                 serialStartOrPrefix = o.optString("serialStartOrPrefix", fallback.serialStartOrPrefix),
@@ -176,5 +195,108 @@ object TestimonialLocalStore {
             .edit()
             .remove(CONFIG_KEY)
             .apply()
+    }
+
+    private fun assetFile(ctx: Context, slot: TestimonialAssetSlot): File =
+        File(ctx.filesDir, slot.fileName)
+
+    fun loadCustomAssets(ctx: Context): TestimonialCustomAssets {
+        return TestimonialCustomAssets(
+            leftLogo = decodeAssetFile(ctx, TestimonialAssetSlot.LEFT_LOGO),
+            rightLogo = decodeAssetFile(ctx, TestimonialAssetSlot.RIGHT_LOGO),
+            watermarkLogo = decodeAssetFile(ctx, TestimonialAssetSlot.WATERMARK),
+            sideOrnament = decodeAssetFile(ctx, TestimonialAssetSlot.SIDE_ORNAMENT)
+        )
+    }
+
+    private fun decodeAssetFile(ctx: Context, slot: TestimonialAssetSlot): Bitmap? {
+        val f = assetFile(ctx, slot)
+        if (!f.exists() || f.length() <= 0L) return null
+        return try {
+            BitmapFactory.decodeFile(f.absolutePath)
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    fun clearCustomAsset(ctx: Context, slot: TestimonialAssetSlot) {
+        runCatching {
+            val f = assetFile(ctx, slot)
+            if (f.exists()) f.delete()
+        }
+    }
+
+    fun saveCustomAssetFromUri(ctx: Context, slot: TestimonialAssetSlot, uri: Uri): Bitmap? {
+        return try {
+            val boundsOpts = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            ctx.contentResolver.openInputStream(uri)?.use { inp ->
+                BitmapFactory.decodeStream(inp, null, boundsOpts)
+            }
+            val srcW = boundsOpts.outWidth
+            val srcH = boundsOpts.outHeight
+            if (srcW <= 0 || srcH <= 0) return null
+
+            val maxDim = slot.maxDimensionPx
+            var sample = 1
+            while ((srcW / sample) > maxDim * 2 || (srcH / sample) > maxDim * 2) {
+                sample *= 2
+            }
+            val decodeOpts = BitmapFactory.Options().apply { inSampleSize = sample }
+            val rawBmp = ctx.contentResolver.openInputStream(uri)?.use { inp ->
+                BitmapFactory.decodeStream(inp, null, decodeOpts)
+            } ?: return null
+
+            val scale = min(maxDim.toFloat() / rawBmp.width, maxDim.toFloat() / rawBmp.height).coerceAtMost(1f)
+            val targetW = (rawBmp.width * scale).toInt().coerceAtLeast(1)
+            val targetH = (rawBmp.height * scale).toInt().coerceAtLeast(1)
+            val scaled = if (targetW != rawBmp.width || targetH != rawBmp.height) {
+                Bitmap.createScaledBitmap(rawBmp, targetW, targetH, true).also {
+                    if (it !== rawBmp) rawBmp.recycle()
+                }
+            } else {
+                rawBmp
+            }
+
+            val finalBmp = if (slot.stripWhiteBackground) {
+                stripPureWhiteBackground(scaled).also {
+                    if (it !== scaled) scaled.recycle()
+                }
+            } else {
+                scaled
+            }
+
+            FileOutputStream(assetFile(ctx, slot)).use { out ->
+                finalBmp.compress(Bitmap.CompressFormat.PNG, 100, out)
+            }
+            finalBmp
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    private fun stripPureWhiteBackground(src: Bitmap): Bitmap {
+        val w = src.width
+        val h = src.height
+        val pixels = IntArray(w * h)
+        src.getPixels(pixels, 0, w, 0, 0, w, h)
+        for (i in pixels.indices) {
+            val px = pixels[i]
+            val a = Color.alpha(px)
+            if (a == 0) continue
+            val r = Color.red(px)
+            val g = Color.green(px)
+            val b = Color.blue(px)
+            val maxC = max(r, max(g, b))
+            val minC = min(r, min(g, b))
+            val spread = maxC - minC
+            val lum = (r + g + b) / 3
+            if (lum >= 235 && spread <= 22) {
+                pixels[i] = Color.TRANSPARENT
+            } else if (lum >= 210 && spread <= 24) {
+                val nextA = ((235 - lum).coerceIn(0, 25) * a / 25).coerceIn(0, a)
+                pixels[i] = Color.argb(nextA, r, g, b)
+            }
+        }
+        return Bitmap.createBitmap(pixels, w, h, Bitmap.Config.ARGB_8888)
     }
 }

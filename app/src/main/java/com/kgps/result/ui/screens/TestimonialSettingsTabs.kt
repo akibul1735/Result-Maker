@@ -32,6 +32,7 @@ import androidx.compose.material.icons.rounded.Description
 import androidx.compose.material.icons.rounded.Draw
 import androidx.compose.material.icons.rounded.Edit
 import androidx.compose.material.icons.rounded.FolderOpen
+import androidx.compose.material.icons.rounded.Image
 import androidx.compose.material.icons.rounded.KeyboardArrowDown
 import androidx.compose.material.icons.rounded.PhotoLibrary
 import androidx.compose.material.icons.rounded.Remove
@@ -64,11 +65,14 @@ import com.kgps.result.ENGLISH_PDF_FONT_LIST
 import com.kgps.result.SeatPlanNumeralMode
 import com.kgps.result.SeatPlanRollOrder
 import com.kgps.result.Settings
+import com.kgps.result.TestimonialAssetSlot
 import com.kgps.result.TestimonialBodyPreset
 import com.kgps.result.TestimonialBorderStyle
 import com.kgps.result.TestimonialConfig
+import com.kgps.result.TestimonialCustomAssets
 import com.kgps.result.TestimonialPlanner
 import com.kgps.result.TestimonialSerialMode
+import com.kgps.result.TestimonialSideDesignMode
 import com.kgps.result.TestimonialType
 import com.kgps.result.bn
 import com.kgps.result.classShortBn
@@ -454,15 +458,23 @@ internal fun TestimonialContentAndBodyTab(
     }
 }
 
+private val TESTIMONIAL_LOGO_SIZE_OPTIONS = listOf(38f, 44f, 52f, 60f, 68f)
+private val TESTIMONIAL_WATERMARK_ALPHA_OPTIONS = listOf(0.07f, 0.11f, 0.16f, 0.22f)
+private val TESTIMONIAL_SIDE_SIZE_OPTIONS = listOf(64f, 76f, 88f, 104f, 120f, 140f)
+
 @Composable
 internal fun TestimonialSchoolAndSignTab(
     config: TestimonialConfig,
     settings: Settings,
     signatureBitmap: Bitmap?,
+    customAssets: TestimonialCustomAssets,
     onUpdateConfig: (TestimonialConfig) -> Unit,
     onPickSignatureFromGallery: () -> Unit,
     onPickSignatureFromFiles: () -> Unit,
-    onClearSignature: () -> Unit
+    onClearSignature: () -> Unit,
+    onPickCustomAssetFromGallery: (TestimonialAssetSlot) -> Unit,
+    onPickCustomAssetFromFiles: (TestimonialAssetSlot) -> Unit,
+    onClearCustomAsset: (TestimonialAssetSlot) -> Unit
 ) {
     AdmitCollapsibleGroupCard(
         title = "বিদ্যালয় ও সরকারি শিরোনাম",
@@ -530,6 +542,79 @@ internal fun TestimonialSchoolAndSignTab(
                 onCheckedChange = { onUpdateConfig(config.copy(showWatermark = it)) },
                 modifier = Modifier.weight(1f),
                 testTag = "testimonial_opt_watermark"
+            )
+        }
+    }
+
+    val uploadedLogoCount = listOfNotNull(
+        customAssets.leftLogo,
+        customAssets.rightLogo,
+        customAssets.watermarkLogo
+    ).size
+    AdmitCollapsibleGroupCard(
+        title = "কাস্টম লোগো ও জলছাপ আপলোড",
+        summary = if (uploadedLogoCount > 0) "${bn(uploadedLogoCount.toString())}টি আপলোড" else "ডিফল্ট সিল ও লোগো",
+        icon = Icons.Rounded.Image,
+        initiallyExpanded = false,
+        testTag = "testimonial_grp_custom_logos"
+    ) {
+        Text(
+            text = "চাইলে সরকারি সিল, DPE বা নিজস্ব বিদ্যালয়ের লোগো এবং জলছাপের ছবি আলাদাভাবে আপলোড করতে পারেন।",
+            fontSize = 10.sp,
+            color = SlateMuted
+        )
+        TestimonialCustomAssetSlotCard(
+            slot = TestimonialAssetSlot.LEFT_LOGO,
+            subtitle = "ফাঁকা রাখলে সরকারি সিল দেখাবে",
+            bitmap = customAssets.leftLogo,
+            onPickGallery = { onPickCustomAssetFromGallery(TestimonialAssetSlot.LEFT_LOGO) },
+            onPickFile = { onPickCustomAssetFromFiles(TestimonialAssetSlot.LEFT_LOGO) },
+            onClear = { onClearCustomAsset(TestimonialAssetSlot.LEFT_LOGO) }
+        )
+        TestimonialCustomAssetSlotCard(
+            slot = TestimonialAssetSlot.RIGHT_LOGO,
+            subtitle = "ফাঁকা রাখলে প্রাথমিক শিক্ষা অধিদপ্তরের লোগো দেখাবে",
+            bitmap = customAssets.rightLogo,
+            onPickGallery = { onPickCustomAssetFromGallery(TestimonialAssetSlot.RIGHT_LOGO) },
+            onPickFile = { onPickCustomAssetFromFiles(TestimonialAssetSlot.RIGHT_LOGO) },
+            onClear = { onClearCustomAsset(TestimonialAssetSlot.RIGHT_LOGO) }
+        )
+        TestimonialCustomAssetSlotCard(
+            slot = TestimonialAssetSlot.WATERMARK,
+            subtitle = "সাদা ব্যাকগ্রাউন্ড স্বয়ংক্রিয়ভাবে স্বচ্ছ হবে",
+            bitmap = customAssets.watermarkLogo,
+            onPickGallery = { onPickCustomAssetFromGallery(TestimonialAssetSlot.WATERMARK) },
+            onPickFile = { onPickCustomAssetFromFiles(TestimonialAssetSlot.WATERMARK) },
+            onClear = { onClearCustomAsset(TestimonialAssetSlot.WATERMARK) }
+        )
+        if (customAssets.watermarkLogo == null && customAssets.rightLogo != null) {
+            AdmitCompactSwitchRow(
+                label = "ডান লোগোটিকে জলছাপ হিসেবেও ব্যবহার করুন",
+                checked = config.watermarkUseRightLogo,
+                onCheckedChange = { onUpdateConfig(config.copy(watermarkUseRightLogo = it)) },
+                testTag = "testimonial_wm_use_right_logo"
+            )
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.fillMaxWidth()) {
+            AdmitCompactPickerBox(
+                label = "লোগোর আকার",
+                valueText = "${bn(config.safeLogoSizePt.toInt().toString())}pt",
+                options = TESTIMONIAL_LOGO_SIZE_OPTIONS,
+                selectedValue = TESTIMONIAL_LOGO_SIZE_OPTIONS.minByOrNull { kotlin.math.abs(it - config.safeLogoSizePt) } ?: 52f,
+                optionLabel = { "${bn(it.toInt().toString())}pt" },
+                onSelect = { onUpdateConfig(config.copy(logoSizePt = it)) },
+                modifier = Modifier.weight(1f),
+                testTag = "testimonial_logo_size_picker"
+            )
+            AdmitCompactPickerBox(
+                label = "জলছাপ গাঢ়ত্ব",
+                valueText = "${bn((config.safeWatermarkAlpha * 100).toInt().toString())}%",
+                options = TESTIMONIAL_WATERMARK_ALPHA_OPTIONS,
+                selectedValue = TESTIMONIAL_WATERMARK_ALPHA_OPTIONS.minByOrNull { kotlin.math.abs(it - config.safeWatermarkAlpha) } ?: 0.11f,
+                optionLabel = { "${bn((it * 100).toInt().toString())}%" },
+                onSelect = { onUpdateConfig(config.copy(watermarkAlpha = it)) },
+                modifier = Modifier.weight(1f),
+                testTag = "testimonial_wm_alpha_picker"
             )
         }
     }
@@ -629,7 +714,11 @@ internal fun TestimonialSchoolAndSignTab(
 @Composable
 internal fun TestimonialDesignAndFontTab(
     config: TestimonialConfig,
+    customAssets: TestimonialCustomAssets,
     onUpdateConfig: (TestimonialConfig) -> Unit,
+    onPickCustomAssetFromGallery: (TestimonialAssetSlot) -> Unit,
+    onPickCustomAssetFromFiles: (TestimonialAssetSlot) -> Unit,
+    onClearCustomAsset: (TestimonialAssetSlot) -> Unit,
     onOpenBnFontPicker: () -> Unit,
     onOpenEnFontPicker: () -> Unit
 ) {
@@ -682,6 +771,41 @@ internal fun TestimonialDesignAndFontTab(
         )
     }
 
+    AdmitSectionGroupCard(title = "পাশের / কর্নার ডিজাইন আপলোড") {
+        Text(
+            text = "নিজস্ব কোণার নকশা (কর্নার অর্নামেন্ট) বা সম্পূর্ণ বর্ডার ফ্রেম ছবি আপলোড করলে ৪ কোণায়/ফ্রেমে স্বয়ংক্রিয়ভাবে বসবে।",
+            fontSize = 10.sp,
+            color = SlateMuted
+        )
+        TestimonialCustomAssetSlotCard(
+            slot = TestimonialAssetSlot.SIDE_ORNAMENT,
+            subtitle = "PNG বা সাদা ব্যাকগ্রাউন্ডের নকশা (৪ কোণা বা পুরো ফ্রেম)",
+            bitmap = customAssets.sideOrnament,
+            onPickGallery = { onPickCustomAssetFromGallery(TestimonialAssetSlot.SIDE_ORNAMENT) },
+            onPickFile = { onPickCustomAssetFromFiles(TestimonialAssetSlot.SIDE_ORNAMENT) },
+            onClear = { onClearCustomAsset(TestimonialAssetSlot.SIDE_ORNAMENT) }
+        )
+        if (customAssets.sideOrnament != null) {
+            AdmitSegmentedOptionBar(
+                items = TestimonialSideDesignMode.entries.map { it to it.labelBn },
+                selected = config.sideDesignMode,
+                onSelect = { onUpdateConfig(config.copy(sideDesignMode = it)) },
+                tagPrefix = "testimonial_side_design_mode"
+            )
+            if (config.sideDesignMode == TestimonialSideDesignMode.FOUR_CORNERS) {
+                AdmitCompactPickerBox(
+                    label = "কর্নার ডিজাইনের আকার",
+                    valueText = "${bn(config.safeSideDesignSizePt.toInt().toString())}pt",
+                    options = TESTIMONIAL_SIDE_SIZE_OPTIONS,
+                    selectedValue = TESTIMONIAL_SIDE_SIZE_OPTIONS.minByOrNull { kotlin.math.abs(it - config.safeSideDesignSizePt) } ?: 88f,
+                    optionLabel = { "${bn(it.toInt().toString())}pt" },
+                    onSelect = { onUpdateConfig(config.copy(sideDesignSizePt = it)) },
+                    testTag = "testimonial_side_size_picker"
+                )
+            }
+        }
+    }
+
     AdmitSectionGroupCard(title = "ফন্ট") {
         Row(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.fillMaxWidth()) {
             Surface(
@@ -718,6 +842,108 @@ internal fun TestimonialDesignAndFontTab(
                         Text(enFontName, fontSize = 10.5.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     }
                     Icon(Icons.Rounded.KeyboardArrowDown, contentDescription = null, tint = SlateMuted, modifier = Modifier.size(14.dp))
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun TestimonialCustomAssetSlotCard(
+    slot: TestimonialAssetSlot,
+    subtitle: String,
+    bitmap: Bitmap?,
+    onPickGallery: () -> Unit,
+    onPickFile: () -> Unit,
+    onClear: () -> Unit
+) {
+    Surface(
+        color = SlateBg,
+        border = BorderStroke(1.dp, SlateOutline.copy(alpha = 0.8f)),
+        shape = RoundedCornerShape(9.dp),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Column(
+            modifier = Modifier.padding(8.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Surface(
+                    color = Color.White,
+                    border = BorderStroke(1.dp, SlateOutline),
+                    shape = RoundedCornerShape(7.dp),
+                    modifier = Modifier.size(40.dp)
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        if (bitmap != null) {
+                            Image(
+                                bitmap = bitmap.asImageBitmap(),
+                                contentDescription = slot.labelBn,
+                                contentScale = ContentScale.Fit,
+                                modifier = Modifier.size(34.dp)
+                            )
+                        } else {
+                            Icon(
+                                Icons.Rounded.Image,
+                                contentDescription = null,
+                                tint = SlateMuted.copy(alpha = 0.6f),
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
+                    }
+                }
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(1.dp)) {
+                    Text(slot.labelBn, fontSize = 11.sp, fontWeight = FontWeight.Bold, color = SlateText)
+                    Text(
+                        text = if (bitmap != null) "কাস্টম ছবি যুক্ত আছে" else subtitle,
+                        fontSize = 9.2.sp,
+                        color = if (bitmap != null) TealDark else SlateMuted,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+            }
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(5.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                OutlinedButton(
+                    onClick = onPickGallery,
+                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
+                    shape = RoundedCornerShape(8.dp),
+                    modifier = Modifier.weight(1f).height(34.dp).testTag("testimonial_asset_${slot.name.lowercase()}_gallery")
+                ) {
+                    Icon(Icons.Rounded.PhotoLibrary, contentDescription = null, modifier = Modifier.size(14.dp))
+                    Spacer(Modifier.width(4.dp))
+                    Text("গ্যালারি", fontSize = 10.5.sp)
+                }
+                OutlinedButton(
+                    onClick = onPickFile,
+                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
+                    shape = RoundedCornerShape(8.dp),
+                    modifier = Modifier.weight(1.1f).height(34.dp).testTag("testimonial_asset_${slot.name.lowercase()}_file")
+                ) {
+                    Icon(Icons.Rounded.FolderOpen, contentDescription = null, modifier = Modifier.size(14.dp))
+                    Spacer(Modifier.width(4.dp))
+                    Text("ফাইল/ড্রাইভ", fontSize = 10.5.sp)
+                }
+                if (bitmap != null) {
+                    OutlinedButton(
+                        onClick = onClear,
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = RoseDanger),
+                        border = BorderStroke(1.dp, RoseDanger.copy(alpha = 0.45f)),
+                        contentPadding = PaddingValues(horizontal = 7.dp, vertical = 0.dp),
+                        shape = RoundedCornerShape(8.dp),
+                        modifier = Modifier.height(34.dp).testTag("testimonial_asset_${slot.name.lowercase()}_clear")
+                    ) {
+                        Icon(Icons.Rounded.DeleteOutline, contentDescription = "${slot.labelBn} মুছুন", modifier = Modifier.size(14.dp))
+                    }
                 }
             }
         }

@@ -93,7 +93,9 @@ import com.kgps.result.ENGLISH_PDF_FONT_LIST
 import com.kgps.result.SeatPlanRollOrder
 import com.kgps.result.Settings
 import com.kgps.result.Student
+import com.kgps.result.TestimonialAssetSlot
 import com.kgps.result.TestimonialConfig
+import com.kgps.result.TestimonialCustomAssets
 import com.kgps.result.TestimonialLocalStore
 import com.kgps.result.TestimonialPageSpec
 import com.kgps.result.TestimonialPlanner
@@ -135,8 +137,8 @@ fun TestimonialPdfScreen(
     settings: Settings,
     permissions: TeacherPermissions,
     initialClass: Int,
-    onExportPdf: (pages: List<TestimonialPageSpec>, signatureBitmap: Bitmap?, fileName: String) -> Unit,
-    onPrint: (pages: List<TestimonialPageSpec>, signatureBitmap: Bitmap?, jobName: String) -> Unit,
+    onExportPdf: (pages: List<TestimonialPageSpec>, signatureBitmap: Bitmap?, customAssets: TestimonialCustomAssets, fileName: String) -> Unit,
+    onPrint: (pages: List<TestimonialPageSpec>, signatureBitmap: Bitmap?, customAssets: TestimonialCustomAssets, jobName: String) -> Unit,
     onSaveStudentProfiles: (updatedStudents: List<Student>, nextSettings: Settings) -> Unit = { _, _ -> },
     onBack: (() -> Unit)? = null,
     modifier: Modifier = Modifier
@@ -177,6 +179,8 @@ fun TestimonialPdfScreen(
     }
     var overrides by remember { mutableStateOf(TestimonialLocalStore.loadOverrides(ctx)) }
     var signatureBitmap by remember { mutableStateOf(AdmitCardLocalStore.loadSignatureBitmap(ctx)) }
+    var customAssets by remember { mutableStateOf(TestimonialLocalStore.loadCustomAssets(ctx)) }
+    var pendingAssetSlot by remember { mutableStateOf<TestimonialAssetSlot?>(null) }
 
     var rollFromText by remember(config.rollFrom) { mutableStateOf(config.rollFrom?.toString().orEmpty()) }
     var rollToText by remember(config.rollTo) { mutableStateOf(config.rollTo?.toString().orEmpty()) }
@@ -190,17 +194,31 @@ fun TestimonialPdfScreen(
     var showResetConfirm by remember { mutableStateOf(false) }
     var pendingExportAction by remember { mutableStateOf<TestimonialExportAction?>(null) }
 
-    val handleSignaturePicked: (Uri?) -> Unit = { uri ->
+    val handleImagePicked: (Uri?) -> Unit = { uri ->
+        val slot = pendingAssetSlot
+        pendingAssetSlot = null
         if (uri != null) {
             scope.launch {
-                val loaded = withContext(Dispatchers.IO) {
-                    AdmitCardLocalStore.saveSignatureFromUri(ctx, uri)
-                }
-                if (loaded != null) {
-                    signatureBitmap = loaded
-                    Toast.makeText(ctx, "স্বাক্ষরের ছবি যুক্ত হয়েছে", Toast.LENGTH_SHORT).show()
+                if (slot == null) {
+                    val loaded = withContext(Dispatchers.IO) {
+                        AdmitCardLocalStore.saveSignatureFromUri(ctx, uri)
+                    }
+                    if (loaded != null) {
+                        signatureBitmap = loaded
+                        Toast.makeText(ctx, "স্বাক্ষরের ছবি যুক্ত হয়েছে", Toast.LENGTH_SHORT).show()
+                    } else {
+                        Toast.makeText(ctx, "ছবিটি পড়া যায়নি", Toast.LENGTH_SHORT).show()
+                    }
                 } else {
-                    Toast.makeText(ctx, "ছবিটি পড়া যায়নি", Toast.LENGTH_SHORT).show()
+                    val loaded = withContext(Dispatchers.IO) {
+                        TestimonialLocalStore.saveCustomAssetFromUri(ctx, slot, uri)
+                    }
+                    if (loaded != null) {
+                        customAssets = customAssets.withUpdated(slot, loaded)
+                        Toast.makeText(ctx, "${slot.labelBn} যুক্ত হয়েছে", Toast.LENGTH_SHORT).show()
+                    } else {
+                        Toast.makeText(ctx, "ছবিটি পড়া যায়নি", Toast.LENGTH_SHORT).show()
+                    }
                 }
             }
         }
@@ -210,14 +228,36 @@ fun TestimonialPdfScreen(
         contract = ActivityResultContracts.StartActivityForResult()
     ) { res ->
         if (res.resultCode == android.app.Activity.RESULT_OK) {
-            handleSignaturePicked(res.data?.data)
+            handleImagePicked(res.data?.data)
+        } else {
+            pendingAssetSlot = null
         }
     }
 
     val docPickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocument()
     ) { uri ->
-        handleSignaturePicked(uri)
+        handleImagePicked(uri)
+    }
+
+    val launchImageGalleryFor: (TestimonialAssetSlot?) -> Unit = { slot ->
+        pendingAssetSlot = slot
+        val pickIntent = Intent(
+            Intent.ACTION_PICK,
+            MediaStore.Images.Media.EXTERNAL_CONTENT_URI
+        ).apply { type = "image/*" }
+        galleryPickerLauncher.launch(pickIntent)
+    }
+
+    val launchImageFilesFor: (TestimonialAssetSlot?) -> Unit = { slot ->
+        pendingAssetSlot = slot
+        docPickerLauncher.launch(arrayOf("image/*"))
+    }
+
+    val clearCustomAssetSlot: (TestimonialAssetSlot) -> Unit = { slot ->
+        TestimonialLocalStore.clearCustomAsset(ctx, slot)
+        customAssets = customAssets.withUpdated(slot, null)
+        Toast.makeText(ctx, "${slot.labelBn} মুছে ফেলা হয়েছে", Toast.LENGTH_SHORT).show()
     }
 
     BackHandler(enabled = panelOpen || previewFullscreen) {
@@ -468,6 +508,7 @@ fun TestimonialPdfScreen(
                                     settings = settings,
                                     students = students,
                                     signatureBitmap = signatureBitmap,
+                                    customAssets = customAssets,
                                     renderScale = 1.9f,
                                     modifier = Modifier.fillMaxSize().padding(vertical = 4.dp)
                                 )
@@ -611,26 +652,26 @@ fun TestimonialPdfScreen(
                                         config = config,
                                         settings = settings,
                                         signatureBitmap = signatureBitmap,
+                                        customAssets = customAssets,
                                         onUpdateConfig = { config = it },
-                                        onPickSignatureFromGallery = {
-                                            val pickIntent = Intent(
-                                                Intent.ACTION_PICK,
-                                                MediaStore.Images.Media.EXTERNAL_CONTENT_URI
-                                            ).apply { type = "image/*" }
-                                            galleryPickerLauncher.launch(pickIntent)
-                                        },
-                                        onPickSignatureFromFiles = {
-                                            docPickerLauncher.launch(arrayOf("image/*"))
-                                        },
+                                        onPickSignatureFromGallery = { launchImageGalleryFor(null) },
+                                        onPickSignatureFromFiles = { launchImageFilesFor(null) },
                                         onClearSignature = {
                                             AdmitCardLocalStore.clearSignature(ctx)
                                             signatureBitmap = null
                                             Toast.makeText(ctx, "স্বাক্ষরের ছবি মুছে ফেলা হয়েছে", Toast.LENGTH_SHORT).show()
-                                        }
+                                        },
+                                        onPickCustomAssetFromGallery = { slot -> launchImageGalleryFor(slot) },
+                                        onPickCustomAssetFromFiles = { slot -> launchImageFilesFor(slot) },
+                                        onClearCustomAsset = clearCustomAssetSlot
                                     )
                                     3 -> TestimonialDesignAndFontTab(
                                         config = config,
+                                        customAssets = customAssets,
                                         onUpdateConfig = { config = it },
+                                        onPickCustomAssetFromGallery = { slot -> launchImageGalleryFor(slot) },
+                                        onPickCustomAssetFromFiles = { slot -> launchImageFilesFor(slot) },
+                                        onClearCustomAsset = clearCustomAssetSlot,
                                         onOpenBnFontPicker = { showBnFontPicker = true },
                                         onOpenEnFontPicker = { showEnFontPicker = true }
                                     )
@@ -705,6 +746,7 @@ fun TestimonialPdfScreen(
             settings = settings,
             students = students,
             signatureBitmap = signatureBitmap,
+            customAssets = customAssets,
             onPageChanged = { idx ->
                 scope.launch { pagerState.scrollToPage(idx) }
             },
@@ -811,9 +853,9 @@ fun TestimonialPdfScreen(
                         val titleSlug = TestimonialPlanner.resolvedBannerTitle(config)
                         val fileName = "${titleSlug}_${classSummary.replace(", ", "_")}.pdf"
                         if (action == TestimonialExportAction.PDF) {
-                            onExportPdf(previewPages, signatureBitmap, fileName)
+                            onExportPdf(previewPages, signatureBitmap, customAssets, fileName)
                         } else {
-                            onPrint(previewPages, signatureBitmap, titleSlug)
+                            onPrint(previewPages, signatureBitmap, customAssets, titleSlug)
                         }
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = TealPrimary)

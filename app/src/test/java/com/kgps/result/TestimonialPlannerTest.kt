@@ -183,4 +183,33 @@ class TestimonialPlannerTest {
         assertEquals("নাজমা বেগম", updatedStudents.first().x["CF_MOTHER_NAME"])
         assertEquals("১০/১০/২০১৫", updatedStudents.first().x["CF_DOB"])
     }
+
+    @Test
+    fun configClampsLogoSideOrnamentAndWatermarkOptionsAndAssetsUpdateBySlot() {
+        val low = TestimonialConfig(
+            sideDesignSizePt = 10f,
+            logoSizePt = 5f,
+            watermarkAlpha = 0.001f
+        )
+        assertEquals(48f, low.safeSideDesignSizePt, 0.01f)
+        assertEquals(34f, low.safeLogoSizePt, 0.01f)
+        assertEquals(0.04f, low.safeWatermarkAlpha, 0.001f)
+
+        val high = TestimonialConfig(
+            sideDesignSizePt = 300f,
+            logoSizePt = 140f,
+            watermarkAlpha = 0.9f,
+            sideDesignMode = TestimonialSideDesignMode.FULL_FRAME
+        )
+        assertEquals(160f, high.safeSideDesignSizePt, 0.01f)
+        assertEquals(76f, high.safeLogoSizePt, 0.01f)
+        assertEquals(0.28f, high.safeWatermarkAlpha, 0.001f)
+        assertEquals(TestimonialSideDesignMode.FULL_FRAME, high.sideDesignMode)
+
+        val emptyAssets = TestimonialCustomAssets()
+        TestimonialAssetSlot.entries.forEach { slot ->
+            assertEquals(null, emptyAssets.bitmapFor(slot))
+            assertEquals(emptyAssets, emptyAssets.withUpdated(slot, null))
+        }
+    }
 }

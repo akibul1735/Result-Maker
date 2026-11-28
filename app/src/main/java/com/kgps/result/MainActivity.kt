@@ -726,11 +726,11 @@ fun ResultMakerWorkspace(
             }
         }
     }
-    var pendingTestimonialPdf by remember { mutableStateOf<Pair<List<TestimonialPageSpec>, Bitmap?>?>(null) }
+    var pendingTestimonialPdf by remember { mutableStateOf<Triple<List<TestimonialPageSpec>, Bitmap?, TestimonialCustomAssets>?>(null) }
     val testimonialPdfLauncher = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/pdf")) { uri ->
         val payload = pendingTestimonialPdf
         if (uri != null && payload != null && payload.first.isNotEmpty()) {
-            val (pagesToWrite, sigBmp) = payload
+            val (pagesToWrite, sigBmp, customAssets) = payload
             workspaceScope.launch {
                 val result = runCatching {
                     withContext(Dispatchers.IO) {
@@ -741,7 +741,8 @@ fun ResultMakerWorkspace(
                                 settings = settings,
                                 students = students,
                                 signatureBitmap = sigBmp,
-                                out = out
+                                out = out,
+                                customAssets = customAssets
                             )
                         }
                     }
@@ -1527,17 +1528,17 @@ fun ResultMakerWorkspace(
                                                 settings = settings,
                                                 permissions = permissions,
                                                 initialClass = cls,
-                                                onExportPdf = { pages, sigBmp, fileName ->
+                                                onExportPdf = { pages, sigBmp, customAssets, fileName ->
                                                     if (!permissions.canExportPdf) {
                                                         vm.showMessage("PDF তৈরি করার অনুমতি আপনার নেই")
                                                     } else if (pages.isEmpty()) {
                                                         vm.showMessage("PDF তৈরির জন্য কোনো পৃষ্ঠা নেই")
                                                     } else {
-                                                        pendingTestimonialPdf = pages to sigBmp
+                                                        pendingTestimonialPdf = Triple(pages, sigBmp, customAssets)
                                                         testimonialPdfLauncher.launch(fileName)
                                                     }
                                                 },
-                                                onPrint = { pages, sigBmp, jobName ->
+                                                onPrint = { pages, sigBmp, customAssets, jobName ->
                                                     if (!permissions.canExportPdf) {
                                                         vm.showMessage("প্রিন্ট করার অনুমতি আপনার নেই")
                                                     } else if (pages.isEmpty()) {
@@ -1549,7 +1550,8 @@ fun ResultMakerWorkspace(
                                                             settings = settings,
                                                             students = allowedStudents,
                                                             signatureBitmap = sigBmp,
-                                                            jobName = jobName
+                                                            jobName = jobName,
+                                                            customAssets = customAssets
                                                         )
                                                     }
                                                 },
