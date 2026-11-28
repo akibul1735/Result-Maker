@@ -289,7 +289,7 @@ object BlankSheetCatalog {
         customTermTitle: String = ""
     ): String = when (term) {
         1, 2, 3 -> termNameBn(term)
-        0 -> "বার্ষিক মূল্যায়ন"
+        0 -> "চূড়ান্ত মূল্যায়ন"
         -1 -> customTermTitle.trim()
         else -> ""
     }

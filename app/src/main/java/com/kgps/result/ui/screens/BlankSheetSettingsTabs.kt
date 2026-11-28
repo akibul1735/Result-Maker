@@ -444,7 +444,7 @@ private fun BlankSheetSubjectTermRow(
             1 to termNameBn(1),
             2 to termNameBn(2),
             3 to termNameBn(3),
-            0 to "বার্ষিক মূল্যায়ন",
+            0 to "চূড়ান্ত মূল্যায়ন",
             -1 to "কাস্টম / শিরোনামহীন"
         )
         val activeTermSelection = if (isThreeTermMarks || isThreeTermTraits) {

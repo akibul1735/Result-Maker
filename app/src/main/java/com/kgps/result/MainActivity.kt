@@ -46,10 +46,13 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
+import androidx.compose.material.icons.automirrored.rounded.Logout
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.AddCircleOutline
 import androidx.compose.material.icons.rounded.AutoAwesome
+import androidx.compose.material.icons.rounded.Backup
 import androidx.compose.material.icons.rounded.Badge
+import androidx.compose.material.icons.rounded.CloudDone
 import androidx.compose.material.icons.rounded.Dashboard
 import androidx.compose.material.icons.rounded.Description
 import androidx.compose.material.icons.rounded.GridOn
@@ -57,6 +60,7 @@ import androidx.compose.material.icons.rounded.Lock
 import androidx.compose.material.icons.rounded.MoreVert
 import androidx.compose.material.icons.rounded.People
 import androidx.compose.material.icons.rounded.PersonAdd
+import androidx.compose.material.icons.rounded.School
 import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -113,6 +117,7 @@ import com.google.firebase.Firebase
 import com.google.firebase.auth.auth
 import com.google.firebase.firestore.FirebaseFirestore
 import com.kgps.result.backup.AutoBackupManager
+import com.kgps.result.backup.AutoBackupStatus
 import com.kgps.result.cloud.CloudSessionState
 import com.kgps.result.cloud.LocalPreviewSchoolGateway
 import com.kgps.result.cloud.SchoolCloudRepository
@@ -138,6 +143,7 @@ import com.kgps.result.ui.screens.SchoolHubScreen
 import com.kgps.result.ui.screens.SeatPlanPdfScreen
 import com.kgps.result.ui.screens.SettingsScreen
 import com.kgps.result.ui.screens.SmartCsvImportDialog
+import com.kgps.result.ui.screens.formatBackupShortTime
 import com.kgps.result.ui.screens.StudentEditorScreen
 import com.kgps.result.ui.screens.TabulationPdfScreen
 import androidx.compose.foundation.layout.widthIn
@@ -818,8 +824,8 @@ fun ResultMakerWorkspace(
                         activeSchool = activeSchool,
                         currentUserId = vm.currentUserId,
                         isLocalPreviewMode = vm.isLocalPreviewMode,
-                        permissions = permissions,
                         pendingRequestCount = joinRequests.size,
+                        backupStatus = backupStatus,
                         secondaryTitle = secondaryTitle,
                         secondaryBackTag = when {
                             isBlankSheet -> "blank_sheet_back_btn"
@@ -829,21 +835,8 @@ fun ResultMakerWorkspace(
                             else -> "settings_back_btn"
                         },
                         onBackFromSecondary = { vm.navigate(NavSection.DASHBOARD) },
+                        onBackupNow = vm::backupNowAll,
                         onOpenSettings = { vm.navigate(NavSection.SETTINGS) },
-                        onCsvImport = { vm.openCsvImport("") },
-                        onBasicImport = { vm.openBasicStudentImport("") },
-                        onAiScan = vm::openAiScanner,
-                        onAllPdf = {
-                            val allowedCls = permissions.effectiveClasses().toSet()
-                            requestPdfWithOption(
-                                students.filter { it.cls in allowedCls }.sortedWith(compareBy({ it.cls }, { it.roll })),
-                                "সব-শ্রেণির-প্রতিবেদন.pdf"
-                            )
-                        },
-                        onOpenBlankSheetPdf = vm::openBlankSheetPdf,
-                        onOpenSeatPlanPdf = vm::openSeatPlanPdf,
-                        onOpenTabulationPdf = vm::openTabulationPdf,
-                        onOpenAdmitCardPdf = vm::openAdmitCardPdf,
                         onOpenSchoolHub = onOpenSchoolHub,
                         onRequestSignOut = {
                             if (vm.isLocalPreviewMode) onSignOut() else askSignOut = true
@@ -1791,26 +1784,24 @@ private fun ResultMakerTopBar(
     activeSchool: SchoolWorkspace,
     currentUserId: String,
     isLocalPreviewMode: Boolean,
-    permissions: TeacherPermissions,
     pendingRequestCount: Int,
+    backupStatus: AutoBackupStatus,
     secondaryTitle: String?,
     secondaryBackTag: String,
     onBackFromSecondary: () -> Unit,
+    onBackupNow: () -> Unit,
     onOpenSettings: () -> Unit,
-    onCsvImport: () -> Unit,
-    onBasicImport: () -> Unit = {},
-    onAiScan: () -> Unit,
-    onAllPdf: () -> Unit,
-    onOpenBlankSheetPdf: () -> Unit,
-    onOpenSeatPlanPdf: () -> Unit = {},
-    onOpenTabulationPdf: () -> Unit = {},
-    onOpenAdmitCardPdf: () -> Unit = {},
     onOpenSchoolHub: () -> Unit,
     onRequestSignOut: () -> Unit
 ) {
     var menuOpen by remember { mutableStateOf(false) }
     val isAdmin = activeSchool.isAdmin(currentUserId)
     val isSecondary = secondaryTitle != null
+    val latestBackupMs = maxOf(
+        backupStatus.lastLocalBackupMs,
+        backupStatus.lastCsvBackupMs,
+        backupStatus.lastDriveBackupMs
+    )
 
     if (isSecondary) {
         Surface(
@@ -1904,14 +1895,34 @@ private fun ResultMakerTopBar(
         },
         actions = {
             if (!isSecondary) {
-                IconButton(
-                    onClick = onOpenSettings,
-                    modifier = Modifier.size(48.dp).testTag("top_bar_settings_btn")
+                Surface(
+                    onClick = onBackupNow,
+                    color = if (latestBackupMs > 0L) TealSoft else SlateBg,
+                    border = BorderStroke(1.dp, if (latestBackupMs > 0L) TealContainer else SlateOutline),
+                    shape = RoundedCornerShape(50),
+                    modifier = Modifier
+                        .padding(end = 2.dp)
+                        .testTag("top_bar_backup_btn")
                 ) {
-                    Icon(
-                        Icons.Rounded.Settings,
-                        contentDescription = if (pendingRequestCount > 0) "সেটিংস (${pendingRequestCount}টি নতুন অনুরোধ)" else "সেটিংস ও সদস্য"
-                    )
+                    Row(
+                        modifier = Modifier.padding(horizontal = 9.dp, vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        Icon(
+                            imageVector = if (latestBackupMs > 0L) Icons.Rounded.CloudDone else Icons.Rounded.Backup,
+                            contentDescription = "দ্রুত ব্যাকআপ",
+                            tint = if (latestBackupMs > 0L) EmeraldGrade else TealPrimary,
+                            modifier = Modifier.size(15.dp)
+                        )
+                        Text(
+                            text = "ব্যাকআপ",
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = if (latestBackupMs > 0L) TealDark else SlateText,
+                            maxLines = 1
+                        )
+                    }
                 }
 
                 Box {
@@ -1919,61 +1930,51 @@ private fun ResultMakerTopBar(
                         onClick = { menuOpen = true },
                         modifier = Modifier.size(48.dp).testTag("top_bar_menu_btn")
                     ) {
-                        Icon(Icons.Rounded.MoreVert, contentDescription = "অতিরিক্ত অপশন")
+                        Icon(Icons.Rounded.MoreVert, contentDescription = "মেনু")
                     }
                     DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
-                        if (permissions.canManageStudents) {
-                            DropdownMenuItem(
-                                text = { Text("পূর্ণাঙ্গ বেসিক ডেটা ইমপোর্ট") },
-                                onClick = { menuOpen = false; onBasicImport() },
-                                modifier = Modifier.testTag("menu_basic_student_import")
-                            )
-                            DropdownMenuItem(
-                                text = { Text("স্মার্ট CSV ইমপোর্ট") },
-                                onClick = { menuOpen = false; onCsvImport() }
-                            )
-                        }
-                        if (permissions.canManageStudents || permissions.allSubjects || permissions.effectiveSubjects().isNotEmpty()) {
-                            DropdownMenuItem(
-                                text = { Text("AI নম্বরপত্র স্ক্যান") },
-                                onClick = { menuOpen = false; onAiScan() }
-                            )
-                        }
-                        if (permissions.canExportPdf) {
-                            DropdownMenuItem(
-                                text = { Text("ফাঁকা ফর্ম / শিট PDF") },
-                                onClick = { menuOpen = false; onOpenBlankSheetPdf() }
-                            )
-                            DropdownMenuItem(
-                                text = { Text("আসন বিন্যাস (সিট প্ল্যান)") },
-                                onClick = { menuOpen = false; onOpenSeatPlanPdf() },
-                                modifier = Modifier.testTag("menu_seat_plan_pdf")
-                            )
-                            DropdownMenuItem(
-                                text = { Text("ফলাফল টেবিল (ট্যাবুলেশন)") },
-                                onClick = { menuOpen = false; onOpenTabulationPdf() },
-                                modifier = Modifier.testTag("menu_tabulation_pdf")
-                            )
-                            DropdownMenuItem(
-                                text = { Text("প্রবেশপত্র (Admit Card)") },
-                                onClick = { menuOpen = false; onOpenAdmitCardPdf() },
-                                modifier = Modifier.testTag("menu_admit_card_pdf")
-                            )
-                            DropdownMenuItem(
-                                text = { Text("সব শ্রেণির সব শিক্ষার্থীর PDF") },
-                                onClick = { menuOpen = false; onAllPdf() }
-                            )
-                        }
-                        if (permissions.canManageStudents || permissions.canExportPdf) {
-                            HorizontalDivider()
-                        }
+                        DropdownMenuItem(
+                            text = {
+                                Text(
+                                    if (pendingRequestCount > 0) {
+                                        "সেটিংস ও সদস্য (${bn(pendingRequestCount.toString())})"
+                                    } else {
+                                        "সেটিংস ও সদস্য"
+                                    }
+                                )
+                            },
+                            leadingIcon = {
+                                Icon(
+                                    Icons.Rounded.Settings,
+                                    contentDescription = null,
+                                    tint = TealPrimary
+                                )
+                            },
+                            onClick = { menuOpen = false; onOpenSettings() },
+                            modifier = Modifier.testTag("top_bar_settings_btn")
+                        )
                         DropdownMenuItem(
                             text = { Text("বিদ্যালয় পরিচিতি") },
+                            leadingIcon = {
+                                Icon(
+                                    Icons.Rounded.School,
+                                    contentDescription = null,
+                                    tint = SlateMuted
+                                )
+                            },
                             onClick = { menuOpen = false; onOpenSchoolHub() },
                             modifier = Modifier.testTag("menu_switch_school")
                         )
+                        HorizontalDivider()
                         DropdownMenuItem(
                             text = { Text("সাইন আউট", color = RoseDanger) },
+                            leadingIcon = {
+                                Icon(
+                                    Icons.AutoMirrored.Rounded.Logout,
+                                    contentDescription = null,
+                                    tint = RoseDanger
+                                )
+                            },
                             onClick = { menuOpen = false; onRequestSignOut() },
                             modifier = Modifier.testTag("menu_sign_out")
                         )

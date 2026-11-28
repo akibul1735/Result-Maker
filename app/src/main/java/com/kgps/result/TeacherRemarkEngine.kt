@@ -288,7 +288,7 @@ object TeacherRemarkEngine {
     private fun termLabel(term: Int): String = when (term) {
         1 -> "১ম প্রান্তিক"
         2 -> "২য় প্রান্তিক"
-        else -> "বার্ষিক মূল্যায়ন"
+        else -> "চূড়ান্ত মূল্যায়ন"
     }
 
     private fun computeMatchScore(p: StudentTermProfile, t: CandidateTemplate): Int {
@@ -562,12 +562,12 @@ object TeacherRemarkEngine {
             bonusPriority = 5
         )
 
-        // Term 3 / Annual Specific Combined Remarks
+        // Term 3 / Final Assessment Specific Combined Remarks
         list += CandidateTemplate(
             id = "comb_t3_exc",
-            text = "বার্ষিক মূল্যায়নে সকল বিষয়ে ধারাবাহিক উৎকর্ষ অর্জন করেছে। পরবর্তী শ্রেণিতে উত্তীর্ণ হওয়ার যোগ্য; আন্তরিক অভিনন্দন।",
+            text = "চূড়ান্ত মূল্যায়নে সকল বিষয়ে ধারাবাহিক উৎকর্ষ অর্জন করেছে। পরবর্তী শ্রেণিতে উত্তীর্ণ হওয়ার যোগ্য; আন্তরিক অভিনন্দন।",
             category = RemarkCategory.COMBINED,
-            toneLabel = "বার্ষিক উত্তীর্ণ (উৎকর্ষ)",
+            toneLabel = "চূড়ান্ত উত্তীর্ণ (উৎকর্ষ)",
             idealResults = setOf(ResultBand.EXCELLENT),
             nearbyResults = setOf(ResultBand.GOOD),
             idealAttendance = setOf(AttendanceBand.REGULAR),
@@ -578,9 +578,9 @@ object TeacherRemarkEngine {
         )
         list += CandidateTemplate(
             id = "comb_t3_good",
-            text = "বার্ষিক মূল্যায়নে উত্তম ফলাফল ও প্রশংসনীয় আচরণ প্রদর্শন করেছে। পরবর্তী শ্রেণির জন্য শুভকামনা ও অভিনন্দন।",
+            text = "চূড়ান্ত মূল্যায়নে উত্তম ফলাফল ও প্রশংসনীয় আচরণ প্রদর্শন করেছে। পরবর্তী শ্রেণির জন্য শুভকামনা ও অভিনন্দন।",
             category = RemarkCategory.COMBINED,
-            toneLabel = "বার্ষিক উত্তীর্ণ (উত্তম)",
+            toneLabel = "চূড়ান্ত উত্তীর্ণ (উত্তম)",
             idealResults = setOf(ResultBand.GOOD),
             nearbyResults = setOf(ResultBand.EXCELLENT),
             idealAttendance = setOf(AttendanceBand.REGULAR, AttendanceBand.MODERATE),
@@ -590,9 +590,9 @@ object TeacherRemarkEngine {
         )
         list += CandidateTemplate(
             id = "comb_t3_avg",
-            text = "বার্ষিক মূল্যায়নে সন্তোষজনক ফলাফল অর্জন করেছে। পরবর্তী শ্রেণিতে আরও ভালো করার লক্ষ্যে নিয়মিত অনুশীলন প্রয়োজন।",
+            text = "চূড়ান্ত মূল্যায়নে সন্তোষজনক ফলাফল অর্জন করেছে। পরবর্তী শ্রেণিতে আরও ভালো করার লক্ষ্যে নিয়মিত অনুশীলন প্রয়োজন।",
             category = RemarkCategory.COMBINED,
-            toneLabel = "বার্ষিক অগ্রগতি",
+            toneLabel = "চূড়ান্ত অগ্রগতি",
             idealResults = setOf(ResultBand.AVERAGE),
             nearbyResults = setOf(ResultBand.GOOD),
             preferredTerms = setOf(3),
@@ -600,9 +600,9 @@ object TeacherRemarkEngine {
         )
         list += CandidateTemplate(
             id = "comb_t3_supp",
-            text = "বার্ষিক মূল্যায়নে ফলাফল উন্নতির সুযোগ রয়েছে। আগামী শিক্ষাবর্ষের শুরু থেকেই নিয়মিত উপস্থিতি ও নিবিড় অনুশীলন জরুরি।",
+            text = "চূড়ান্ত মূল্যায়নে ফলাফল উন্নতির সুযোগ রয়েছে। আগামী শিক্ষাবর্ষের শুরু থেকেই নিয়মিত উপস্থিতি ও নিবিড় অনুশীলন জরুরি।",
             category = RemarkCategory.COMBINED,
-            toneLabel = "বার্ষিক পরামর্শ",
+            toneLabel = "চূড়ান্ত পরামর্শ",
             idealResults = setOf(ResultBand.NEEDS_SUPPORT),
             nearbyResults = setOf(ResultBand.AVERAGE),
             preferredTerms = setOf(3),

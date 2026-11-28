@@ -185,7 +185,7 @@ fun DashboardScreen(
         1 -> "১ম প্রান্তিক"
         2 -> "২য় প্রান্তিক"
         3 -> "৩য় প্রান্তিক"
-        else -> "বার্ষিক গড়"
+        else -> "চূড়ান্ত মূল্যায়ন"
     }
 
     val latestBackupMs = maxOf(
@@ -398,11 +398,8 @@ fun DashboardScreen(
                         evaluatedCount = summary.evaluatedInScope,
                         classCount = visibleClasses.size,
                         avgAttendancePct = summary.avgAttendancePct,
-                        latestBackupMs = latestBackupMs,
                         isRestricted = isRestricted,
-                        permissionsSummary = permissions.summaryBn(),
-                        onBackupNow = onBackupNowAll,
-                        onOpenSettings = onOpenSettings
+                        permissionsSummary = permissions.summaryBn()
                     )
                     ScopeFilterCard(
                         settings = settings,
@@ -465,11 +462,8 @@ fun DashboardScreen(
                         evaluatedCount = summary.evaluatedInScope,
                         classCount = visibleClasses.size,
                         avgAttendancePct = summary.avgAttendancePct,
-                        latestBackupMs = latestBackupMs,
                         isRestricted = isRestricted,
-                        permissionsSummary = permissions.summaryBn(),
-                        onBackupNow = onBackupNowAll,
-                        onOpenSettings = onOpenSettings
+                        permissionsSummary = permissions.summaryBn()
                     )
                 }
 
@@ -602,11 +596,8 @@ private fun DashboardHeroCard(
     evaluatedCount: Int,
     classCount: Int,
     avgAttendancePct: Double?,
-    latestBackupMs: Long,
     isRestricted: Boolean,
-    permissionsSummary: String,
-    onBackupNow: () -> Unit,
-    onOpenSettings: () -> Unit
+    permissionsSummary: String
 ) {
     Surface(
         shape = RoundedCornerShape(18.dp),
@@ -666,48 +657,6 @@ private fun DashboardHeroCard(
                         color = Color.White.copy(alpha = 0.8f),
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
-                    )
-                }
-
-                Surface(
-                    onClick = onBackupNow,
-                    color = Color.White.copy(alpha = 0.15f),
-                    shape = RoundedCornerShape(50),
-                    modifier = Modifier.testTag("dash_hero_backup_pill")
-                ) {
-                    Row(
-                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(4.dp)
-                    ) {
-                        Icon(
-                            if (latestBackupMs > 0L) Icons.Rounded.CloudDone else Icons.Rounded.Backup,
-                            contentDescription = "দ্রুত ব্যাকআপ",
-                            tint = TealContainer,
-                            modifier = Modifier.size(13.dp)
-                        )
-                        Text(
-                            text = if (latestBackupMs > 0L) formatBackupShortTime(latestBackupMs) else "ব্যাকআপ",
-                            fontSize = 10.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            color = Color.White,
-                            maxLines = 1
-                        )
-                    }
-                }
-
-                IconButton(
-                    onClick = onOpenSettings,
-                    modifier = Modifier
-                        .size(40.dp)
-                        .minimumInteractiveComponentSize()
-                        .testTag("dash_backup_settings_btn")
-                ) {
-                    Icon(
-                        Icons.Rounded.Settings,
-                        contentDescription = "সেটিংস",
-                        tint = Color.White,
-                        modifier = Modifier.size(19.dp)
                     )
                 }
             }
@@ -837,7 +786,7 @@ private fun ScopeFilterCard(
                     horizontalArrangement = Arrangement.spacedBy(3.dp)
                 ) {
                     listOf(
-                        0 to "বার্ষিক",
+                        0 to "চূড়ান্ত মূল্যায়ন",
                         1 to "১ম প্রান্তিক",
                         2 to "২য় প্রান্তিক",
                         3 to "৩য় প্রান্তিক"
@@ -849,13 +798,13 @@ private fun ScopeFilterCard(
                             shadowElevation = if (sel) 1.dp else 0.dp,
                             shape = RoundedCornerShape(8.dp),
                             modifier = Modifier
-                                .weight(1f)
+                                .weight(if (t == 0) 1.32f else 1f)
                                 .defaultMinSize(minHeight = 32.dp)
                         ) {
                             Box(contentAlignment = Alignment.Center, modifier = Modifier.padding(vertical = 5.dp, horizontal = 3.dp)) {
                                 Text(
                                     text = lbl,
-                                    fontSize = 10.5.sp,
+                                    fontSize = 10.sp,
                                     fontWeight = if (sel) FontWeight.Bold else FontWeight.Medium,
                                     color = if (sel) TealDark else SlateMuted,
                                     maxLines = 1,

@@ -367,7 +367,7 @@ object TabulationPlanner {
         val yearStr = formatDigits(settings.year.ifBlank { "2026" }, config.numeralMode)
         val scopeTitle = config.customTitle.trim().ifBlank {
             when (config.termScope) {
-                TabulationTermScope.FINAL_AVG -> "চূড়ান্ত ফলাফল সারসংক্ষেপ (বার্ষিক গড়) — $yearStr"
+                TabulationTermScope.FINAL_AVG -> "চূড়ান্ত মূল্যায়ন সারসংক্ষেপ — $yearStr"
                 else -> "${config.termScope.labelBn} ফলাফল ট্যাবুলেশন — $yearStr"
             }
         }

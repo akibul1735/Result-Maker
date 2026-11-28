@@ -417,7 +417,7 @@ object Repo {
     }
 
     private fun summaryHeaders(style: CsvHeaderStyle): List<String> = when (style) {
-        CsvHeaderStyle.FRIENDLY_BN -> listOf("বার্ষিক গড় (%)", "সামগ্রিক গ্রেড")
+        CsvHeaderStyle.FRIENDLY_BN -> listOf("চূড়ান্ত মূল্যায়ন (%)", "সামগ্রিক গ্রেড")
         CsvHeaderStyle.FRIENDLY_EN -> listOf("Overall Avg (%)", "Overall Grade")
         CsvHeaderStyle.SYSTEM_KEYS -> emptyList()
     }

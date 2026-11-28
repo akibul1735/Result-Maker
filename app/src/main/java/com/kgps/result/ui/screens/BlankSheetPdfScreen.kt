@@ -293,7 +293,7 @@ fun BlankSheetPdfScreen(
         } else {
             when (config.term) {
                 1, 2, 3 -> termNameBn(config.term)
-                0 -> "বার্ষিক"
+                0 -> "চূড়ান্ত মূল্যায়ন"
                 -1 -> config.customTermTitle.ifBlank { "শিরোনামহীন" }
                 else -> "শিরোনামহীন"
             }

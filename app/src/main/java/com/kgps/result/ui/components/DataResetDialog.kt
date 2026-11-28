@@ -464,7 +464,7 @@ fun DataResetDialog(
                                             listOf(
                                                 1 to "১ম প্রান্তিক",
                                                 2 to "২য় প্রান্তিক",
-                                                3 to "৩য়/বার্ষিক"
+                                                3 to "৩য় প্রান্তিক"
                                             ).forEach { (term, label) ->
                                                 val sel = term in request.selectedTerms
                                                 FilterChip(

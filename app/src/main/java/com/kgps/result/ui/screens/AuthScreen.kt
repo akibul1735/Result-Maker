@@ -148,7 +148,7 @@ fun AuthScreen(
                             AuthFeatureRow(
                                 icon = Icons.Rounded.PictureAsPdf,
                                 title = "NCTB A4 বুকলেট PDF",
-                                subtitle = "সকল শ্রেণির প্রান্তিক ও বার্ষিক প্রতিবেদন এক ক্লিকে প্রিন্টযোগ্য PDF।"
+                                subtitle = "সকল শ্রেণির প্রান্তিক ও চূড়ান্ত মূল্যায়ন প্রতিবেদন এক ক্লিকে প্রিন্টযোগ্য PDF।"
                             )
                         }
                     }

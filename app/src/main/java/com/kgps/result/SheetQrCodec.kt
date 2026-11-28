@@ -736,7 +736,7 @@ object SheetQrCodec {
             meta.sheetKind == ClassSheetKind.THREE_TERM_MARKS -> "৩ প্রান্তিক"
             isMultiTermTraits -> "৩ প্রান্তিক"
             meta.term in 1..3 -> termNameBn(meta.term)
-            else -> "বার্ষিক/সাধারণ"
+            else -> "চূড়ান্ত মূল্যায়ন/সাধারণ"
         }
         val colListStr = columnHeaderDescription(meta).joinToString(" | ")
         val hasBreakdown = meta.columnIds.any { it in setOf("TB", "ACT", "LANG", "CT") }
