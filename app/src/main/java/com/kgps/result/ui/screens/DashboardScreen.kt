@@ -145,8 +145,9 @@ fun DashboardScreen(
     var activeAnalyticsTab by remember { mutableStateOf(DashboardAnalyticsTab.MERIT) }
     var showMoreTools by remember { mutableStateOf(false) }
     var showBatchDialog by remember { mutableStateOf(false) }
+    var showImportChooserDialog by remember { mutableStateOf(false) }
     var showTieDialog by remember { mutableStateOf(false) }
-    var toolUsageStats by remember(context) { mutableStateOf(DashboardToolUsageStore.loadStats(context)) }
+    val sessionToolUsageStats = remember(context) { DashboardToolUsageStore.getSessionSnapshotStats(context) }
 
     val sortedAllowedStudents = remember(students, visibleClasses) {
         val allowed = visibleClasses.toSet()
@@ -188,26 +189,15 @@ fun DashboardScreen(
         else -> "চূড়ান্ত মূল্যায়ন"
     }
 
-    val latestBackupMs = maxOf(
-        backupStatus.lastLocalBackupMs,
-        backupStatus.lastCsvBackupMs,
-        backupStatus.lastDriveBackupMs
-    )
-
     val allToolSpecs = remember(
         permissions,
         canScanSheet,
-        latestBackupMs,
-        onBasicStudentImport,
-        onCsvImport,
         onBatchEdit,
         onAiScan,
-        onAllPdf,
         onOpenBlankSheetPdf,
         onOpenSeatPlanPdf,
         onOpenTabulationPdf,
-        onOpenAdmitCardPdf,
-        onBackupNowAll
+        onOpenAdmitCardPdf
     ) {
         buildList {
             if (permissions.canExportPdf) {
@@ -265,23 +255,11 @@ fun DashboardScreen(
             if (permissions.canExportPdf) {
                 add(
                     QuickToolSpec(
-                        id = DashboardQuickToolId.ALL_PDF,
-                        icon = Icons.Rounded.Description,
-                        shortTitle = "সব PDF",
-                        title = "সব শ্রেণির PDF",
-                        subtitle = "এক ফাইলে সব",
-                        tint = TealPrimary,
-                        testTag = "dash_all_pdf_btn",
-                        onClick = onAllPdf
-                    )
-                )
-                add(
-                    QuickToolSpec(
-                        id = DashboardQuickToolId.BATCH_PRINT,
+                        id = DashboardQuickToolId.REPORT_CARD,
                         icon = Icons.Rounded.LibraryBooks,
-                        shortTitle = "ব্যাচ প্রিন্ট",
-                        title = "ব্যাচ প্রিন্ট / PDF",
-                        subtitle = "শ্রেণি বা কাস্টম",
+                        shortTitle = "রিপোর্ট কার্ড",
+                        title = "রিপোর্ট কার্ড",
+                        subtitle = "ব্যাচ ও সব শ্রেণির PDF",
                         tint = AmberNotice,
                         testTag = "dash_batch_print_btn",
                         onClick = { showBatchDialog = true }
@@ -315,56 +293,32 @@ fun DashboardScreen(
                 )
                 add(
                     QuickToolSpec(
-                        id = DashboardQuickToolId.CSV_IMPORT,
+                        id = DashboardQuickToolId.DATA_IMPORT,
                         icon = Icons.Rounded.UploadFile,
-                        shortTitle = "CSV ইমপোর্ট",
-                        title = "CSV ইমপোর্ট",
-                        subtitle = "ফাইল / টেক্সট",
+                        shortTitle = "তথ্য ইমপোর্ট",
+                        title = "তথ্য ইমপোর্ট",
+                        subtitle = "CSV ও বেসিক প্রোফাইল",
                         tint = TealPrimary,
-                        testTag = "dash_csv_import_btn",
-                        onClick = onCsvImport
-                    )
-                )
-                add(
-                    QuickToolSpec(
-                        id = DashboardQuickToolId.BASIC_IMPORT,
-                        icon = Icons.Rounded.Badge,
-                        shortTitle = "বেসিক ইমপোর্ট",
-                        title = "বেসিক ইমপোর্ট",
-                        subtitle = "পূর্ণ প্রোফাইল",
-                        tint = TealDark,
-                        testTag = "dash_basic_import_btn",
-                        onClick = onBasicStudentImport
+                        testTag = "dash_import_tools_btn",
+                        onClick = { showImportChooserDialog = true }
                     )
                 )
             }
-            add(
-                QuickToolSpec(
-                    id = DashboardQuickToolId.BACKUP_NOW,
-                    icon = if (latestBackupMs > 0L) Icons.Rounded.CloudDone else Icons.Rounded.Backup,
-                    shortTitle = "ব্যাকআপ",
-                    title = "দ্রুত ব্যাকআপ",
-                    subtitle = formatBackupShortTime(latestBackupMs),
-                    tint = EmeraldGrade,
-                    testTag = "dash_backup_now_btn",
-                    onClick = onBackupNowAll
-                )
-            )
         }
     }
 
-    val (primaryTools, moreTools) = remember(allToolSpecs, toolUsageStats) {
+    val (primaryTools, moreTools) = remember(allToolSpecs, sessionToolUsageStats) {
         val specMap = allToolSpecs.associateBy { it.id }
         val (topIds, restIds) = partitionQuickTools(
             availableIds = allToolSpecs.map { it.id },
-            stats = toolUsageStats,
+            stats = sessionToolUsageStats,
             primaryLimit = 4
         )
         topIds.mapNotNull { specMap[it] } to restIds.mapNotNull { specMap[it] }
     }
 
     val handleToolClick: (QuickToolSpec) -> Unit = { spec ->
-        toolUsageStats = DashboardToolUsageStore.recordUsage(context, spec.id)
+        DashboardToolUsageStore.recordUsage(context, spec.id)
         spec.onClick()
     }
 
@@ -541,6 +495,20 @@ fun DashboardScreen(
             onPrintBatch = onPrintBatch,
             onExportBatchPdf = onExportBatchPdf,
             onDismiss = { showBatchDialog = false }
+        )
+    }
+
+    if (showImportChooserDialog) {
+        ImportToolsChooserDialog(
+            onSelectCsvImport = {
+                showImportChooserDialog = false
+                onCsvImport()
+            },
+            onSelectBasicImport = {
+                showImportChooserDialog = false
+                onBasicStudentImport()
+            },
+            onDismiss = { showImportChooserDialog = false }
         )
     }
 }
@@ -1095,6 +1063,115 @@ private fun SecondaryToolTile(
             }
         }
     }
+}
+
+@Composable
+private fun ImportToolsChooserDialog(
+    onSelectCsvImport: () -> Unit,
+    onSelectBasicImport: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    androidx.compose.material3.AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Text(
+                "তথ্য ইমপোর্ট ধরন বেছে নিন",
+                fontWeight = FontWeight.Bold,
+                fontSize = 16.sp,
+                color = SlateText
+            )
+        },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Surface(
+                    onClick = onSelectCsvImport,
+                    color = SlateBg,
+                    border = BorderStroke(1.dp, SlateOutline),
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .defaultMinSize(minHeight = 56.dp)
+                        .testTag("dash_csv_import_btn")
+                ) {
+                    Row(
+                        modifier = Modifier.padding(12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        Surface(color = TealSoft, shape = RoundedCornerShape(9.dp)) {
+                            Icon(
+                                Icons.Rounded.UploadFile,
+                                contentDescription = null,
+                                tint = TealPrimary,
+                                modifier = Modifier.padding(8.dp).size(20.dp)
+                            )
+                        }
+                        Column(Modifier.weight(1f)) {
+                            Text(
+                                "স্মার্ট CSV ইমপোর্ট",
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 13.sp,
+                                color = SlateText
+                            )
+                            Text(
+                                "CSV ফাইল বা টেক্সট থেকে নম্বর ও শিক্ষার্থী",
+                                fontSize = 11.sp,
+                                color = SlateMuted
+                            )
+                        }
+                    }
+                }
+
+                Surface(
+                    onClick = onSelectBasicImport,
+                    color = SlateBg,
+                    border = BorderStroke(1.dp, SlateOutline),
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .defaultMinSize(minHeight = 56.dp)
+                        .testTag("dash_basic_import_btn")
+                ) {
+                    Row(
+                        modifier = Modifier.padding(12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        Surface(color = TealSoft, shape = RoundedCornerShape(9.dp)) {
+                            Icon(
+                                Icons.Rounded.Badge,
+                                contentDescription = null,
+                                tint = TealDark,
+                                modifier = Modifier.padding(8.dp).size(20.dp)
+                            )
+                        }
+                        Column(Modifier.weight(1f)) {
+                            Text(
+                                "বেসিক প্রোফাইল ইমপোর্ট",
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 13.sp,
+                                color = SlateText
+                            )
+                            Text(
+                                "শিক্ষার্থীর পূর্ণাঙ্গ প্রোফাইল তালিকা যোগ",
+                                fontSize = 11.sp,
+                                color = SlateMuted
+                            )
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {},
+        dismissButton = {
+            androidx.compose.material3.TextButton(
+                onClick = onDismiss,
+                modifier = Modifier.defaultMinSize(minHeight = 48.dp)
+            ) {
+                Text("বন্ধ করুন", fontWeight = FontWeight.SemiBold)
+            }
+        }
+    )
 }
 
 @Composable

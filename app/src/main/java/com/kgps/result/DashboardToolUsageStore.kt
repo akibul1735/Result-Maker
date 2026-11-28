@@ -10,13 +10,10 @@ enum class DashboardQuickToolId(
     ADMIT_CARD_PDF("admit_card_pdf", 1),
     BLANK_SHEET_PDF("blank_sheet_pdf", 2),
     AI_SCAN("ai_scan", 3),
-    ALL_PDF("all_pdf", 4),
-    BATCH_PRINT("batch_print", 5),
-    SEAT_PLAN_PDF("seat_plan_pdf", 6),
-    BACKUP_NOW("backup_now", 7),
-    BATCH_EDIT("batch_edit", 8),
-    CSV_IMPORT("csv_import", 9),
-    BASIC_IMPORT("basic_import", 10)
+    REPORT_CARD("report_card", 4),
+    SEAT_PLAN_PDF("seat_plan_pdf", 5),
+    BATCH_EDIT("batch_edit", 6),
+    DATA_IMPORT("data_import", 7)
 }
 
 data class ToolUsageStat(
@@ -42,27 +39,74 @@ object DashboardToolUsageStore {
     private const val KEY_COUNT_PREFIX = "count_"
     private const val KEY_LAST_PREFIX = "last_"
 
-    fun loadStats(context: Context): Map<DashboardQuickToolId, ToolUsageStat> {
-        val prefs = context.applicationContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-        return DashboardQuickToolId.entries.associateWith { id ->
-            ToolUsageStat(
-                count = prefs.getInt(KEY_COUNT_PREFIX + id.key, 0).coerceAtLeast(0),
-                lastUsedMs = prefs.getLong(KEY_LAST_PREFIX + id.key, 0L).coerceAtLeast(0L)
-            )
+    @Volatile
+    private var sessionSnapshot: Map<DashboardQuickToolId, ToolUsageStat>? = null
+
+    /**
+     * Loads and freezes tool usage stats for the current app session so quick-action positions
+     * remain stable while working, and updates take effect on the next app session.
+     */
+    fun getSessionSnapshotStats(context: Context): Map<DashboardQuickToolId, ToolUsageStat> {
+        sessionSnapshot?.let { return it }
+        return synchronized(this) {
+            sessionSnapshot ?: loadFromPrefs(context).also { sessionSnapshot = it }
         }
     }
 
+    fun loadFromPrefs(context: Context): Map<DashboardQuickToolId, ToolUsageStat> {
+        val prefs = context.applicationContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        return DashboardQuickToolId.entries.associateWith { id ->
+            when (id) {
+                DashboardQuickToolId.REPORT_CARD -> {
+                    val c = prefs.getInt(KEY_COUNT_PREFIX + id.key, 0).coerceAtLeast(0) +
+                        prefs.getInt(KEY_COUNT_PREFIX + "batch_print", 0).coerceAtLeast(0) +
+                        prefs.getInt(KEY_COUNT_PREFIX + "all_pdf", 0).coerceAtLeast(0)
+                    val l = maxOf(
+                        prefs.getLong(KEY_LAST_PREFIX + id.key, 0L).coerceAtLeast(0L),
+                        prefs.getLong(KEY_LAST_PREFIX + "batch_print", 0L).coerceAtLeast(0L),
+                        prefs.getLong(KEY_LAST_PREFIX + "all_pdf", 0L).coerceAtLeast(0L)
+                    )
+                    ToolUsageStat(count = c, lastUsedMs = l)
+                }
+
+                DashboardQuickToolId.DATA_IMPORT -> {
+                    val c = prefs.getInt(KEY_COUNT_PREFIX + id.key, 0).coerceAtLeast(0) +
+                        prefs.getInt(KEY_COUNT_PREFIX + "csv_import", 0).coerceAtLeast(0) +
+                        prefs.getInt(KEY_COUNT_PREFIX + "basic_import", 0).coerceAtLeast(0)
+                    val l = maxOf(
+                        prefs.getLong(KEY_LAST_PREFIX + id.key, 0L).coerceAtLeast(0L),
+                        prefs.getLong(KEY_LAST_PREFIX + "csv_import", 0L).coerceAtLeast(0L),
+                        prefs.getLong(KEY_LAST_PREFIX + "basic_import", 0L).coerceAtLeast(0L)
+                    )
+                    ToolUsageStat(count = c, lastUsedMs = l)
+                }
+
+                else -> ToolUsageStat(
+                    count = prefs.getInt(KEY_COUNT_PREFIX + id.key, 0).coerceAtLeast(0),
+                    lastUsedMs = prefs.getLong(KEY_LAST_PREFIX + id.key, 0L).coerceAtLeast(0L)
+                )
+            }
+        }
+    }
+
+    /**
+     * Persists the incremented usage count to SharedPreferences without mutating the current
+     * session snapshot, so reordering only applies on the next session.
+     */
     fun recordUsage(
         context: Context,
         toolId: DashboardQuickToolId,
         nowMs: Long = System.currentTimeMillis()
-    ): Map<DashboardQuickToolId, ToolUsageStat> {
+    ) {
         val prefs = context.applicationContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
         val nextCount = prefs.getInt(KEY_COUNT_PREFIX + toolId.key, 0).coerceAtLeast(0) + 1
         prefs.edit()
             .putInt(KEY_COUNT_PREFIX + toolId.key, nextCount)
             .putLong(KEY_LAST_PREFIX + toolId.key, nowMs)
             .apply()
-        return loadStats(context)
+    }
+
+    internal fun resetSessionSnapshotForTest() {
+        sessionSnapshot = null
     }
 }
