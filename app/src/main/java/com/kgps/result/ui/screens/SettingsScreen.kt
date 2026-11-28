@@ -119,6 +119,7 @@ import com.kgps.result.activeClassIds
 import com.kgps.result.activeSchoolClasses
 import com.kgps.result.ai.DiscoveredGeminiModel
 import com.kgps.result.backup.AutoBackupStatus
+import com.kgps.result.backup.BackupFileRetentionMode
 import com.kgps.result.backup.BackupScheduleConfig
 import com.kgps.result.backup.BackupSystemKind
 import com.kgps.result.backup.CsvBackupFormat
@@ -227,6 +228,7 @@ fun SettingsScreen(
     onSelectCsvHeaderStyle: (CsvHeaderStyle) -> Unit,
     onSelectCsvBackupFormat: (CsvBackupFormat) -> Unit,
     onUpdateBackupSchedule: (BackupSystemKind, BackupScheduleConfig) -> Unit,
+    onUpdateBackupRetentionMode: (BackupSystemKind, BackupFileRetentionMode) -> Unit = { _, _ -> },
     onBackupNowAll: () -> Unit,
     onBackupLocalNow: () -> Unit,
     onBackupDriveNow: () -> Unit,
@@ -1478,6 +1480,7 @@ fun SettingsScreen(
                     onSelectCsvHeaderStyle = onSelectCsvHeaderStyle,
                     onSelectCsvBackupFormat = onSelectCsvBackupFormat,
                     onUpdateBackupSchedule = onUpdateBackupSchedule,
+                    onUpdateBackupRetentionMode = onUpdateBackupRetentionMode,
                     formatTime = ::formatTimeBn
                 )
             }

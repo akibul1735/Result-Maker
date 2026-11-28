@@ -83,6 +83,7 @@ import com.kgps.result.activeClassIds
 import com.kgps.result.ai.DiscoveredGeminiModel
 import com.kgps.result.ai.GeminiApiConfig
 import com.kgps.result.backup.AutoBackupStatus
+import com.kgps.result.backup.BackupFileRetentionMode
 import com.kgps.result.backup.BackupScheduleCalculator
 import com.kgps.result.backup.BackupScheduleConfig
 import com.kgps.result.backup.BackupScheduleMode
@@ -653,6 +654,7 @@ internal fun SettingsAutoBackupContent(
     onSelectCsvHeaderStyle: (CsvHeaderStyle) -> Unit,
     onSelectCsvBackupFormat: (CsvBackupFormat) -> Unit,
     onUpdateBackupSchedule: (BackupSystemKind, BackupScheduleConfig) -> Unit,
+    onUpdateBackupRetentionMode: (BackupSystemKind, BackupFileRetentionMode) -> Unit = { _, _ -> },
     formatTime: (Long) -> String
 ) {
     TreeBranchItem(isLast = false) {
@@ -738,6 +740,14 @@ internal fun SettingsAutoBackupContent(
                     enabled = backupStatus.localEnabled,
                     segmentBackgroundColor = Color.White,
                     onUpdateSchedule = { cfg -> onUpdateBackupSchedule(BackupSystemKind.LOCAL, cfg) }
+                )
+
+                BackupRetentionModeSelector(
+                    kind = BackupSystemKind.LOCAL,
+                    selectedMode = backupStatus.localRetentionMode,
+                    enabled = backupStatus.localEnabled,
+                    segmentBackgroundColor = Color.White,
+                    onSelectMode = { mode -> onUpdateBackupRetentionMode(BackupSystemKind.LOCAL, mode) }
                 )
 
                 Row(horizontalArrangement = Arrangement.spacedBy(5.dp), modifier = Modifier.fillMaxWidth()) {
@@ -834,6 +844,14 @@ internal fun SettingsAutoBackupContent(
                     enabled = backupStatus.driveEnabled,
                     segmentBackgroundColor = Color.White,
                     onUpdateSchedule = { cfg -> onUpdateBackupSchedule(BackupSystemKind.DRIVE, cfg) }
+                )
+
+                BackupRetentionModeSelector(
+                    kind = BackupSystemKind.DRIVE,
+                    selectedMode = backupStatus.driveRetentionMode,
+                    enabled = backupStatus.driveEnabled,
+                    segmentBackgroundColor = Color.White,
+                    onSelectMode = { mode -> onUpdateBackupRetentionMode(BackupSystemKind.DRIVE, mode) }
                 )
 
                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.fillMaxWidth()) {
@@ -969,6 +987,14 @@ internal fun SettingsAutoBackupContent(
                     onUpdateSchedule = { cfg -> onUpdateBackupSchedule(BackupSystemKind.CSV, cfg) }
                 )
 
+                BackupRetentionModeSelector(
+                    kind = BackupSystemKind.CSV,
+                    selectedMode = backupStatus.csvRetentionMode,
+                    enabled = backupStatus.csvEnabled,
+                    segmentBackgroundColor = Color.White,
+                    onSelectMode = { mode -> onUpdateBackupRetentionMode(BackupSystemKind.CSV, mode) }
+                )
+
                 HorizontalDivider(color = SlateOutline.copy(alpha = 0.65f))
 
                 CsvHeaderStyleSelector(
@@ -1011,6 +1037,77 @@ internal fun SettingsAutoBackupContent(
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun BackupRetentionModeSelector(
+    kind: BackupSystemKind,
+    selectedMode: BackupFileRetentionMode,
+    enabled: Boolean,
+    segmentBackgroundColor: Color,
+    onSelectMode: (BackupFileRetentionMode) -> Unit
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Text(
+            text = "ফাইল সংরক্ষণ মোড:",
+            fontSize = 10.5.sp,
+            fontWeight = FontWeight.SemiBold,
+            color = if (enabled) SlateText else SlateMuted
+        )
+        Surface(
+            color = segmentBackgroundColor,
+            border = BorderStroke(1.dp, SlateOutline),
+            shape = RoundedCornerShape(9.dp),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(2.dp),
+                horizontalArrangement = Arrangement.spacedBy(2.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                BackupFileRetentionMode.entries.forEach { mode ->
+                    val selected = selectedMode == mode
+                    Box(
+                        contentAlignment = Alignment.Center,
+                        modifier = Modifier
+                            .weight(1f)
+                            .heightIn(min = 48.dp)
+                            .clip(RoundedCornerShape(7.dp))
+                            .background(
+                                when {
+                                    selected && enabled -> TealPrimary
+                                    selected -> TealPrimary.copy(alpha = 0.55f)
+                                    else -> Color.Transparent
+                                }
+                            )
+                            .clickable { onSelectMode(mode) }
+                            .testTag("settings_backup_retention_${kind.name.lowercase()}_${mode.id}")
+                            .padding(horizontal = 4.dp, vertical = 4.dp)
+                    ) {
+                        Text(
+                            text = mode.shortBn,
+                            fontSize = 10.5.sp,
+                            fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
+                            color = if (selected) Color.White else SlateText,
+                            maxLines = 1,
+                            softWrap = false,
+                            overflow = TextOverflow.Ellipsis,
+                            textAlign = TextAlign.Center
+                        )
+                    }
+                }
+            }
+        }
+        Text(
+            text = selectedMode.descBn,
+            fontSize = 9.5.sp,
+            color = if (enabled) TealDark else SlateMuted,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis
+        )
     }
 }
 

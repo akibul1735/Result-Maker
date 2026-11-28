@@ -30,6 +30,7 @@ import com.kgps.result.ai.VisionImageOptimizer
 import com.kgps.result.ai.validateScannedStudentRow
 import com.kgps.result.backup.AutoBackupManager
 import com.kgps.result.backup.AutoBackupStatus
+import com.kgps.result.backup.BackupFileRetentionMode
 import com.kgps.result.backup.BackupScheduleConfig
 import com.kgps.result.backup.BackupScheduleMode
 import com.kgps.result.backup.BackupSystemKind
@@ -2067,6 +2068,20 @@ class ResultMakerViewModel(
             "${config.mode.shortBn} · ${com.kgps.result.backup.BackupScheduleCalculator.formatTime12hBn(config.hour, config.minute)}"
         }
         showMessage("$kindLabel সময়সূচি: $scheduleDesc")
+    }
+
+    fun setBackupRetentionMode(kind: BackupSystemKind, mode: BackupFileRetentionMode) {
+        when (kind) {
+            BackupSystemKind.LOCAL -> autoBackupManager.setLocalRetentionMode(mode)
+            BackupSystemKind.DRIVE -> autoBackupManager.setDriveRetentionMode(mode)
+            BackupSystemKind.CSV -> autoBackupManager.setCsvRetentionMode(mode)
+        }
+        val kindLabel = when (kind) {
+            BackupSystemKind.LOCAL -> "লোকাল JSON"
+            BackupSystemKind.DRIVE -> "Google Drive"
+            BackupSystemKind.CSV -> if (autoBackupManager.status.value.csvBackupFormat == CsvBackupFormat.EXCEL) "Excel" else "CSV"
+        }
+        showMessage("$kindLabel ফাইল মোড: ${mode.shortBn}")
     }
 
     fun backupLocalNow() {

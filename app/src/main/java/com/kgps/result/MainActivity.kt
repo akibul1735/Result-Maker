@@ -1570,6 +1570,7 @@ fun ResultMakerWorkspace(
                                     onSelectCsvHeaderStyle = vm::setCsvHeaderStyle,
                                     onSelectCsvBackupFormat = vm::setCsvBackupFormat,
                                     onUpdateBackupSchedule = vm::updateBackupSchedule,
+                                    onUpdateBackupRetentionMode = vm::setBackupRetentionMode,
                                     onBackupNowAll = vm::backupNowAll,
                                     onBackupLocalNow = vm::backupLocalNow,
                                     onBackupDriveNow = vm::backupDriveNow,

@@ -38,6 +38,51 @@ enum class BackupSystemKind {
     CSV
 }
 
+enum class BackupFileRetentionMode(
+    val id: String,
+    val shortBn: String,
+    val descBn: String
+) {
+    SINGLE_LATEST(
+        id = "single",
+        shortBn = "১টি ফাইল (আপডেট)",
+        descBn = "একই স্থায়ী ফাইলে সর্বশেষ ব্যাকআপ আপডেট হবে, প্রতিদিন নতুন ফাইল জমবে না"
+    ),
+    DAILY_HISTORY(
+        id = "daily",
+        shortBn = "একাধিক (দৈনিক)",
+        descBn = "প্রতিদিন আলাদা তারিখের নামে ফাইল সংরক্ষিত হবে (সর্বোচ্চ ১৪ দিন)"
+    );
+
+    companion object {
+        fun fromId(id: String?): BackupFileRetentionMode =
+            entries.firstOrNull { it.id == id } ?: SINGLE_LATEST
+    }
+}
+
+object BackupFileNaming {
+    fun sanitizeSchoolCode(schoolCode: String): String =
+        schoolCode.replace(Regex("[^A-Za-z0-9]"), "").ifBlank { "SCHOOL" }
+
+    fun formatDateTag(nowMs: Long): String =
+        SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date(nowMs))
+
+    fun resolveBackupFileName(
+        schoolCode: String,
+        extensionWithDot: String,
+        mode: BackupFileRetentionMode,
+        nowMs: Long = System.currentTimeMillis()
+    ): String {
+        val safeCode = sanitizeSchoolCode(schoolCode)
+        val normalizedExt = if (extensionWithDot.startsWith(".")) extensionWithDot else ".$extensionWithDot"
+        return when (mode) {
+            BackupFileRetentionMode.SINGLE_LATEST -> "ResultMaker_${safeCode}_latest$normalizedExt"
+            BackupFileRetentionMode.DAILY_HISTORY -> "ResultMaker_${safeCode}_${formatDateTag(nowMs)}$normalizedExt"
+        }
+    }
+}
+
+
 enum class CsvBackupFormat(
     val id: String,
     val labelBn: String,
@@ -246,6 +291,7 @@ data class AutoBackupStatus(
         minute = 0,
         dayOfWeek = Calendar.FRIDAY
     ),
+    val localRetentionMode: BackupFileRetentionMode = BackupFileRetentionMode.SINGLE_LATEST,
     val lastLocalBackupMs: Long = 0L,
     val lastLocalFileName: String = "",
     val lastLocalError: String? = null,
@@ -261,6 +307,7 @@ data class AutoBackupStatus(
         minute = 0,
         dayOfWeek = Calendar.FRIDAY
     ),
+    val driveRetentionMode: BackupFileRetentionMode = BackupFileRetentionMode.SINGLE_LATEST,
     val lastDriveBackupMs: Long = 0L,
     val lastDriveFileName: String = "",
     val lastDriveError: String? = null,
@@ -277,6 +324,7 @@ data class AutoBackupStatus(
         minute = 30,
         dayOfWeek = Calendar.FRIDAY
     ),
+    val csvRetentionMode: BackupFileRetentionMode = BackupFileRetentionMode.SINGLE_LATEST,
     val lastCsvBackupMs: Long = 0L,
     val lastCsvFileName: String = "",
     val lastCsvError: String? = null,
@@ -324,16 +372,22 @@ class AutoBackupManager(
         val csvHeaderStyle = CsvHeaderStyle.fromId(prefs.getString(KEY_CSV_HEADER_STYLE, CsvHeaderStyle.FRIENDLY_BN.id))
         val csvBackupFormat = CsvBackupFormat.fromId(prefs.getString(KEY_CSV_BACKUP_FORMAT, CsvBackupFormat.CSV.id))
 
+        val localRetentionMode = BackupFileRetentionMode.fromId(prefs.getString(KEY_LOCAL_RETENTION_MODE, null))
+        val driveRetentionMode = BackupFileRetentionMode.fromId(prefs.getString(KEY_DRIVE_RETENTION_MODE, null))
+        val csvRetentionMode = BackupFileRetentionMode.fromId(prefs.getString(KEY_CSV_RETENTION_MODE, null))
+
         return AutoBackupStatus(
             localEnabled = prefs.getBoolean(KEY_LOCAL_ENABLED, true),
             localFolderUri = localFolderUri,
             localFolderLabel = buildFolderLabel(localFolderUri),
             localSchedule = loadSchedule(KEY_LOCAL_SCHED_PREFIX, BackupScheduleMode.ON_CHANGE, 21, 0),
+            localRetentionMode = localRetentionMode,
             lastLocalBackupMs = prefs.getLong(KEY_LAST_LOCAL_MS, 0L),
             lastLocalFileName = prefs.getString(KEY_LAST_LOCAL_NAME, "").orEmpty(),
 
             driveEnabled = prefs.getBoolean(KEY_DRIVE_ENABLED, false),
             driveSchedule = loadSchedule(KEY_DRIVE_SCHED_PREFIX, BackupScheduleMode.DAILY, 22, 0),
+            driveRetentionMode = driveRetentionMode,
             lastDriveBackupMs = prefs.getLong(KEY_LAST_DRIVE_MS, 0L),
             lastDriveFileName = prefs.getString(KEY_LAST_DRIVE_NAME, "").orEmpty(),
 
@@ -343,6 +397,7 @@ class AutoBackupManager(
             csvHeaderStyle = csvHeaderStyle,
             csvBackupFormat = csvBackupFormat,
             csvSchedule = loadSchedule(KEY_CSV_SCHED_PREFIX, BackupScheduleMode.DAILY, 21, 30),
+            csvRetentionMode = csvRetentionMode,
             lastCsvBackupMs = prefs.getLong(KEY_LAST_CSV_MS, 0L),
             lastCsvFileName = prefs.getString(KEY_LAST_CSV_NAME, "").orEmpty()
         )
@@ -370,6 +425,11 @@ class AutoBackupManager(
     fun setLocalSchedule(config: BackupScheduleConfig) {
         saveSchedule(KEY_LOCAL_SCHED_PREFIX, config)
         _status.update { it.copy(localSchedule = config) }
+    }
+
+    fun setLocalRetentionMode(mode: BackupFileRetentionMode) {
+        prefs.edit().putString(KEY_LOCAL_RETENTION_MODE, mode.id).apply()
+        _status.update { it.copy(localRetentionMode = mode) }
     }
 
     fun setLocalFolderUri(uri: Uri?) {
@@ -407,6 +467,11 @@ class AutoBackupManager(
         _status.update { it.copy(driveSchedule = config) }
     }
 
+    fun setDriveRetentionMode(mode: BackupFileRetentionMode) {
+        prefs.edit().putString(KEY_DRIVE_RETENTION_MODE, mode.id).apply()
+        _status.update { it.copy(driveRetentionMode = mode) }
+    }
+
     fun setCsvAutoBackupEnabled(enabled: Boolean) {
         prefs.edit().putBoolean(KEY_CSV_ENABLED, enabled).apply()
         _status.update { it.copy(csvEnabled = enabled, lastCsvError = null) }
@@ -415,6 +480,11 @@ class AutoBackupManager(
     fun setCsvSchedule(config: BackupScheduleConfig) {
         saveSchedule(KEY_CSV_SCHED_PREFIX, config)
         _status.update { it.copy(csvSchedule = config) }
+    }
+
+    fun setCsvRetentionMode(mode: BackupFileRetentionMode) {
+        prefs.edit().putString(KEY_CSV_RETENTION_MODE, mode.id).apply()
+        _status.update { it.copy(csvRetentionMode = mode) }
     }
 
     fun setCsvHeaderStyle(style: CsvHeaderStyle) {
@@ -517,15 +587,21 @@ class AutoBackupManager(
 
             runCatching {
                 val bytes = json.toByteArray(Charsets.UTF_8)
-                val dateTag = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date(nowMs))
-                val safeCode = schoolCode.replace(Regex("[^A-Za-z0-9]"), "").ifBlank { "SCHOOL" }
-                val dailyName = "ResultMaker_${safeCode}_$dateTag.json"
+                val retentionMode = st.localRetentionMode
+                val targetFileName = BackupFileNaming.resolveBackupFileName(
+                    schoolCode = schoolCode,
+                    extensionWithDot = ".json",
+                    mode = retentionMode,
+                    nowMs = nowMs
+                )
 
                 // 1. App-private rolling backup folder (atomic temp write)
                 val dir = schoolBackupDir(schoolId)
                 writeBytesAtomically(dir, "latest_backup.json", bytes)
-                writeBytesAtomically(dir, dailyName, bytes)
-                pruneOldSnapshots(dir, prefix = "ResultMaker_", ext = ".json", keepDailyCount = 14)
+                if (retentionMode == BackupFileRetentionMode.DAILY_HISTORY) {
+                    writeBytesAtomically(dir, targetFileName, bytes)
+                    pruneOldSnapshots(dir, prefix = "ResultMaker_", ext = ".json", keepDailyCount = 14)
+                }
 
                 // Also keep standard local Repo snapshot synchronized
                 Repo.save(appContext, students, settings)
@@ -533,7 +609,7 @@ class AutoBackupManager(
                 // 2. Android 10+ Downloads/ResultMaker folder (user-accessible without permissions)
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                     writeToMediaStoreDownloads(
-                        fileName = "ResultMaker_${safeCode}_latest.json",
+                        fileName = targetFileName,
                         mimeType = "application/json",
                         bytes = bytes
                     )
@@ -542,7 +618,7 @@ class AutoBackupManager(
                 // 3. Optional user-picked SAF folder
                 val folderUriStr = _status.value.localFolderUri
                 if (!folderUriStr.isNullOrBlank()) {
-                    writeToSafFolder(Uri.parse(folderUriStr), dailyName, "application/json", bytes)
+                    writeToSafFolder(Uri.parse(folderUriStr), targetFileName, "application/json", bytes)
                 }
 
                 withContext(NonCancellable) {
@@ -550,19 +626,19 @@ class AutoBackupManager(
                         .putString(KEY_LAST_LOCAL_HASH, hash)
                         .putLong(KEY_LAST_LOCAL_MS, nowMs)
                         .putLong(KEY_LAST_LOCAL_SLOT_MS, nowMs)
-                        .putString(KEY_LAST_LOCAL_NAME, dailyName)
+                        .putString(KEY_LAST_LOCAL_NAME, targetFileName)
                         .apply()
 
                     refreshLocalSnapshots(schoolId)
                     _status.update {
                         it.copy(
                             lastLocalBackupMs = nowMs,
-                            lastLocalFileName = dailyName,
+                            lastLocalFileName = targetFileName,
                             lastLocalError = null
                         )
                     }
                 }
-                dailyName
+                targetFileName
             }.onFailure { err ->
                 _status.update {
                     it.copy(lastLocalError = err.localizedMessage ?: "লোকাল ব্যাকআপ ত্রুটি")
@@ -610,8 +686,7 @@ class AutoBackupManager(
             }
 
             runCatching {
-                val dateTag = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date(nowMs))
-                val safeCode = schoolCode.replace(Regex("[^A-Za-z0-9]"), "").ifBlank { "SCHOOL" }
+                val retentionMode = st.csvRetentionMode
                 val dir = schoolCsvBackupDir(schoolId)
                 val folderUriStr = _status.value.csvFolderUri
 
@@ -624,21 +699,28 @@ class AutoBackupManager(
                 when (activeFormat) {
                     CsvBackupFormat.CSV -> {
                         val csvBytes = combinedCsv.toByteArray(Charsets.UTF_8)
-                        val dailyName = "ResultMaker_${safeCode}_$dateTag.csv"
+                        val targetFileName = BackupFileNaming.resolveBackupFileName(
+                            schoolCode = schoolCode,
+                            extensionWithDot = ".csv",
+                            mode = retentionMode,
+                            nowMs = nowMs
+                        )
                         writeBytesAtomically(dir, "latest_backup.csv", csvBytes)
-                        writeBytesAtomically(dir, dailyName, csvBytes)
+                        if (retentionMode == BackupFileRetentionMode.DAILY_HISTORY) {
+                            writeBytesAtomically(dir, targetFileName, csvBytes)
+                            pruneOldSnapshots(dir, prefix = "ResultMaker_", ext = ".csv", keepDailyCount = 14)
+                        }
                         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                             writeToMediaStoreDownloads(
-                                fileName = "ResultMaker_${safeCode}_latest.csv",
+                                fileName = targetFileName,
                                 mimeType = "text/csv",
                                 bytes = csvBytes
                             )
                         }
                         if (!folderUriStr.isNullOrBlank()) {
-                            writeToSafFolder(Uri.parse(folderUriStr), dailyName, "text/csv", csvBytes)
+                            writeToSafFolder(Uri.parse(folderUriStr), targetFileName, "text/csv", csvBytes)
                         }
-                        pruneOldSnapshots(dir, prefix = "ResultMaker_", ext = ".csv", keepDailyCount = 14)
-                        outputName = dailyName
+                        outputName = targetFileName
                     }
                     CsvBackupFormat.EXCEL -> {
                         val knownIds = (com.kgps.result.activeClassIds(settings) + students.map { it.cls }.filter { it in 1..20 })
@@ -651,22 +733,29 @@ class AutoBackupManager(
                             style = st.csvHeaderStyle,
                             classes = activeClasses
                         )
-                        val dailyName = "ResultMaker_${safeCode}_$dateTag.xlsx"
+                        val targetFileName = BackupFileNaming.resolveBackupFileName(
+                            schoolCode = schoolCode,
+                            extensionWithDot = ".xlsx",
+                            mode = retentionMode,
+                            nowMs = nowMs
+                        )
                         val xlsxMime = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
                         writeBytesAtomically(dir, "latest_all_classes.xlsx", xlsxBytes)
-                        writeBytesAtomically(dir, dailyName, xlsxBytes)
+                        if (retentionMode == BackupFileRetentionMode.DAILY_HISTORY) {
+                            writeBytesAtomically(dir, targetFileName, xlsxBytes)
+                            pruneOldSnapshots(dir, prefix = "ResultMaker_", ext = ".xlsx", keepDailyCount = 14)
+                        }
                         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                             writeToMediaStoreDownloads(
-                                fileName = "ResultMaker_${safeCode}_latest.xlsx",
+                                fileName = targetFileName,
                                 mimeType = xlsxMime,
                                 bytes = xlsxBytes
                             )
                         }
                         if (!folderUriStr.isNullOrBlank()) {
-                            writeToSafFolder(Uri.parse(folderUriStr), dailyName, xlsxMime, xlsxBytes)
+                            writeToSafFolder(Uri.parse(folderUriStr), targetFileName, xlsxMime, xlsxBytes)
                         }
-                        pruneOldSnapshots(dir, prefix = "ResultMaker_", ext = ".xlsx", keepDailyCount = 14)
-                        outputName = dailyName
+                        outputName = targetFileName
                     }
                 }
 
@@ -810,9 +899,12 @@ class AutoBackupManager(
         hash: String,
         enableAutoOnSuccess: Boolean
     ): Result<DriveBackupFile> {
-        val dateTag = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date())
-        val safeCode = schoolCode.replace(Regex("[^A-Za-z0-9]"), "").ifBlank { "SCHOOL" }
-        val fileName = "ResultMaker_${safeCode}_$dateTag.json"
+        val fileName = BackupFileNaming.resolveBackupFileName(
+            schoolCode = schoolCode,
+            extensionWithDot = ".json",
+            mode = _status.value.driveRetentionMode,
+            nowMs = System.currentTimeMillis()
+        )
 
         val result = GoogleDriveBackupClient.uploadBackupJson(accessToken, fileName, jsonContent)
         result.onSuccess { uploaded ->
@@ -942,6 +1034,7 @@ class AutoBackupManager(
         private const val KEY_LOCAL_ENABLED = "local_enabled"
         private const val KEY_LOCAL_FOLDER_URI = "local_folder_uri"
         private const val KEY_LOCAL_SCHED_PREFIX = "local_sched"
+        private const val KEY_LOCAL_RETENTION_MODE = "local_retention_mode"
         private const val KEY_LAST_LOCAL_HASH = "last_local_hash"
         private const val KEY_LAST_LOCAL_MS = "last_local_ms"
         private const val KEY_LAST_LOCAL_SLOT_MS = "last_local_slot_ms"
@@ -949,6 +1042,7 @@ class AutoBackupManager(
 
         private const val KEY_DRIVE_ENABLED = "drive_enabled"
         private const val KEY_DRIVE_SCHED_PREFIX = "drive_sched"
+        private const val KEY_DRIVE_RETENTION_MODE = "drive_retention_mode"
         private const val KEY_LAST_DRIVE_HASH = "last_drive_hash"
         private const val KEY_LAST_DRIVE_MS = "last_drive_ms"
         private const val KEY_LAST_DRIVE_SLOT_MS = "last_drive_slot_ms"
@@ -959,6 +1053,7 @@ class AutoBackupManager(
         private const val KEY_CSV_HEADER_STYLE = "csv_header_style"
         private const val KEY_CSV_BACKUP_FORMAT = "csv_backup_format"
         private const val KEY_CSV_SCHED_PREFIX = "csv_sched"
+        private const val KEY_CSV_RETENTION_MODE = "csv_retention_mode"
         private const val KEY_LAST_CSV_HASH = "last_csv_hash"
         private const val KEY_LAST_CSV_MS = "last_csv_ms"
         private const val KEY_LAST_CSV_SLOT_MS = "last_csv_slot_ms"
