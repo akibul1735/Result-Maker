@@ -73,7 +73,7 @@ import kotlin.math.abs
 
 private const val A4_ASPECT_RATIO = 595f / 842f
 
-private fun clampFullscreenPanOffset(offset: Offset, scale: Float, size: IntSize): Offset {
+internal fun clampFullscreenPanOffset(offset: Offset, scale: Float, size: IntSize): Offset {
     if (scale <= 1.02f || size.width <= 0 || size.height <= 0) return Offset.Zero
     val maxX = (size.width * (scale - 1f)) / 2f
     val maxY = (size.height * (scale - 1f)) / 2f + size.height * 0.22f

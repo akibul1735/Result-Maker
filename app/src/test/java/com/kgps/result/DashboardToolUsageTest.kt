@@ -24,6 +24,7 @@ class DashboardToolUsageTest {
             listOf(
                 DashboardQuickToolId.REPORT_CARD,
                 DashboardQuickToolId.SEAT_PLAN_PDF,
+                DashboardQuickToolId.TESTIMONIAL_PDF,
                 DashboardQuickToolId.BATCH_EDIT,
                 DashboardQuickToolId.DATA_IMPORT
             ),

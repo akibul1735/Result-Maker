@@ -47,6 +47,7 @@ import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.material.icons.rounded.TableChart
 import androidx.compose.material.icons.rounded.TableView
 import androidx.compose.material.icons.rounded.UploadFile
+import androidx.compose.material.icons.rounded.WorkspacePremium
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -130,6 +131,7 @@ fun DashboardScreen(
     onOpenSeatPlanPdf: () -> Unit = {},
     onOpenTabulationPdf: () -> Unit = {},
     onOpenAdmitCardPdf: () -> Unit = {},
+    onOpenTestimonialPdf: () -> Unit = {},
     onPrintBatch: (List<Student>, String) -> Unit,
     onExportBatchPdf: (List<Student>, String) -> Unit,
     onBackupNowAll: () -> Unit,
@@ -197,7 +199,8 @@ fun DashboardScreen(
         onOpenBlankSheetPdf,
         onOpenSeatPlanPdf,
         onOpenTabulationPdf,
-        onOpenAdmitCardPdf
+        onOpenAdmitCardPdf,
+        onOpenTestimonialPdf
     ) {
         buildList {
             if (permissions.canExportPdf) {
@@ -275,6 +278,18 @@ fun DashboardScreen(
                         tint = TealPrimary,
                         testTag = "dash_seat_plan_pdf_btn",
                         onClick = onOpenSeatPlanPdf
+                    )
+                )
+                add(
+                    QuickToolSpec(
+                        id = DashboardQuickToolId.TESTIMONIAL_PDF,
+                        icon = Icons.Rounded.WorkspacePremium,
+                        shortTitle = "প্রশংসাপত্র",
+                        title = "প্রশংসাপত্র মেকার",
+                        subtitle = "প্রশংসাপত্র ও প্রত্যয়ন",
+                        tint = Color(0xFF0F766E),
+                        testTag = "dash_testimonial_pdf_btn",
+                        onClick = onOpenTestimonialPdf
                     )
                 )
             }

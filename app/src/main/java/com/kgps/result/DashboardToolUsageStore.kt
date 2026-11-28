@@ -12,8 +12,9 @@ enum class DashboardQuickToolId(
     AI_SCAN("ai_scan", 3),
     REPORT_CARD("report_card", 4),
     SEAT_PLAN_PDF("seat_plan_pdf", 5),
-    BATCH_EDIT("batch_edit", 6),
-    DATA_IMPORT("data_import", 7)
+    TESTIMONIAL_PDF("testimonial_pdf", 6),
+    BATCH_EDIT("batch_edit", 7),
+    DATA_IMPORT("data_import", 8)
 }
 
 data class ToolUsageStat(

@@ -84,6 +84,7 @@ enum class NavSection(val route: String, val labelBn: String) {
     SEAT_PLAN("seat_plan", "আসন বিন্যাস (সিট প্ল্যান)"),
     TABULATION("tabulation", "ফলাফল টেবিল PDF"),
     ADMIT_CARD("admit_card", "প্রবেশপত্র PDF"),
+    TESTIMONIAL("testimonial", "প্রশংসাপত্র মেকার"),
     ASSISTANT("assistant", "AI সহায়ক"),
     SETTINGS("settings", "সেটিংস")
 }
@@ -1006,6 +1007,55 @@ class ResultMakerViewModel(
         }
         _editingStudent.value = null
         _currentSection.value = NavSection.ADMIT_CARD
+    }
+
+    fun openTestimonialPdf() {
+        if (!activePermissions.value.canExportPdf) {
+            showMessage("PDF তৈরি করার অনুমতি আপনার নেই")
+            return
+        }
+        _editingStudent.value = null
+        _currentSection.value = NavSection.TESTIMONIAL
+    }
+
+    fun saveTestimonialStudentProfiles(
+        updatedStudents: List<Student>,
+        nextSettings: Settings
+    ) {
+        val school = activeSchool.value ?: return
+        val perm = school.permissionsFor(currentUserId)
+        if (!perm.canManageStudents) {
+            showMessage("শিক্ষার্থীর তথ্য পরিবর্তনের অনুমতি আপনার নেই")
+            return
+        }
+        val prevList = students.value
+        val existingById = prevList.associateBy { it.id }
+        val safeUpdates = updatedStudents.mapNotNull { candidate ->
+            sanitizeStudentForPermissions(candidate, existingById[candidate.id], perm)
+        }
+        val updateMap = safeUpdates.associateBy { it.id }
+        val nextList = prevList.map { st -> updateMap[st.id] ?: st }
+        val settingsChanged = nextSettings != school.settings
+
+        viewModelScope.launch {
+            if (settingsChanged && school.isAdmin(currentUserId)) {
+                cloudRepo.updateSchoolSettings(school, nextSettings).onFailure { e ->
+                    showMessage(friendlyFirestoreErrorMessage(e))
+                    return@launch
+                }
+            }
+            if (safeUpdates.isNotEmpty()) {
+                cloudRepo.syncBatchStudents(school.id, prevList, nextList, deleteRemoved = false)
+                    .onSuccess {
+                        showMessage("${bn(safeUpdates.size.toString())} জন শিক্ষার্থীর প্রোফাইলে তথ্য সংরক্ষিত হয়েছে")
+                    }
+                    .onFailure { e ->
+                        showMessage(friendlyFirestoreErrorMessage(e))
+                    }
+            } else if (settingsChanged) {
+                showMessage("ফিল্ড সেটিংস সংরক্ষিত হয়েছে")
+            }
+        }
     }
 
     fun cacheBlankSheetTemplatesLocally(pages: List<BlankSheetPageSpec>) {
