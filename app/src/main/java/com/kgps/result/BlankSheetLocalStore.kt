@@ -20,7 +20,7 @@ object BlankSheetLocalStore {
                         put("align", col.align.name)
                         if (col.compKey != null) put("compKey", col.compKey)
                         put("isCustom", col.isCustom)
-                        if (col.groupBn != null) put("groupBn", col.groupBn)
+                        put("groupBn", col.groupBn ?: "")
                         put("pickerLabelBn", col.pickerLabelBn)
                     }
                 )

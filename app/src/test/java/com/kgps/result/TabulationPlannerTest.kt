@@ -91,14 +91,64 @@ class TabulationPlannerTest {
         assertEquals(7, groupsTotalOnly.sumOf { it.subCols.size })
         assertTrue(groupsTotalOnly.all { it.subCols == listOf(TabulationSubColType.TOTAL) })
 
-        val cfgFinal = TabulationConfig(
+        val cfgFinalAvgOnly = TabulationConfig(
             selectedClass = 5,
             termScope = TabulationTermScope.FINAL_AVG,
-            subjectDisplay = TabulationSubjectDisplay.CONT_WR_TOT
+            subjectDisplay = TabulationSubjectDisplay.CONT_WR_TOT,
+            finalDisplay = TabulationFinalDisplay.AVG_ONLY
         )
-        val groupsFinal = TabulationPlanner.buildSubjectGroups(5, settings, cfgFinal)
-        assertEquals(8, groupsFinal.sumOf { it.subCols.size })
-        assertTrue(groupsFinal.all { it.subCols == listOf(TabulationSubColType.TOTAL) })
+        val groupsFinalAvgOnly = TabulationPlanner.buildSubjectGroups(5, settings, cfgFinalAvgOnly)
+        assertEquals(8, groupsFinalAvgOnly.sumOf { it.subCols.size })
+        assertTrue(groupsFinalAvgOnly.all { it.subCols == listOf(TabulationSubColType.TOTAL) })
+
+        val cfgFinalWithTerms = cfgFinalAvgOnly.copy(finalDisplay = TabulationFinalDisplay.TERMS_AND_AVG)
+        val groupsFinalWithTerms = TabulationPlanner.buildSubjectGroups(5, settings, cfgFinalWithTerms)
+        assertEquals(32, groupsFinalWithTerms.sumOf { it.subCols.size })
+        assertTrue(
+            groupsFinalWithTerms.all {
+                it.subCols == listOf(
+                    TabulationSubColType.TERM_1,
+                    TabulationSubColType.TERM_2,
+                    TabulationSubColType.TERM_3,
+                    TabulationSubColType.AVG
+                )
+            }
+        )
+    }
+
+    @Test
+    fun buildPages_finalModeWithTerms_populatesThreeTermsAndAverage() {
+        val settings = Settings()
+        val stu = Student(
+            id = "fin1",
+            cls = 5,
+            roll = 1,
+            name = "তানহা",
+            religion = "ইসলাম",
+            m = mapOf(
+                mk("BAN", 1, "CONT") to 20.0,
+                mk("BAN", 1, "WR") to 50.0, // total 70
+                mk("BAN", 2, "CONT") to 25.0,
+                mk("BAN", 2, "WR") to 55.0, // total 80
+                mk("BAN", 3, "CONT") to 25.0,
+                mk("BAN", 3, "WR") to 65.0  // total 90 -> avg = 80
+            )
+        )
+        val pages = TabulationPlanner.buildPages(
+            students = listOf(stu),
+            settings = settings,
+            config = TabulationConfig(
+                selectedClass = 5,
+                termScope = TabulationTermScope.FINAL_AVG,
+                finalDisplay = TabulationFinalDisplay.TERMS_AND_AVG,
+                numeralMode = TabulationNumeralMode.ENGLISH
+            )
+        )
+        assertEquals(1, pages.size)
+        val banCells = pages[0].rows[0].subjectCells[0]
+        assertEquals(listOf("70", "80", "90", "80"), banCells.map { it.text })
+        assertFalse(banCells[0].isBold)
+        assertTrue(banCells[3].isBold)
     }
 
     @Test

@@ -247,6 +247,8 @@ internal fun AdmitCompactSliderControl(
     sliderTestTag: String = "",
     resetTestTag: String = "",
     resetLabel: String = "ডিফল্ট",
+    snapStep: Float? = 0.5f,
+    resetThreshold: Float = 0.4f,
     valueFormatter: (Float) -> String = { formatAdmitPtBn(it) }
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(1.dp)) {
@@ -261,7 +263,7 @@ internal fun AdmitCompactSliderControl(
                 fontWeight = FontWeight.SemiBold,
                 color = SlateMuted
             )
-            if (abs(value - defaultValue) >= 0.4f) {
+            if (abs(value - defaultValue) >= resetThreshold) {
                 Surface(
                     onClick = { onValueChange(defaultValue) },
                     color = TealSoft,
@@ -282,8 +284,12 @@ internal fun AdmitCompactSliderControl(
         Slider(
             value = value.coerceIn(valueRange.start, valueRange.endInclusive),
             onValueChange = { raw ->
-                val snapped = (raw * 2f).roundToInt() / 2f
-                onValueChange(snapped.coerceIn(valueRange.start, valueRange.endInclusive))
+                val next = if (snapStep != null && snapStep > 0f) {
+                    (raw / snapStep).roundToInt() * snapStep
+                } else {
+                    raw
+                }
+                onValueChange(next.coerceIn(valueRange.start, valueRange.endInclusive))
             },
             valueRange = valueRange,
             colors = SliderDefaults.colors(

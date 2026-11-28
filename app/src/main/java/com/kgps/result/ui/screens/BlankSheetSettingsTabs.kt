@@ -29,6 +29,7 @@ import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.ArrowDropDown
 import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.Close
+import androidx.compose.material.icons.rounded.Edit
 import androidx.compose.material.icons.rounded.KeyboardArrowDown
 import androidx.compose.material.icons.rounded.KeyboardArrowUp
 import androidx.compose.material.icons.rounded.Remove
@@ -748,6 +749,9 @@ private fun BlankSheetPresetsAndColumnsCompact(
     var groupTitleInput by remember { mutableStateOf("") }
     var firstSubTitleInput by remember { mutableStateOf("") }
     var newSubNamesInput by remember { mutableStateOf("") }
+    var editColTargetId by remember { mutableStateOf<String?>(null) }
+    var editTitleInput by remember { mutableStateOf("") }
+    var editGroupInput by remember { mutableStateOf("") }
 
     val focusedIndex = remember(config.columns, focusedColId) {
         config.columns.indexOfFirst { it.id == focusedColId }
@@ -988,6 +992,12 @@ private fun BlankSheetPresetsAndColumnsCompact(
 
     if (focusedCol != null && focusedIndex in config.columns.indices) {
         val defaultWeight = BlankSheetCatalog.byId(focusedCol.id)?.widthWeight ?: 1.0f
+        val activeGroup = focusedCol.groupBn?.trim().orEmpty()
+        val groupSiblings = if (activeGroup.isNotEmpty()) {
+            config.columns.filter { it.groupBn?.trim() == activeGroup }
+        } else {
+            emptyList()
+        }
         Surface(
             color = TealSoft.copy(alpha = 0.45f),
             border = BorderStroke(1.dp, TealPrimary.copy(alpha = 0.4f)),
@@ -996,7 +1006,7 @@ private fun BlankSheetPresetsAndColumnsCompact(
         ) {
             Column(
                 modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp),
-                verticalArrangement = Arrangement.spacedBy(4.dp)
+                verticalArrangement = Arrangement.spacedBy(5.dp)
             ) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -1005,8 +1015,8 @@ private fun BlankSheetPresetsAndColumnsCompact(
                 ) {
                     Column(modifier = Modifier.weight(1f)) {
                         Text(
-                            text = if (!focusedCol.groupBn.isNullOrBlank()) {
-                                "${focusedCol.groupBn} › ${focusedCol.titleBn}"
+                            text = if (activeGroup.isNotEmpty()) {
+                                "$activeGroup › ${focusedCol.titleBn}"
                             } else {
                                 focusedCol.titleBn
                             },
@@ -1017,7 +1027,7 @@ private fun BlankSheetPresetsAndColumnsCompact(
                             overflow = TextOverflow.Ellipsis
                         )
                         Text(
-                            text = "বাকি কলামগুলো অটো-ফিট হবে",
+                            text = "স্লাইডারে মসৃণ সাইজ · বাকি কলাম অটো-ফিট",
                             fontSize = 8.5.sp,
                             color = SlateMuted
                         )
@@ -1070,9 +1080,29 @@ private fun BlankSheetPresetsAndColumnsCompact(
                     }
                     Surface(
                         onClick = {
+                            editColTargetId = focusedCol.id
+                            editTitleInput = focusedCol.titleBn
+                            editGroupInput = focusedCol.groupBn.orEmpty()
+                        },
+                        shape = RoundedCornerShape(6.dp),
+                        color = MaterialTheme.colorScheme.surface,
+                        border = BorderStroke(1.dp, TealPrimary.copy(alpha = 0.55f)),
+                        modifier = Modifier.size(30.dp).testTag("blank_col_edit_btn")
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Icon(
+                                Icons.Rounded.Edit,
+                                contentDescription = "কলাম বা সাব-কলাম এডিট",
+                                tint = TealDark,
+                                modifier = Modifier.size(15.dp)
+                            )
+                        }
+                    }
+                    Surface(
+                        onClick = {
                             subColTargetId = focusedCol.id
-                            groupTitleInput = focusedCol.groupBn?.takeIf { it.isNotBlank() } ?: focusedCol.titleBn
-                            firstSubTitleInput = if (focusedCol.groupBn.isNullOrBlank()) focusedCol.titleBn else ""
+                            groupTitleInput = activeGroup.ifBlank { focusedCol.titleBn }
+                            firstSubTitleInput = if (activeGroup.isBlank()) focusedCol.titleBn else ""
                             newSubNamesInput = ""
                         },
                         shape = RoundedCornerShape(6.dp),
@@ -1083,7 +1113,7 @@ private fun BlankSheetPresetsAndColumnsCompact(
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(2.dp),
-                            modifier = Modifier.padding(horizontal = 7.dp)
+                            modifier = Modifier.padding(horizontal = 6.dp)
                         ) {
                             Icon(Icons.Rounded.Add, contentDescription = null, tint = TealPrimary, modifier = Modifier.size(13.dp))
                             Text("সাব", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = TealDark)
@@ -1092,10 +1122,10 @@ private fun BlankSheetPresetsAndColumnsCompact(
                     if (config.columns.size > 1) {
                         Surface(
                             onClick = {
-                                onUpdateConfig(
-                                    config.copy(columns = config.columns.filterNot { it.id == focusedCol.id })
-                                )
-                                focusedColId = null
+                                val nextCols = config.columns.filterNot { it.id == focusedCol.id }
+                                val nextFocus = nextCols.getOrNull(focusedIndex.coerceAtMost(nextCols.lastIndex))?.id
+                                onUpdateConfig(config.copy(columns = nextCols))
+                                focusedColId = nextFocus
                             },
                             shape = RoundedCornerShape(6.dp),
                             color = MaterialTheme.colorScheme.surface,
@@ -1114,15 +1144,107 @@ private fun BlankSheetPresetsAndColumnsCompact(
                     }
                 }
 
+                // Inline Sub-Column Quick Switch / Rename / Remove strip when editing any grouped column
+                if (activeGroup.isNotEmpty() && groupSiblings.isNotEmpty()) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .horizontalScroll(rememberScrollState()),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        Text(
+                            text = "সাব-কলাম:",
+                            fontSize = 9.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = TealDark
+                        )
+                        groupSiblings.forEach { sib ->
+                            val isSibFocused = sib.id == focusedCol.id
+                            Surface(
+                                onClick = { focusedColId = sib.id },
+                                shape = RoundedCornerShape(6.dp),
+                                color = if (isSibFocused) TealPrimary else MaterialTheme.colorScheme.surface,
+                                border = BorderStroke(1.dp, if (isSibFocused) TealPrimary else SlateOutline),
+                                modifier = Modifier.heightIn(min = 26.dp).testTag("blank_subcol_chip_${sib.id}")
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(3.dp),
+                                    modifier = Modifier.padding(start = 6.dp, end = if (config.columns.size > 1) 3.dp else 6.dp, top = 3.dp, bottom = 3.dp)
+                                ) {
+                                    Text(
+                                        text = sib.titleBn,
+                                        fontSize = 9.5.sp,
+                                        fontWeight = if (isSibFocused) FontWeight.Bold else FontWeight.Medium,
+                                        color = if (isSibFocused) Color.White else SlateText,
+                                        maxLines = 1
+                                    )
+                                    if (config.columns.size > 1) {
+                                        Surface(
+                                            onClick = {
+                                                val nextCols = config.columns.filterNot { it.id == sib.id }
+                                                val fallbackSib = nextCols.firstOrNull { it.groupBn?.trim() == activeGroup }?.id
+                                                onUpdateConfig(config.copy(columns = nextCols))
+                                                if (focusedColId == sib.id) {
+                                                    focusedColId = fallbackSib
+                                                }
+                                            },
+                                            shape = RoundedCornerShape(4.dp),
+                                            color = if (isSibFocused) Color.White.copy(alpha = 0.22f) else MaterialTheme.colorScheme.error.copy(alpha = 0.12f),
+                                            modifier = Modifier.size(18.dp).testTag("blank_subcol_quick_remove_${sib.id}")
+                                        ) {
+                                            Box(contentAlignment = Alignment.Center) {
+                                                Icon(
+                                                    Icons.Rounded.Close,
+                                                    contentDescription = "${sib.titleBn} রিমুভ",
+                                                    tint = if (isSibFocused) Color.White else MaterialTheme.colorScheme.error,
+                                                    modifier = Modifier.size(11.dp)
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        if (groupSiblings.size == 1) {
+                            Surface(
+                                onClick = {
+                                    val updated = config.columns.map { c ->
+                                        if (c.id == focusedCol.id) {
+                                            c.copy(groupBn = null, pickerLabelBn = c.titleBn)
+                                        } else c
+                                    }
+                                    onUpdateConfig(config.copy(columns = updated))
+                                },
+                                shape = RoundedCornerShape(6.dp),
+                                color = MaterialTheme.colorScheme.surface,
+                                border = BorderStroke(1.dp, SlateOutline),
+                                modifier = Modifier.heightIn(min = 26.dp).testTag("blank_subcol_ungroup_btn")
+                            ) {
+                                Text(
+                                    text = "গ্রুপ সরান",
+                                    fontSize = 9.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = SlateText,
+                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 4.dp)
+                                )
+                            }
+                        }
+                    }
+                }
+
                 AdmitCompactSliderControl(
-                    label = "কলামের দৈর্ঘ্য / প্রস্থ (অটো-ফিট)",
-                    value = focusedCol.widthWeight.coerceIn(0.5f, 4.0f),
-                    defaultValue = defaultWeight.coerceIn(0.5f, 4.0f),
-                    valueRange = 0.5f..4.0f,
+                    label = "কলামের প্রস্থ (অটো-ফিট)",
+                    value = focusedCol.widthWeight.coerceIn(0.4f, 4.0f),
+                    defaultValue = defaultWeight.coerceIn(0.4f, 4.0f),
+                    valueRange = 0.4f..4.0f,
+                    snapStep = null,
+                    resetThreshold = 0.03f,
                     onValueChange = { raw ->
-                        val snapped = ((raw * 4f).roundToInt() / 4f).coerceIn(0.5f, 4.0f)
+                        val smooth = ((raw * 100f).roundToInt() / 100f).coerceIn(0.4f, 4.0f)
                         val updated = config.columns.map { c ->
-                            if (c.id == focusedCol.id) c.copy(widthWeight = snapped) else c
+                            if (c.id == focusedCol.id) c.copy(widthWeight = smooth) else c
                         }
                         onUpdateConfig(config.copy(columns = updated))
                     },
@@ -1267,6 +1389,122 @@ private fun BlankSheetPresetsAndColumnsCompact(
             dismissButton = {
                 TextButton(
                     onClick = { subColTargetId = null },
+                    modifier = Modifier.heightIn(min = 48.dp)
+                ) {
+                    Text("বাতিল")
+                }
+            }
+        )
+    }
+
+    val editTarget = remember(editColTargetId, config.columns) {
+        config.columns.find { it.id == editColTargetId }
+    }
+    if (editTarget != null) {
+        val currentGroup = editTarget.groupBn?.trim().orEmpty()
+        AlertDialog(
+            onDismissRequest = { editColTargetId = null },
+            title = {
+                Text(
+                    text = if (currentGroup.isNotEmpty()) "সাব-কলাম এডিট" else "কলাম এডিট",
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 15.sp
+                )
+            },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(7.dp)) {
+                    AdmitCompactTextInput(
+                        label = if (currentGroup.isNotEmpty()) "সাব-কলামের নাম" else "কলামের নাম",
+                        value = editTitleInput,
+                        onValueChange = { editTitleInput = it },
+                        placeholder = "যেমন: লিখিত / মৌখিক",
+                        modifier = Modifier.fillMaxWidth(),
+                        testTag = "blank_edit_col_title_input"
+                    )
+                    AdmitCompactTextInput(
+                        label = "গ্রুপ / মূল শিরোনাম (সাব-কলামের জন্য, ঐচ্ছিক)",
+                        value = editGroupInput,
+                        onValueChange = { editGroupInput = it },
+                        placeholder = "গ্রুপ না চাইলে ফাঁকা রাখুন",
+                        modifier = Modifier.fillMaxWidth(),
+                        testTag = "blank_edit_col_group_input"
+                    )
+                    if (editGroupInput.isNotBlank()) {
+                        Surface(
+                            onClick = { editGroupInput = "" },
+                            shape = RoundedCornerShape(6.dp),
+                            color = TealSoft,
+                            border = BorderStroke(1.dp, TealContainer),
+                            modifier = Modifier.testTag("blank_edit_clear_group_btn")
+                        ) {
+                            Text(
+                                text = "গ্রুপ শিরোনাম সরান (সাধারণ কলাম করুন)",
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = TealDark,
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp)
+                            )
+                        }
+                    }
+                    if (config.columns.size > 1) {
+                        OutlinedButton(
+                            onClick = {
+                                val nextCols = config.columns.filterNot { it.id == editTarget.id }
+                                onUpdateConfig(config.copy(columns = nextCols))
+                                if (focusedColId == editTarget.id) focusedColId = null
+                                editColTargetId = null
+                            },
+                            shape = RoundedCornerShape(8.dp),
+                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.55f)),
+                            modifier = Modifier.fillMaxWidth().heightIn(min = 38.dp).testTag("blank_edit_col_remove_btn")
+                        ) {
+                            Icon(
+                                Icons.Rounded.Close,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.error,
+                                modifier = Modifier.size(15.dp)
+                            )
+                            Spacer(Modifier.width(4.dp))
+                            Text(
+                                text = if (currentGroup.isNotEmpty()) "এই সাব-কলামটি রিমুভ করুন" else "এই কলামটি রিমুভ করুন",
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = MaterialTheme.colorScheme.error
+                            )
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        val cleanTitle = editTitleInput.trim()
+                        val cleanGroup = editGroupInput.trim().takeIf { it.isNotEmpty() }
+                        if (cleanTitle.isNotEmpty()) {
+                            val updatedCols = config.columns.map { c ->
+                                if (c.id == editTarget.id) {
+                                    val newPicker = if (cleanGroup != null) "$cleanGroup-$cleanTitle" else cleanTitle
+                                    c.copy(
+                                        titleBn = cleanTitle,
+                                        groupBn = cleanGroup,
+                                        pickerLabelBn = newPicker
+                                    )
+                                } else c
+                            }
+                            onUpdateConfig(config.copy(columns = updatedCols))
+                        }
+                        editColTargetId = null
+                    },
+                    enabled = editTitleInput.trim().isNotEmpty(),
+                    colors = ButtonDefaults.buttonColors(containerColor = TealPrimary),
+                    modifier = Modifier.heightIn(min = 48.dp).testTag("blank_edit_col_save_btn")
+                ) {
+                    Text("সংরক্ষণ")
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = { editColTargetId = null },
                     modifier = Modifier.heightIn(min = 48.dp)
                 ) {
                     Text("বাতিল")

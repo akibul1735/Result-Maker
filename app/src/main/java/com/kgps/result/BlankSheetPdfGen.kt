@@ -351,7 +351,7 @@ object BlankSheetPdfGen {
             enFontId = enFontId,
             color = 0xFF000000.toInt()
         )
-        val bannerPadX = 8f
+        val bannerPadX = (contentW * 0.06f).coerceIn(24f, 44f)
         val minBannerGap = 10f
         val innerBannerW = max(60f, contentW - bannerPadX * 2f)
 

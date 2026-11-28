@@ -23,6 +23,11 @@ enum class TabulationSubjectDisplay(val labelBn: String) {
     TOTAL_ONLY("শুধু মোট")
 }
 
+enum class TabulationFinalDisplay(val labelBn: String) {
+    TERMS_AND_AVG("৩ প্রান্তিক+গড়"),
+    AVG_ONLY("শুধু গড়")
+}
+
 enum class TabulationHeaderStyle(val labelBn: String) {
     SHORT_SUB("সংক্ষিপ্ত (ধা/সা/মোট)"),
     VERTICAL_SUB("লম্বা ৯০° (ধারাবাহিক)")
@@ -42,6 +47,7 @@ data class TabulationConfig(
     val selectedClass: Int = 5,
     val termScope: TabulationTermScope = TabulationTermScope.TERM_3,
     val subjectDisplay: TabulationSubjectDisplay = TabulationSubjectDisplay.CONT_WR_TOT,
+    val finalDisplay: TabulationFinalDisplay = TabulationFinalDisplay.TERMS_AND_AVG,
     val headerStyle: TabulationHeaderStyle = TabulationHeaderStyle.SHORT_SUB,
     val pageSize: TabulationPageSize = TabulationPageSize.A4_LANDSCAPE,
     val sortOrder: TabulationSortOrder = TabulationSortOrder.ROLL_ASC,
@@ -67,7 +73,11 @@ data class TabulationConfig(
 enum class TabulationSubColType(val shortBn: String, val fullBn: String) {
     CONT("ধা", "ধারাবাহিক"),
     WR("সা", "সামষ্টিক"),
-    TOTAL("মোট", "মোট")
+    TOTAL("মোট", "মোট"),
+    TERM_1("১ম", "১ম প্রান্তিক"),
+    TERM_2("২য়", "২য় প্রান্তিক"),
+    TERM_3("৩য়", "৩য় প্রান্তিক"),
+    AVG("গড়", "চূড়ান্ত গড়")
 }
 
 data class TabulationSubjectColumnGroup(
@@ -148,12 +158,18 @@ object TabulationPlanner {
         config: TabulationConfig
     ): List<TabulationSubjectColumnGroup> {
         val baseSubs = subjectsFor(cls, RELIGIONS.first(), settings)
-        val forceTotalOnly = config.termScope == TabulationTermScope.FINAL_AVG ||
-            config.subjectDisplay == TabulationSubjectDisplay.TOTAL_ONLY
 
         return baseSubs.map { sub ->
             val cols = when {
-                forceTotalOnly -> listOf(TabulationSubColType.TOTAL)
+                config.termScope == TabulationTermScope.FINAL_AVG &&
+                    config.finalDisplay == TabulationFinalDisplay.TERMS_AND_AVG -> listOf(
+                    TabulationSubColType.TERM_1,
+                    TabulationSubColType.TERM_2,
+                    TabulationSubColType.TERM_3,
+                    TabulationSubColType.AVG
+                )
+                config.termScope == TabulationTermScope.FINAL_AVG -> listOf(TabulationSubColType.TOTAL)
+                config.subjectDisplay == TabulationSubjectDisplay.TOTAL_ONLY -> listOf(TabulationSubColType.TOTAL)
                 sub.written == 0 && config.skipWrittenOnHalfSubjects -> listOf(TabulationSubColType.TOTAL)
                 sub.written == 0 -> listOf(TabulationSubColType.CONT, TabulationSubColType.TOTAL)
                 else -> listOf(TabulationSubColType.CONT, TabulationSubColType.WR, TabulationSubColType.TOTAL)
@@ -247,26 +263,62 @@ object TabulationPlanner {
                                 }
                                 else -> TabulationCellValue("")
                             }
+                            TabulationSubColType.TERM_1,
+                            TabulationSubColType.TERM_2,
+                            TabulationSubColType.TERM_3,
+                            TabulationSubColType.AVG -> TabulationCellValue("")
                         }
                     }
                 } else {
-                    // Final average mode (1 cell: average total across activeTerms)
+                    // Final average mode: supports either 3-term breakdown + final avg OR single avg column
                     val entered = activeTerms.filter { student.hasSub(sub, it) }
                     val anySubData = entered.isNotEmpty()
                     val anySubAbs = entered.any { student.isSubTermAbsent(sub, it) }
-                    val subFailed = ResultRulesEngine.isSubjectAnnualFailed(student, sub, activeTerms, rules)
-                    grp.subCols.map {
-                        if (!anySubData) {
-                            TabulationCellValue("")
-                        } else {
-                            val avg = ResultRulesEngine.subjectAvg(student, sub, activeTerms)
-                            val raw = formatNum(avg, config.numeralMode)
-                            val txt = ResultRulesEngine.formatTermTotalCell(raw, subFailed, rules)
-                            TabulationCellValue(
-                                text = txt,
-                                isFailed = (subFailed && rules.showFailIndicator) || anySubAbs,
-                                isBold = true
-                            )
+                    val subAvgFailed = ResultRulesEngine.isSubjectAnnualFailed(student, sub, activeTerms, rules)
+                    grp.subCols.map { colType ->
+                        when (colType) {
+                            TabulationSubColType.TERM_1,
+                            TabulationSubColType.TERM_2,
+                            TabulationSubColType.TERM_3 -> {
+                                val tNum = when (colType) {
+                                    TabulationSubColType.TERM_1 -> 1
+                                    TabulationSubColType.TERM_2 -> 2
+                                    else -> 3
+                                }
+                                val hasTermSub = student.hasSub(sub, tNum)
+                                val termAbs = student.isSubFullyAbsent(sub, tNum)
+                                val termFailed = ResultRulesEngine.isSubjectTermFailed(student, sub, tNum, rules)
+                                when {
+                                    termAbs -> TabulationCellValue("A", isAbsent = true, isBold = false)
+                                    hasTermSub -> {
+                                        val raw = formatNum(student.total(sub, tNum), config.numeralMode)
+                                        val txt = ResultRulesEngine.formatTermTotalCell(raw, termFailed, rules)
+                                        TabulationCellValue(
+                                            text = txt,
+                                            isFailed = termFailed && rules.showFailIndicator,
+                                            isBold = false
+                                        )
+                                    }
+                                    else -> TabulationCellValue("")
+                                }
+                            }
+                            TabulationSubColType.AVG,
+                            TabulationSubColType.TOTAL,
+                            TabulationSubColType.CONT,
+                            TabulationSubColType.WR -> {
+                                if (!anySubData) {
+                                    TabulationCellValue("")
+                                } else {
+                                    val avg = ResultRulesEngine.subjectAvg(student, sub, activeTerms)
+                                    val raw = formatNum(avg, config.numeralMode)
+                                    val txt = ResultRulesEngine.formatTermTotalCell(raw, subAvgFailed, rules)
+                                    TabulationCellValue(
+                                        text = txt,
+                                        isFailed = (subAvgFailed && rules.showFailIndicator) || anySubAbs,
+                                        isBold = true
+                                    )
+                                }
+                            }
                         }
                     }
                 }

@@ -204,15 +204,18 @@ object TabulationPdfGen {
         }
 
         val totalSubCols = page.subjectGroups.sumOf { it.subCols.size }.coerceAtLeast(1)
-        val rollW = when (cfg.pageSize) {
-            TabulationPageSize.LEGAL_LANDSCAPE -> 26f
-            TabulationPageSize.A4_LANDSCAPE -> 22f
-            TabulationPageSize.A4_PORTRAIT -> 20f
+        val rollW = when {
+            cfg.pageSize == TabulationPageSize.LEGAL_LANDSCAPE -> 25f
+            cfg.pageSize == TabulationPageSize.A4_LANDSCAPE && totalSubCols >= 26 -> 19f
+            cfg.pageSize == TabulationPageSize.A4_LANDSCAPE -> 22f
+            else -> 20f
         }
         val nameW = when {
+            cfg.pageSize == TabulationPageSize.LEGAL_LANDSCAPE && totalSubCols >= 26 -> 100f
             cfg.pageSize == TabulationPageSize.LEGAL_LANDSCAPE -> 108f
             cfg.pageSize == TabulationPageSize.A4_PORTRAIT && totalSubCols <= 10 -> 105f
             totalSubCols <= 10 -> 125f
+            totalSubCols >= 26 -> 74f
             else -> 82f
         }
         val summaryTotalW = summaryCols.sumOf { it.width.toDouble() }.toFloat()
@@ -288,7 +291,8 @@ object TabulationPdfGen {
         val dataFontBase = when {
             subColW >= 30f -> 8.0f
             subColW >= 24f -> 7.3f
-            else -> 6.7f
+            subColW >= 20f -> 6.8f
+            else -> 6.2f
         }
 
         page.rows.forEachIndexed { rIdx, row ->
@@ -396,8 +400,9 @@ object TabulationPdfGen {
     ) {
         c.drawRect(x, y, x + w, y + h, borderPaint)
         if (text.isBlank()) return
+        val pad = if (w < 20f) 2.2f else 3.2f
         val dp = PdfGen.dualPaint(ctx, size, bold, bnFont, enFont, color)
-        PdfGen.shrinkMixedToFit(dp, text, (w - 3.2f).coerceAtLeast(6f), step = 0.2f, minSize = 4.6f)
+        PdfGen.shrinkMixedToFit(dp, text, (w - pad).coerceAtLeast(6f), step = 0.2f, minSize = 4.2f)
         val fm = dp.bn.fontMetrics
         val ty = y + h / 2f - (fm.ascent + fm.descent) / 2f
         PdfGen.drawMixedText(c, text, x + w / 2f, ty, dp, Paint.Align.CENTER)

@@ -1351,7 +1351,7 @@ fun ResultMakerWorkspace(
                                         .filter { it.cls in allowedCls }
                                         .sortedWith(compareBy({ it.cls }, { it.roll }))
                                     Column(
-                                        modifier = Modifier.fillMaxSize().padding(horizontal = 8.dp, vertical = 4.dp),
+                                        modifier = Modifier.fillMaxSize().padding(horizontal = 6.dp),
                                         horizontalAlignment = Alignment.CenterHorizontally
                                     ) {
                                         Box(Modifier.widthIn(max = 980.dp).fillMaxSize()) {
